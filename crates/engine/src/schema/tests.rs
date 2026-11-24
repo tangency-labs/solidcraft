@@ -79,6 +79,33 @@ fn axes_and_scale_factors_match_their_readers() {
     }
 }
 
+/// A cylinder's `AxisDirExpr` (#18822) takes what `AxisDir` takes, and `[x, y, z]` or
+/// `{x, y, z}` with expressions among the numbers; its schema agrees with its reader, except
+/// for the zero vector, which a schema can't refuse.
+#[test]
+fn an_expression_axis_matches_its_reader() {
+    let root = schemars::schema_for!(AxisDirExpr);
+    let root = root.as_value();
+    let given = [json!("X"), json!(" y "), json!([0, 0, 1]), json!([0, "-sin(t)", "-cos(t)"]), json!({"x": "a", "y": 0, "z": 1})];
+    for v in given {
+        assert!(crate::cmd::axis_expr_form(&v).is_ok(), "{v}");
+        assert!(parse::<AxisDirExpr>(v.clone()).is_some(), "{v}");
+        assert!(conforms(root, root, &v), "{v}");
+    }
+    for v in [json!("W"), json!([1, 2]), json!([0, "", 1]), json!([0, true, "a"]), json!({"x": "a"}), json!(null), json!([0, 0, 0])] {
+        assert!(crate::cmd::axis_expr_form(&v).is_err(), "{v}");
+        assert!(parse::<AxisDirExpr>(v.clone()).is_none(), "{v}");
+        if !v.is_string() {
+            assert_eq!(conforms(root, root, &v), v == json!([0, 0, 0]), "{v}");
+        }
+    }
+    // Plain numbers are normalized, as `AxisDir` reads them; expressions are kept as given.
+    let d = crate::cmd::axis_expr_form(&json!([0, 0, 2])).unwrap();
+    assert_eq!(d.map(|e| e.to_string()), ["0", "0", "1"]);
+    let d = crate::cmd::axis_expr_form(&json!([0, "-sin(t)", 2])).unwrap();
+    assert_eq!(d.map(|e| e.to_string()), ["0", "-sin(t)", "2"]);
+}
+
 #[test]
 fn points_accept_what_the_point_readers_accept() {
     assert!(parse::<Point3>(json!([1, 2, 3])).is_some());
@@ -392,6 +419,28 @@ fn issues_are_read_from_the_commands_own_contract() {
 fn a_level_is_read_back_from_its_name() {
     for level in ParamCheck::ALL {
         assert_eq!(ParamCheck::parse(level.name()), Some(level));
+    }
+}
+
+#[test]
+fn ui_prefs_browser_scroll_wheel_schema_lists_supported_modes() {
+    use super::ui_prefs::{BrowserScrollWheel, PrefsParams};
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["browser_scroll_wheel"].is_object());
+    for (id, expected) in
+        [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom), ("always_pan", BrowserScrollWheel::AlwaysPan)]
+    {
+        let value = json!({"browser_scroll_wheel":id});
+        let parsed = serde_json::from_value::<PrefsParams>(value.clone()).unwrap();
+        assert_eq!(parsed.browser_scroll_wheel, Some(expected));
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    assert_eq!(serde_json::from_value::<PrefsParams>(json!({})).unwrap().browser_scroll_wheel, None);
+    for invalid in [json!("future"), json!(42), json!(true), json!(null)] {
+        let value = json!({"browser_scroll_wheel":invalid});
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err());
+        assert!(!conforms(schema, schema, &value), "{value}");
     }
 }
 
@@ -728,7 +777,8 @@ pub(super) fn names_of<T: serde::Serialize>(values: &[T]) -> Vec<String> {
 /// (strict's comes from `TypedContract::check` and serde), and the handler may stop first at
 /// one the contract can't see (against the design: a pick that finds nothing, a missing sketch,
 /// an expression that doesn't evaluate; one of two keys, such as `radius` or `diameter`; an
-/// empty list).
+/// empty list). A value a helper reads as another command's (the pick-up's `appearance.chain`
+/// target) names that command with the check off and the one that was called in strict.
 /// Each module's `strict_keeps_todays_errors` calls this with its commands' cases; each runs
 /// after `sketch_rectangle`.
 pub(super) fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {
@@ -1155,7 +1205,9 @@ fn axis_lines_match_the_axis_reader() {
         (json!("Bore"), true),
         (json!({"dir": [0, 0, 1]}), true),
         (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
-        (json!({"origin": ["1 mm", 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": ["1 mm", "r - 2 mm", 0], "dir": [0, 0, 1]}), true),
+        (json!({"origin": [true, 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": [0, 0], "dir": [0, 0, 1]}), false),
         (json!({"dir": [0, 0, 1], "type": "world", "axis": "X"}), true),
         (json!({"edge": [1, 2, 3]}), true),
         (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),
@@ -1275,7 +1327,7 @@ fn plane_names_match_check_plane_name() {
 fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
     use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
-    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch"]);
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch", "view"]);
     assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
     let mut s = crate::Session::default();
     let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();

@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              component: id (0 the design)}; excluded?: {count?, print?}; title_block_overrides?: {cell: text} (none of these unless given) → sheet: the new sheet's id, sheets. \
              One undo step.",
         ),
-    CommandSpec::new("drawing.sheet.set", "Sheet Settings", crate::checked!("drawing.sheet.set", set))
+    CommandSpec::new("drawing.sheet.set", "Sheet Settings", crate::checked!("drawing.sheet.set", set)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("settings")
         .in_drawing()
         .doc_only()
@@ -72,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
-             balloons, and the images on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+             balloons, and the images and sheet sketches and fills on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
@@ -110,6 +110,8 @@ fn listed(on: &OnSheet) -> String {
         kind("revision tag", &on.tags),
         kind("table", &on.tables),
         kind("note", &on.notes),
+        kind("sheet sketch", &on.sketches),
+        kind("sheet fill", &on.fills),
     ]
     .into_iter()
     .flatten()
@@ -284,6 +286,7 @@ pub(super) fn contents_delete(cmd: &str, p: &Value, what: &str) -> Result<bool> 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.delete";
     let with_contents = contents_delete(cmd, p, "the sheet goes with everything on it")?;
+    let editing = s.active_sheet_sketch.clone();
     s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         if d.sheets.len() <= 1 {
@@ -291,6 +294,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let Some(sheet) = d.sheets.get(at).cloned() else { return Ok(()) };
         let on = d.on_sheet(sheet.id);
+        if editing.as_ref().is_some_and(|entry| entry.goes_with(d.id, &on)) {
+            return Err(bad(cmd, "finish or cancel the sheet sketch before deleting its sheet"));
+        }
         if !on.is_empty() && !with_contents {
             let what = listed(&on);
             return Err(bad(cmd, format!("sheet `{}` has {what} on it: give `\"contents\": \"delete\"` to delete them with it", sheet.name)));

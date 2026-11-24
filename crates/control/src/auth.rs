@@ -18,6 +18,10 @@ pub const MIN_TOKEN_LEN: usize = 32;
 /// program).
 pub const PORT_TRIES: u16 = 16;
 
+/// The error a connection past the server's `MAX_CONNECTIONS` is refused with, unrun; here, not in
+/// the desktop-only server, because clients on every target read it (docs/control-protocol.md).
+pub const TOO_MANY_CONNECTIONS: &str = "too many connections";
+
 /// Which app a control channel belongs to: where its token files live, its environment and its
 /// name in messages.
 #[derive(Clone, Copy)]
@@ -580,6 +584,8 @@ mod tests {
     }
 
     /// A process file naming a process that has exited marks the token file stale.
+    /// Where the process inspector cannot run (a sandboxed test runner), the exit
+    /// is unknown, and the explanation must not claim it.
     #[cfg(any(unix, windows))]
     #[test]
     fn a_token_file_from_an_exited_process_is_stale() {
@@ -593,7 +599,13 @@ mod tests {
         let source = |writer| Some(TokenSource { path: PathBuf::from("7878.token"), modified: None, writer });
         let stale = ClientToken { token: "secret-token".into(), file: source(Some((pid, None))), app: TEST };
         let error = stale.explain_error("unauthorized");
-        assert!(error.contains(&format!("stale token file from an instance that exited (process {pid}): 7878.token")), "{error}");
+        match process_running(pid) {
+            Some(false) => {
+                assert!(error.contains(&format!("stale token file from an instance that exited (process {pid}): 7878.token")), "{error}");
+            }
+            None => assert!(!error.contains("stale") && error.contains("restart it or delete that file"), "{error}"),
+            Some(true) => panic!("the reaped child {pid} is reported as running"),
+        }
         assert!(!error.contains("secret-token"));
         let live = ClientToken { token: "t".into(), file: source(Some((std::process::id(), process_start(std::process::id())))), app: TEST };
         assert!(!live.explain_error("unauthorized").contains("stale"));

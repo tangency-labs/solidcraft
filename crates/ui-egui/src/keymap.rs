@@ -13,6 +13,8 @@ use crate::SolveApp;
 use crate::ui_kit;
 
 pub(crate) const DRAG_ZOOM: &str = crate::navigation_slots::ZOOM_TOOL;
+/// The command behind the navigation bar's Look At button and its key.
+const LOOK_AT: &str = "view.normal_to";
 
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
@@ -23,6 +25,7 @@ pub const RESERVED: &[&str] = &[
     "Backspace",
     "Ctrl+Z",
     "Ctrl+Y",
+    "Ctrl+Shift+Z",
     "Ctrl+S",
     "Ctrl+Shift+S",
     "Ctrl+N",
@@ -233,7 +236,9 @@ pub(crate) fn saved_keys(id: &str, v: &Value) -> Option<Vec<String>> {
 /// Panel bindings own arrows only while shared chrome has actual keyboard focus.
 /// Every other application-reserved key remains protected for every command.
 fn reserved_for(id: &str, key: &str) -> bool {
+    // Undo and Redo own the undo keys: they are ordinary bindings that can be moved or removed.
     RESERVED.contains(&key)
+        && !(matches!(id, "edit.undo" | "edit.redo") && matches!(key, "Ctrl+Z" | "Ctrl+Y" | "Ctrl+Shift+Z"))
         && !(solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_some()
             && key.rsplit('+').next().is_some_and(|name| matches!(name, "Left" | "Right" | "Up" | "Down")))
 }
@@ -378,8 +383,18 @@ pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
 pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
     match app.keymap.custom.get(id) {
         Some(keys) => keys.clone(),
-        None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty()).map(str::to_string).into_iter().collect(),
+        None => default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut)).into_iter().map(str::to_string).collect(),
     }
+}
+
+/// The keys a command has until the user changes them: its registered shortcut, and for Redo
+/// also Ctrl+Shift+Z (#12902).
+fn default_keys(id: &str, shortcut: Option<&'static str>) -> Vec<&'static str> {
+    let mut keys: Vec<&'static str> = shortcut.filter(|k| !k.is_empty()).into_iter().collect();
+    if id == "edit.redo" {
+        keys.push("Ctrl+Shift+Z");
+    }
+    keys
 }
 
 /// Drag to Zoom has no default binding. Compare the keys and current modifiers using the
@@ -396,7 +411,7 @@ pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
 fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
     match app.keymap.custom.get(command.id) {
         Some(keys) => keys.iter().map(String::as_str).collect(),
-        None => command.shortcut.filter(|k| !k.is_empty()).into_iter().collect(),
+        None => default_keys(command.id, command.shortcut),
     }
 }
 
@@ -482,6 +497,9 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
     if keeps_old_show_hide(app, key) {
         app.start("ui.toggle_visibility");
     } else if let Some(id) = command_for(app, key) {
+        if repeat && matches!(id, "tab.view.pop_out" | "tab.view.move_to_window") {
+            return;
+        }
         if id == DRAG_ZOOM {
             // The viewport reads the held chord. A key press must not latch Zoom.
             return;
@@ -501,7 +519,24 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        app.start(variant_for_key(app, id));
+        let resolved = variant_for_key(app, id);
+        if app.preferences.shortcut_again_ends_tool {
+            if repeat {
+                return;
+            }
+            if crate::toolbar::end_running_command(app, resolved) {
+                return;
+            }
+        }
+        app.start(resolved);
+    } else if app.session.active_sketch.is_some() && !crate::render_workspace::active(app) && commands_for(app, key).contains(&LOOK_AT) {
+        // Look At's key with no planar face or plane selected: `command_for` skips the disabled
+        // command, yet the navigation bar's button and Ctrl+8 then face the open sketch. So
+        // does the key the button shows. A held key's repeats change nothing: asking again turns
+        // the view to the other side.
+        if !repeat {
+            crate::viewport::look_at_selection(app);
+        }
     } else if let Some(id) = sketch_tool_for(app, key) {
         let then = variant_for_key(app, id);
         app.start("sketch.create");
@@ -528,13 +563,16 @@ fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
 }
 
 /// Outside a sketch: the SKETCH-tab command bound to `key` that a new sketch would start. Not
-/// Normal/Construction (a mode of the drawing in progress) nor the Finish Sketch panel.
+/// Normal/Construction (a mode of the drawing in progress), the Finish Sketch panel, nor a Modify
+/// tool other than Offset, which offsets a face sketch's projected edges.
 fn sketch_tool_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     if app.session.active_sketch.is_some() || crate::render_workspace::active(app) {
         return None;
     }
     commands_for(app, key).into_iter().find(|id| {
-        solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && c.id != "sketch.construction")
+        solidcraft_engine::find_command(id).is_some_and(|c| {
+            c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && (c.panel != "MODIFY" || c.id == "sketch.offset") && c.id != "sketch.construction"
+        })
     })
 }
 
@@ -590,7 +628,7 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
 
 /// Keep a command's keys, as a change only when they aren't its default.
 fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
-    let default = solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty());
+    let default = default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut));
     if keys.iter().map(String::as_str).eq(default) {
         app.keymap.custom.remove(id);
     } else {
@@ -736,7 +774,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             .filter_map(|c| {
                 let keys = keys_for_spec(app, c);
                 let displayed: Vec<_> = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect();
-                let label = app.tr_label(c.label);
+                let label = app.tr_command(c.id, c.label);
                 let group = shortcut_group(c);
                 let hit = if filtering {
                     crate::ui_kit::settings_search::shows_all(ui)
@@ -1211,6 +1249,67 @@ mod tests {
         assert!(!crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
     }
 
+    /// #18233: Ctrl+A (Cmd+A) is Select All in the view, but a focused text field keeps its own.
+    #[test]
+    fn ctrl_a_selects_all_except_in_a_text_field() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10})).unwrap();
+        assert_eq!(command_for(&h.app, "Ctrl+A"), Some("select.all"));
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.app.session.selection.clear();
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        assert!(h.app.session.selection.is_empty(), "the palette's field selects its own text");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Block".into() }]);
+    }
+
+    /// #20639: Undo and Redo are ordinary bindings. The exact chord decides, so Ctrl+Shift+Z
+    /// bound to Redo redoes and never undoes, and a removed key does nothing.
+    #[test]
+    fn undo_and_redo_keys_are_real_bindings_matched_exactly() {
+        let press_key = |h: &mut crate::scenario::Harness, shift: bool, key: &str| {
+            h.step(&json!({"key": key, "cmd": true, "shift": shift})).unwrap();
+            h.frames(2);
+        };
+        let new_box = || {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.run("solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10})).unwrap();
+            h
+        };
+        // The defaults still undo with Ctrl+Z and redo with Ctrl+Y and Ctrl+Shift+Z.
+        let mut h = new_box();
+        let done = h.app.session.undo.len();
+        press_key(&mut h, false, "Z");
+        assert_eq!(h.app.session.undo.len(), done - 1, "Ctrl+Z undoes");
+        press_key(&mut h, false, "Y");
+        assert_eq!(h.app.session.undo.len(), done, "Ctrl+Y redoes");
+        press_key(&mut h, false, "Z");
+        press_key(&mut h, true, "Z");
+        assert_eq!(h.app.session.undo.len(), done, "Ctrl+Shift+Z redoes");
+        // Redo moved to Ctrl+Shift+Z alone: it redoes, Ctrl+Y no longer does.
+        bind_at(&mut h.app, "edit.redo", None, "Ctrl+Shift+Z", false).unwrap();
+        press_key(&mut h, false, "Z");
+        assert_eq!(h.app.session.undo.len(), done - 1);
+        press_key(&mut h, false, "Y");
+        assert_eq!(h.app.session.undo.len(), done - 1, "Ctrl+Y is no longer bound");
+        press_key(&mut h, true, "Z");
+        assert_eq!(h.app.session.undo.len(), done, "Ctrl+Shift+Z redoes and does not undo");
+        // Undo with its key removed: Ctrl+Z runs nothing.
+        bind_at(&mut h.app, "edit.undo", Some(0), "", false).unwrap();
+        assert!(keys(&h.app, "edit.undo").is_empty());
+        press_key(&mut h, false, "Z");
+        assert_eq!(h.app.session.undo.len(), done, "Ctrl+Z does nothing without a binding");
+        // Reset brings the defaults back.
+        reset(&mut h.app, None);
+        press_key(&mut h, false, "Z");
+        assert_eq!(h.app.session.undo.len(), done - 1);
+    }
+
     fn app() -> SolveApp {
         SolveApp::new(solidcraft_engine::Session::default(), Default::default())
     }
@@ -1231,7 +1330,7 @@ mod tests {
             }
         }
         for (text, expected) in [
-            (" shift + CTRL + shift + t ", "Ctrl+Shift+T"),
+            (" shift + CTRL + shift + j ", "Ctrl+Shift+J"),
             ("cmd+option+t", "Ctrl+Alt+T"),
             ("shift+cmd+ctrl+t", "Ctrl+Cmd+Shift+T"),
             ("ctrl++", "Ctrl+Plus"),
@@ -1252,10 +1351,10 @@ mod tests {
     fn text_shortcuts_use_the_recorded_chord_and_check_conflicts() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        for spelling in ["ctrl+shift+t", "Shift+Ctrl+T", "CTRL+SHIFT+T", "Ctrl+Shift+T"] {
+        for spelling in ["ctrl+shift+j", "Shift+Ctrl+J", "CTRL+SHIFT+J", "Ctrl+Shift+J"] {
             let reply = h.call("ui.shortcut", json!({"command":"solid.box", "key":spelling}));
-            assert_eq!(reply["result"]["keys"], json!(["Ctrl+Shift+T"]), "{reply}");
-            h.call("ui.key", json!({"key":"T", "cmd":true, "shift":true}));
+            assert_eq!(reply["result"]["keys"], json!(["Ctrl+Shift+J"]), "{reply}");
+            h.call("ui.key", json!({"key":"J", "cmd":true, "shift":true}));
             assert!(
                 matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Primitive { cmd: "solid.box", .. })),
                 "{spelling} opens Box"
@@ -1263,29 +1362,29 @@ mod tests {
             h.call("ui.key", json!({"key":"Escape"}));
         }
         let before = h.app.keymap.prefs();
-        let conflict = h.call("ui.shortcut", json!({"command":"solid.cylinder", "key":"shift+CTRL+t"}));
+        let conflict = h.call("ui.shortcut", json!({"command":"solid.cylinder", "key":"shift+CTRL+j"}));
         assert!(conflict["error"].as_str().unwrap().contains("already used by Box"));
         for key in ["Foo", "Shift+Shift", "Ctrl+", "Ctrl++T", "T+Ctrl", "escape", "ctrl+z", "delete", "ctrl+comma"] {
             let reply = h.call("ui.shortcut", json!({"command":"solid.box", "key":key}));
             assert_eq!(reply["ok"], false, "{key}: {reply}");
             assert_eq!(h.app.keymap.prefs(), before, "a refused binding changes nothing");
         }
-        bind(&mut h.app, "solid.cylinder", "shift+ctrl+t", true).unwrap();
+        bind(&mut h.app, "solid.cylinder", "shift+ctrl+j", true).unwrap();
         assert!(keys(&h.app, "solid.box").is_empty());
-        assert_eq!(keys(&h.app, "solid.cylinder"), ["Ctrl+Shift+T"]);
+        assert_eq!(keys(&h.app, "solid.cylinder"), ["Ctrl+Shift+J"]);
     }
 
     #[test]
     fn text_shortcuts_are_checked_in_settings_and_shortcut_imports() {
         let saved = json!({
-            "solid.box":["shift+ctrl+t", "CTRL+SHIFT+T", "Foo", "ctrl+z", "delete", "escape"],
+            "solid.box":["shift+ctrl+j", "CTRL+SHIFT+J", "Foo", "ctrl+z", "delete", "escape"],
             "solid.cylinder":"alt+f12",
             "solid.extrude":"Shift+ShiftLeft",
             "solid.sphere":""
         });
         let mut a = app();
         a.keymap.load(&saved);
-        assert_eq!(keys(&a, "solid.box"), ["Ctrl+Shift+T"]);
+        assert_eq!(keys(&a, "solid.box"), ["Ctrl+Shift+J"]);
         assert_eq!(keys(&a, "solid.cylinder"), ["Alt+F12"]);
         assert_eq!(keys(&a, "solid.extrude"), ["Shift"], "legacy modifier-only keys survive");
         assert!(keys(&a, "solid.sphere").is_empty());
@@ -1569,6 +1668,29 @@ mod tests {
         h.frames(2);
         assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
         assert_eq!(h.app.prefs_window.shell.filter, "fixx");
+    }
+
+    /// Dialog OK (`ui.dialog_ok`, #17416) has no default key: a Preferences search finds it on
+    /// the shortcuts page, a key recorded there binds it, and `ui.shortcut` reports that key.
+    #[test]
+    fn dialog_ok_is_found_in_a_preferences_search_and_takes_a_recorded_key() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "General"}));
+        h.frames(3);
+        h.step(&json!({"text": "dialog ok"})).expect("search");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "shortcut:ui.dialog_ok"}})).expect("Dialog OK is listed");
+        assert!(capturing(&h.app), "recording Dialog OK's key");
+        h.step(&json!({"key": "F9", "pressed": true})).unwrap();
+        h.step(&json!({"key": "F9", "pressed": false})).unwrap();
+        h.frames(65);
+        assert!(h.app.keymap.capturing.is_none(), "{:?}", h.app.keymap.message);
+        assert_eq!(effective(&h.app, "ui.dialog_ok").as_deref(), Some("F9"));
+        let got = h.call("ui.shortcut", json!({"command": "ui.dialog_ok"}));
+        assert_eq!(got["result"]["key"], "F9", "{got}");
     }
 
     #[test]

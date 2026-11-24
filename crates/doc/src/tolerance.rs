@@ -1,6 +1,8 @@
 //! Semantic dimension annotations and text formatting, independent of layout, UI language and saved data.
 
-use crate::display_units::{DecimalMarker, NumberFormat, Shown, format_number, format_value, grouped_digits};
+use serde::{Deserialize, Serialize};
+
+use crate::display_units::{DecimalMarker, MAX_DECIMALS, NumberFormat, Shown, format_number, format_value, grouped_digits};
 use crate::{DocError, Result, expr};
 
 /// Deviations are offsets from the unrounded nominal, in internal units (mm or rad).
@@ -42,7 +44,9 @@ pub enum Indicator {
     SphericalRadius,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A drafting profile keeps it, so it is saved with the profile (W09d).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Repeat {
     Times,
     X,
@@ -258,11 +262,11 @@ pub fn format_dimension(value: &DimensionValue, style: &DimensionStyle) -> Resul
     if !value.nominal.is_finite() {
         return Err(DocError::Invalid("dimension nominal must be finite".into()));
     }
-    if style.decimals > 8 {
-        return Err(DocError::Invalid("dimension decimals must be at most 8".into()));
+    if style.decimals > MAX_DECIMALS {
+        return Err(DocError::Invalid(format!("dimension decimals must be at most {MAX_DECIMALS}")));
     }
-    if style.tolerance_decimals > 8 {
-        return Err(DocError::Invalid("dimension tolerance_decimals must be at most 8".into()));
+    if style.tolerance_decimals > MAX_DECIMALS {
+        return Err(DocError::Invalid(format!("dimension tolerance_decimals must be at most {MAX_DECIMALS}")));
     }
     if !(1..=10_000).contains(&value.count) {
         return Err(DocError::Invalid("dimension count must be between 1 and 10000".into()));

@@ -8,7 +8,7 @@ use super::CommandSpec;
 use crate::params::{bad, str_};
 use crate::schema::diagnostics::{
     CrashReport, CrashReportList, CrashReportParams, CrashReportsClearParams, CrashReportsCleared, CrashReportsParams, CrashTestParams,
-    CrashTestResult,
+    CrashTestResult, ReportIssueParams, ReportIssueReply, ReportIssueStatusParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session, crash};
@@ -17,8 +17,33 @@ const LIST_CONTRACT: TypedContract<CrashReportsParams> = TypedContract::new();
 const READ_CONTRACT: TypedContract<CrashReportParams> = TypedContract::new();
 const CLEAR_CONTRACT: TypedContract<CrashReportsClearParams> = TypedContract::new();
 const CRASH_TEST_CONTRACT: TypedContract<CrashTestParams> = TypedContract::new();
+const REPORT_CONTRACT: TypedContract<ReportIssueParams> = TypedContract::new();
+const REPORT_STATUS_CONTRACT: TypedContract<ReportIssueStatusParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("diagnostics.report_issue", "Report an Issue", crate::checked!("diagnostics.report_issue", report_issue))
+        .icon("bug_report")
+        .noundo()
+        .contract(&REPORT_CONTRACT)
+        .output(output_schema_for::<ReportIssueReply>)
+        .params(
+            "title: string; description?: string; type?: bug | feature | question; app?: slug (default solidcraft); system?, repro?, \
+             log?, screenshot?: bool (default true); design?, crash?: bool (default false). Files a problem report on \
+             tickets.solidcraft.io for the person: the app gathers what the report dialog would, sends it as a draft and opens it \
+             in their browser to review and file. Ask the person first. design and crash are never sent on an agent's word: \
+             asking for them shows the report dialog for the person to tick them. Returns {report, status, message?, url?, ticket?, \
+             dropped?}; follow it with diagnostics.report_issue_status. Needs the SolidCraft app (not headless)",
+        ),
+    CommandSpec::new("diagnostics.report_issue_status", "Report Status", crate::checked!("diagnostics.report_issue_status", report_issue_status))
+        .icon("bug_report")
+        .noundo()
+        .contract(&REPORT_STATUS_CONTRACT)
+        .output(output_schema_for::<ReportIssueReply>)
+        .params(
+            "report: id from diagnostics.report_issue. Returns {report, status, message?, url?, ticket?, dropped?}: status pending, \
+             awaiting_user (the report dialog waits for the person), sending, opened (in their browser to file), filed, queued \
+             (offline) or failed",
+        ),
     CommandSpec::new("diagnostics.crash_reports", "Crash Reports", crate::checked!("diagnostics.crash_reports", list))
         .any_part()
         .icon("bug_report")
@@ -213,4 +238,40 @@ fn profile(_: &mut Session, p: &Value) -> Result<Value> {
         out.enabled = solidcraft_profile::enabled();
     }
     serde_json::to_value(out).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
+}
+
+fn report_issue(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "diagnostics.report_issue";
+    let title = str_(p, "title").map(str::trim).unwrap_or_default();
+    if title.is_empty() {
+        return Err(bad(cmd, "`title` is required: a short title for the problem"));
+    }
+    if title.chars().count() > 200 {
+        return Err(bad(cmd, "`title` is at most 200 characters"));
+    }
+    if !crate::report_issue::host_attached() {
+        return Err(bad(
+            cmd,
+            "not supported yet: reports are filed from the SolidCraft app; connect to it (solidcraft-cli mcp --connect) instead of a headless session",
+        ));
+    }
+    let id = crate::report_issue::submit(s.uid, p.clone());
+    reply(
+        cmd,
+        ReportIssueReply {
+            report: id,
+            status: "pending".into(),
+            message: Some("SolidCraft is gathering the report; call diagnostics.report_issue_status for where it is.".into()),
+            url: None,
+            ticket: None,
+            dropped: Vec::new(),
+            param_warnings: Vec::new(),
+        },
+    )
+}
+
+fn report_issue_status(_: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "diagnostics.report_issue_status";
+    let id = str_(p, "report").ok_or_else(|| bad(cmd, "`report` is required (as diagnostics.report_issue returned it)"))?;
+    crate::report_issue::status(id).ok_or_else(|| bad(cmd, format!("no report `{id}` in this session")))
 }

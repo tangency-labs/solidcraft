@@ -10,7 +10,7 @@ use solidcraft_geom::cell::Projection;
 use solidcraft_geom::revision::Numbering;
 
 use super::check::whole;
-use super::drawing_view::LineGroupParam;
+use super::drawing_view::{LineGroupParam, SheetParam};
 use super::types::present;
 
 /// Make a drawing of the design from a template, with ids of its own, and open it.
@@ -22,11 +22,25 @@ pub struct DrawingCreateParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub name: Option<String>,
-    /// A built-in's name (`drawing.template.list`) or a .json template file
+    /// A built-in's name (`drawing.template.list`) or a .json or .scdwg template file
     /// (`drawing.template.save`): the design's kind's built-in when not given.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub template: Option<String>,
+    /// The first sheet's name, overriding the template's name when supplied.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub first_sheet_name: Option<String>,
+    /// The first sheet's paper size, orientation and DPI when supplied.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SheetParam")]
+    pub first_sheet_paper: Option<SheetParam>,
+    /// Starts the first sheet without a title block when true.
+    #[serde(default)]
+    pub omit_first_sheet_title_block: bool,
+    /// Place front, top, right and isometric views on the first sheet at a fitted scale.
+    #[serde(default)]
+    pub standard_views: bool,
     /// Its content language, a BCP 47 tag (the template's when not given).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
@@ -146,7 +160,7 @@ fn revision_numbering_schema(_: &mut SchemaGenerator) -> Schema {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TemplateApplyParams {
-    /// A built-in's name, as `drawing.template.list` lists it, or a .json template file
+    /// A built-in's name, as `drawing.template.list` lists it, or a .json or .scdwg template file
     /// (`drawing.template.save`). Its sheet in each sheet's place is applied, its last for the
     /// sheets past its own.
     pub template: String,
@@ -198,10 +212,13 @@ pub struct TemplateSaveParams {
 /// What `drawing.template.save` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TemplateSaveResult {
-    /// The file written.
+    /// The file written: always a .scdwg container.
     pub path: String,
     /// How many bytes it holds.
     pub bytes: usize,
+    /// The .json path asked for, when the template went beside it as .scdwg.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

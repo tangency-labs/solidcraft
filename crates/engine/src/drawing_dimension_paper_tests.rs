@@ -33,6 +33,7 @@ fn read(points: &[[f64; 2]], text: &str) -> Resolved {
         status: Status::Ok,
         measured: None,
         text: Some(text.into()),
+        number: None,
         label: None,
         members: Vec::new(),
         exact: true,
@@ -280,6 +281,65 @@ fn a_cones_angle_is_drawn_between_its_silhouettes() {
     assert!(tips.len() == 2 && tips.iter().all(|t| close(t.len(), 20.0) && t.y < 0.0), "below the apex: {tips:?}");
     let between = (tips[0].dot(tips[1]) / 400.0).clamp(-1.0, 1.0).acos();
     assert!((between - 120f64.to_radians()).abs() < 1e-9, "{tips:?}");
+}
+
+/// The centre of a group's one line of level text, and whether anything else in the group, or a line
+/// from `vertex` out along `rays`, comes into its box. Each piece is checked at 200 points along it.
+fn text_crossed(group: &Group, vertex: Vec2, rays: [Vec2; 2]) -> (Vec2, bool) {
+    let run = runs(group)[0];
+    let half = Vec2::new(measured(&run.text), TEXT_MM) * 0.5;
+    let centre = run.origin + half;
+    let inside = |p: Vec2| (p.x - centre.x).abs() < half.x && (p.y - centre.y).abs() < half.y;
+    let (mut lines, _) = parts(group);
+    lines.extend(rays.map(|u| vec![vertex, vertex + u * 100.0]));
+    let lines_in =
+        lines.iter().flat_map(|l| l.iter().zip(l.iter().skip(1))).any(|(a, b)| (0..=200).any(|i| inside(*a + (*b - *a) * (i as f64 / 200.0))));
+    let arrows_in = group.items.iter().filter(|item| matches!(item, Item::Fill { .. })).any(|item| {
+        let b = fill_box(item);
+        b.max.x > centre.x - half.x && b.min.x < centre.x + half.x && b.max.y > centre.y - half.y && b.min.y < centre.y + half.y
+    });
+    (centre, lines_in || arrows_in)
+}
+
+/// A narrow angle's number that doesn't fit inside it goes outside, beyond the arrow at its
+/// counter-clockwise end, a gap past the arrow's tail along the arc's tangent, so neither the part's
+/// edges nor the dimension's own lines cross it (#13937): the issue's wedge, a 10° corner at 1:1 with its
+/// "10.00°" 10 mm out. A cone as narrow does the same; a right angle keeps its number in the middle, and a
+/// placed number keeps its place.
+#[test]
+fn a_narrow_angles_number_goes_outside_the_angle() {
+    let angle = || DimensionKind::Angle { a: edge(), b: edge(), reading: Reading::Projected, other_side: false };
+    let ten = 10f64.to_radians();
+    let end = Vec2::from_angle(ten);
+    let wedge = [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0 * ten.tan()], [0.0, 0.0]];
+    let group = drawn(angle(), 10.0, &wedge, "10.00°", "1:1");
+    let (centre, crossed) = text_crossed(&group, Vec2::ZERO, [Vec2::X, end]);
+    // From the tip at 10°, along the tangent there: a tail of 2 arrows, a gap and the box's half reach.
+    let (out, half) = (end.perp(), Vec2::new(measured("10.00°"), TEXT_MM) * 0.5);
+    let want = end * 10.0 + out * (2.0 * SIZES.arrow + SIZES.gap + half.x * out.x.abs() + half.y * out.y.abs());
+    assert!(close(centre.x, want.x) && close(centre.y, want.y), "{centre:?} for {want:?}");
+    assert!(!crossed, "{:?}", parts(&group));
+
+    // A cone 10° across, its silhouettes running out from its apex: the same.
+    let (c, s) = ((ten / 2.0).cos(), (ten / 2.0).sin());
+    let sides = [[0.0, 0.0], [50.0 * c, -50.0 * s], [0.0, 0.0], [50.0 * c, 50.0 * s]];
+    let group = drawn(DimensionKind::Cone { face: face() }, 10.0, &sides, "10.0°", "1:1");
+    let rays = [Vec2::new(c, -s), Vec2::new(c, s)];
+    let (centre, crossed) = text_crossed(&group, Vec2::ZERO, rays);
+    assert!(!crossed && centre.dot(rays[1].perp()) > 0.0, "beyond the counter-clockwise side: {centre:?} {:?}", parts(&group));
+
+    // A right angle 20 mm out has room: its number stays in the middle.
+    let square = [[10.0, 0.0], [50.0, 0.0], [0.0, 10.0], [0.0, 50.0]];
+    let (centre, _) = text_crossed(&drawn(angle(), 20.0, &square, "90.00°", "1:1"), Vec2::ZERO, [Vec2::X, Vec2::new(0.0, 1.0)]);
+    let middle = Vec2::new(1.0, 1.0) * (20.0 * FRAC_1_SQRT_2);
+    assert!(close(centre.x, middle.x) && close(centre.y, middle.y), "{centre:?}");
+
+    // A placed number keeps its place in the narrow wedge: the offset out towards it.
+    let placed = dimension(angle(), 10.0, TextPlace::At([20.0, 1.0]));
+    let group = laid(&placed, &read(&wedge, "10.00°"), &view_at("1:1")).unwrap().group;
+    let (centre, _) = text_crossed(&group, Vec2::ZERO, [Vec2::X, end]);
+    let towards = Vec2::new(20.0, 1.0).normalized().unwrap() * 10.0;
+    assert!(close(centre.x, towards.x) && close(centre.y, towards.y), "{centre:?}");
 }
 
 /// A chain is one line of frames at one offset: a shared extension line is drawn once, whichever
@@ -676,10 +736,97 @@ fn a_radial_and_an_angle_name_their_own_parts() {
     assert!(same_points(&arrows, &[at(20.0, 0.0), at(0.0, -1.0), at(0.0, 20.0), at(-1.0, 0.0)]), "{layout:?}");
 }
 
+/// The centre of a layout's first text box.
+fn box_centre(layout: &Layout) -> Vec2 {
+    layout.text_boxes[0].iter().fold(Vec2::ZERO, |sum, corner| sum + *corner) * 0.25
+}
+
+/// How far `p` is from the line a layout's first dimension line runs along, however far it runs.
+fn off_the_line(layout: &Layout, p: Vec2) -> f64 {
+    let line = lines_as(layout, LineRole::Dimension)[0];
+    let along = (line[1] - line[0]).normalized().unwrap();
+    (p - line[0]).dot(along.perp()).abs()
+}
+
+/// A dimension dragged ([`dragged`]) lays out where it was dragged: a text dragged to a point has its
+/// box's centre there, and a line dragged through a point runs through it. A length across, up and at
+/// 30°, with its text of one line or two, at points either side of it; a cylinder and two faces either
+/// side of their ends, and refused between them; an angle's and a cone's arc round their vertex through
+/// the point; a radius's leader turned to it, the text as far out as before; a sphere's text; and a
+/// chain's line, whose text isn't dragged.
+#[test]
+fn a_dragged_dimension_lays_out_where_it_was_dragged() {
+    let (frame, fonts) = (view_at("1:1"), PaperFonts::new("", "en", true));
+    let after = |d: &Dimension, r: &Resolved, drag: Drag| {
+        let (offset_mm, text) = dragged(d, r, &frame, &fonts, drag).unwrap_or_else(|why| panic!("{drag:?}: {why:?}"));
+        laid(&Dimension { offset_mm, text, ..d.clone() }, r, &frame).unwrap().layout
+    };
+    let at = Vec2::new;
+    let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    for points in [[[0.0, 0.0], [80.0, 0.0]], [[0.0, 0.0], [0.0, 80.0]], [[0.0, 0.0], [80.0 * c, 80.0 * s]]] {
+        for text in ["80.00", "80\n00"] {
+            let (d, r) = (dimension(length(LinearDirection::Aligned), 10.0, TextPlace::Centred), read(&points, text));
+            for p in [at(25.0, 30.0), at(55.0, -20.0), at(-15.0, 5.0)] {
+                let moved = after(&d, &r, Drag::Text(p));
+                assert!(box_centre(&moved).dist(p) < 1e-9, "{points:?} {text:?} {p:?}: {moved:?}");
+                assert!(off_the_line(&after(&d, &r, Drag::Line(p)), p) < 1e-9, "{points:?} {text:?} {p:?}");
+            }
+        }
+    }
+
+    // A shaft along x, radius 5, from x 0 to 40, and two faces seen edge-on: the line runs across them
+    // left of their left ends or right of their right ends, never between.
+    let shaft = read(&[[0.0, 5.0], [40.0, 5.0], [0.0, -5.0], [40.0, -5.0]], "10.00");
+    let faces = DimensionKind::Faces { a: face(), b: face(), direction: LinearDirection::Aligned };
+    for kind in [DimensionKind::Cylinder { face: face() }, faces] {
+        let d = dimension(kind, 10.0, TextPlace::Centred);
+        for p in [at(-15.0, 2.0), at(55.0, 20.0)] {
+            assert!(off_the_line(&after(&d, &shaft, Drag::Line(p)), p) < 1e-9, "{p:?}");
+            assert!(box_centre(&after(&d, &shaft, Drag::Text(p))).dist(p) < 1e-9, "{p:?}");
+        }
+        assert_eq!(dragged(&d, &shaft, &frame, &fonts, Drag::Line(at(20.0, 0.0))), Err(NotDragged::BetweenEnds));
+    }
+
+    // An angle and a cone, each with its vertex at the origin.
+    let angle = DimensionKind::Angle { a: edge(), b: edge(), reading: Reading::Projected, other_side: false };
+    let square = read(&[[10.0, 0.0], [50.0, 0.0], [0.0, 10.0], [0.0, 50.0]], "90");
+    let (c, s) = (0.5, 3f64.sqrt() / 2.0);
+    let sides = read(&[[0.0, 0.0], [-50.0 * s, -50.0 * c], [0.0, 0.0], [50.0 * s, -50.0 * c]], "120.0°");
+    for (kind, r, p) in [(angle, square, at(15.0, 20.0)), (DimensionKind::Cone { face: face() }, sides, at(-7.0, -24.0))] {
+        let d = dimension(kind, 20.0, TextPlace::Centred);
+        let arc = after(&d, &r, Drag::Line(p));
+        assert!(lines_as(&arc, LineRole::Dimension).iter().flat_map(|line| line.iter()).all(|q| close(q.len(), 25.0)), "{arc:?}");
+        assert!(box_centre(&after(&d, &r, Drag::Text(p))).dist(p) < 1e-9, "{p:?}");
+    }
+
+    // A quarter arc of radius 5 from east to north, and a whole sphere of radius 10.
+    let m = 5.0 * FRAC_1_SQRT_2;
+    let fillet = dimension(DimensionKind::Radial { edge: edge(), diameter: false }, 10.0, TextPlace::Centred);
+    let arc = read(&[[0.0, 0.0], [5.0, 0.0], [m, m], [0.0, 5.0]], "R5.00");
+    let p = at(-12.0, 9.0);
+    assert!(box_centre(&after(&fillet, &arc, Drag::Text(p))).dist(p) < 1e-9);
+    let turned = box_centre(&after(&fillet, &arc, Drag::Line(p)));
+    assert!(close(turned.normalized().unwrap().dot(p.normalized().unwrap()), 1.0) && close(turned.len(), 15.0), "{turned:?}");
+    let ball = dimension(DimensionKind::Sphere { face: face() }, 10.0, TextPlace::Centred);
+    let whole = Resolved { label: Some(LabelKind::SphericalDiameter), ..read(&[[0.0, 0.0], [10.0, 0.0], [-10.0, 0.0], [10.0, 0.0]], "SØ20.00") };
+    assert!(box_centre(&after(&ball, &whole, Drag::Text(p))).dist(p) < 1e-9);
+
+    // A chain's members share one line, through the point; their numbers sit on it.
+    let chain = dimension(DimensionKind::Chain { points: Vec::new(), direction: LinearDirection::Horizontal }, 10.0, TextPlace::Centred);
+    let member = |text: &str| Member { measured: Measured { value: 1.0, foreshortened: false }, text: text.into() };
+    let mut holes = read(&[[0.0, 0.0], [10.0, 5.0], [30.0, 0.0], [60.0, 8.0]], "60");
+    holes.text = None;
+    holes.members = vec![member("10.00"), member("20.00"), member("30.00")];
+    let p = at(25.0, -12.0);
+    let moved = after(&chain, &holes, Drag::Line(p));
+    assert!(moved.arrows.len() == 6 && moved.arrows.iter().all(|(tip, _)| close(tip.y, p.y)), "{moved:?}");
+    assert_eq!(dragged(&chain, &holes, &frame, &fonts, Drag::Text(p)), Err(NotDragged::ChainText));
+}
+
 /// Any measured points and offsets, at the sizes and shapes that break layouts (zero spans, equal
 /// points, reversed or parallel lines, huge and tiny values), lay out or say no without a panic; a
 /// scene that takes the group either holds it or says why, and when it holds it every point of the
-/// layout is finite.
+/// layout is finite. A drag of each, to a point of the same values, answers without a panic.
 #[test]
 fn hostile_points_and_offsets_never_panic() {
     let mut state = 0x4896_9193_u64;
@@ -691,6 +838,7 @@ fn hostile_points_and_offsets_never_panic() {
     };
     let values = [0.0, -0.0, 1e-300, 1e-9, -1e-9, 1.0, -1.0, 3.0, 6.0, 1e5, -1e5, 1e12, f64::MAX, f64::MIN, f64::NAN, f64::INFINITY];
     let pick = |next: &mut dyn FnMut() -> u64| values[(next() % values.len() as u64) as usize];
+    let fonts = PaperFonts::new("", "en", true);
     for _ in 0..4000 {
         let count = (next() % 7) as usize;
         let points: Vec<[f64; 2]> = (0..count).map(|_| [pick(&mut next), pick(&mut next)]).collect();
@@ -707,8 +855,12 @@ fn hostile_points_and_offsets_never_panic() {
             DimensionKind::Sphere { face: face() },
             DimensionKind::Cone { face: face() },
         ];
+        let to = Vec2::new(pick(&mut next), pick(&mut next));
         for kind in kinds {
             let d = dimension(kind, offset, text);
+            for drag in [Drag::Text(to), Drag::Line(to)] {
+                let _ = dragged(&d, &read(&points, "1"), &view_at("1:5"), &fonts, drag);
+            }
             if let Some(on) = laid(&d, &read(&points, "1"), &view_at("1:5")) {
                 let layout = on.layout;
                 let mut scene = Scene::new(Vec2::new(420.0, 297.0), vec![on.group]);

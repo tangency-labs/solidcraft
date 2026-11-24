@@ -9,6 +9,7 @@
 //! | `assert_test_edge14` | `sm_AssertTestEdge14` |
 //! | `edgeuse` | `SmEdgeuse::AssertValid` |
 //! | `edge_ends`, `faces_tangent_at` (fork, WR-668) | the edge lookups of `sm_IsZeroSpeedTangentEnd` |
+//! | `tangent_sections::tangent_directions` (not upstream, #18639) | none: test 9's directions past the contact band of tangent planes and cylinders |
 //! | `curve`, `curve_in_walk` | the virtual `SmCurve::AssertValid` (`m_pCurve->AssertValid`, `m_pUVTrimCurve->AssertValid`; the compound and Hermite overrides are in `curves`) |
 //!
 //! Deviations: the radial edge-use walks are bounded by the edge's use count (upstream
@@ -18,11 +19,13 @@
 //! evaluation propagates its error. Loop membership of an edge use (test 14) and wire
 //! membership (test 13) read sets built once per loop use / shell. `SmHyperbola` and
 //! `SmParabola` use the inherited `SmBSplineCurve` check with their own `MakeNurb`,
-//! `IsAnalytic` and `IsBounded`. Opt-in (WR-540,
-//! `Kernel::fixes.edge_check_orders_tangent_faces`, #383): where two faces round an edge
-//! leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
+//! `IsAnalytic` and `IsBounded`. Not upstream (WR-540, #383): where two faces round an
+//! edge leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
 //! direction to its point 20 edge tolerances into the face, square to the edge (the
-//! fork's tangency-labs/smlib@5533bbb). Not upstream (WR-668, tangency-labs/smlib
+//! fork's tangency-labs/smlib@5533bbb). Not upstream (#18639): round a line edge whose
+//! faces are all planes and cylinders along it, test 9 reads them instead at the step
+//! `tangent_sections` certifies in closed form, past the band in which the tangent faces
+//! are within the contact tolerance of each other, wherever one is certified. Not upstream (WR-668, tangency-labs/smlib
 //! ecf1963, the default since its flag was retired): the edge check and edge-use
 //! check build the edge's [`EdgeEnds`] (its interval and whether its faces are tangent
 //! at each end) before checking its curve or a UV trim, since a Rust curve does not
@@ -377,7 +380,8 @@ fn edge_point(k: &Kernel, b: &Brep, e: EdgeId, t: f64) -> Result<Point3> {
 /// The direction edge use `eu`'s face leaves the edge in at `t` (with its point,
 /// tangent and face normal): its binormal, or with `step_off` (WR-540) the direction to
 /// its point `step_off_dist` into the face, square to the edge (kept as the binormal when
-/// the step or a unitisation fails).
+/// the step or a unitisation fails); with `certified` (#18639) the direction it holds for
+/// `eu`.
 fn sector_direction(
     k: &Kernel,
     b: &mut Brep,
@@ -386,9 +390,14 @@ fn sector_direction(
     options: BinormalOptions,
     step_off: bool,
     step_off_dist: f64,
+    certified: Option<&[(EdgeuseId, crate::math::Vec3)]>,
 ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
     use crate::topology::edgeuse::p2::{evaluate_binormal_step_off, StepOffOptions};
     let mut eval = evaluate_binormal(k, b, eu, t, true, &options)?;
+    if let Some(&(_, dir)) = certified.and_then(|c| c.iter().find(|(u, _)| *u == eu)) {
+        eval.binormal = dir;
+        return Ok(eval);
+    }
     if !step_off {
         return Ok(eval);
     }
@@ -442,43 +451,48 @@ fn radial_order(
     // Must watch out for zero sectors: coincident faces.
     let mut have_nonzero_angle = false;
 
-    // Not upstream (WR-540), opt-in `Kernel::fixes.edge_check_orders_tangent_faces` (the
-    // fork's tangency-labs/smlib@5533bbb, #383): a sector between faces tangent along the
-    // edge (a cylinder touching a plane it rests on, left by a boolean as a non-manifold
-    // edge) has binormals that agree to first order, so the binormal angles tie (or differ
-    // by rounding, either way round) and cannot show the order. Where any sector is that
-    // narrow, every face is measured by the direction from the edge to its point a short
-    // step into the face (20 edge tolerances, as IsConvexRadialSector steps).
+    // Not upstream (WR-540; the fork's tangency-labs/smlib@5533bbb, #383): a sector
+    // between faces tangent along the edge (a cylinder touching a plane it rests on, left
+    // by a boolean as a non-manifold edge) has binormals that agree to first order, so the
+    // binormal angles tie (or differ by rounding, either way round) and cannot show the
+    // order. Where any sector is that narrow, every face is measured by the direction from
+    // the edge to its point a short step into the face (20 edge tolerances, as
+    // IsConvexRadialSector steps). Not upstream (#18639): round a line edge whose faces
+    // are planes and cylinders along it, every face is read instead at the step that
+    // `tangent_sections` certifies past the tangent faces' contact band, where one is.
     let seq_param = extent.evaluate(0.456);
-    let mut step_off = false;
-    let mut step_off_dist = 0.0;
-    if k.fixes.edge_check_orders_tangent_faces {
-        step_off_dist = 20.0 * tedge::tolerance(b, e)?;
-        let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
-        let num_eus = b.edge(e)?.edgeuses.len();
-        let mut eu = target;
-        let mut sectors = 0usize;
-        while let Some(rad) = eu1::radial(b, eu)? {
-            if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
-                break;
-            }
-            let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
-            let b1 =
-                crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
-            if let (Some(b0), Some(b1)) = (b0, b1) {
-                if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
-                    if u0.dot(u1) > tie_dot {
-                        step_off = true;
-                    }
-                }
-            }
-            sectors += 1;
-            match eu1::mate(b, rad)? {
-                Some(next) if !step_off && next != target && sectors < num_eus => eu = next,
-                _ => break,
+    let edge_tol = tedge::tolerance(b, e)?;
+    let step_off_dist = 20.0 * edge_tol;
+    let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
+    let num_eus = b.edge(e)?.edgeuses.len();
+    let mut walked: Vec<(EdgeuseId, EdgeuseId, bool)> = Vec::new();
+    let mut eu = target;
+    let mut sectors = 0usize;
+    while let Some(rad) = eu1::radial(b, eu)? {
+        if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
+            break;
+        }
+        let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
+        let b1 = crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
+        let mut tie = false;
+        if let (Some(b0), Some(b1)) = (b0, b1) {
+            if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
+                tie = u0.dot(u1) > tie_dot;
             }
         }
+        walked.push((eu, rad, tie));
+        sectors += 1;
+        match eu1::mate(b, rad)? {
+            Some(next) if next != target && sectors < num_eus => eu = next,
+            _ => break,
+        }
     }
+    let step_off = walked.iter().any(|s| s.2);
+    let certified = if step_off {
+        super::tangent_sections::tangent_directions(k, b, e, seq_param, edge_tol, &walked)?
+    } else {
+        None
+    };
 
     let mut steps = 0;
     while Some(target) != primary {
@@ -498,8 +512,11 @@ fn radial_order(
             ));
         }
         let t = extent.evaluate(0.456);
-        let target_eval = sector_direction(k, b, target, t, options, step_off, step_off_dist)?;
-        let radial_eval = sector_direction(k, b, radial, t, options, step_off, step_off_dist)?;
+        let certified = certified.as_deref();
+        let target_eval =
+            sector_direction(k, b, target, t, options, step_off, step_off_dist, certified)?;
+        let radial_eval =
+            sector_direction(k, b, radial, t, options, step_off, step_off_dist, certified)?;
 
         // 1st iteration save variables
         if primary.is_none() {

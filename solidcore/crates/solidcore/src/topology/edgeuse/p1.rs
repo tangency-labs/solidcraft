@@ -92,6 +92,7 @@
 //!   and [`loopuse_shell`] call unit `topology.loopuse`.
 
 use crate::curve::curve::Curve;
+use crate::error::topology::TopologyFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
@@ -919,6 +920,20 @@ pub fn max_edge_face_gap(
     Ok(Some(b.edgeuse(eu)?.max_edge_face_gap))
 }
 
+/// [`max_edge_face_gap`] without `force_calc` of an edge use whose gap is already cached
+/// ([`is_max_edge_face_gap_init`]): the cached gap, read without calculating anything, so
+/// it needs only the B-rep to read. `None` for edge uses without an edge/face gap.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub fn cached_max_edge_face_gap(b: &Brep, eu: EdgeuseId) -> Result<Option<EdgeFaceGap>> {
+    if !has_edge_face_gap(b, eu)? {
+        return Ok(None);
+    }
+    Ok(Some(b.edgeuse(eu)?.max_edge_face_gap))
+}
+
 /// `GetEdgeCCWEdgeGap`: the cached gap between a loop edge use's end and its
 /// counter-clockwise neighbour's start (calculated first when `force_calc` or not
 /// cached); `None` for other edge uses.
@@ -991,9 +1006,9 @@ pub fn calc_max_edge_face_gap(
     // construct gap function
     let interval = b.edge(e)?.interval;
     if interval.min() == interval.max() {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the edge's interval is a single point",
+            TopologyFailure::DegenerateEdgeInterval,
         ));
     }
     let sample = {
@@ -1631,9 +1646,9 @@ impl EvalNFunctions for FindStepOff<'_> {
         let dv_len_sq = s_dv.length_squared();
         // if we have a zero length tangent then we must fail
         if du_len_sq < EFF_ZERO_SQ || dv_len_sq < EFF_ZERO_SQ {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_STEP,
-                "the surface has a zero-length tangent",
+                TopologyFailure::ZeroSurfaceTangent,
             ));
         }
 

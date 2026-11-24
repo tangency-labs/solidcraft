@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
+use solidcraft_doc::drawing::thread_lines::ThreadStroke;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{self, Source, Visibility};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
@@ -20,6 +21,7 @@ use solidcraft_kernel::PlanarPiece;
 
 use super::ShownSet;
 use super::exact::{self, Fallback, PreparedBodies};
+use super::threads::{ThreadLine, threads};
 use crate::mesh_lines::{self, Ask, Origin, Owner, Refused, Scene, View};
 use crate::params::bad;
 use crate::{Result, Session};
@@ -57,6 +59,8 @@ pub struct Piece {
 #[derive(Clone, Debug)]
 pub struct Lines {
     pub lines: Vec<ViewLine>,
+    /// The shown bodies' cosmetic threads, drawn where their crests are ([`threads`]).
+    pub threads: Vec<ThreadLine>,
     /// Pieces drawn where another source lay too.
     pub covered: usize,
     /// The chord the mesh was asked for, in model millimetres.
@@ -208,10 +212,12 @@ fn lines_with(
     }
     // Each body's lines together, in the shown set's order.
     out.sort_by_key(|line| line.shown);
-    if out.iter().map(|line| line.pieces.len()).fold(0usize, usize::saturating_add) > MAX_RECORDS {
+    let threads = threads(shown, frame, &out, model_chord_mm);
+    let pieces = out.iter().map(|line| line.pieces.len()).chain(threads.iter().map(|thread| thread.pieces.len()));
+    if pieces.fold(0usize, usize::saturating_add) > MAX_RECORDS {
         return Err(bad(cmd, format!("the view has more than {MAX_RECORDS} line pieces: raise chord_mm, or choose a smaller view")));
     }
-    Ok(Lines { lines: out, covered, model_chord_mm, stats, made })
+    Ok(Lines { lines: out, threads, covered, model_chord_mm, stats, made })
 }
 
 /// The lines the mesh projection draws whose owners `keep` takes, each tested against every shown
@@ -229,7 +235,15 @@ fn meshed(
     let LineRequest { shows, hidden, reference_hidden, reference_hides_model, tangent_edges, .. } = *request;
     let started = web_time::Instant::now();
     let names: BTreeSet<&str> = shown.bodies.iter().filter_map(|b| shown.body(b)).map(|b| b.name.as_str()).collect();
-    let mut scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()), refused)?;
+    let mut scene = mesh_lines::prepare(
+        s,
+        &shown.state,
+        cmd,
+        model_chord_mm,
+        Ask { tangent_edges, sources: true },
+        |b| names.contains(b.name.as_str()),
+        refused,
+    )?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     if scene.placements.len() != shown.bodies.len() {
         return Err(bad(cmd, ONE_NAME));
@@ -261,8 +275,7 @@ fn meshed(
     let runs: Vec<(Owner, Vec<(bool, Vec<Vec2>)>)> = by_owner.into_iter().map(|(owner, stretches)| (owner, chain(&stretches, join))).collect();
     let arcs = exact_arcs(shown, &scene, &frame.basis(), &runs);
     let sampled = frame.accuracy_on_paper(CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
-    // A cut point lies on a chord, so off the true curve by up to the chord's sag.
-    let near = |radius: f64| 2.0 * model_chord_mm + radius * 1e-9;
+    let near = |radius: f64| near(model_chord_mm, radius);
     let mut out = Vec::with_capacity(runs.len());
     for (owner, runs) in runs {
         let placement = scene.placements.get(owner.placement as usize).ok_or_else(|| bad(cmd, "a line names no placement"))?;
@@ -298,7 +311,13 @@ fn meshed(
         occlusion_ms: drawing.occlusion_ms,
         ..Stats::default()
     };
-    Ok(Lines { lines: out, covered, model_chord_mm, stats, made: Made::default() })
+    Ok(Lines { lines: out, threads: Vec::new(), covered, model_chord_mm, stats, made: Made::default() })
+}
+
+/// How far a line the mesh drew may lie off the true curve of `radius` (model millimetres), for
+/// chords of `model_chord_mm`: a cut point lies on a chord, so off the curve by up to its sag.
+pub(super) fn near(model_chord_mm: f64, radius: f64) -> f64 {
+    2.0 * model_chord_mm + radius * 1e-9
 }
 
 /// The part of the line from `a` to `b` inside `area`, if any.
@@ -317,10 +336,11 @@ pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
 }
 
 /// `lines` as the paper scene group of the view `object`, in line `group`, and the index in `lines`
-/// of the line each stroke draws: each piece one stroke, closed when it ends where it starts. Painted
-/// from the bottom: hidden pieces, dashed hidden lines, then reference parts' visible ones as thin
-/// lines, then the model's as visible lines.
-pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<usize>) {
+/// of the line each stroke draws (none for a thread's): each piece one stroke, closed when it ends
+/// where it starts. Painted from the bottom: hidden pieces, dashed hidden lines, then reference
+/// parts' visible ones as thin lines, then the model's as visible lines; each with its threads after
+/// it: root lines thin, limit lines as the part's edges.
+pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<Option<usize>>) {
     let drawn = |piece: &Piece, width_mm: f64| {
         let hidden = piece.visibility == Visibility::Hidden;
         stroke(piece, width_mm, hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|d| d.to_vec()))
@@ -328,29 +348,54 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
     let strokes = |reference: bool, visibility: Visibility, width_mm: f64| {
         let pieces = lines.lines.iter().enumerate().filter(move |(_, l)| l.reference == reference);
         let pieces = pieces.flat_map(|(at, l)| l.pieces.iter().map(move |p| (at, p)));
-        pieces.filter(move |(_, p)| p.visibility == visibility).filter_map(move |(at, p)| Some((drawn(p, width_mm)?, at)))
+        pieces.filter(move |(_, p)| p.visibility == visibility).filter_map(move |(at, p)| Some((drawn(p, width_mm)?, Some(at))))
+    };
+    // A thread's piece is one segment: a limit line at the width given, a root line thin.
+    let thin_mm = LineKind::Thin.width_mm(group);
+    let threads = |reference: bool, visibility: Visibility, width_mm: f64| {
+        let pieces = lines.threads.iter().filter(move |t| t.reference == reference).flat_map(|t| &t.pieces);
+        pieces.filter(move |p| p.visibility == visibility).filter_map(move |p| {
+            let width_mm = if p.stroke == ThreadStroke::Limit { width_mm } else { thin_mm.min(width_mm) };
+            Some((drawn(&Piece { visibility, path: vec![p.seg], accuracy: CurveAccuracy::Analytic }, width_mm)?, None))
+        })
+    };
+    let painted = |reference: bool, visibility: Visibility, width_mm: f64| {
+        strokes(reference, visibility, width_mm).chain(threads(reference, visibility, width_mm))
     };
     let hidden_mm = LineKind::Hidden.width_mm(group);
-    let hidden = strokes(true, Visibility::Hidden, hidden_mm).chain(strokes(false, Visibility::Hidden, hidden_mm));
-    let visible = strokes(true, Visibility::Visible, LineKind::Thin.width_mm(group)).chain(strokes(
-        false,
-        Visibility::Visible,
-        LineKind::Visible.width_mm(group),
-    ));
+    let hidden = painted(true, Visibility::Hidden, hidden_mm).chain(painted(false, Visibility::Hidden, hidden_mm));
+    let visible = painted(true, Visibility::Visible, thin_mm).chain(painted(false, Visibility::Visible, LineKind::Visible.width_mm(group)));
     let (items, drew) = hidden.chain(visible).unzip();
     (Group { object, kind: ObjectKind::View, items }, drew)
 }
 
 /// ISO 128-20's narrow long-dashed dotted lines in line `group`, with its Table 3 lengths: a long dash
 /// of 24 widths of the narrow line, then `dots` dots of half a width, each after a gap of 3, and a gap
-/// of 3 to end. One dot is type 04 (a bend bent up); two, type 05 (a bend bent down).
-pub fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
+/// of 3 to end. One dot is ISO 128 type 04; two, type 05.
+pub(super) fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
     let d = LineKind::Thin.width_mm(group);
     let mut lengths = vec![24.0 * d, 3.0 * d];
     for _ in 0..dots {
         lengths.extend([0.5 * d, 3.0 * d]);
     }
     lengths
+}
+
+/// A chain line `length_mm` long with `dots` dots in line `group` ([`chain_dashes_mm`]), its pattern
+/// started so the first long dash is centred on the line's middle.
+pub(super) fn chain_line(dots: usize, group: LineGroup, length_mm: f64) -> Dashes {
+    centred(chain_dashes_mm(dots, group), length_mm)
+}
+
+/// `lengths_mm` started where a line `length_mm` long has its first, long dash at its middle. A
+/// length that isn't a finite number of 0 or more is taken as a line with no length.
+fn centred(lengths_mm: Vec<f64>, length_mm: f64) -> Dashes {
+    let period: f64 = lengths_mm.iter().sum();
+    let long = lengths_mm.first().copied().unwrap_or_default();
+    let length = if length_mm.is_finite() { length_mm.max(0.0) } else { 0.0 };
+    let phase = (long / 2.0 - length / 2.0).rem_euclid(period);
+    // Rounding can land on the period itself, which a pattern's phase stays below.
+    Dashes { lengths_mm, phase_mm: if phase < period { phase } else { 0.0 } }
 }
 
 /// `lines`' visible pieces as phantom lines in line `group` (#13048), as an overlay draws the parts its
@@ -371,7 +416,6 @@ fn stroke(piece: &Piece, width_mm: f64, dashes: Option<Vec<f64>>) -> Option<Item
     let pattern = dashes.map(|lengths_mm| Dashes { lengths_mm, phase_mm: 0.0 });
     (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
 }
-
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
 /// short to sweep is drawn as its chord.
 pub(super) fn drawable(seg: Seg2) -> Option<Seg2> {
@@ -439,7 +483,7 @@ fn one_arc(pieces: &[PlanarPiece]) -> Option<Seg2> {
         if !continues((center, radius, start, sweep), next) {
             return None;
         }
-        sweep += next.3;
+        sweep = joined_sweep(sweep, next.3)?;
     }
     Some(Seg2::Arc { center, radius, start, sweep })
 }
@@ -450,6 +494,19 @@ pub(super) fn continues((center, radius, start, sweep): (Vec2, f64, f64, f64), (
     let on_from_last = (start + sweep - s).rem_euclid(std::f64::consts::TAU);
     let on_from_last = on_from_last.min(std::f64::consts::TAU - on_from_last);
     c.dist(center) <= radius * 1e-9 && (r - radius).abs() <= radius * 1e-9 && on_from_last <= 1e-9
+}
+
+/// The sweep of an arc of `sweep` and the arc of `turn` that [`continues`] it, joined: `None` past a
+/// whole turn. Each joint is only within 1e-9 of the last arc's end, so the rounded sum of the pieces'
+/// sweeps can fall either side of a whole turn when they close the circle; a sum within 1e-9 of one
+/// is the whole turn, exactly ±2π, as a circle's own sweep is (#212).
+pub(super) fn joined_sweep(sweep: f64, turn: f64) -> Option<f64> {
+    let full = std::f64::consts::TAU;
+    let sum = sweep + turn;
+    if (sum.abs() - full).abs() <= 1e-9 {
+        return Some(full.copysign(sum));
+    }
+    (sum.abs() < full).then_some(sum)
 }
 
 /// A placement's turn: its matrix's rotation, bit for bit.
@@ -573,7 +630,7 @@ mod tests {
 
     fn lines_of(pieces: Vec<Piece>) -> Lines {
         let line = ViewLine { shown: 0, reference: false, source: Source::Edge { edge: 0, tangent: false }, pieces };
-        Lines { lines: vec![line], covered: 0, model_chord_mm: 0.01, stats: Stats::default(), made: Made::default() }
+        Lines { lines: vec![line], threads: Vec::new(), covered: 0, model_chord_mm: 0.01, stats: Stats::default(), made: Made::default() }
     }
 
     fn piece(visibility: Visibility, path: Vec<Seg2>) -> Piece {
@@ -627,6 +684,7 @@ mod tests {
         };
         let lines = Lines {
             lines: vec![line(false), line(true), line(false)],
+            threads: Vec::new(),
             covered: 0,
             model_chord_mm: 0.01,
             stats: Stats::default(),
@@ -648,7 +706,7 @@ mod tests {
                 LineKind::Visible.width_mm(LineGroup::DEFAULT)
             ]
         );
-        assert_eq!(paper_lines(&lines, 7, LineGroup::DEFAULT).1, [1, 0, 2], "each stroke says which line it draws");
+        assert_eq!(paper_lines(&lines, 7, LineGroup::DEFAULT).1, [Some(1), Some(0), Some(2)], "each stroke says which line it draws");
     }
 
     /// Hidden pieces come first, the reference parts' and then the model's, whatever order they were
@@ -669,7 +727,14 @@ mod tests {
         );
         let reference =
             line(true, vec![piece(Visibility::Visible, vec![Seg2::Line { a: b, b: c }]), piece(Visibility::Hidden, vec![Seg2::Line { a, b: c }])]);
-        let lines = Lines { lines: vec![model, reference], covered: 0, model_chord_mm: 0.01, stats: Stats::default(), made: Made::default() };
+        let lines = Lines {
+            lines: vec![model, reference],
+            threads: Vec::new(),
+            covered: 0,
+            model_chord_mm: 0.01,
+            stats: Stats::default(),
+            made: Made::default(),
+        };
         let group = paper_group(&lines, 7, LineGroup::DEFAULT);
         let dashes = Dashes { lengths_mm: vec![3.0, 0.75], phase_mm: 0.0 };
         let strokes: Vec<(usize, bool, f64, Option<&Dashes>)> = group
@@ -689,7 +754,7 @@ mod tests {
             (1, false, LineKind::Visible.width_mm(LineGroup::DEFAULT), None),
         ];
         assert_eq!(strokes, want);
-        assert_eq!(paper_lines(&lines, 7, LineGroup::DEFAULT).1, [1, 0, 0, 1, 0], "each stroke's line, in paint order");
+        assert_eq!(paper_lines(&lines, 7, LineGroup::DEFAULT).1, [Some(1), Some(0), Some(0), Some(1), Some(0)], "each stroke's line, in paint order");
         let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]);
         assert!(scene.validate().is_ok());
     }
@@ -707,6 +772,7 @@ mod tests {
         };
         let lines = Lines {
             lines: vec![line(false, Visibility::Visible), line(false, Visibility::Hidden), line(true, Visibility::Visible)],
+            threads: Vec::new(),
             covered: 0,
             model_chord_mm: 0.01,
             stats: Stats::default(),
@@ -723,6 +789,40 @@ mod tests {
         let narrow = LineKind::Hidden.width_mm(LineGroup::Mm0_7);
         assert_eq!(narrow, 0.35);
         assert_eq!(drawn, [(0.35, Some(vec![12.0 * narrow, 3.0 * narrow])), (0.35, None), (0.7, None)]);
+    }
+
+    /// A thread's root lines are thin and its limit lines drawn as the part's edges, a reference
+    /// part's all thin; hidden ones dashed. Each is painted after the lines of its kind, and no stroke
+    /// of a thread names a line, so a thread can't be picked.
+    #[test]
+    fn a_threads_lines_are_painted_thin_with_limit_lines_as_edges() {
+        use solidcraft_doc::drawing::thread_lines::ThreadPiece;
+        let seg = Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, 12.0) };
+        let one = |stroke, visibility| ThreadPiece { stroke, visibility, seg };
+        let thread = |reference| ThreadLine {
+            shown: 0,
+            reference,
+            pieces: vec![
+                one(ThreadStroke::Root, Visibility::Visible),
+                one(ThreadStroke::Limit, Visibility::Visible),
+                one(ThreadStroke::Root, Visibility::Hidden),
+            ],
+        };
+        let mut lines = lines_of(vec![piece(Visibility::Visible, vec![seg])]);
+        lines.threads = vec![thread(false), thread(true)];
+        let (group, drew) = paper_lines(&lines, 7, LineGroup::Mm0_7);
+        let drawn: Vec<(f64, bool)> = group
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stroke { width_mm, pattern, .. } => Some((*width_mm, pattern.is_some())),
+                _ => None,
+            })
+            .collect();
+        // Hidden: the reference's thread, the model's thread; visible: the reference's thread (all
+        // thin), the model's line, the model's thread (root thin, limit as edges).
+        assert_eq!(drawn, [(0.35, true), (0.35, true), (0.35, false), (0.35, false), (0.7, false), (0.35, false), (0.7, false)]);
+        assert_eq!(drew, [None, None, None, None, Some(0), None, None]);
     }
 
     /// A view's group past the paper scene's 100,000 records is caught by the scene's own check.
@@ -871,7 +971,7 @@ mod tests {
     fn a_view_without_a_parts_first_copy_prepares_the_next() {
         let (s, _) = crate::drawing_scene::tests::two_cubes();
         let (both, frame, request) = asked(&s, solidcraft_geom::drawing_view::NamedView::Front, false);
-        let second = ShownSet { state: both.state.clone(), bodies: both.bodies[1..].to_vec(), uncut: None };
+        let second = ShownSet { state: both.state.clone(), bodies: both.bodies[1..].to_vec(), uncut: None, cut: Default::default() };
         let mut prepared = PreparedBodies::default();
         let drawn = |set: &ShownSet, prepared: &mut PreparedBodies| lines(&s, set, &frame, &request, prepared, "test").unwrap();
         let all = drawn(&both, &mut prepared);
@@ -973,5 +1073,32 @@ mod tests {
         let long = &runs[2].1;
         let ends = [long[0], long[3]];
         assert!(ends.contains(&p(0.0, 0.0)) && ends.contains(&p(3.0, 1.0)), "{long:?}");
+    }
+
+    /// A chain line's pattern is Table 3's lengths, started so its first long dash is centred on the
+    /// line however long it is: shorter than the dash, one dash, a whole number of periods. A length
+    /// that isn't a finite number of 0 or more is taken as a line with no length.
+    #[test]
+    fn a_chain_line_centres_its_long_dash_on_the_line() {
+        for group in [LineGroup::DEFAULT, LineGroup::Mm0_25] {
+            for dots in [1, 2] {
+                let lengths = chain_dashes_mm(dots, group);
+                let (long, period) = (lengths[0], lengths.iter().sum::<f64>());
+                for length in [0.0, 0.5 * long, long, 100.0, 7.0 * period, -3.0, f64::NAN] {
+                    let dashes = chain_line(dots, group, length);
+                    let case = format!("{group:?}, {dots} dots, {length} mm: {dashes:?}");
+                    assert_eq!(dashes.lengths_mm, lengths, "{case}");
+                    assert!((0.0..period).contains(&dashes.phase_mm), "{case}");
+                    // At the line's middle the pattern is halfway along its long dash.
+                    let drawn = if length.is_finite() { length.max(0.0) } else { 0.0 };
+                    let off = ((dashes.phase_mm + drawn / 2.0).rem_euclid(period) - long / 2.0).abs();
+                    assert!(off.min(period - off) < 1e-9, "{case}");
+                    let path = vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::new(100.0, 0.0) }];
+                    let stroke = Item::Stroke { path, closed: false, width_mm: LineKind::Thin.width_mm(group), pattern: Some(dashes) };
+                    let group = Group { object: 1, kind: ObjectKind::View, items: vec![stroke] };
+                    solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]).validate().unwrap_or_else(|e| panic!("{case}: {e}"));
+                }
+            }
+        }
     }
 }

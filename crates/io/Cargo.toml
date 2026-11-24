@@ -9,11 +9,16 @@ license.workspace = true
 workspace = true
 
 [features]
+# Tests only: preserve frozen legacy DXF byte/error baselines during migration.
+dxf-legacy-baseline-tests = []
 # Tests only: trust a model cache even when the build has no git commit.
 trust-unknown-source = []
 
 [dependencies]
+solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
+solidcore-step = { workspace = true }
+solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
@@ -26,6 +31,7 @@ coset = { workspace = true }
 ed25519-dalek = { workspace = true }
 pgp = { workspace = true }
 solidcraft-profile = { workspace = true }
+solidcraft-sketch = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }
@@ -43,6 +49,20 @@ cadmpeg-registry = { workspace = true }
 # Sheet PNGs (src/paper/png.rs).
 png = { workspace = true }
 tiny-skia = { workspace = true }
+# Gerber (RS-274X) parsing for PCB import (src/gerber.rs); pure Rust, MIT OR Apache-2.0, and
+# gives the full command set (apertures, regions, macros) later slices need for copper layers.
+gerber_parser = { version = "0.5.0", default-features = false }
+# Exact area of Gerber copper, mask and silkscreen layers (src/gerber_area.rs): closed polylines
+# with arc segments and booleans on them; pure Rust, no unsafe, MIT OR Apache-2.0.
+cavalier_contours = { version = "0.9.0", default-features = false }
+# Sheet PDFs (src/paper/pdf.rs).
+pdf-writer = { workspace = true }
+flate2 = { workspace = true }
+# Its neutral model read into B-rep records (src/native_cad.rs, `cadir_records`).
+solidcore-cadir = { workspace = true }
+# Exported mesh file names in NFC, so one name in two Unicode forms is one file (src/urdf.rs);
+# MIT OR Apache-2.0.
+unicode-normalization = { version = "0.1.26", default-features = false }
 
 # The model cache's key (build.rs).
 [build-dependencies]
@@ -56,9 +76,21 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 # The computer's name for a design's lock file (src/design_lock.rs; the browser keeps no lock files).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 gethostname = { workspace = true }
+# A temporary file in its target folder; also a rename that never replaces a file (src/safe_write.rs, create_atomic).
+tempfile = "3.27"
+same-file = "1.0.6"
+# Whether the process named in a lock is still running (src/design_lock.rs); the workspace's
+# MIT-licensed process lookup, safe API.
+sysinfo = { workspace = true }
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+trash = "5.2.9"
 
 [dev-dependencies]
+solidcore-ops = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-testkit = { workspace = true }
+# The mesh path's stats, built by hand in the export notes' test.
+solidcore-tess = { workspace = true }
 # Provenance tests sign with a software OpenPGP key, so they need no GnuPG or smartcard.
 rand = "0.8"

@@ -1,0 +1,291 @@
+# One-off test builds of any branch, tag, SHA or pull request, in about ten minutes (docs/releasing.md,
+# "Test builds"). Nothing here is a release: the builds are unsigned, carry the version
+# `<Cargo.toml version>-test+<shortsha>` (the in-app updater treats that as a development build and
+# never offers an update), and the artifact is kept for 7 days.
+#
+# Two ways in:
+#   - Actions > Test build > Run workflow: a ref (default main) and a platform.
+#   - A maintainer adds `build:windows`, `build:linux`, `build:macos` or `build:all` to a pull
+#     request. Only people with write access can add labels. The build is of the PR's head; a comment
+#     on the PR (one, edited in place) links the artifact, and the label comes off so it can be
+#     added again.
+#
+# The packaging is the release workflow's own scripts (packaging/windows/package.ps1 -PortableOnly,
+# packaging/linux/package.sh --formats appimage, packaging/macos/package.sh --arch aarch64), not
+# a copy of them.
+#
+# Pull request code is untrusted. This workflow runs on pull_request_target (so a fork PR's label
+# can comment), which means the PR's code runs in a job that has no secrets, a read-only token
+# (`contents: read`), no persisted credentials, and a cache it may only read. The one job with write
+# access (comment) never checks out or runs PR code.
+name: Test build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA to build"
+        type: string
+        default: main
+      platform:
+        description: "What to build"
+        type: choice
+        options: [windows-portable, linux-appimage, macos-dmg, all]
+        default: windows-portable
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  plan:
+    name: Plan
+    if: >-
+      github.repository_owner == 'tangency-labs' &&
+      (github.event_name == 'workflow_dispatch' || startsWith(github.event.label.name, 'build:'))
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      repo: ${{ steps.p.outputs.repo }}
+      sha: ${{ steps.p.outputs.sha }}
+      short: ${{ steps.p.outputs.short }}
+      version: ${{ steps.p.outputs.version }}
+      key: ${{ steps.p.outputs.key }}
+      pr: ${{ steps.p.outputs.pr }}
+      windows: ${{ steps.p.outputs.windows }}
+      linux: ${{ steps.p.outputs.linux }}
+      macos: ${{ steps.p.outputs.macos }}
+    steps:
+      # No checkout: the version is read from the commit through the API, so no PR code runs here.
+      - id: p
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_PLATFORM: ${{ inputs.platform }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ]; then
+            repo="$GITHUB_REPOSITORY"
+            ref="${INPUT_REF:-main}"
+            enc="$(jq -rn --arg r "$ref" '$r|@uri')"
+            sha="$(gh api "repos/$repo/commits/$enc" --jq .sha)"
+            platform="$INPUT_PLATFORM"
+            key="$ref"
+            pr=""
+          else
+            repo="$PR_REPO"
+            sha="$PR_SHA"
+            case "$LABEL" in
+              build:windows) platform=windows-portable ;;
+              build:linux) platform=linux-appimage ;;
+              build:macos) platform=macos-dmg ;;
+              build:all) platform=all ;;
+              *) echo "::error::Unknown build label $LABEL"; exit 1 ;;
+            esac
+            key="pr-$PR_NUMBER"
+            pr="$PR_NUMBER"
+          fi
+          case "$sha" in *[!0-9a-f]* | "") echo "::error::Could not resolve a commit"; exit 1 ;; esac
+          short="${sha:0:7}"
+          base="$(gh api "repos/$repo/contents/Cargo.toml?ref=$sha" -H 'Accept: application/vnd.github.raw' |
+            awk '/^\[/ { p = ($0 == "[workspace.package]"); next } p && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }')"
+          case "$base" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::Could not read the version from Cargo.toml"; exit 1 ;; esac
+          version="${base%%-*}-test+$short"
+          for p in windows linux macos; do echo "$p=false" >>"$GITHUB_OUTPUT"; done
+          case "$platform" in
+            windows-portable) echo windows=true >>"$GITHUB_OUTPUT" ;;
+            linux-appimage) echo linux=true >>"$GITHUB_OUTPUT" ;;
+            macos-dmg) echo macos=true >>"$GITHUB_OUTPUT" ;;
+            all) printf '%s\n' windows=true linux=true macos=true >>"$GITHUB_OUTPUT" ;;
+          esac
+          { echo "repo=$repo"; echo "sha=$sha"; echo "short=$short"; echo "version=$version"; echo "key=$key"; echo "pr=$pr"; } >>"$GITHUB_OUTPUT"
+          echo "### Test build $version of \`$repo\` at \`$sha\` ($platform)" >>"$GITHUB_STEP_SUMMARY"
+
+  windows:
+    name: Windows portable
+    needs: plan
+    if: needs.plan.outputs.windows == 'true'
+    runs-on: blacksmith-8vcpu-windows-2025
+    permissions:
+      contents: read
+    concurrency:
+      group: test-build-${{ needs.plan.outputs.key }}-windows-portable
+      cancel-in-progress: true
+    outputs:
+      url: ${{ steps.up.outputs.artifact-url }}
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.plan.outputs.repo }}
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: x86_64-pc-windows-msvc
+      # Restores the release build's cache; never saves (a PR's build must not write a cache
+      # that main or a release would later restore).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-windows-x64
+          save-if: false
+      - name: Build and package (portable zip)
+        shell: pwsh
+        run: ./packaging/windows/package.ps1 -Arch x64 -PortableOnly
+      - id: up
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solidcraft-${{ needs.plan.outputs.short }}-windows-portable
+          path: dist/release/*-portable.zip
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+
+  linux:
+    name: Linux AppImage
+    needs: plan
+    if: needs.plan.outputs.linux == 'true'
+    # The release's runner: the oldest image, so the binaries only need glibc >= 2.35.
+    runs-on: blacksmith-8vcpu-ubuntu-2204
+    permissions:
+      contents: read
+    concurrency:
+      group: test-build-${{ needs.plan.outputs.key }}-linux-appimage
+      cancel-in-progress: true
+    outputs:
+      url: ${{ steps.up.outputs.artifact-url }}
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.plan.outputs.repo }}
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils appstream zsync
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-linux-x86_64
+          save-if: false
+      - name: Build and package (AppImage)
+        run: packaging/linux/package.sh --formats appimage
+      - id: up
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solidcraft-${{ needs.plan.outputs.short }}-linux-appimage
+          path: dist/release/*.AppImage
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+
+  macos:
+    # Apple Silicon only (the release's universal build compiles both architectures, which doubles
+    # the time). Ad-hoc signed, not notarized: the first launch needs right-click > Open.
+    name: macOS dmg (Apple Silicon)
+    needs: plan
+    if: needs.plan.outputs.macos == 'true'
+    runs-on: blacksmith-6vcpu-macos-15
+    permissions:
+      contents: read
+    concurrency:
+      group: test-build-${{ needs.plan.outputs.key }}-macos-dmg
+      cancel-in-progress: true
+    outputs:
+      url: ${{ steps.up.outputs.artifact-url }}
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.plan.outputs.repo }}
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-macos-aarch64
+          save-if: false
+      - name: Build and package (dmg, ad-hoc signed)
+        run: packaging/macos/package.sh --arch aarch64
+      - id: up
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solidcraft-${{ needs.plan.outputs.short }}-macos-dmg
+          path: dist/release/*.dmg
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+
+  # The only job with write access, and it never checks out or runs PR code.
+  comment:
+    name: Comment on the PR
+    needs: [plan, windows, linux, macos]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.pr != ''
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Edit the PR's test-build comment, then remove the label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.plan.outputs.pr }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          SHORT: ${{ needs.plan.outputs.short }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          LABEL: ${{ github.event.label.name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          R_WINDOWS: ${{ needs.windows.result }}
+          R_LINUX: ${{ needs.linux.result }}
+          R_MACOS: ${{ needs.macos.result }}
+          U_WINDOWS: ${{ needs.windows.outputs.url }}
+          U_LINUX: ${{ needs.linux.outputs.url }}
+          U_MACOS: ${{ needs.macos.outputs.url }}
+        run: |
+          set -euo pipefail
+          marker='<!-- solidcraft-test-build -->'
+          declare -A line
+          id="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n1)"
+          if [ -n "$id" ]; then
+            while IFS= read -r l; do
+              case "$l" in "- **"*) name="${l#- \*\*}"; name="${name%%\*\**}"; line[$name]="$l" ;; esac
+            done < <(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$id" --jq .body)
+          fi
+          expires="$(date -u -d '+7 days' '+%Y-%m-%d')"
+          add() { # name result url
+            case "$2" in
+              success) line[$1]="- **$1** at \`$SHORT\` (\`$VERSION\`): [download the artifact]($3), kept until $expires" ;;
+              failure) line[$1]="- **$1** at \`$SHORT\`: the build failed, see the [run]($RUN_URL)" ;;
+              *) ;; # skipped (not asked for) or cancelled (a newer request replaced it)
+            esac
+          }
+          add windows-portable "$R_WINDOWS" "$U_WINDOWS"
+          add linux-appimage "$R_LINUX" "$U_LINUX"
+          add macos-dmg "$R_MACOS" "$U_MACOS"
+          body="$marker"$'\n'"Test builds of this PR (unsigned; not releases). Each line is the last build of that platform."$'\n\n'
+          for k in $(printf '%s\n' "${!line[@]}" | sort); do body+="${line[$k]}"$'\n'; done
+          body+=$'\n'"Add the \`build:windows\`, \`build:linux\`, \`build:macos\` or \`build:all\` label to build again."
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
+          # Off again, so it can be added again. Already gone (a newer run took it): fine.
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/$PR/labels/$(jq -rn --arg l "$LABEL" '$l|@uri')" >/dev/null || true

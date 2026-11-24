@@ -1,7 +1,8 @@
 //! A drawing's views drawn off the window's thread (#4892 B7): working a view's lines out takes long
-//! enough on a large design that the window must keep drawing meanwhile. Each view is worked out
-//! on a worker from a copy of the session, and its lines are taken up only when nothing they were
-//! asked from has changed (`drawing_scene::finish`). The drawing page calls [`tick`] each frame.
+//! enough on a large design that the window must keep drawing meanwhile. Each view, and each
+//! shaded picture's setup, is worked out on a worker from a copy of the session, and taken up only
+//! when nothing it was asked from has changed (`drawing_scene::finish`). The drawing page calls
+//! [`tick`] each frame.
 
 use solidcraft_engine::drawing_scene::{self, Done};
 
@@ -9,15 +10,42 @@ use crate::SolveApp;
 
 /// A view being drawn on a worker thread.
 pub struct Drawing {
-    done: std::sync::mpsc::Receiver<Done>,
+    /// The work, and how long the worker took over it.
+    done: std::sync::mpsc::Receiver<(Done, std::time::Duration)>,
+    /// The view being drawn (none: a picture's setup), and when it was asked for.
+    view: Option<u64>,
+    asked: web_time::Instant,
 }
 
-/// Takes up a view a worker has drawn, then starts on the next one out of date, and says whether
-/// any is still being drawn. In the browser, or when no thread can start, it draws one view here.
+/// One line in the log for each view drawn: how long its lines took to work out, how long they
+/// then waited for the window to take them, and the two together. A view that takes long says
+/// where the time went.
+fn log_view(view: u64, worked: std::time::Duration, total: std::time::Duration) {
+    let waited = total.saturating_sub(worked);
+    log::info!(
+        "drawing view {}: worked out in {:.3} s, waited {:.3} s for the window, {:.3} s in all",
+        solidcraft_engine::doc::ids::encode(view),
+        worked.as_secs_f64(),
+        waited.as_secs_f64(),
+        total.as_secs_f64()
+    );
+}
+
+/// Whether no drawing view is being drawn on a worker thread.
+pub fn idle(app: &SolveApp) -> bool {
+    app.drawing_job.is_none()
+}
+
+/// Takes up what a worker has done, then starts on the next view out of date or picture to set up,
+/// and says whether any work is still waiting. In the browser, or when no thread can start, it does
+/// that work here.
 pub fn tick(app: &mut SolveApp) -> bool {
     if let Some(drawing) = &app.drawing_job {
         match drawing.done.try_recv() {
-            Ok(done) => {
+            Ok((done, worked)) => {
+                if let Some(view) = drawing.view {
+                    log_view(view, worked, drawing.asked.elapsed());
+                }
                 drawing_scene::finish(&mut app.session, done);
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => return true,
@@ -28,14 +56,18 @@ pub fn tick(app: &mut SolveApp) -> bool {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // No view waiting: the dimensions out of date are read here (they are quick), as `step` does.
+        // Nothing long waiting: the dimensions out of date are read here (they are quick), and a
+        // picture set up draws its bands for a few milliseconds, as `step` does.
         let Some(job) = drawing_scene::begin(&mut app.session) else { return drawing_scene::step(&mut app.session) };
         let (tx, rx) = std::sync::mpsc::channel();
+        let (view, asked) = (job.view(), web_time::Instant::now());
         let worker = std::thread::Builder::new().name("drawing view".into()).spawn(move || {
-            let _ = tx.send(job.run());
+            let began = web_time::Instant::now();
+            let done = job.run();
+            let _ = tx.send((done, began.elapsed()));
         });
         if worker.is_ok() {
-            app.drawing_job = Some(Drawing { done: rx });
+            app.drawing_job = Some(Drawing { done: rx, view, asked });
             return true;
         }
         // No thread to draw on: draw here, as before.

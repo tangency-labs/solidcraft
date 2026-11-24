@@ -65,6 +65,24 @@ pub struct Admission {
 fn limit(message: &str) -> JobError {
     JobError::new(ErrorCode::LimitExceeded, message)
 }
+/// The scene has more triangles, face appearances or edge polylines than the CPU profile admits:
+/// say which, how many were counted when the cap was passed, the cap, and where it is chosen (#16623).
+fn over_cap(triangles: u64, faces: u64, polylines: u64, cap: u64) -> JobError {
+    let (what, count) = if triangles > cap {
+        ("triangles", triangles)
+    } else if faces > cap {
+        ("face appearances", faces)
+    } else {
+        ("edge polylines", polylines)
+    };
+    JobError::new(
+        ErrorCode::LimitExceeded,
+        format!(
+            "product image exceeds its admission cap: the scene has at least {count} {what}, over the cap of {cap}; \
+             the CPU profile in the render workspace sets this cap (Compact, Studio or Workstation)"
+        ),
+    )
+}
 fn invalid(message: &str) -> JobError {
     JobError::new(ErrorCode::InvalidScene, message)
 }
@@ -282,7 +300,7 @@ fn admit_source_with_limits(
         faces = faces.checked_add(body.faces.len() as u64).ok_or_else(|| limit("appearance count overflow"))?;
         polylines = polylines.checked_add(m.edges.len() as u64 + m.edge_faces.len() as u64).ok_or_else(|| limit("edge count overflow"))?;
         if triangles > max_triangles || faces > max_triangles || polylines > max_triangles {
-            return Err(limit("product image exceeds its triangle/appearance/polyline admission cap"));
+            return Err(over_cap(triangles, faces, polylines, max_triangles));
         }
         add_bytes(&mut geometry, m.positions.capacity(), std::mem::size_of::<Vec3>(), max_geometry_bytes)?;
         add_bytes(&mut geometry, m.normals.capacity(), std::mem::size_of::<Vec3>(), max_geometry_bytes)?;

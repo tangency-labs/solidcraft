@@ -10,22 +10,22 @@ use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec3};
 use crate::schema::frame::SketchSolve;
 use crate::schema::sketch::{
-    CancelResult, CoincidentMade, CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, Constrained, ConstraintResult, EditParams,
-    EditResult, EqualMade, EqualParams, EqualResult, ExitParams, FinishResult, FixOutcome, FixParams, FixResult, HorizontalVerticalParams,
-    MidpointParams, ParallelParams, PerpendicularParams, SymmetryParams, SymmetryResult, TangentMade, TangentParams, TangentResult,
+    CoincidentMade, CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, Constrained, ConstraintResult, EditParams, EditResult,
+    EqualMade, EqualParams, EqualResult, ExitParams, FixOutcome, FixParams, FixResult, HorizontalVerticalParams, MidpointParams, ParallelParams,
+    PerpendicularParams, SymmetryParams, SymmetryResult, TangentMade, TangentParams, TangentResult,
 };
 use crate::schema::sketch_dimension::{DimensionResult, SketchDimensionParams};
 use crate::schema::sketch_dimensioned::{DrawDimensionedParams, DrawDimensionedResult};
 use crate::schema::sketch_session::{
     Activated, Attachment, ChainParams, ChainResult, ConstructionParams, ConstructionResult, CreateParams, CreateResult, DeleteParams, DeleteResult,
     DimensionTextParams, DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, Frame, MovePointParams, MovePointResult,
-    OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
+    MovePointsParams, MovePointsResult, MovedPoint, OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
 };
 use crate::schema::sketch_shapes::{
-    ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, Created, DrawResult, LineParams,
-    PointParams, PointResult, PolygonCircumscribedParams, PolygonEdgeParams, PolygonInscribedParams, PolygonResult, RectCenterParams, RectCorners,
-    RectResult, RectRoundedParams, RectSides, RectThreePointParams, RectTwoPointParams, RoundedRectResult, SlotCenterToCenterParams,
-    SlotOverallParams,
+    ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, Created, DrawResult,
+    EdgeCenterRectCorners, EdgeCenterRectResult, EdgeCenterRectSides, LineParams, PointParams, PointResult, PolygonCircumscribedParams,
+    PolygonEdgeParams, PolygonInscribedParams, PolygonResult, RectCenterParams, RectCorners, RectEdgeCenterParams, RectResult, RectRoundedParams,
+    RectSides, RectThreePointParams, RectTwoPointParams, RoundedRectResult, SlotCenterToCenterParams, SlotOverallParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session, SketchEntry, Snapshot};
@@ -58,6 +58,7 @@ const CREATE_CONTRACT: TypedContract<CreateParams> = TypedContract::new();
 const CONSTRUCTION_CONTRACT: TypedContract<ConstructionParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
 const MOVE_POINT_CONTRACT: TypedContract<MovePointParams> = TypedContract::new();
+const MOVE_POINTS_CONTRACT: TypedContract<MovePointsParams> = TypedContract::new();
 const DRAG_CONTRACT: TypedContract<DragParams> = TypedContract::new();
 const DRAG_END_CONTRACT: TypedContract<DragEndParams> = TypedContract::new();
 const DIMENSION_TEXT_CONTRACT: TypedContract<DimensionTextParams> = TypedContract::new();
@@ -92,53 +93,60 @@ const RECT_TWO_POINT_CONTRACT: TypedContract<RectTwoPointParams> = TypedContract
 const RECT_THREE_POINT_CONTRACT: TypedContract<RectThreePointParams> = TypedContract::new();
 const RECT_ROUNDED_CONTRACT: TypedContract<RectRoundedParams> = TypedContract::new();
 const RECT_CENTER_CONTRACT: TypedContract<RectCenterParams> = TypedContract::new();
+const RECT_EDGE_CENTER_CONTRACT: TypedContract<RectEdgeCenterParams> = TypedContract::new();
 const POLYGON_INSCRIBED_CONTRACT: TypedContract<PolygonInscribedParams> = TypedContract::new();
 const POLYGON_CIRCUMSCRIBED_CONTRACT: TypedContract<PolygonCircumscribedParams> = TypedContract::new();
 const POLYGON_EDGE_CONTRACT: TypedContract<PolygonEdgeParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.create", "Create Sketch", crate::checked!("sketch.create", create_sketch))
+    CommandSpec::new("sketch.create", "Create Sketch", crate::checked!("sketch.create", create_sketch)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("sketch")
+        .from_selection(super::model_selection::sketch_plane)
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
-    CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
+        .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] in mm, default [0,0,0], each a number or a length expression (an origin whose expressions name parameters is kept, and the sketch follows them when they change), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), view?: open Model view id (defaults to focused or most recent Model), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
+    CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch)).begins_edit()
         .noundo().icon("sketch")
         .contract(&EDIT_CONTRACT).output(output_schema_for::<EditResult>)
-        .params("sketch: id or name; restore_marker?: nonnegative timeline position, null (end) or false. A position or null: temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omitted: the same with the current position when features come after the sketch, so they rebuild once at Finish rather than after every sketch command. false: leave the timeline in place (later features rebuild after every sketch command)"),
+        .params("sketch: id or name; view?: open Model view id; restore_marker?: nonnegative timeline position, null (end) or false. A position or null: temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omitted: the same with the current position when features come after the sketch, so they rebuild once at Finish rather than after every sketch command. false: leave the timeline in place (later features rebuild after every sketch command)"),
     CommandSpec::new("sketch.finish", "Finish Sketch", crate::checked!("sketch.finish", finish_sketch))
-        .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo()
-        .contract(&EXIT_CONTRACT).output(output_schema_for::<FinishResult>)
+        .in_sketch_part()
+        .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(super::has_sketch_edit).noundo()
+        .contract(&EXIT_CONTRACT).output(output_schema_for::<crate::schema::drawing_sketch::FinishResult>)
         .params("restore_marker?: bool (default true); false transfers the temporary marker directly to another editor without rebuilding the intervening timeline"),
     CommandSpec::new("sketch.cancel", "Cancel Sketch", crate::checked!("sketch.cancel", cancel_sketch))
+        .in_sketch_part()
         .at("SKETCH", "FINISH SKETCH")
         .icon("sketch_cancel")
-        .enabled(in_sketch)
-        .contract(&EXIT_CONTRACT).output(output_schema_for::<CancelResult>)
+        .enabled(super::has_sketch_edit)
+        .contract(&EXIT_CONTRACT).output(output_schema_for::<crate::schema::drawing_sketch::CancelResult>)
         .params("Leaves the sketch without keeping what changed since it was created or opened for editing: the design goes back to how it was then (a new sketch is removed), as one step that Undo brings back. Refused when the undo history no longer leads back to that point (use Undo instead). restore_marker?: bool (default true); false transfers the temporary marker to another editor"),
     CommandSpec::new("sketch.line", "Line", crate::checked!("sketch.line", draw_line))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("line")
         .key("L")
         .enabled(in_sketch)
         .contract(&LINE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters, while text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.draw.dimensioned", "Draw Dimensioned Sketch Geometry", crate::checked!("sketch.draw.dimensioned", draw_dimensioned)).icon("dimension")
+        .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters and the sketch's other points (\"p1.x\"), \"W / 2\": such a point is fixed where it comes to and follows the parameters, while text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.draw.dimensioned", "Draw Dimensioned Sketch Geometry", crate::checked!("sketch.draw.dimensioned", draw_dimensioned)).in_sketch_part().icon("dimension")
         .enabled(in_sketch)
         .contract(&DRAW_DIMENSIONED_CONTRACT)
         .output(output_schema_for::<DrawDimensionedResult>)
         .params(concat!("command: sketch creation command, params: object, dimensions: object of role to numeric or expression value, or `name = expression` (also `#name = expression`), which defines the user parameter `name` as sketch.dimension does (the reply's `defined` lists the names) (optional with as_drawn or locate), as_drawn?: bool (also dimension every other role of the shape at its size as drawn; a radius or diameter given takes the place of the other, as an edge polygon's side length does its radius, a circle otherwise takes its diameter, and a size the sketch already determines, such as the angle of a line inferred horizontal, is left out), locate?: bool (then place the shape from the sketch origin until nothing of it is left free: horizontal and vertical distances from the origin to its points, centres first, each kept only where it removes freedom, so a shape anchored to the origin or to placed geometry gets none; a point on an axis goes onto that axis instead of a 0 distance; the reply's located lists them); creates geometry and all driving dimensions atomically in one undo step", created_doc!())),
     CommandSpec::new("sketch.rectangle.two_point", "2-Point Rectangle", crate::checked!("sketch.rectangle.two_point", rect_two_point))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("rect")
         .key("R")
         .enabled(in_sketch)
         .contract(&RECT_TWO_POINT_CONTRACT)
         .output(output_schema_for::<RectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the corner is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner), or a snap that holds the corner there, as `sketch.point` takes one: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", crate::checked!("sketch.rectangle.three_point", rect_three_point))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("rect3")
         .enabled(in_sketch)
@@ -146,20 +154,30 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DrawResult>)
         .params(concat!("p0, p1: first edge; p2: point on the opposite edge; construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.rounded", "Rounded Rectangle", crate::checked!("sketch.rectangle.rounded", rect_rounded))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("rect_rounded")
         .enabled(in_sketch)
         .contract(&RECT_ROUNDED_CONTRACT)
         .output(output_schema_for::<RoundedRectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner is fixed and follows them, as in `sketch.rectangle.two_point`; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the corner is fixed and follows them, as in `sketch.rectangle.two_point`; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", crate::checked!("sketch.rectangle.center", rect_center))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("rect_center")
         .enabled(in_sketch)
         .contract(&RECT_CENTER_CONTRACT)
         .output(output_schema_for::<RectResult>)
-        .params(concat!("center, corner: [x,y] (a coordinate may be an expression over the design's parameters: the point is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point); construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("center, corner: [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that holds the point there, as `sketch.point` takes one: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.rectangle.edge_center", "Edge Center Rectangle", crate::checked!("sketch.rectangle.edge_center", rect_edge_center))
+        .at("SKETCH", "CREATE")
+        .icon("rect_edge_center")
+        .enabled(in_sketch)
+        .contract(&RECT_EDGE_CENTER_CONTRACT)
+        .output(output_schema_for::<EdgeCenterRectResult>)
+        .params(concat!("anchor: [x,y], a point id or \"mid:<line>\" (the midpoint of one edge); corner: [x,y] (a corner of the opposite edge); orientation of the anchored edge, one of direction: [dx,dy] | line: curve id (parallel to it) | none when anchor is \"mid:<line>\" (that line's direction); construction?: bool. The rectangle extends from the anchor toward the corner: its width is the corner's distance from the anchored edge, its half-length the corner's offset along the edge. Returns sides {anchor, side_a, far, side_b} (line ids) and corners {anchor_start, anchor_end, far_end, far_start} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.circle.center", "Center Diameter Circle", crate::checked!("sketch.circle.center", circle_center))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("circle")
         .key("C")
@@ -167,11 +185,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CIRCLE_CENTER_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-            "center: [x,y] or point ref (a coordinate may be an expression over the design's parameters: the centre is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the centre), radius | diameter: number or expression (an expression naming a parameter is a dimension driven by it; with `through` a point ref, that and the point both fix the radius); through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
+            "center: [x,y] or point ref (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the centre is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the centre), radius | diameter: number or expression (an expression naming a parameter is a dimension driven by it; with `through` a point ref, that and the point both fix the radius); through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
             connect_doc!(),
             created_doc!()
         )),
     CommandSpec::new("sketch.circle.two_point", "2-Point Circle", crate::checked!("sketch.circle.two_point", circle_two))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("circle2")
         .enabled(in_sketch)
@@ -179,14 +198,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DrawResult>)
         .params(concat!("p0, p1: diameter ends; construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.circle.three_point", "3-Point Circle", crate::checked!("sketch.circle.three_point", circle_three))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("circle3")
         .enabled(in_sketch)
         .contract(&CIRCLE_THREE_POINT_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("p0, p1, p2: [x,y] or point ref (a referenced point stays on the circle); construction?: bool", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.arc.three_point", "3-Point Arc", crate::checked!("sketch.arc.three_point", arc_three)).at("SKETCH", "CREATE").icon("arc3").enabled(in_sketch).contract(&ARC_THREE_POINT_CONTRACT).output(output_schema_for::<DrawResult>).params(concat!("start, end, through: [x,y] or point ref (a referenced through point stays on the arc); construction?: bool", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.arc.three_point", "3-Point Arc", crate::checked!("sketch.arc.three_point", arc_three)).in_sketch_part().at("SKETCH", "CREATE").icon("arc3").enabled(in_sketch).contract(&ARC_THREE_POINT_CONTRACT).output(output_schema_for::<DrawResult>).params(concat!("start, end, through: [x,y] or point ref (a referenced through point stays on the arc); construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.arc.center_point", "Center Point Arc", crate::checked!("sketch.arc.center_point", arc_center))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("arc_center")
         .enabled(in_sketch)
@@ -194,6 +215,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DrawResult>)
         .params(concat!("center, start, end (counter-clockwise from start; clockwise?: bool for clockwise) | center, start, sweep: signed degrees; construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.inscribed", "Inscribed Polygon", crate::checked!("sketch.polygon.inscribed", polygon_inscribed))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("polygon")
         .enabled(in_sketch)
@@ -201,13 +223,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<PolygonResult>)
         .params(concat!("center, radius (to vertices), sides, angle?: deg", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.circumscribed", "Circumscribed Polygon", crate::checked!("sketch.polygon.circumscribed", polygon_circumscribed))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("polygon_circumscribed")
         .enabled(in_sketch)
         .contract(&POLYGON_CIRCUMSCRIBED_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
-        .params(concat!("center, radius (to edge midpoints), sides, angle?: deg", connect_doc!(), created_doc!())),
+        .params(concat!("center, radius | diameter (to edge midpoints): number or expression (an expression naming a parameter is a dimension driven by it, so the polygon follows the parameter; on a sheet sketch the dimension keeps the expression and reads source parameters without defining any), sides: number or expression (read when drawn, it does not follow a later change), angle?: deg", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.edge", "Edge Polygon", crate::checked!("sketch.polygon.edge", polygon_edge))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("polygon_edge")
         .enabled(in_sketch)
@@ -215,21 +239,24 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<PolygonResult>)
         .params(concat!("p0, p1: one edge, sides", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.slot.center_to_center", "Center to Center Slot", crate::checked!("sketch.slot.center_to_center", slot_c2c))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("slot")
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_TO_CENTER_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("p0, p1: arc centres, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: arc centres, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.slot.overall", "Overall Slot", crate::checked!("sketch.slot.overall", slot_overall))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("slot_overall")
         .enabled(in_sketch)
         .contract(&SLOT_OVERALL_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: overall ends, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).in_sketch_part().at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("dimension")
         .key("D")
@@ -237,86 +264,109 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DIMENSION_CONTRACT)
         .output(output_schema_for::<DimensionResult>)
         .params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales to the value instead of distorting: about the origin when the drawing is tied to it (joined to the origin, or constrained to a sketch axis), otherwise about the middle of the drawing, so it stays where it was drawn (#11043); scale_about_origin?: bool (default false; the dimension tool sends the Sketch preference) scales about the origin always, as before #11043. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (3D sketch geometry too, #10608: a drawn 3D line for its length, two 3D points such as \"w1.start\" for their distance, with type distance_x / distance_y / distance_z for the run along an axis, two drawn 3D lines for the angle between them, a drawn 3D arc for its radius; driven and value work as below; a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales to the value instead of distorting: about the origin when the drawing is tied to it (joined to the origin, or constrained to a sketch axis), otherwise about the middle of the drawing, so it stays where it was drawn (#11043); scale_about_origin?: bool (default false; the dimension tool sends the Sketch preference) scales about the origin always, as before #11043. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", crate::checked!("sketch.constraint.horizontal_vertical", c_horizontal_vertical))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_hv")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::horizontal_vertical)
         .contract(&HORIZONTAL_VERTICAL_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
         .params("line: id | points: [a, b] (point ids or {midpoint: line_id}; accepted midpoints reuse or create a point with a Midpoint constraint); mode?: horizontal|vertical"),
     CommandSpec::new("sketch.constraint.coincident", "Coincident", crate::checked!("sketch.constraint.coincident", c_coincident))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_coincident")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::coincident)
         .contract(&COINCIDENT_CONTRACT)
         .output(output_schema_for::<CoincidentResult>)
-        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both)", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (they become collinear), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two 3D points (`<3D curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) or a 3D point and a drawn 3D line", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", crate::checked!("sketch.constraint.tangent", c_tangent))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::tangent)
         .contract(&TANGENT_CONTRACT)
         .output(output_schema_for::<TangentResult>)
-        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both)", model_operand_doc!())),
+        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both); in a 3D sketch, a drawn 3D line and a drawn 3D arc that meet at an end (the line leaves the arc the way it runs on)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.equal", "Equal", crate::checked!("sketch.constraint.equal", c_equal))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_equal")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::equal)
         .contract(&EQUAL_CONTRACT)
         .output(output_schema_for::<EqualResult>)
-        .params(concat!("a, b: lines or circles/arcs; or curves: [2 to 200 lines or circles/arcs], each made equal to the first, in one step", model_operand_doc!())),
+        .params(concat!("a, b: lines or circles/arcs (in a 3D sketch, two drawn 3D lines or two drawn 3D arcs); or curves: [2 to 200 lines or circles/arcs], each made equal to the first, in one step", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.parallel", "Parallel", crate::checked!("sketch.constraint.parallel", c_parallel))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_parallel")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::parallel)
         .contract(&PARALLEL_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines, or a drawn 3D line and an origin plane xy / yz / xz", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.perpendicular", "Perpendicular", crate::checked!("sketch.constraint.perpendicular", c_perpendicular))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_perpendicular")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::perpendicular)
         .contract(&PERPENDICULAR_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.fix", "Fix/Unfix", crate::checked!("sketch.constraint.fix", c_fix))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_fix")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::fix)
         .contract(&FIX_CONTRACT)
         .output(output_schema_for::<FixResult>)
-        .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
+        .params("entity: point or curve | entities: [points and curves] (3D points and drawn 3D curves too, not mixed with planar ones); fixed?: bool (default: fix them all unless all are fixed, then unfix); unfixing a point placed by parameter expressions (`sketch.inspect` shows them as its `fixed_by`) frees it where they come to now, as plain numbers"),
     CommandSpec::new("sketch.constraint.midpoint", "MidPoint", crate::checked!("sketch.constraint.midpoint", c_midpoint))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_midpoint")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::midpoint)
         .contract(&MIDPOINT_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("point, line | a, b in pick order: a point and a line (either way round), or two lines whose midpoints meet (the first stays, the second moves)", model_operand_doc!())),
+        .params(concat!("point, line | a, b in pick order: a point and a line or an arc (either way round; on an arc the point sits halfway along it, not at the middle of its chord), or two lines whose midpoints meet (the first stays, the second moves)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.concentric", "Concentric", crate::checked!("sketch.constraint.concentric", c_concentric))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_concentric")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::concentric)
         .contract(&CONCENTRIC_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
         .params(concat!("a, b: two circles/arcs, or a circle/arc and a sketch point (including origin), in either order; the point and the curve's centre become coincident", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.collinear", "Collinear", crate::checked!("sketch.constraint.collinear", c_collinear))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_collinear")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::collinear)
         .contract(&COLLINEAR_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.symmetry", "Symmetry", crate::checked!("sketch.constraint.symmetry", c_symmetry))
+        .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_symmetry")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::symmetry)
         .contract(&SYMMETRY_CONTRACT)
         .output(output_schema_for::<SymmetryResult>)
         .params(concat!("a, b: two points or two curves (lines mirror their ends, circles/arcs their centres); line: symmetry line id, or x / y for the sketch's own axes (a curve with that id wins; an axis becomes a linked construction line on it, reported in created); or point (or a point id as line, \"origin\" too): symmetric about that point, each pair joined by a construction line it is the midpoint of", model_operand_doc!())),
     CommandSpec::new("sketch.construction", "Normal/Construction", crate::checked!("sketch.construction", construction))
+        .in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("construction")
         .key("X")
@@ -324,23 +374,30 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONSTRUCTION_CONTRACT)
         .output(output_schema_for::<ConstructionResult>)
         .params("curves: [ids], value?: bool (default: construction unless all of them already are)"),
-    CommandSpec::new("sketch.delete", "Delete Sketch Entities", crate::checked!("sketch.delete", sketch_delete)).icon("delete")
+    CommandSpec::new("sketch.delete", "Delete Sketch Entities", crate::checked!("sketch.delete", sketch_delete)).in_sketch_part().icon("delete")
         .enabled(in_sketch)
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
         .params("entities: [curve, point or constraint ids]"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", crate::checked!("sketch.move_point", move_point))
+        .in_sketch_part()
         .icon("sketch_move")
         .enabled(in_sketch)
         .contract(&MOVE_POINT_CONTRACT)
         .output(output_schema_for::<MovePointResult>)
         .params("point: ref, to: [x,y]"),
-    CommandSpec::new("sketch.move_points", "Move Sketch Points", move_points).icon("sketch_move").enabled(in_sketch).params(
+    CommandSpec::new("sketch.move_points", "Move Sketch Points", crate::checked!("sketch.move_points", move_points))
+        .icon("sketch_move")
+        .enabled(in_sketch)
+        .contract(&MOVE_POINTS_CONTRACT)
+        .output(output_schema_for::<MovePointsResult>)
+        .params(
         "moves: [{point: ref | near: [x,y], to: [x,y]}] (each point to its own target; `near`: the sketch point closest to it, \
          refused when none lies within `tolerance` or two are as close), tolerance?: mm (default 0.1); sketch? → moved: \
-         [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`)",
+         [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`); a point placed by parameter expressions is refused, naming them (unfix it with sketch.constraint.fix first)",
     ),
     CommandSpec::new("sketch.drag", "Drag Sketch Geometry", crate::checked!("sketch.drag", drag))
+        .in_sketch_part()
         .icon("sketch_move")
         .enabled(in_sketch)
         .live(drag_live)
@@ -358,25 +415,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "constraint?: {command: a sketch.constraint.* id, params}: ends a drag made of `sketch.drag` `live: true` frames: adds the constraint it let go on (not kept if it over-constrains the sketch), then evaluates the whole model once; returns the constraint's result and the sketch's solved state and degrees of freedom",
     ),
-    CommandSpec::new("sketch.dimension_text", "Move Dimension Text", crate::checked!("sketch.dimension_text", dimension_text)).icon("edit")
+    CommandSpec::new("sketch.dimension_text", "Move Dimension Text", crate::checked!("sketch.dimension_text", dimension_text)).in_sketch_part().icon("edit")
         .enabled(in_sketch)
         .contract(&DIMENSION_TEXT_CONTRACT)
         .output(output_schema_for::<DimensionTextResult>)
         .params("dimension: constraint id or parameter name; at: [x,y] text centre (sketch coordinates) | reset: true (default place)"),
     CommandSpec::new("sketch.options", "Sketch Palette Options", crate::checked!("sketch.options", sketch_options))
+        .in_sketch_part()
         .icon("sketch")
         .contract(&OPTIONS_CONTRACT)
         .output(output_schema_for::<OptionsResult>)
         .params(
         "sketch?: id|name (default active); any of show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, grid, snap, slice, sketch_3d: bool. Returns them all",
     ),
-    CommandSpec::new("sketch.chain", "Chain", crate::checked!("sketch.chain", chain_cmd)).icon("chain")
+    CommandSpec::new("sketch.chain", "Chain", crate::checked!("sketch.chain", chain_cmd)).in_sketch_part().icon("chain")
         .enabled(in_sketch)
         .noundo().read_only()
         .contract(&CHAIN_CONTRACT)
         .output(output_schema_for::<ChainResult>)
         .params("curve: id: the curves joined to it end to end (what a double-click selects)"),
-    CommandSpec::new("sketch.solve", "Solve Sketch", crate::checked!("sketch.solve", solve_cmd)).icon("compute")
+    CommandSpec::new("sketch.solve", "Solve Sketch", crate::checked!("sketch.solve", solve_cmd)).in_sketch_part().icon("compute")
         .enabled(in_sketch)
         .noundo().read_only()
         .contract(&SOLVE_CONTRACT)
@@ -408,14 +466,24 @@ pub(super) fn edit_solve<T>(
     strict: bool,
     f: impl FnOnce(&mut Sketch, &mut solidcraft_doc::Document) -> Result<T>,
 ) -> Result<(T, Option<SketchSolve>)> {
+    if s.sheet_sketching() {
+        return sketch_store::edit_sheet(s, p, cmd, f);
+    }
     let id = sketch_store::target(s, p, cmd)?;
     let (out, rep) = edit_solved(s, id, strict, Analysis::Freedom, |sk, doc| Ok((f(sk, doc)?, Left::Unsolved)))?;
     Ok((out, rep.as_ref().map(solve_info)))
 }
 
-/// A solve's outcome as commands return it.
+/// A solve's outcome as commands return it: `dof` counts the 3D curves' freedoms too, and a
+/// sketch with drawn 3D curves also gives the planar sketch's alone (`planar_dof`, #10608).
+/// `solved` is the planar sketch's; a sketch with drawn 3D curves also gives `wires_solved`.
 pub(super) fn solve_info(rep: &SolveReport) -> SketchSolve {
-    SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof }
+    SketchSolve {
+        solved: rep.keeps_orientation(),
+        dof: rep.shown_dof(),
+        planar_dof: rep.wires.is_some().then_some(rep.dof),
+        wires_solved: rep.wires.is_some().then(|| rep.wires_ok()),
+    }
 }
 
 /// A solve's outcome as commands return it, as JSON.
@@ -474,8 +542,33 @@ pub(super) fn edit_solved<T>(
     let stored = sk.driving_values();
     // The constraints the sketch has before the edit: a conflict message must not name one the
     // edit itself adds (the trial already holds it under the id it would get, #9735).
-    let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).collect();
+    let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).chain(sk.wire_constraints.iter().map(|c| c.id.clone())).collect();
+    // What the edit changes: a strict edit is refused for breaking the planar sketch only when
+    // it changed the planar sketch, and for breaking 3D constraints only when it changed the 3D
+    // curves or their constraints, and only constraints that held before it or that it adds
+    // (#10608). A 3D sketch too large to solve refuses only an edit that makes it so.
+    let before = strict.then(|| {
+        let big = s.model.state().sketch(id).and_then(|k| k.report.wires.as_ref()).is_some_and(|w| w.oversized.is_some() || w.out_of_time);
+        (
+            sk.points.clone(),
+            sk.curves.clone(),
+            sk.constraints.clone(),
+            sk.wires.clone(),
+            sk.wire_constraints.clone(),
+            sk.wire_constraints_holding(),
+            big,
+        )
+    });
     let (out, left) = f(&mut sk, &mut doc)?;
+    let strictness = match before {
+        Some((points, curves, constraints, wires, wire_constraints, held, was_big)) => Strict {
+            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints,
+            wires: sk.wires != wires || sk.wire_constraints != wire_constraints,
+            held,
+            was_big,
+        },
+        None => Strict::default(),
+    };
     // A curve that took an offset spline's generated node (drawn from its end) gets its own point there.
     sk.detach_offset_points()?;
     let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty();
@@ -494,7 +587,11 @@ pub(super) fn edit_solved<T>(
                 sk.refresh_offsets()?;
                 rep = counted_solve(&mut sk, &Hold::default(), Some(&reference), analysis, None);
             }
-            Some(settle(strict, rep, &mut sk, unsolved, &pre)?)
+            // The 3D curves' report too, so every reply counts their freedoms alike.
+            if sk.wires.iter().any(|w| w.link.is_none() && !w.fit.is_empty()) {
+                rep.wires = Some(sk.solve_wires_with(None, analysis != Analysis::StatusOnly));
+            }
+            Some(settle(strictness, rep, &mut sk, unsolved, &pre)?)
         }
         // Solved for the document's values, continuing from the stored solved state.
         Left::Solved | Left::Unsolved => {
@@ -504,9 +601,13 @@ pub(super) fn edit_solved<T>(
             #[cfg(test)]
             solve_counts::record(analysis);
             let rep = doc.solve_sketch_with_analysis(&vals, &mut sk, &stored, None, analysis)?;
-            Some(settle(strict, rep, &mut sk, unsolved, &pre)?)
+            Some(settle(strictness, rep, &mut sk, unsolved, &pre)?)
         }
     };
+    let mut rep = rep;
+    if let Some(r) = rep.as_mut() {
+        doc.discount_traces(id, &sk, r);
+    }
     sketch_store::checked(&sk)?;
     sketch_store::write(&mut doc, id, sk)?;
     s.set_doc(doc);
@@ -519,7 +620,37 @@ pub(super) fn edit_solved<T>(
 /// `pre` are the constraint ids the sketch had before the edit: the trial already holds any
 /// constraint the edit adds, under the id it would get, so a conflict list that named it would
 /// name an id the sketch does not have yet (#9735).
-fn settle(strict: bool, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String]) -> Result<SolveReport> {
+/// The 3D constraints (#10608) are settled apart, see [`Strict`]. A 3D group that fails moves
+/// none of its curves; a planar solve that fails keeps the 3D curves as the 3D solve left them.
+fn settle(strict: Strict, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String]) -> Result<SolveReport> {
+    let Strict { planar: strict, wires: strict_wires, held, was_big } = strict;
+    let collapse = wire_collapse(&unsolved, sk);
+    if strict_wires && let Some(why) = collapse.clone() {
+        return Err(EngineError::Other(why));
+    }
+    if let Some(w) = rep.wires.as_ref().filter(|w| strict_wires && !w.ok) {
+        if w.oversized.is_some() || w.out_of_time {
+            if !was_big {
+                return Err(EngineError::Other(w.failure(|f| f.to_string())));
+            }
+        } else {
+            // What it breaks: a constraint that held before the edit, or one the edit adds.
+            let broken: Vec<&String> = w.failing.iter().filter(|id| held.contains(*id) || !pre.contains(*id)).collect();
+            let had: Vec<String> = broken.iter().filter(|id| pre.contains(**id)).map(|id| (*id).clone()).collect();
+            if !broken.is_empty() && had.is_empty() {
+                return Err(EngineError::Other(
+                    "that would over-constrain the 3D sketch (it conflicts with what its other 3D constraints already determine)".into(),
+                ));
+            }
+            if !had.is_empty() {
+                return Err(EngineError::Other(format!("that would over-constrain the 3D sketch (conflicts with {})", had.join(", "))));
+            }
+        }
+    }
+    // A non-strict edit's 3D solve that squeezed a curve away keeps the curves as the edit left them.
+    if !strict_wires && collapse.is_some() {
+        sk.wires.clone_from(&unsolved.wires);
+    }
     if strict && !rep.keeps_orientation() {
         if rep.folded.is_empty() && rep.oversized.is_none() && !rep.failing.is_empty() {
             let had: Vec<String> = rep.failing.iter().filter(|id| pre.iter().any(|p| p == *id)).cloned().collect();
@@ -548,9 +679,63 @@ fn settle(strict: bool, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch,
         return Err(EngineError::Other(format!("that would shrink {curve} to a point: its constraints can only be met without it")));
     }
     if !rep.keeps_orientation() || far || gone.is_some() {
+        let (wires, wire_constraints) = (std::mem::take(&mut sk.wires), std::mem::take(&mut sk.wire_constraints));
         *sk = unsolved;
+        (sk.wires, sk.wire_constraints) = (wires, wire_constraints);
     }
     Ok(rep)
+}
+
+/// Which failures refuse an edit's solve: the planar sketch's when the edit changed it
+/// (`planar`), the 3D constraints' when it changed the 3D curves or their constraints (`wires`)
+/// and they held before it (`wires_held`). An edit is not refused for a failure it did not touch.
+#[derive(Clone, Default)]
+pub(super) struct Strict {
+    planar: bool,
+    wires: bool,
+    held: std::collections::HashSet<String>,
+    was_big: bool,
+}
+
+/// Why solving `before` into `after` collapsed a drawn 3D curve (#10608), as `shrunk` and
+/// `flung` judge planar geometry: a line or arc from longer (or wider) than 1e-3 to shorter
+/// than 1e-5, or a point thrown further than [`FLUNG`] times the 3D curves' size.
+pub(super) fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
+    let size = |w: &solidcraft_sketch::Wire| match (w.arc, w.fit.as_slice()) {
+        (Some(a), _) => Some(a.radius),
+        (None, [p, q]) => Some(p.dist(*q)),
+        _ => None,
+    };
+    let drawn = |sk: &Sketch| {
+        sk.wires
+            .iter()
+            .filter(|w| w.link.is_none() && !w.fit.is_empty())
+            .map(|w| (w.id.clone(), w.clone()))
+            .collect::<std::collections::HashMap<_, _>>()
+    };
+    let (old, new) = (drawn(before), drawn(after));
+    for w in after.wires.iter().filter(|w| w.link.is_none() && !w.fit.is_empty()) {
+        let id = &w.id;
+        if let Some(o) = old.get(id)
+            && matches!((size(o), size(w)), (Some(b), Some(a)) if b > 1e-3 && a < 1e-5)
+        {
+            return Some(format!("that would shrink {id} to a point: its 3D constraints can only be met without it"));
+        }
+    }
+    let (lo, hi) = old.values().flat_map(|w| w.fit.iter().copied()).fold(
+        (
+            solidcore_record::Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            solidcore_record::Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+        ),
+        |(lo, hi), p| (lo.min(p), hi.max(p)),
+    );
+    let span = if lo.x <= hi.x { lo.dist(hi) } else { 0.0 };
+    // A 3D dimension may ask for more than the curves span now (its largest driving value).
+    let longest =
+        after.wire_constraints.iter().filter(|c| !c.driven && !c.kind.is_angle()).filter_map(|c| c.kind.value()).map(f64::abs).fold(0.0, f64::max);
+    let reach = FLUNG * (span + longest).max(1.0);
+    let thrown = new.iter().any(|(id, w)| old.get(id).is_some_and(|o| o.fit.iter().zip(&w.fit).any(|(p, q)| !(p.dist(*q) <= reach))));
+    thrown.then(|| "that would throw 3D points of the sketch far away: its 3D constraints have no solution near the sketch as it is".to_string())
 }
 
 /// The first line or circle that solving `before` into `after` shrank to a point: longer (or
@@ -584,7 +769,8 @@ pub(crate) fn collapse_reason(before: &Sketch, after: &Sketch) -> Option<String>
     if flung(before, after) {
         return Some("that would throw points of the sketch far away: its constraints have no solution near the sketch as it is".into());
     }
-    None
+    // The 3D curves too (#10608).
+    wire_collapse(before, after)
 }
 
 /// Did solving `before` into `after` throw some point further than [`FLUNG`] times the sketch's
@@ -660,6 +846,13 @@ pub(super) const CONNECT_TOL: f64 = 1e-6;
 /// Coincident to where the expressions happened to come to at draw time conflicts with the
 /// next parameter change (#10703).
 fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String>> {
+    connect_points_except(sk, first, p, &[])
+}
+
+/// [`connect_points`], leaving out the new points `joined`: those the command has itself joined
+/// to an existing point (a rectangle corner snapped to a model vertex, see [`join_snapped`]),
+/// which are not joined again, to that point or to another at the same place.
+fn connect_points_except(sk: &mut Sketch, first: usize, p: &Value, joined: &[usize]) -> Result<Vec<String>> {
     if !bool_(p, "connect").unwrap_or(true) {
         return Ok(Vec::new());
     }
@@ -668,7 +861,7 @@ fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String
     old.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
     let mut ties = Vec::new();
     for q in first..sk.points.len() {
-        if sk.points.get(q).is_some_and(|pt| pt.exprs.is_some()) {
+        if sk.points.get(q).is_some_and(|pt| pt.exprs.is_some()) || joined.contains(&q) {
             continue;
         }
         let Some(at) = sk.point(q) else { continue };
@@ -720,11 +913,11 @@ impl PArg {
     }
 }
 
-pub(super) fn parg(sk: &mut Sketch, doc: &solidcraft_doc::Document, v: &Value, cmd: &str) -> Result<PArg> {
+pub(super) fn parg_in(sk: &mut Sketch, doc: &solidcraft_doc::Document, v: &Value, cmd: &str, paper: bool) -> Result<PArg> {
     if let Some(p) = vec2(v) {
         return Ok(PArg::At(p));
     }
-    if let Some((at, exprs)) = expr_point(doc, v, cmd)? {
+    if let Some((at, exprs)) = expr_point_in(doc, sk, v, cmd, paper)? {
         return Ok(match exprs {
             Some(exprs) => PArg::Ref(add_placed_point(sk, at, exprs, None)?, at),
             None => PArg::At(at),
@@ -745,11 +938,19 @@ pub(super) fn parg(sk: &mut Sketch, doc: &solidcraft_doc::Document, v: &Value, c
     Err(bad(cmd, POINT_ARG_MUST))
 }
 
+/// Model-only point parser retained for commands that do not admit sheet sketches.
 pub(super) fn req_parg(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<PArg> {
-    parg(sk, doc, p.get(k).ok_or_else(|| bad(cmd, format!("missing `{k}`")))?, cmd)
+    req_parg_in(sk, doc, p, k, cmd, false)
+}
+
+pub(super) fn req_parg_in(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str, paper: bool) -> Result<PArg> {
+    parg_in(sk, doc, p.get(k).ok_or_else(|| bad(cmd, format!("missing `{k}`")))?, cmd, paper)
 }
 
 const POINT_MUST: &str = "a point's coordinates must be numbers or expressions over the design's parameters";
+
+/// What a rectangle's corner must be, when it is a snap that names no point (see `corner_or_snap`).
+pub(crate) const CORNER_MUST: &str = "must be a point [x, y] or a snap: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {vertex: [x,y,z]} or {on_edge: [x,y,z]}";
 
 /// What a point argument must be, when it is none of the forms [`parg`] reads.
 const POINT_ARG_MUST: &str = "a point must be [x, y], a point id like \"l1.end\", or {at, ref}";
@@ -785,16 +986,52 @@ pub(crate) fn point_arg_form(v: &Value, snaps: bool) -> std::result::Result<(), 
 }
 
 /// A point given as `[x, y]` with a coordinate typed as text: where it is now and, when a
-/// coordinate names a parameter, the expressions that place it (none: a plain point).
-pub(super) fn expr_point(doc: &solidcraft_doc::Document, v: &Value, cmd: &str) -> Result<Option<(Vec2, Option<PointExprs>)>> {
+/// coordinate names a parameter or another point, the expressions that place it (none: a
+/// plain point).
+fn expr_point_in(doc: &solidcraft_doc::Document, sk: &Sketch, v: &Value, cmd: &str, paper: bool) -> Result<Option<(Vec2, Option<PointExprs>)>> {
     let Some([x, y]) = v.as_array().map(Vec::as_slice) else { return Ok(None) };
     if !x.is_string() && !y.is_string() {
         return Ok(None);
     }
-    let (px, ex) = super::sketch_create::text_number(doc, x, cmd, "point x", POINT_MUST, false)?;
-    let (py, ey) = super::sketch_create::text_number(doc, y, cmd, "point y", POINT_MUST, false)?;
+    let (px, ex) = point_number_in(doc, sk, x, cmd, "point x", POINT_MUST, paper)?;
+    let (py, ey) = point_number_in(doc, sk, y, cmd, "point y", POINT_MUST, paper)?;
     let exprs = (ex.is_some() || ey.is_some()).then_some(PointExprs { x: ex, y: ey });
     Ok(Some((Vec2::new(px, py), exprs)))
+}
+
+/// A point's coordinate typed as text: a number, or an expression over the design's
+/// parameters and the sketch's other points (`p1.x`). The expression is kept when it names
+/// a parameter or a point, so that the point follows them.
+fn point_number_in(
+    doc: &solidcraft_doc::Document,
+    sk: &Sketch,
+    v: &Value,
+    cmd: &str,
+    key: &str,
+    must: &str,
+    paper: bool,
+) -> Result<(f64, Option<String>)> {
+    match v {
+        Value::Number(n) => {
+            let x = n.as_f64().and_then(crate::params::finite).ok_or_else(|| bad(cmd, must))?;
+            Ok((x, None))
+        }
+        Value::String(e) if !e.trim().is_empty() && e.len() <= 4096 => {
+            let e = if paper { e.trim().to_string() } else { doc.with_design_unit(e.trim(), Kind::Length) };
+            match doc.eval_point_expr(sk, &e) {
+                Ok(x) => {
+                    let x = crate::params::finite(x).ok_or_else(|| bad(cmd, must))?;
+                    // The expression is kept when it names a parameter or a point, so the point
+                    // follows them.
+                    let follows = !solidcraft_doc::expr::references(&e).is_empty() || !solidcraft_doc::expr::point_members(&e).is_empty();
+                    Ok((x, follows.then_some(e)))
+                }
+                // Say what is wrong with it (an unknown parameter, a length where an angle goes).
+                Err(error) => Err(bad(cmd, format!("{key}: {error}"))),
+            }
+        }
+        _ => Err(bad(cmd, must)),
+    }
 }
 
 /// A new point placed by parameters: fixed where its expressions come to, and moved there
@@ -864,6 +1101,7 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
         .chain(before.curves.iter().map(|x| x.id.as_str()))
         .chain(before.constraints.iter().map(|x| x.id.as_str()))
         .chain(before.wires.iter().map(|x| x.id.as_str()))
+        .chain(before.wire_constraints.iter().map(|x| x.id.as_str()))
         .collect();
     let new = |id: &&str| !old.contains(*id);
     let points: Vec<&str> = after.points.iter().map(|x| x.id.as_str()).filter(new).collect();
@@ -872,7 +1110,13 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
     let ids = |v: Vec<&solidcraft_sketch::Constraint>| v.into_iter().map(|c| c.id.clone()).collect::<Vec<_>>();
     let wires: Vec<String> = after.wires.iter().map(|x| x.id.as_str()).filter(new).map(str::to_string).collect();
     let owned = |v: Vec<&str>| v.into_iter().map(str::to_string).collect::<Vec<_>>();
-    let out = Created { points: owned(points), curves: owned(curves), constraints: ids(cons), dimensions: ids(dims), wires };
+    // 3D constraints (#10608) are constraints too.
+    // 3D constraints and dimensions (#10608) are listed as the planar ones are.
+    let (mut constraints, mut dimensions) = (ids(cons), ids(dims));
+    for c in after.wire_constraints.iter().filter(|c| new(&c.id.as_str())) {
+        if c.kind.is_dimension() { &mut dimensions } else { &mut constraints }.push(c.id.clone());
+    }
+    let out = Created { points: owned(points), curves: owned(curves), constraints, dimensions, wires };
     serde_json::to_value(out).unwrap_or_default()
 }
 
@@ -943,11 +1187,48 @@ pub(crate) const PLANE_REF_FORMS: &str = "`plane` must be XY, XZ, YZ, a construc
 pub(crate) fn custom_plane_form(v: &Value) -> std::result::Result<Plane, &'static str> {
     let origin = match v.get("origin") {
         None | Some(Value::Null) => Vec3::ZERO,
-        Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm (expressions are not evaluated here)")?,
+        Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm")?,
     };
-    let x = v.get("x_dir").and_then(vec3).ok_or("plane needs x_dir")?;
-    let y = v.get("y_dir").and_then(vec3).ok_or("plane needs y_dir")?;
+    let x = plane_direction(v, "x_dir", "plane needs x_dir", "plane `x_dir` must be three numbers [x, y, z]: only `origin` takes expressions")?;
+    let y = plane_direction(v, "y_dir", "plane needs y_dir", "plane `y_dir` must be three numbers [x, y, z]: only `origin` takes expressions")?;
     Plane::new(origin, x, y).ok_or("degenerate plane")
+}
+
+/// A plane's `x_dir` or `y_dir`: three numbers. Absent, it is `missing`; given as something else
+/// (an expression), `not_numbers`, so the message names what is wrong rather than "needs" it (#19965).
+fn plane_direction(v: &Value, key: &str, missing: &'static str, not_numbers: &'static str) -> std::result::Result<Vec3, &'static str> {
+    match v.get(key) {
+        None | Some(Value::Null) => Err(missing),
+        Some(d) => vec3(d).ok_or(not_numbers),
+    }
+}
+
+/// An explicit plane whose origin has length expressions (`{origin: ["0 mm", "station", 0], x_dir,
+/// y_dir}`, #8192): kept as expressions where they name parameters, so the sketch follows them.
+fn expressed_plane(s: &Session, v: &Value, cmd: &str) -> Result<PlaneRef> {
+    let origin = super::features::point_param(s, v, "origin", cmd)?.unwrap_or_default();
+    let mut at = [0.0; 3];
+    for (slot, e) in at.iter_mut().zip(&origin) {
+        *slot = s.doc.eval(e, Kind::Length).map_err(|err| bad(cmd, format!("plane origin: {err}")))?;
+    }
+    let mut numbers = v.clone();
+    numbers["origin"] = json!(at);
+    let plane = custom_plane_form(&numbers).map_err(|why| bad(cmd, why))?;
+    if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
+        return Ok(PlaneRef::Custom { plane });
+    }
+    Ok(PlaneRef::Placed { origin, x_dir: plane.x, y_dir: plane.y })
+}
+
+/// [`plane_ref`] for the commands whose explicit plane has an origin of numbers only
+/// (`canvas.insert`, `canvas.decal`, the browser's): length expressions are refused as before.
+pub(super) fn plane_ref_numbers(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
+    if let Some(v @ Value::Object(o)) = p.get("plane")
+        && !o.contains_key("face")
+    {
+        custom_plane_form(v).map_err(|why| bad(cmd, why))?;
+    }
+    plane_ref(s, p, cmd)
 }
 
 pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
@@ -958,6 +1239,8 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
         Some(v @ Value::Object(o)) => {
             if o.contains_key("face") {
                 face::capture(s, v, cmd)?
+            } else if o.get("origin").is_some_and(|origin| origin.as_array().is_some_and(|a| a.iter().any(Value::is_string))) {
+                expressed_plane(s, v, cmd)?
             } else {
                 PlaneRef::Custom { plane: custom_plane_form(v).map_err(|why| bad(cmd, why))? }
             }
@@ -1046,6 +1329,7 @@ fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 /// What `sketch.create` makes, from its parameters.
 fn new_sketch(s: &mut Session, p: &Value) -> Result<CreateResult> {
     let cmd = "sketch.create";
+    s.requested_sketch_view(p, cmd)?;
     // These name the plane, so they belong inside `plane`. Next to it they were ignored and the
     // sketch went to XY (or the plane given) without a word.
     for (key, example) in [
@@ -1105,7 +1389,7 @@ fn create_sketch_on(s: &mut Session, p: &Value, mut plane: PlaneRef, frame: Opti
 
 /// `flip` of `sketch.create`: `None` keeps the plane's own side, otherwise the axis to turn
 /// about (`true`: about y when the plane's y axis points upward, so it stays up, else about x).
-fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Option<bool>> {
+pub(super) fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Option<bool>> {
     let about_y = match p.get("flip") {
         None | Some(Value::Null) | Some(Value::Bool(false)) => return Ok(None),
         Some(Value::String(a)) if a.eq_ignore_ascii_case("x") => false,
@@ -1123,7 +1407,7 @@ fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Opt
     Ok(Some(about_y))
 }
 
-/// Used only by face Extrude/Revolve/PressPull, preserving pre-certificate linked profiles.
+/// Used only by face Extrude/Revolve/Sweep/PressPull, preserving pre-certificate linked profiles.
 pub(super) fn create_face_profile(s: &mut Session, p: &Value, body: &str, index: usize) -> Result<Value> {
     let value = p.get("plane").ok_or_else(|| bad("face profile", "missing picked face plane"))?;
     let plane = face::capture_internal(s, value, "face profile")?;
@@ -1135,11 +1419,13 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
 }
 
 /// A new sketch on `plane`, as `sketch.create` replies.
-fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
+fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
+    let sketching_view = s.requested_sketch_view(p, "sketch.create")?;
     let before = entry_point(s);
     if face::is_face(p) {
         face::capture_positions(s, &plane)?;
     }
+    solidcraft_doc::capture_sketch_plane_placement(&s.design_document(), &mut plane, s.active_component, &s.active_component_frame())?;
     // Validate the plane resolves.
     let (vals, _) = s.doc.param_values();
     s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
@@ -1154,6 +1440,7 @@ fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: O
         f.component = comp;
     }
     s.active_sketch = Some(id);
+    s.sketching_view = Some(sketching_view);
     s.sketch_entry = Some(SketchEntry { sketch: id, ..before });
     let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     // Sketching on a face projects the face's edges (unless turned off).
@@ -1177,8 +1464,6 @@ fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: O
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => Some(if face::anchor(plane).is_some() {
             Attachment::ExactFace
-        } else if solidcraft_doc::sheet::plane_sheet_face(plane).is_some() {
-            Attachment::SheetFace
         } else if internal_body.is_some() {
             Attachment::InternalLegacyFace
         } else {
@@ -1186,10 +1471,21 @@ fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: O
         }),
         _ => None,
     });
-    Ok(CreateResult { sketch: id, name, projected: link, attachment, frame: None, note: None, activated: None, param_warnings: Vec::new() })
+    Ok(CreateResult {
+        sketch: id,
+        sketching_view,
+        name,
+        projected: link,
+        attachment,
+        frame: None,
+        note: None,
+        activated: None,
+        param_warnings: Vec::new(),
+    })
 }
 
 fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+    let sketching_view = s.requested_sketch_view(p, "sketch.edit")?;
     let requested = p
         .get("restore_marker")
         .map(|v| {
@@ -1222,7 +1518,11 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         s.active_component = component;
         s.active_occurrence_path = (!path.is_empty()).then_some(path);
     }
-    if s.active_sketch != Some(id) || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
+    // An entry copied from a longer history than this session has (a worker's scratch copy starts with
+    // none) can never lead back, so opening the sketch again takes a fresh one, as a scratch session did
+    // before it copied the entry: Cancel Sketch then works after a plugin's or agent's Edit Sketch.
+    let outlives_history = s.sketch_entry.as_ref().is_some_and(|entry| entry.sketch == id && entry.undo_len > s.undo.len());
+    if s.active_sketch != Some(id) || outlives_history || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
         let restore_marker = match requested {
             Some(crate::schema::sketch::EditMarker::Restore(marker)) => Some(marker),
             Some(crate::schema::sketch::EditMarker::InPlace) => None,
@@ -1247,8 +1547,9 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.active_sketch = Some(id);
+    s.sketching_view = Some(sketching_view);
     s.revision += 1;
-    Ok(json!({"sketch": id, "name": name}))
+    Ok(json!({"sketch": id, "sketching_view": sketching_view, "name": name}))
 }
 
 /// The design and undo history as they are now, where a sketch is entered (its id set after).
@@ -1277,6 +1578,9 @@ fn restore_on_exit(cmd: &str, p: &Value) -> Result<bool> {
 /// step since taken in this sketch. Otherwise the steps since can't be told apart from others,
 /// and Undo is the way back.
 fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+    if s.sheet_sketching() {
+        return super::drawing_sketch::cancel(s, p);
+    }
     let cmd = "sketch.cancel";
     let restore = restore_on_exit(cmd, p)?;
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
@@ -1291,7 +1595,18 @@ fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             };
         // The step that created the sketch was taken before it was open: its state is the entry's.
         let since = s.undo.get(entry.undo_len..).unwrap_or_default();
+        // Drawing commands can run while this model sketch remains active. Restoring
+        // the whole entry design would discard their work. Immutable drawing Arcs
+        // prove both membership and contents stayed unchanged, without walking their
+        // payloads. Check the retained suffix too: drawing membership can change
+        // and later return to its entry state. A drawing step undone out of this
+        // suffix can stay in redo: the normal model commit preserves foreign redo.
+        let same_drawings = |doc: &solidcraft_doc::Document| {
+            doc.drawings.len() == entry.doc.drawings.len() && doc.drawings.iter().zip(&entry.doc.drawings).all(|(a, b)| std::sync::Arc::ptr_eq(a, b))
+        };
         same_before
+            && same_drawings(&s.doc)
+            && since.iter().all(|snap| snap.part.is_none() && same_drawings(&snap.doc))
             && since.iter().enumerate().all(|(i, snap)| snap.active_sketch == Some(id) || (i == 0 && std::sync::Arc::ptr_eq(&snap.doc, &entry.doc)))
     });
     let Some(entry) = current else {
@@ -1308,6 +1623,7 @@ fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().marker = marker;
     }
     s.active_sketch = None;
+    s.sketching_view = None;
     s.selection.clear();
     s.revision += 1;
     Ok(json!({"sketch": id, "removed": created}))
@@ -1315,12 +1631,28 @@ fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let restore = restore_on_exit("sketch.finish", p)?;
+    if s.sheet_sketching() {
+        return super::drawing_sketch::finish(s, p);
+    }
+    finish_model_edit(s, restore, true)
+}
+
+/// Finish the model receiver even when another window has a drawing open. `fold` groups the
+/// sketch's own steps into one undo step, as Finish Sketch does. Another edit that finishes
+/// the sketch leaves them apart (#15414): one Undo then takes back one change of the sketch,
+/// not the whole session the person had drawn.
+pub(crate) fn finish_model_edit(s: &mut Session, restore: bool, fold: bool) -> Result<Value> {
     let id = s.active_sketch.take();
+    s.sketching_view = None;
     let profiles = id.and_then(|i| s.model.state().sketch(i).map(|ss| ss.profiles.len())).unwrap_or(0);
     if let Some(entry) = s.sketch_entry.take().filter(|entry| Some(entry.sketch) == id)
         && let Some(marker) = entry.restore_marker
     {
-        finish_edit_history(s, &entry, marker);
+        if fold {
+            finish_edit_history(s, &entry, marker);
+        } else {
+            keep_edit_history(s, &entry, marker);
+        }
         if restore {
             let marker = marker.filter(|m| *m < s.doc.features.len());
             if s.doc.marker != marker {
@@ -1329,8 +1661,58 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.selection.clear();
     }
+    // Only a sketch a person entered from the UI goes when nothing was drawn in it; one a script or an
+    // agent made stays, so a command that creates it and edits it later still finds it.
+    let by_person = s.sketch_by_person.take();
+    if let Some(id) = id
+        && by_person == Some(id)
+        && sketch_store::read(&s.doc, id).is_ok_and(crate::edit_start::empty_geometry)
+    {
+        s.doc_mut().delete_feature(id)?;
+    }
     s.revision += 1;
     Ok(json!({"sketch": id, "profiles": profiles}))
+}
+
+/// Where the steps of this sketch's edit begin in the history: the step after the one that held
+/// the design as it was when the sketch was opened. The anchor may have moved when the undo
+/// limit trimmed older steps; if it is gone, only a stack entirely from this sketch counts.
+fn edit_history_start(s: &Session, entry: &SketchEntry) -> Option<usize> {
+    use std::sync::Arc;
+    match &entry.undo_top {
+        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
+        None => Some(0),
+    }
+    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0))
+    .filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
+}
+
+/// Another edit finished the sketch (#15414): the steps of its edit stay in the history, one
+/// change each, and each of them describes the complete design, with the temporary rollback
+/// undone with it. One Undo then takes back one change of the sketch, not the whole session.
+fn keep_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
+    let Some(start) = edit_history_start(s, entry) else { return };
+    for step in s.undo.get_mut(start..).unwrap_or_default() {
+        if step.active_sketch == Some(entry.sketch) {
+            complete_edit_step(step, marker);
+        }
+    }
+    for step in &mut s.redo {
+        if step.active_sketch == Some(entry.sketch) {
+            complete_edit_step(step, marker);
+        }
+    }
+}
+
+/// A step of a finished sketch's edit describes the whole design: the temporary rollback the
+/// edit used is undone with it, and the sketch is closed, as another edit left it.
+fn complete_edit_step(step: &mut crate::Snapshot, marker: Option<usize>) {
+    use std::sync::Arc;
+    let doc = Arc::make_mut(&mut step.doc);
+    doc.marker = marker.filter(|m| *m < doc.features.len());
+    step.active_sketch = None;
+    step.sketching_view = None;
+    step.sketch_restore_marker = None;
 }
 
 /// Fold only the steps still belonging to this edit. Its snapshots describe the complete
@@ -1338,30 +1720,28 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 /// older steps; if it is gone, only a stack entirely from this sketch can be folded safely.
 fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
     use std::sync::Arc;
-    let start = match &entry.undo_top {
-        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
-        None => Some(0),
-    }
-    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0));
-    let Some(start) =
-        start.filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
-    else {
+    let Some(start) = edit_history_start(s, entry) else {
         return;
     };
     let mut before = (*entry.doc).clone();
     before.marker = marker.filter(|m| *m < before.features.len());
     let mut after = (*s.doc).clone();
     after.marker = marker.filter(|m| *m < after.features.len());
-    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility;
+    let section = s.undo.get(start..).unwrap_or_default().iter().find_map(|snap| snap.section.clone()).filter(|was| *was != s.section_state());
+    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility || section.is_some();
     s.undo.truncate(start);
     if changed {
         s.undo.push(Snapshot {
             label: "Edit Sketch".into(),
             doc: Arc::new(before),
             active_sketch: None,
+            sketching_view: None,
+            sketch_restore_marker: None,
+            active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: entry.pending_moves.clone(),
             visibility: entry.visibility.clone(),
             part: None,
+            section,
         });
         if s.undo.len() > crate::MAX_UNDO {
             s.undo.remove(0);
@@ -1373,6 +1753,8 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             let doc = Arc::make_mut(&mut snap.doc);
             doc.marker = marker.filter(|m| *m < doc.features.len());
             snap.active_sketch = None;
+            snap.sketching_view = None;
+            snap.sketch_restore_marker = None;
         }
     }
 }
@@ -1396,10 +1778,12 @@ fn named_id(cmd: &str, id: Option<&str>) -> Result<Option<String>> {
 
 fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.line";
+    let paper = s.sheet_sketching();
+    // The shared preprocessor refuses model snaps before a sheet tool reads them.
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let list = p.get("points").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`points` must be a list"))?;
-    if list.len() < 2 || list.len() > 10_000 {
-        return Err(bad(cmd, "a line needs 2 or more points"));
+    if let Some(why) = crate::schema::sketch_shapes::line_points_refusal(list.len()) {
+        return Err(bad(cmd, why));
     }
     let closed = bool_(p, "closed").unwrap_or(false);
     let infer = bool_(p, "infer").unwrap_or(false);
@@ -1408,7 +1792,7 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
         named_id(cmd, Some(id))?;
     }
     let ((curves, cons), info) = draw(s, p, cmd, |sk, doc| {
-        let args: Vec<PArg> = list.iter().map(|v| parg(sk, doc, v, cmd)).collect::<Result<_>>()?;
+        let args: Vec<PArg> = list.iter().map(|v| parg_in(sk, doc, v, cmd, paper)).collect::<Result<_>>()?;
         let n = args.len();
         let segs = if closed { n } else { n - 1 };
         let mut pts: Vec<Option<usize>> = args.iter().map(PArg::idx).collect();
@@ -1488,7 +1872,19 @@ fn infer_at_start(sk: &Sketch, c: usize, axis: bool) -> Option<ConstraintKind> {
 
 /// Closed polygon of lines through new or referenced corner points.
 fn polygon_lines(sk: &mut Sketch, corners: &[Vec2]) -> Result<(Vec<usize>, Vec<usize>)> {
-    let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None)).collect::<std::result::Result<_, _>>()?;
+    let corners: Vec<(Vec2, Option<usize>)> = corners.iter().map(|c| (*c, None)).collect();
+    polygon_lines_on(sk, &corners)
+}
+
+/// [`polygon_lines`] where a corner may be a point the sketch already has, rather than a new one.
+fn polygon_lines_on(sk: &mut Sketch, corners: &[(Vec2, Option<usize>)]) -> Result<(Vec<usize>, Vec<usize>)> {
+    let mut pts = Vec::with_capacity(corners.len());
+    for (at, own) in corners {
+        pts.push(match own {
+            Some(i) => *i,
+            None => sk.add_point(*at, None)?,
+        });
+    }
     let n = pts.len();
     let mut lines = Vec::new();
     for i in 0..n {
@@ -1608,18 +2004,103 @@ fn rect_result(sk_out: (Vec<String>, Vec<String>), (sides, corners): (RectSides,
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// A rectangle corner: `[x, y]` of numbers, or with a coordinate typed as an expression (as a
-/// `sketch.line` point is): where it is now and the expressions that place it.
-fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<(Vec2, PointExprs)> {
+/// A rectangle corner (or an ellipse's centre and major end): `[x, y]` of numbers, or with a
+/// coordinate typed as an expression (as a `sketch.line` point is): where it is now and the
+/// expressions that place it.
+pub(super) fn corner_arg(doc: &solidcraft_doc::Document, sk: &Sketch, p: &Value, k: &str, cmd: &str, paper: bool) -> Result<(Vec2, PointExprs)> {
     let v = p.get(k).ok_or_else(|| bad(cmd, format!("`{k}` must be a point [x, y]")))?;
-    match expr_point(doc, v, cmd)? {
+    match expr_point_in(doc, sk, v, cmd, paper)? {
         Some((at, exprs)) => Ok((at, exprs.unwrap_or_default())),
         None => Ok((req_vec2(cmd, p, k)?, PointExprs::default())),
     }
 }
 
+/// How the text form of a snap begins: a midpoint, a point on a curve, a crossing of two curves, a
+/// model vertex. Read by `is_snap`, the rectangle corners' schema pattern and the rectangle tools'
+/// `held`; `snap_points` and the other drawing tools still keep their own copies.
+pub const SNAP_PREFIXES: [&str; 4] = ["mid:", "on:", "x:", "vertex:"];
+
+/// Whether a point argument is a snap `sketch_project::snap_points` turns into a point: a click
+/// snapped while drawing (`"mid:<line>"`, `"on:<curve>:x,y"`, `"x:<a>+<b>:x,y"`, `"vertex:x,y,z"`)
+/// or a model vertex or edge.
+pub(crate) fn is_snap(v: &Value) -> bool {
+    v.as_str().is_some_and(|t| SNAP_PREFIXES.iter().any(|k| t.starts_with(k))) || v.get("vertex").is_some() || v.get("on_edge").is_some()
+}
+
+/// A corner or the centre of a rectangle: where it is, the expressions that place it, and the
+/// point a snap made for it.
+struct Corner {
+    at: Vec2,
+    exprs: PointExprs,
+    snap: Option<usize>,
+}
+
+/// The corner `k` of a rectangle: [`corner_arg`], or a snap, as a `sketch.line` point takes one.
+/// `given` is the command's parameters and `p` the same after `sketch_project::snap_points`, where
+/// a snap has become the id of the point it made: on its curve, at its midpoint or crossing, or
+/// the projection of its model vertex. `sk` is the sketch as `snap_points` left it, so an
+/// expression over another point reads that sketch too. A snap that made no point of the sketch
+/// is refused, as `sketch.point` refuses it.
+fn corner_or_snap(s: &Session, sk: &Sketch, given: &Value, p: &Value, k: &str, cmd: &str) -> Result<Corner> {
+    let Some(snap) = given.get(k).filter(|v| is_snap(v)) else {
+        let (at, exprs) = corner_arg(&s.doc, sk, p, k, cmd, s.sheet_sketching())?;
+        return Ok(Corner { at, exprs, snap: None });
+    };
+    let made = str_(p, k).filter(|_| p.get(k) != Some(snap)).and_then(|id| {
+        let i = sk.resolve_point(id)?;
+        Some((i, sk.point(i)?))
+    });
+    let Some((i, at)) = made else { return Err(bad(cmd, format!("`{k}` {CORNER_MUST}"))) };
+    Ok(Corner { at, exprs: PointExprs::default(), snap: Some(i) })
+}
+
+/// A snap is made in the sketch being edited (`sketch_project::snap_points`), so a snapped corner
+/// among `keys` in a call whose `sketch` names another sketch is refused, before anything is made.
+/// A drawing sheet's sketch takes no snap yet: `snap_points` refuses it there, in its own words.
+fn snaps_in_edited_sketch(s: &Session, p: &Value, keys: &[&str], cmd: &str) -> Result<()> {
+    let Some(k) = keys.iter().find(|k| p.get(**k).is_some_and(is_snap)) else { return Ok(()) };
+    if s.sheet_sketching() {
+        return Ok(());
+    }
+    if sketch_store::active(s) == Some(sketch_store::target(s, p, cmd)?) {
+        return Ok(());
+    }
+    Err(bad(cmd, format!("`{k}` is a snap, which is taken only in the sketch being edited: edit that sketch first, or give `{k}` as [x, y]")))
+}
+
+/// The point a snapped corner is built on: the snap's own point, which the snap's constraints hold
+/// (one on a curve or at a midpoint, two at a crossing, one per curve), so that deleting them
+/// frees the corner. None for a corner that was not snapped, and for a snap to a model vertex: its point is
+/// projected geometry the sketch cannot move, so the corner is a point of its own joined to it
+/// ([`join_snapped`]), as a corner drawn onto an existing point is.
+fn snap_point(sk: &Sketch, c: &Corner) -> Option<usize> {
+    c.snap.filter(|i| sk.points.get(*i).is_some_and(|q| q.link.is_none()))
+}
+
+/// The constraints a snap made to hold its own point ([`snap_point`]), for the command's reply:
+/// `sketch_project::snap_points` adds them before the rectangle is built. Read before the
+/// rectangle adds constraints of its own to that point (a centre's midpoint on its diagonal).
+fn snap_holds(sk: &Sketch, c: &Corner) -> Vec<String> {
+    let Some(i) = snap_point(sk, c) else { return Vec::new() };
+    let holds = |k: &ConstraintKind| matches!(k, ConstraintKind::PointOnCurve { p, .. } | ConstraintKind::Midpoint { p, .. } if *p == i);
+    sk.constraints.iter().filter(|c| holds(&c.kind)).map(|c| c.id.clone()).collect()
+}
+
+/// Joins the built `corner` to the point `c` snapped to, when the corner is not that point itself
+/// (see [`snap_point`]), and notes the corner in `joined` for [`connect_points_except`]. Not the
+/// `connect` parameter's doing: a snap is kept with `connect: false` too, as a line's is.
+fn join_snapped(sk: &mut Sketch, c: &Corner, corner: Option<&usize>, cons: &mut Vec<String>, joined: &mut Vec<usize>) -> Result<()> {
+    if let (Some(i), Some(q)) = (c.snap, corner)
+        && i != *q
+    {
+        cons.push(add_c(sk, ConstraintKind::Coincident { p: i, q: *q })?);
+        joined.push(*q);
+    }
+    Ok(())
+}
+
 /// Holds sketch point `i` where `exprs` place it, when it has any (see [`add_placed_point`]).
-fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
+pub(super) fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
     if exprs.x.is_none() && exprs.y.is_none() {
         return;
     }
@@ -1629,9 +2110,16 @@ fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
     }
 }
 
-fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
+fn rect_two_point(s: &mut Session, given: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.two_point";
-    let ((a, ea), (b, eb)) = (corner_arg(&s.doc, p, "p0", cmd)?, corner_arg(&s.doc, p, "p1", cmd)?);
+    // A corner clicked on a curve, a midpoint, a crossing or a model vertex comes as that snap and
+    // stays there, as a line's end does (#18756).
+    snaps_in_edited_sketch(s, given, &["p0", "p1"], cmd)?;
+    let p = &super::sketch_project::snap_points(s, given, cmd)?;
+    // Read after the snaps have made their points: the sketch the rectangle is built in.
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let (c0, c1) = (corner_or_snap(s, &sk, given, p, "p0", cmd)?, corner_or_snap(s, &sk, given, p, "p1", cmd)?);
+    let ((a, ea), (b, eb)) = ((c0.at, &c0.exprs), (c1.at, &c1.exprs));
     if (a.x - b.x).abs() < 1e-9 || (a.y - b.y).abs() < 1e-9 {
         return Err(bad(cmd, "the corners must differ in x and y"));
     }
@@ -1639,14 +2127,33 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     // Each side of the rectangle takes its coordinate from the corner it comes from.
     let (lo_x, hi_x) = if a.x <= b.x { (&ea.x, &eb.x) } else { (&eb.x, &ea.x) };
     let (lo_y, hi_y) = if a.y <= b.y { (&ea.y, &eb.y) } else { (&eb.y, &ea.y) };
+    // Which of the four corners, counter-clockwise from the bottom-left, `p0` is; `p1` is opposite.
+    let at0 = match (a.x <= b.x, a.y <= b.y) {
+        (true, true) => 0,
+        (false, true) => 1,
+        (false, false) => 2,
+        (true, false) => 3,
+    };
+    let at1 = (at0 + 2) % 4;
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let first = sk.points.len();
-        let (l, pts) = polygon_lines(sk, &[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)])?;
+        let mut corners = [(lo, None), (Vec2::new(hi.x, lo.y), None), (hi, None), (Vec2::new(lo.x, hi.y), None)];
+        for (at, c) in [(at0, &c0), (at1, &c1)] {
+            if let Some(corner) = corners.get_mut(at) {
+                corner.1 = snap_point(sk, c);
+            }
+        }
+        // The reply names the constraints holding a snapped corner too: they are the rectangle's.
+        let mut cons: Vec<String> = [&c0, &c1].into_iter().flat_map(|c| snap_holds(sk, c)).collect();
+        let (l, pts) = polygon_lines_on(sk, &corners)?;
         place_point(sk, pts.first(), PointExprs { x: lo_x.clone(), y: lo_y.clone() });
         place_point(sk, pts.get(2), PointExprs { x: hi_x.clone(), y: hi_y.clone() });
-        let mut cons = rect_constraints(sk, &l)?;
+        cons.extend(rect_constraints(sk, &l)?);
+        let mut joined = Vec::new();
+        join_snapped(sk, &c0, pts.get(at0), &mut cons, &mut joined)?;
+        join_snapped(sk, &c1, pts.get(at1), &mut cons, &mut joined)?;
         mark_construction(sk, &l, p);
-        cons.extend(connect_points(sk, first, p)?);
+        cons.extend(connect_points_except(sk, first, p, &joined)?);
         drop_implied_axes(sk, &mut cons);
         Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
     })?;
@@ -1659,7 +2166,8 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.rounded";
     // The corners may be typed as expressions: `sketch.rectangle.two_point` below places them, so
     // here they are only worked out to check the radius against the sides.
-    let ((a, _), (b, _)) = (corner_arg(&s.doc, p, "p0", cmd)?, corner_arg(&s.doc, p, "p1", cmd)?);
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let ((a, _), (b, _)) = (corner_arg(&s.doc, &sk, p, "p0", cmd, s.sheet_sketching())?, corner_arg(&s.doc, &sk, p, "p1", cmd, s.sheet_sketching())?);
     let r_expr = req_expr(cmd, p, "radius")?;
     let r = s.doc.eval(&r_expr, Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
     if !(r > 1e-9 && r < 1e8) {
@@ -1718,7 +2226,7 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     let ids = |v: &Value, k: &str| -> Vec<String> {
         v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
     };
@@ -1733,23 +2241,29 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
         arcs,
         diagonal,
         centre,
-        param: rounded.get("param").and_then(Value::as_str).unwrap_or_default().to_string(),
+        param: rounded.get("param").and_then(Value::as_str).map(str::to_string),
+        expression: rounded.get("expression").and_then(Value::as_str).map(str::to_string),
         created: None,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
+fn rect_center(s: &mut Session, given: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.center";
-    let ((c, ec), (k, ek)) = (corner_arg(&s.doc, p, "center", cmd)?, corner_arg(&s.doc, p, "corner", cmd)?);
+    // The centre and the corner take a snap as the 2-Point Rectangle's corners do (#18756).
+    snaps_in_edited_sketch(s, given, &["center", "corner"], cmd)?;
+    let p = &super::sketch_project::snap_points(s, given, cmd)?;
+    // Read after the snaps have made their points, as the 2-Point Rectangle reads it.
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let (centre, corner) = (corner_or_snap(s, &sk, given, p, "center", cmd)?, corner_or_snap(s, &sk, given, p, "corner", cmd)?);
+    let ((c, ec), (k, ek)) = ((centre.at, centre.exprs.clone()), (corner.at, corner.exprs.clone()));
     let h = Vec2::new((k.x - c.x).abs(), (k.y - c.y).abs());
     if h.x < 1e-9 || h.y < 1e-9 {
         return Err(bad(cmd, "the corner must differ from the centre in x and y"));
     }
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let first = sk.points.len();
-        let (l, pts) = polygon_lines(sk, &[c - h, Vec2::new(c.x + h.x, c.y - h.y), c + h, Vec2::new(c.x - h.x, c.y + h.y)])?;
         // The corner given sits in the quadrant it was drawn in.
         let at = match (k.x >= c.x, k.y >= c.y) {
             (true, true) => 2,
@@ -1757,8 +2271,16 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
             (true, false) => 1,
             (false, false) => 0,
         };
+        let mut corners = [(c - h, None), (Vec2::new(c.x + h.x, c.y - h.y), None), (c + h, None), (Vec2::new(c.x - h.x, c.y + h.y), None)];
+        if let Some(q) = corners.get_mut(at) {
+            q.1 = snap_point(sk, &corner);
+        }
+        let mut cons: Vec<String> = [&centre, &corner].into_iter().flat_map(|c| snap_holds(sk, c)).collect();
+        let (l, pts) = polygon_lines_on(sk, &corners)?;
         place_point(sk, pts.get(at), ek);
-        let mut cons = rect_constraints(sk, &l)?;
+        cons.extend(rect_constraints(sk, &l)?);
+        let mut joined = Vec::new();
+        join_snapped(sk, &corner, pts.get(at), &mut cons, &mut joined)?;
         // Both diagonals (construction), the centre at their crossing. Only the first carries
         // the midpoint constraint: diagonals of a parallelogram bisect each other, so a second
         // one would be redundant (over-constrained).
@@ -1770,16 +2292,120 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
                     cu.construction = true;
                 }
             }
-            let cp = sk.add_point(c, None)?;
+            let cp = match snap_point(sk, &centre) {
+                Some(i) => i,
+                None => sk.add_point(c, None)?,
+            };
             place_point(sk, Some(&cp), ec);
             cons.push(add_c(sk, ConstraintKind::Midpoint { p: cp, l: diag })?);
+            join_snapped(sk, &centre, Some(&cp), &mut cons, &mut joined)?;
         }
         mark_construction(sk, &l, p);
-        cons.extend(connect_points(sk, first, p)?);
+        cons.extend(connect_points_except(sk, first, p, &joined)?);
         drop_implied_axes(sk, &mut cons);
         Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
     })?;
     rect_result(out, names, info)
+}
+
+/// The direction of the anchored edge of an edge-centre rectangle: `direction`, else the
+/// direction of `line`, else that of the line an `anchor` of the form `mid:<line>` snaps to.
+/// Never a default axis: a rectangle with no orientation is an error.
+fn edge_direction(sk: &Sketch, p: &Value, cmd: &str) -> Result<Vec2> {
+    if let Some(v) = p.get("direction") {
+        let d = vec2(v).ok_or_else(|| bad(cmd, "`direction` must be [dx, dy]"))?;
+        return d.normalized().filter(|d| d.is_finite()).ok_or_else(|| bad(cmd, "`direction` must be a non-zero vector"));
+    }
+    let line = match (str_(p, "line"), p.get("mid_line").and_then(Value::as_str)) {
+        (Some(l), _) | (None, Some(l)) => l,
+        _ => {
+            return Err(bad(
+                cmd,
+                "the edge's orientation is ambiguous: give `direction` [dx, dy] or `line` (a line it is parallel to), or anchor on a line's midpoint with \"mid:<line>\"",
+            ));
+        }
+    };
+    let c = sk.curve_index(line).ok_or_else(|| bad(cmd, format!("unknown sketch curve `{line}`")))?;
+    let Some(solidcraft_sketch::Shape::Line { a, b }) = sk.shape(c) else { return Err(bad(cmd, format!("`{line}` is not a line"))) };
+    (b - a).normalized().ok_or_else(|| bad(cmd, format!("`{line}` has no length")))
+}
+
+/// A rectangle from the midpoint of one edge (`anchor`) and a corner of the opposite edge (#4798).
+/// The anchored edge runs along the given direction; the corner's offset along it is the
+/// half-length and its offset across it the width, so the rectangle lies on the corner's side of
+/// the anchor.
+fn rect_edge_center(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.rectangle.edge_center";
+    // A `mid:<line>` anchor becomes a point id when snapped; remember its line for the direction.
+    let mut p = p.clone();
+    if let Some(line) = p.get("anchor").and_then(Value::as_str).and_then(|a| a.strip_prefix("mid:")).map(str::to_string)
+        && let Some(o) = p.as_object_mut()
+    {
+        o.insert("mid_line".into(), Value::String(line));
+    }
+    let p = &super::sketch_project::snap_points(s, &p, cmd)?;
+    let k = req_vec2(cmd, p, "corner")?;
+    let ((out, names), info) = edit(s, p, cmd, false, |sk, doc| {
+        let first = sk.points.len();
+        let anchor = req_parg(sk, doc, p, "anchor", cmd)?;
+        let d = edge_direction(sk, p, cmd)?;
+        let n = d.perp();
+        let a = anchor.pos();
+        let (w, h) = ((k - a).dot(n), (k - a).dot(d).abs());
+        // Relative to the sketch's scale, so a tiny or huge rectangle is judged alike.
+        let scale = a.len().max(k.len()).max(1.0);
+        if !(w.is_finite() && h.is_finite()) || w.abs() < 1e-9 * scale || h < 1e-9 * scale {
+            return Err(bad(cmd, "the corner must be off the anchored edge and off its perpendicular through the anchor"));
+        }
+        let (c0, c1) = (a - d * h, a + d * h);
+        let (l, pts) = polygon_lines(sk, &[c0, c1, c1 + n * w, c0 + n * w])?;
+        let mut cons = Vec::new();
+        if let [l0, l1, l2, l3] = l[..] {
+            let kinds = if d.y.abs() < 1e-12 {
+                // Along the sketch's x axis: horizontal and vertical sides, as the other rectangles.
+                [
+                    ConstraintKind::Horizontal { l: l0 },
+                    ConstraintKind::Horizontal { l: l2 },
+                    ConstraintKind::Vertical { l: l1 },
+                    ConstraintKind::Vertical { l: l3 },
+                ]
+                .to_vec()
+            } else if d.x.abs() < 1e-12 {
+                [
+                    ConstraintKind::Vertical { l: l0 },
+                    ConstraintKind::Vertical { l: l2 },
+                    ConstraintKind::Horizontal { l: l1 },
+                    ConstraintKind::Horizontal { l: l3 },
+                ]
+                .to_vec()
+            } else {
+                [ConstraintKind::Perpendicular { a: l0, b: l1 }, ConstraintKind::Parallel { a: l0, b: l2 }, ConstraintKind::Parallel { a: l1, b: l3 }]
+                    .to_vec()
+            };
+            for k in kinds {
+                cons.push(add_c(sk, k)?);
+            }
+            // The anchor stays at the middle of its edge.
+            let ap = match anchor.idx() {
+                Some(i) => i,
+                None => sk.add_point(a, None)?,
+            };
+            cons.push(add_c(sk, ConstraintKind::Midpoint { p: ap, l: l0 })?);
+        }
+        mark_construction(sk, &l, p);
+        cons.extend(connect_points(sk, first, p)?);
+        drop_implied_axes(sk, &mut cons);
+        let curve = |i: usize| l.get(i).and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone());
+        let point = |i: usize| pts.get(i).and_then(|q| sk.points.get(*q)).map(|q| q.id.clone());
+        let names = (
+            EdgeCenterRectSides { anchor: curve(0), side_a: curve(1), far: curve(2), side_b: curve(3) },
+            EdgeCenterRectCorners { anchor_start: point(0), anchor_end: point(1), far_end: point(2), far_start: point(3) },
+        );
+        Ok(((ids_of(sk, &l), cons), names))
+    })?;
+    let ((curves, constraints), (sides, corners)) = (out, names);
+    let reply = EdgeCenterRectResult { curves, constraints, sketch: info, sides, corners, created: None, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1831,23 +2457,99 @@ fn circle_size(s: &Session, p: &Value, cmd: &str) -> Result<(f64, Option<(String
     if !p.get(key).is_some_and(Value::is_string) {
         return Ok((radius_arg(p, cmd)?, None));
     }
-    let e = s.doc.with_design_unit(req_expr(cmd, p, key)?.as_str(), Kind::Length);
-    let v = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("{key}: {e}")))?;
+    let (v, e) = length_expr(s, p, key, cmd)?;
     let r = if key == "diameter" { v / 2.0 } else { v };
     if !(r > 1e-9 && r < 1e8) {
         return Err(bad(cmd, "radius must be positive"));
     }
+    Ok((r, e.map(|e| (e, key == "diameter"))))
+}
+
+/// A length `key` typed as an expression over the design's parameters: what it comes to, and
+/// the expression when it names a parameter (then a dimension driven by them). A bare number
+/// reads in the design's unit, and an expression naming no parameter is just the number.
+pub(super) fn length_expr(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<(f64, Option<String>)> {
+    let e = s.doc.with_design_unit(req_expr(cmd, p, key)?.as_str(), Kind::Length);
+    let v = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("{key}: {e}")))?;
     let driven = !solidcraft_doc::expr::references(&e).is_empty();
-    Ok((r, driven.then_some((e, key == "diameter"))))
+    Ok((v, driven.then_some(e)))
+}
+
+/// A slot's `width`, read as [`circle_size`] reads a circle's radius (#15857): a number, or an
+/// expression over the design's parameters, which is then a diameter dimension on a round end
+/// (the parameter `dN` holds the expression) so that the slot follows it. A bare number typed as
+/// text reads in the design's unit, and an expression naming no parameter is just the number it
+/// comes to. Returns the width, and the expression when it drives the width.
+pub(super) fn slot_width(s: &Session, p: &Value, cmd: &str) -> Result<(f64, Option<String>)> {
+    let (w, driven) = match p.get("width") {
+        Some(Value::String(_)) => {
+            let e = s.doc.with_design_unit(req_expr(cmd, p, "width")?.as_str(), Kind::Length);
+            let w = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("width: {e}")))?;
+            let driven = !solidcraft_doc::expr::references(&e).is_empty();
+            (w, driven.then_some(e))
+        }
+        // A value that is there but is no number is not a missing one.
+        Some(v) if !v.is_null() && num(p, "width").is_none() => return Err(bad(cmd, "`width` must be a number")),
+        _ => (num(p, "width").unwrap_or(0.0), None),
+    };
+    if w > 1e-9 && w < 1e9 { Ok((w, driven)) } else { Err(bad(cmd, "`width` must be positive")) }
+}
+
+/// The diameter dimension on round end `cap` that a slot whose width was typed as `driven` (an
+/// expression naming parameters) gets: the slot follows the parameters (#15857).
+pub(super) fn slot_width_dimension(
+    sk: &mut Sketch,
+    doc: &mut solidcraft_doc::Document,
+    cap: usize,
+    w: f64,
+    driven: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(e) = driven else { return Ok(None) };
+    let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+    let pname = doc.new_model_param(e, &unit);
+    Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
+}
+
+/// The radius or diameter dimension on round curve `c` (radius `r` now) for a size typed as the
+/// expression `e` over parameters. A model sketch defines a model parameter holding `e`. A sheet
+/// sketch never changes the source design, so it keeps `e` on the dimension as its authored paper
+/// expression, as a sheet dimension does, and `e` may only read source parameters.
+#[allow(clippy::too_many_arguments)]
+fn size_dimension(
+    sk: &mut Sketch,
+    doc: &mut solidcraft_doc::Document,
+    paper: bool,
+    cmd: &str,
+    e: &str,
+    diameter: bool,
+    c: usize,
+    r: f64,
+) -> Result<String> {
+    let value = if diameter { 2.0 * r } else { r };
+    let mk = |v: f64| if diameter { ConstraintKind::Diameter { c, value: v } } else { ConstraintKind::Radius { c, value: v } };
+    if !paper {
+        let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+        let pname = doc.new_model_param(e, &unit);
+        return Ok(sk.add_constraint(mk(value), Some(pname))?);
+    }
+    if e.len() > 4096 || e.trim().is_empty() || e.chars().any(char::is_control) {
+        return Err(bad(cmd, "sheet dimension expression must be nonempty, at most 4096 bytes and contain no controls"));
+    }
+    if solidcraft_doc::expr::definition(e).is_some() {
+        return Err(bad(cmd, "a sheet dimension cannot define source parameters; use a paper expression or a read-only source parameter"));
+    }
+    let wanted = doc.eval(e, Kind::Length).map_err(|err| bad(cmd, format!("value: {err}")))?;
+    Ok(sk.add_constraint(mk(wanted), Some(e.to_string()))?)
 }
 
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
+    let paper = s.sheet_sketching();
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (r, size) = circle_size(s, p, cmd)?;
     let id = named_id(cmd, str_(p, "id"))?;
     let (out, info) = draw(s, p, cmd, |sk, doc| {
-        let c = req_parg(sk, doc, p, "center", cmd)?;
+        let c = req_parg_in(sk, doc, p, "center", cmd, paper)?;
         // The origin is the sketch's frame, not a hold on the geometry: a circle centred there
         // keeps a centre of its own, tied to the origin as any other drawn geometry is, so it
         // is not fixed geometry the sketch cannot move (#5034). A centre held by a parameter or
@@ -1859,16 +2561,13 @@ fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
         // sets the radius.
         let mut cons = Vec::new();
         if let Some(v) = p.get("through")
-            && let PArg::Ref(q, _) = parg(sk, doc, v, cmd)?
+            && let PArg::Ref(q, _) = parg_in(sk, doc, v, cmd, paper)?
         {
             cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: q, c: ci })?);
         }
         // A size typed as an expression is a dimension driven by the parameters it names.
         if let Some((e, diameter)) = &size {
-            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-            let pname = doc.new_model_param(e, &unit);
-            let kind = if *diameter { ConstraintKind::Diameter { c: ci, value: 2.0 * r } } else { ConstraintKind::Radius { c: ci, value: r } };
-            cons.push(sk.add_constraint(kind, Some(pname))?);
+            cons.push(size_dimension(sk, doc, paper, cmd, e, *diameter, ci, r)?);
         }
         Ok((ids_of(sk, &[ci]), cons))
     })?;
@@ -1927,11 +2626,12 @@ fn circle_three(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.three_point";
+    let paper = s.sheet_sketching();
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = named_id(cmd, str_(p, "id"))?;
     let (out, info) = draw(s, p, cmd, |sk, doc| {
-        let (a, b) = (req_parg(sk, doc, p, "start", cmd)?, req_parg(sk, doc, p, "end", cmd)?);
-        let t = req_parg(sk, doc, p, "through", cmd)?;
+        let (a, b) = (req_parg_in(sk, doc, p, "start", cmd, paper)?, req_parg_in(sk, doc, p, "end", cmd, paper)?);
+        let t = req_parg_in(sk, doc, p, "through", cmd, paper)?;
         let (o, _) = circumcircle(a.pos(), t.pos(), b.pos()).ok_or_else(|| bad(cmd, "the points are collinear"))?;
         // Counter-clockwise from start to end must pass the through point; otherwise swap.
         let ang = |q: Vec2| (q - o).angle();
@@ -1954,12 +2654,13 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.center_point";
+    let paper = s.sheet_sketching();
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = named_id(cmd, str_(p, "id"))?;
     let sweep = num(p, "sweep");
     let (out, info) = draw(s, p, cmd, |sk, doc| {
-        let c = req_parg(sk, doc, p, "center", cmd)?;
-        let a = req_parg(sk, doc, p, "start", cmd)?;
+        let c = req_parg_in(sk, doc, p, "center", cmd, paper)?;
+        let a = req_parg_in(sk, doc, p, "start", cmd, paper)?;
         if let Some(sw) = sweep {
             // Start point and signed sweep (degrees); clockwise arcs keep `<id>.start` at the start.
             if !(sw.abs() > 1e-9 && sw.abs() < 360.0) {
@@ -1987,7 +2688,7 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
             mark_construction(sk, &[ci], p);
             return Ok((ids_of(sk, &[ci]), Vec::new()));
         }
-        let b = req_parg(sk, doc, p, "end", cmd)?;
+        let b = req_parg_in(sk, doc, p, "end", cmd, paper)?;
         // Clockwise from start to end (#6645): stored counter-clockwise from the end and reversed,
         // as a negative sweep is. The start keeps the radius and `<id>.start`.
         let ci = if bool_(p, "clockwise").unwrap_or(false) {
@@ -2019,9 +2720,24 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     draw_reply(out, info)
 }
 
-fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, start: f64, n: usize, inscribed: bool) -> Result<Value> {
+/// A polygon's corners on a circle of `r_vertex` round `center`, `n` of them, the first at angle
+/// `start`. `size` is the expression the size was typed as when it names parameters (with whether
+/// it is a diameter): the construction circle that holds the polygon to its centre then gets a
+/// dimension driven by it, so the polygon follows the parameters (#20920).
+fn polygon(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    center: Vec2,
+    r_vertex: f64,
+    start: f64,
+    n: usize,
+    inscribed: bool,
+    size: Option<(String, bool)>,
+) -> Result<Value> {
     let mut support_circle = String::new();
-    let (out, info) = draw(s, p, cmd, |sk, _| {
+    let paper = s.sheet_sketching();
+    let (out, info) = draw(s, p, cmd, |sk, doc| {
         let corners: Vec<Vec2> = (0..n).map(|i| center + Vec2::from_angle(start + std::f64::consts::TAU * i as f64 / n as f64) * r_vertex).collect();
         let (l, pts) = polygon_lines(sk, &corners)?;
         let mut cons = Vec::new();
@@ -2058,6 +2774,9 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
                 cons.push(add_c(sk, ConstraintKind::Tangent { a: *first, b: circ })?);
             }
         }
+        if let Some((e, diameter)) = &size {
+            cons.push(size_dimension(sk, doc, paper, cmd, e, *diameter, circ, rc)?);
+        }
         Ok((ids_of(sk, &l), cons))
     })?;
     let reply = PolygonResult { curves: out.0, constraints: out.1, sketch: info, support_circle, created: None, param_warnings: Vec::new() };
@@ -2065,7 +2784,22 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
 }
 
 fn sides(p: &Value, cmd: &str) -> Result<usize> {
-    let n = num(p, "sides").unwrap_or(6.0);
+    sides_count(num(p, "sides").unwrap_or(6.0), cmd)
+}
+
+/// `sides` of a polygon typed as an expression over the design's parameters, or as a number. The
+/// count is read when the polygon is drawn: the sketch has no way to add or remove sides when a
+/// parameter changes later (a circular sketch pattern's `count` is what follows one).
+fn sides_expr(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+    if !p.get("sides").is_some_and(Value::is_string) {
+        return sides(p, cmd);
+    }
+    let e = req_expr(cmd, p, "sides")?;
+    let n = s.doc.eval(&e, Kind::Unitless).map_err(|e| bad(cmd, format!("sides: {e}")))?;
+    sides_count(n, cmd)
+}
+
+fn sides_count(n: f64, cmd: &str) -> Result<usize> {
     if !(3.0..=200.0).contains(&n) || n.fract() != 0.0 {
         return Err(bad(cmd, "sides must be an integer from 3 to 200"));
     }
@@ -2078,16 +2812,16 @@ fn polygon_inscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let r = radius_arg(p, cmd)?;
     let n = sides(p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r, a, n, true)
+    polygon(s, p, cmd, c, r, a, n, true, None)
 }
 
 fn polygon_circumscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.polygon.circumscribed";
     let c = req_vec2(cmd, p, "center")?;
-    let r = radius_arg(p, cmd)?;
-    let n = sides(p, cmd)?;
+    let (r, size) = circle_size(s, p, cmd)?;
+    let n = sides_expr(s, p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false)
+    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false, size)
 }
 
 fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2104,7 +2838,7 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = (b - a).normalized().unwrap_or(Vec2::X);
     let center = mid + dir.perp() * apothem;
     let start = (a - center).angle();
-    polygon(s, p, cmd, center, rv, start, n, true)
+    polygon(s, p, cmd, center, rv, start, n, true, None)
 }
 
 /// The centre point of arc `a` (`None`: not an arc).
@@ -2118,18 +2852,27 @@ fn arc_centre(sk: &Sketch, a: usize) -> Option<usize> {
 /// A straight slot: two lines and two equal arc caps, tangent where they meet, plus its middle
 /// (#7908): a point held at the midpoint of a construction line between the arc centres, so it
 /// stays in the middle however the slot is edited or dragged. The middle adds no freedom.
-pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
-    let reply = slot_parts(s, p, cmd, c0, c1, w)?;
+/// `driven` is the width's expression when it names parameters ([`slot_width`]).
+pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64, driven: Option<&str>) -> Result<Value> {
+    let reply = slot_parts(s, p, cmd, c0, c1, w, driven)?;
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
-pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<crate::schema::sketch_shapes::SlotResult> {
+pub(super) fn slot_parts(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    c0: Vec2,
+    c1: Vec2,
+    w: f64,
+    driven: Option<&str>,
+) -> Result<crate::schema::sketch_shapes::SlotResult> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
     let mut extra = (None, None);
-    let (out, info) = draw(s, p, cmd, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, doc| {
         let pts: Vec<usize> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
         let (p0, p1, p2, p3) = (pts[0], pts[1], pts[2], pts[3]);
@@ -2149,6 +2892,7 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
         }
         let mid = sk.add_point((c0 + c1) * 0.5, None)?;
         cons.push(add_c(sk, ConstraintKind::Midpoint { p: mid, l: axis })?);
+        cons.extend(slot_width_dimension(sk, doc, a1, w, driven)?);
         extra = (sk.curves.get(axis).map(|c| c.id.clone()), sk.points.get(mid).map(|q| q.id.clone()));
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
@@ -2162,33 +2906,30 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.center_to_center";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
-    let w = num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))?;
-    slot(s, p, cmd, a, b, w)
+    let (w, driven) = slot_width(s, p, cmd)?;
+    slot(s, p, cmd, a, b, w, driven.as_deref())
 }
 
 fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.overall";
     let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
-    let w = num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))?;
+    let (w, driven) = slot_width(s, p, cmd)?;
     let d = (b - a).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     if a.dist(b) <= w {
         return Err(bad(cmd, "the slot must be longer than it is wide"));
     }
-    slot(s, p, cmd, a + d * (w / 2.0), b - d * (w / 2.0), w)
+    slot(s, p, cmd, a + d * (w / 2.0), b - d * (w / 2.0), w, driven.as_deref())
 }
 
 fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.point";
+    let paper = s.sheet_sketching();
     let id = named_id(cmd, str_(p, "id"))?;
     // A point snapped while drawing (`"mid:<line>"`, `"on:<curve>:x,y"`, `"x:<a>+<b>:x,y"`, a
     // model vertex or edge): the snap makes it, held by its constraint, as it does for a line's
     // end. Taken as bare coordinates it was free to move off the midpoint or crossing it was put
     // on (#4691, #15387).
-    let snapped = p.get("point").is_some_and(|v| {
-        v.as_str().is_some_and(|t| ["mid:", "on:", "vertex:", "x:"].iter().any(|k| t.starts_with(k)))
-            || v.get("vertex").is_some()
-            || v.get("on_edge").is_some()
-    });
+    let snapped = p.get("point").is_some_and(is_snap);
     if snapped {
         let given = p.get("point").cloned().unwrap_or(Value::Null);
         let p = &super::sketch_project::snap_points(s, p, cmd)?;
@@ -2215,7 +2956,7 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
         return point_reply(pid, Vec::new(), info);
     }
     let ((pid, cons), info) = edit(s, p, cmd, false, |sk, doc| {
-        let i = match expr_point(doc, p.get("point").unwrap_or(&Value::Null), cmd)? {
+        let i = match expr_point_in(doc, sk, p.get("point").unwrap_or(&Value::Null), cmd, paper)? {
             Some((at, Some(exprs))) => add_placed_point(sk, at, exprs, id.as_deref())?,
             Some((at, None)) => sk.add_point(at, id.as_deref())?,
             None => sk.add_point(req_vec2(cmd, p, "point")?, id.as_deref())?,
@@ -2523,7 +3264,8 @@ pub(super) fn redundancy(
     residual: Option<f64>,
     cid: &str,
 ) -> Result<Option<Vec<String>>> {
-    let after = info.get("dof").and_then(Value::as_u64).map(|d| d as usize);
+    // The planar sketch's freedoms, as `before` counts them (not its 3D curves', #10608).
+    let after = info.get("planar_dof").or_else(|| info.get("dof")).and_then(Value::as_u64).map(|d| d as usize);
     let (Some(b), Some(a)) = (before, after) else { return Ok(None) };
     if a < b {
         return Ok(None);
@@ -2537,9 +3279,9 @@ pub(super) fn redundancy(
 /// The constraints that already determine constraint `cid` of the target sketch, as
 /// "id (Name)".
 fn determined_by(s: &Session, p: &Value, cmd: &str, cid: &str) -> Vec<String> {
-    let Some(sk) = sketch_store::target(s, p, cmd).ok().and_then(|id| sketch_store::read(&s.doc, id).ok()) else { return Vec::new() };
+    let Ok(sk) = sketch_store::read_for_command(s, p, cmd) else { return Vec::new() };
     let Some(ci) = sk.constraints.iter().position(|c| c.id == cid) else { return Vec::new() };
-    solidcraft_sketch::determined_by(sk, ci)
+    solidcraft_sketch::determined_by(&sk, ci)
         .into_iter()
         .filter_map(|k| sk.constraints.get(k))
         .map(|c| format!("{} ({})", c.id, c.kind.name()))
@@ -2655,15 +3397,29 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.coincident";
+    if let Some(reply) = super::sketch_3d::coincident_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
     // Already tied (e.g. connected when it was drawn there): nothing to add.
-    let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
-    if let Some((a, b)) = two_round(sk, p) {
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    if let Some((a, b)) = two_round(&sk, p) {
         return coincident_circles(s, p, cmd, a, b);
     }
+    // Two straight lines made coincident lie along one line: Collinear, as in other CAD tools (#18232).
+    if let Some((a, b)) = two_lines(&sk, p, cmd)? {
+        if let Some(c) =
+            sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Collinear { a: x, b: y } if (x, y) == (a, b) || (x, y) == (b, a)))
+        {
+            let rep = solve(&mut sk.clone());
+            let made = CoincidentMade::Existing { constraint: c.id.clone(), existing: true, sketch: report_json(&rep) };
+            return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
+        }
+        let made = constrain(s, p, cmd, |_| Ok(ConstraintKind::Collinear { a, b }))?;
+        return reply(cmd, CoincidentResult { made: CoincidentMade::Added(made), param_warnings: Vec::new() });
+    }
     let pt = |k: &str| p.get(k).and_then(Value::as_str).and_then(|r| sk.resolve_point(r));
-    let line_points = coincident_line_points(sk, p, cmd)?;
-    if let Some((a, b)) = line_points.or_else(|| pt("a").zip(pt("b")))
+    if let Some((a, b)) = pt("a").zip(pt("b"))
         && let Some(c) = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (a, b) || (p, q) == (b, a)))
     {
         let rep = solve(&mut sk.clone());
@@ -2671,9 +3427,6 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
     }
     let pick = |sk: &mut Sketch| -> Result<ConstraintKind> {
-        if let Some((a, b)) = line_points {
-            return Ok(ConstraintKind::Coincident { p: a, q: b });
-        }
         // A line's middle, `{midpoint: line}` as a selected midpoint is sent (#10311): the point
         // tied there by a Midpoint constraint stands for it, made as Horizontal/Vertical makes it.
         let middle = |sk: &mut Sketch, key: &str| -> Result<Option<usize>> {
@@ -2761,33 +3514,16 @@ fn coincident_circles(s: &mut Session, p: &Value, cmd: &str, a: usize, b: usize)
     reply(cmd, CoincidentResult { made: CoincidentMade::Circles { constraint, constraints: ids, sketch: info }, param_warnings: Vec::new() })
 }
 
-/// Four endpoint pairs, ordered independently of pick order when distances tie.
-fn coincident_line_points(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
+/// `a` and `b` both straight lines (two different ones), by curve index.
+fn two_lines(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
     let curve = |key: &str| p.get(key).and_then(Value::as_str).and_then(|id| sk.curve_index(id));
     let (Some(a), Some(b)) = (curve("a"), curve("b")) else { return Ok(None) };
     if a == b {
         return Err(bad(cmd, "choose two distinct lines"));
     }
-    let ends = |i: usize| match sk.curves.get(i).map(|curve| &curve.kind) {
-        Some(CurveKind::Line { a, b }) => Some([*a, *b]),
-        _ => None,
-    };
-    let (Some(first), Some(second)) = (ends(a), ends(b)) else {
+    let line = |i: usize| matches!(sk.curves.get(i).map(|curve| &curve.kind), Some(CurveKind::Line { .. }));
+    if !(line(a) && line(b)) {
         return Err(bad(cmd, "two curves must both be straight lines; otherwise choose a point and a curve"));
-    };
-    let mut best: Option<(f64, usize, usize)> = None;
-    for a in first {
-        for b in second {
-            let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return Err(bad(cmd, "line endpoint is missing")) };
-            let candidate = (pa.dist(pb), a.min(b), a.max(b));
-            if best.is_none_or(|old| candidate < old) {
-                best = Some(candidate);
-            }
-        }
-    }
-    let (_, a, b) = best.ok_or_else(|| bad(cmd, "line endpoints are missing"))?;
-    if a == b {
-        return Err(bad(cmd, "the lines already share an endpoint"));
     }
     Ok(Some((a, b)))
 }
@@ -2814,9 +3550,12 @@ fn two_curves_or_axes(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<(usize, u
 
 fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.tangent";
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, cmd)? {
+        return reply(cmd, TangentResult { made: TangentMade::Curves(made), param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
-    let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
-    if tangent_end(sk, p, "a").is_some() || tangent_end(sk, p, "b").is_some() {
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    if tangent_end(&sk, p, "a").is_some() || tangent_end(&sk, p, "b").is_some() {
         return tangent_at_end(s, p, cmd);
     }
     let made = constrain(s, p, cmd, |sk| {
@@ -2946,7 +3685,15 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     reply(cmd, TangentResult { made, param_warnings: Vec::new() })
 }
 fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
-    if p.get("curves").is_some() {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.equal")? {
+        return reply("sketch.constraint.equal", EqualResult { made: EqualMade::Pair(made), param_warnings: Vec::new() });
+    }
+    if let Some(list) = p.get("curves") {
+        let cmd = "sketch.constraint.equal";
+        let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
+        if list.as_array().into_iter().flatten().filter_map(Value::as_str).any(|id| sk.wire_index(id).is_some()) {
+            return Err(bad(cmd, "3D curves take Equal a pair at a time: give `a` and `b`"));
+        }
         return equal_curves(s, p);
     }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.equal", &["a", "b"])?;
@@ -2987,6 +3734,9 @@ fn equal_curves(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, EqualResult { made: EqualMade::Curves { constraints: out, sketch: info }, param_warnings: Vec::new() })
 }
 fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.parallel")? {
+        return reply("sketch.constraint.parallel", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.parallel", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.parallel", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.parallel")
@@ -2995,6 +3745,9 @@ fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.perpendicular")? {
+        return reply("sketch.constraint.perpendicular", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.perpendicular", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.perpendicular", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.perpendicular")
@@ -3021,6 +3774,9 @@ fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.collinear")? {
+        return reply("sketch.constraint.collinear", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.collinear", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.collinear", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.collinear")
@@ -3045,8 +3801,11 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
             }
         };
         let is_line = |sk: &Sketch, c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+        let is_arc = |sk: &Sketch, c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. }));
         match (entity("a")?, entity("b")?) {
-            (Ent::Point(q), Ent::Curve(l)) | (Ent::Curve(l), Ent::Point(q)) if is_line(sk, l) => Ok(ConstraintKind::Midpoint { p: q, l }),
+            (Ent::Point(q), Ent::Curve(l)) | (Ent::Curve(l), Ent::Point(q)) if is_line(sk, l) || is_arc(sk, l) => {
+                Ok(ConstraintKind::Midpoint { p: q, l })
+            }
             // Two lines: their midpoints meet. One point sits at the middle of both, reusing
             // a midpoint either line already has, so nothing new is saved in the design.
             (Ent::Curve(a), Ent::Curve(b)) if is_line(sk, a) && is_line(sk, b) => {
@@ -3063,7 +3822,7 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 Ok(ConstraintKind::Midpoint { p: q, l })
             }
-            _ => Err(bad(cmd, "MidPoint needs a point and a line, or two lines")),
+            _ => Err(bad(cmd, "MidPoint needs a point and a line or an arc, or two lines")),
         }
     };
     constrain_reply(s, p, cmd, |sk| {
@@ -3076,6 +3835,11 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
         {
             return Err(bad(cmd, "a line's own end can't be its midpoint: the line would shrink to a point"));
         }
+        if let ConstraintKind::Midpoint { p: q, l } = k
+            && matches!(sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Arc { a, b, .. }) if *a == q || *b == q)
+        {
+            return Err(bad(cmd, "an arc's own end can't be its midpoint: the arc would shrink to a point"));
+        }
         Ok(k)
     })
 }
@@ -3086,10 +3850,31 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
 /// end of another line clicked, then the line it should sit in the middle of). The line still
 /// moves when the point can't.
 fn line_stays(s: &Session, p: &Value, cmd: &str) -> Value {
-    let swapped = (|| {
+    // `point` and `line` naming an arc (the context menu's form): the arc stays and the point goes
+    // to its middle, as if the arc had been picked first. Without an order the solver moved
+    // whichever was cheaper, and brought the arc to the point.
+    let arc_first = (|| {
+        if p.get("a").is_some() || p.get("b").is_some() {
+            return None;
+        }
+        let (point, line) = (p.get("point")?, p.get("line")?);
         let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd).ok()?).ok()?;
+        sk.curve_index(line.as_str()?).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Arc { .. })))?;
+        let mut q = p.clone();
+        let object = q.as_object_mut()?;
+        object.remove("point");
+        object.remove("line");
+        object.insert("a".into(), line.clone());
+        object.insert("b".into(), point.clone());
+        Some(q)
+    })();
+    if let Some(q) = arc_first {
+        return q;
+    }
+    let swapped = (|| {
+        let sk = sketch_store::read_for_command(s, p, cmd).ok()?;
         let (a, b) = (p.get("a")?.as_str()?, p.get("b")?.as_str()?);
-        let line = sk.curve_index(b).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Line { .. })));
+        let line = sk.curve_index(b).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. })));
         (sk.curve_index(a).is_none() && sk.resolve_point(a).is_some() && line.is_some()).then(|| {
             let mut q = p.clone();
             q["a"] = json!(b);
@@ -3267,7 +4052,10 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
     if refs.is_empty() {
         return Err(bad(cmd, "`entity` or `entities` must name sketch points or curves"));
     }
-    let (n, info) = edit(s, p, cmd, false, |sk, _| {
+    if let Some(reply) = super::sketch_3d::fix_3d(s, p, cmd, &refs, want)? {
+        return Ok(reply);
+    }
+    let (n, info) = edit(s, p, cmd, false, |sk, doc| {
         // Points and curves; a point is fixed by a Fix constraint, a curve by its flag (which
         // also holds its radius). Projected geometry is always fixed.
         let mut pts = Vec::new();
@@ -3282,16 +4070,35 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
         let all_fixed = pts.iter().all(|q| *q == 0 || sk.point_locked(*q)) && curves.iter().all(|c| sk.curve_locked(*c));
         let fix = want.unwrap_or(!all_fixed);
         let mut n = 0;
+        // A point placed by parameters is released where its expressions come to now, as plain
+        // numbers (#16554).
+        if !fix && pts.iter().any(|q| sk.points.get(*q).is_some_and(|x| x.exprs.is_some())) {
+            doc.apply_point_values(&doc.param_values().0, sk)?;
+        }
         for q in pts {
-            let own = sk.points.get(q).is_some_and(|x| x.fixed || x.link.is_some());
-            if q == 0 || own {
-                continue;
-            }
+            let Some(pt) = sk.points.get(q).filter(|pt| q != 0 && pt.link.is_none()) else { continue };
+            let own = pt.fixed;
             let has = sk.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: q });
-            if fix && !has {
+            if fix && !own && !has {
                 add_c(sk, ConstraintKind::Fix { p: q })?;
                 n += 1;
-            } else if !fix && has {
+            } else if !fix && (own || has) {
+                // An equation curve's fit points are placed by its formulas at every solve.
+                if let Some(eq) =
+                    sk.equations.iter().find(|e| sk.curve_index(&e.curve).and_then(|ci| sk.curves.get(ci)).is_some_and(|c| c.kind.uses(q)))
+                {
+                    return Err(bad(
+                        cmd,
+                        format!(
+                            "point `{}` is placed by the equation of curve `{}`, so it cannot be released; edit or delete the equation curve",
+                            pt.id, eq.curve
+                        ),
+                    ));
+                }
+                if let Some(pt) = sk.points.get_mut(q) {
+                    pt.fixed = false;
+                    pt.exprs = None;
+                }
                 sk.constraints.retain(|c| c.kind != ConstraintKind::Fix { p: q });
                 n += 1;
             }
@@ -3330,6 +4137,9 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
 /// [`dimension`]'s reply, as the typed value the output schema describes.
 fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     let cmd = "sketch.dimension";
+    if let Some(reply) = super::sketch_3d::dimension_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     // A dimension may measure model geometry (#7912): an `{edge: [x,y,z], body?}` or a
     // `{vertex: [x,y,z], body?}` among its entities is projected into the sketch first, as
     // `sketch.project` does, and stands for the projected curve (or point) there.
@@ -3347,9 +4157,27 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         ("offset", _) => "distance".to_string(),
         _ => ty,
     };
-    let value = expr(p, "value");
+    // The model's optional-value compatibility stays untouched. A sheet value,
+    // when explicitly supplied, must parse: an overlong/invalid expression must
+    // not silently become an omitted value and drive the current measurement.
+    let value = if s.sheet_sketching() && p.get("value").is_some() { Some(crate::params::req_expr(cmd, p, "value")?) } else { expr(p, "value") };
     let text_at = p.get("text_at").and_then(vec2);
     let driven = bool_(p, "driven").unwrap_or(false);
+    // Sheet dimensions have their own authored paper expression and never define
+    // a parameter on the source model. Reference dimensions remain value-less.
+    let on_sheet = s.sheet_sketching();
+    if on_sheet && driven && value.is_some() {
+        return Err(bad(cmd, "a sheet sketch reference dimension cannot define or take a value"));
+    }
+    if on_sheet && bool_(p, "scale_sketch").unwrap_or(false) {
+        return Err(bad(cmd, "scaling a sheet sketch through a dimension is not supported"));
+    }
+    if on_sheet && value.as_ref().is_some_and(|v| solidcraft_doc::expr::definition(v.as_str()).is_some()) {
+        return Err(bad(cmd, "a sheet dimension cannot define source parameters; use a paper expression or a read-only source parameter"));
+    }
+    if on_sheet && !driven && str_(p, "if_redundant").is_some() {
+        return Err(bad(cmd, "sheet sketch driving dimensions do not support automatic reference fallback"));
+    }
     // `name = expression` defines the user parameter `name` and dimensions with it (#2916).
     let (defines, value) = match value.as_ref().and_then(|v| solidcraft_doc::expr::definition(v.as_str())) {
         Some((name, rhs)) => {
@@ -3641,8 +4469,34 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             return Ok((String::new(), name, measured(is_angle, cur)));
         }
         // With no value, the dimension restates what it measures, in the design's units (#3812).
-        let (unit, default_expr) = if is_angle { ("deg".into(), format!("{} deg", round6(cur.to_degrees()))) } else { doc.design_length(cur) };
+        let (unit, default_expr) = if is_angle {
+            ("deg".into(), format!("{} deg", round6(cur.to_degrees())))
+        } else if on_sheet {
+            ("mm".into(), format!("{} mm", round6(cur)))
+        } else {
+            doc.design_length(cur)
+        };
         let kind = if is_angle { Kind::Angle } else { Kind::Length };
+        if on_sheet {
+            let authored = value.as_ref().map(|v| v.as_str().to_string()).unwrap_or(default_expr);
+            if authored.len() > 4096 || authored.trim().is_empty() || authored.chars().any(char::is_control) {
+                return Err(bad(cmd, "sheet dimension expression must be nonempty, at most 4096 bytes and contain no controls"));
+            }
+            // eval uses paper-mm / degree defaults, not the model's display units.
+            // Source names are read-only; the same authored expression is persisted
+            // on the sheet dimension and re-resolved whenever the drawing is read.
+            let wanted = doc.eval(&authored, kind).map_err(|e| bad(cmd, format!("value: {e}")))?;
+            if let Some((alternate, alternate_value)) = alt
+                && (wanted - alternate_value).abs() < (wanted - cur).abs()
+            {
+                k = alternate;
+            }
+            k.set_value(wanted);
+            let name = k.name();
+            let id = sk.add_constraint(k, Some(authored.clone()))?;
+            place_text(sk, &id, text_at);
+            return Ok((authored, name, measured(is_angle, cur)));
+        }
         if let Some((name, rhs)) = &defines {
             // The new user parameter reads a bare number as the dimension would (the design's
             // unit for a length, degrees for an angle), and carries that unit.
@@ -3671,7 +4525,17 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         }
         // How far the value is from what the geometry measures now: zero for a dimension that
         // only restates what the sketch already has.
-        let want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
+        let mut want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
+        // A negative linear offset flips to the opposite side of the reference and keeps its magnitude.
+        if !is_angle
+            && let Some(w) = want
+            && w < 0.0
+            && sk.flip_for_negative_dimension(&k, -w)
+        {
+            let flipped_expr = if solidcraft_doc::expr::references(&e).is_empty() { doc.design_length(-w).1 } else { format!("-({e})") };
+            doc.change_param(&pname, &flipped_expr, None, None)?;
+            want = Some(-w);
+        }
         residual = want.map(|w| (w - cur).abs()).filter(|r| r.is_finite());
         // The first length dimension of a sketch with nothing sized yet scales it (#1365).
         // A sketch axis can also be measured by its fixed endpoints. In that case, only use
@@ -3709,9 +4573,20 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         Ok((pname, name, measured(is_angle, cur)))
     })?;
     // Report what the dimension measures once the sketch is solved, not the geometry before.
-    let current = solved_measure(s, p, cmd, &new_id).unwrap_or(current);
+    // The model-only lookup cannot inspect the drawing-owned sketch.
+    let current = if on_sheet {
+        let entry = sketch_store::sheet_target(s, p, cmd)?;
+        let owner = s.drawing(cmd)?;
+        let sk = &owner.sheet_sketch(entry.sketch).ok_or_else(|| bad(cmd, "the edited sheet sketch no longer exists"))?.sketch;
+        let latest = sk.constraints.last().ok_or_else(|| bad(cmd, "the sheet dimension was not stored"))?;
+        let value = solidcraft_sketch::measure_dimension(sk, &latest.kind).ok_or_else(|| bad(cmd, "could not measure the sheet dimension"))?;
+        measured(latest.kind.is_angle(), value)
+    } else {
+        solved_measure(s, p, cmd, &new_id).unwrap_or(current)
+    };
     if driven {
         return Ok(DimensionResult {
+            constraint: None,
             param: None,
             driven: Some(true),
             kind: kind_name.to_string(),
@@ -3726,6 +4601,25 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             determined_by: None,
             created: None,
             param_warnings: Vec::new(),
+        });
+    }
+    if on_sheet {
+        return Ok(DimensionResult {
+            param: None,
+            driven: Some(false),
+            kind: kind_name.to_string(),
+            expression: Some(param),
+            measured: current.0,
+            unit: current.1.to_string(),
+            sketch: info,
+            scaled: None,
+            axis: axis.map(str::to_string),
+            defined: None,
+            redundant: None,
+            determined_by: None,
+            created: None,
+            param_warnings: Vec::new(),
+            constraint: None,
         });
     }
     // A dimension the sketch already determines cannot drive it: it is refused, or with
@@ -3753,6 +4647,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     }
     let v = s.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     Ok(DimensionResult {
+        constraint: None,
         param: Some(param),
         driven: None,
         kind: kind_name.to_string(),
@@ -3836,24 +4731,16 @@ fn solved_measure(s: &Session, p: &Value, cmd: &str, id: &str) -> Option<(f64, &
 }
 
 /// The type of a dimension between `a` and `b` (two points or a line's ends). `auto` takes it
-/// from where the text is placed. Across from the two, between the perpendiculars through them
-/// on either side, it is the distance between them, and a little past those too (a tenth of
-/// that distance), so it takes a clear pull past an end to change it. Pulled past an end, the
-/// pull as seen from that end decides: up or down the horizontal distance, sideways the
-/// vertical one (#257, #7295). The two meet on the diagonals through the end, so each has a
-/// wide zone however shallow or steep the line is. With no text, or when the two already line
-/// up with an axis, `auto` stays the distance between them; other types are returned unchanged.
+/// from where the text is placed ([`solidcraft_sketch::linear_axis`], the rule a drawing's
+/// Dimension tool shares); with no text it stays the distance between them; other types are
+/// returned unchanged.
 fn auto_orientation(ty: &str, a: Vec2, b: Vec2, text_at: Option<Vec2>) -> &str {
     let Some(t) = text_at.filter(|_| ty == "auto") else { return ty };
-    let d = b - a;
-    let len = d.len();
-    let along = (t - a).dot(d) / len;
-    let margin = len / 10.0;
-    if d.x.abs() <= 1e-9 * len || d.y.abs() <= 1e-9 * len || !along.is_finite() || (-margin..=len + margin).contains(&along) {
-        return ty;
+    match solidcraft_sketch::linear_axis(a, b, t) {
+        solidcraft_sketch::LinearAxis::Aligned => ty,
+        solidcraft_sketch::LinearAxis::Horizontal => "horizontal",
+        solidcraft_sketch::LinearAxis::Vertical => "vertical",
     }
-    let pull = t - if along < 0.0 { a } else { b };
-    if pull.y.abs() >= pull.x.abs() { "horizontal" } else { "vertical" }
 }
 
 /// Midpoint pairs choose an axis as soon as the text passes their bounding box: above or below
@@ -3995,6 +4882,9 @@ fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
     let key = str_(p, "dimension").ok_or_else(|| bad(cmd, "`dimension` must be a dimension id or parameter name"))?.to_string();
     let at = if bool_(p, "reset").unwrap_or(false) { None } else { Some(req_vec2(cmd, p, "at")?) };
     let (id, info) = edit_solve(s, p, cmd, false, |sk, _| {
+        if sk.wire_constraints.iter().any(|c| c.kind.is_dimension() && (c.id == key || c.param.as_deref() == Some(key.as_str()))) {
+            return Err(bad(cmd, format!("`{key}` is a 3D dimension: 3D dimensions have no text to move yet (#10617)")));
+        }
         let c = sk
             .constraints
             .iter()
@@ -4183,10 +5073,14 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
     if ids.is_empty() {
         return Err(bad(cmd, "`entities` must list sketch entity ids"));
     }
+    let model_edit = !s.sheet_sketching();
     let (n, info) = edit_solve(s, p, cmd, false, |sk, doc| {
         let mut curves = Vec::new();
         let mut points = Vec::new();
         let mut cons = Vec::new();
+        // 3D constraints and curves (#10608) go after the loop, so a curve and its own
+        // constraint can be deleted together.
+        let (mut wire_cons, mut wires) = (Vec::new(), Vec::new());
         for id in &ids {
             if let Some(c) = sk.curve_index(id) {
                 curves.push(c);
@@ -4197,8 +5091,10 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 points.push(q);
             } else if sk.constraints.iter().any(|c| &c.id == id) {
                 cons.push(id.clone());
+            } else if sk.wire_constraints.iter().any(|c| &c.id == id) {
+                wire_cons.push(id.clone());
             } else if sk.wire_index(id).is_some() {
-                sk.remove_wires(std::slice::from_ref(id));
+                wires.push(id.clone());
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));
@@ -4206,6 +5102,8 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }
         }
+        sk.remove_wire_constraints(&wire_cons);
+        sk.remove_wires(&wires);
         let selected_curves = curves.iter().copied().collect::<std::collections::BTreeSet<_>>();
         let selected_points = points.iter().copied().collect::<std::collections::BTreeSet<_>>();
         let removed = sk
@@ -4253,17 +5151,30 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 sk.break_link(id)?;
             }
         }
-        doc.prune_model_params();
+        if model_edit {
+            doc.prune_model_params();
+        }
         Ok(ids.len())
     })?;
-    // Dimension parameters may have been dropped; prune again with the stored sketch.
-    s.doc_mut().prune_model_params();
+    if model_edit {
+        s.doc_mut().prune_model_params();
+    }
     reply(cmd, DeleteResult { deleted: n, sketch: info, param_warnings: Vec::new() })
 }
 
 fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.move_point";
     let to = req_vec2(cmd, p, "to")?;
+    if s.sheet_sketching() {
+        // Reuse the existing point drag on solved paper coordinates. Only the
+        // shared sheet receiver publishes one drawing-local undo step.
+        let (_, report) = edit(s, p, cmd, false, |sk, _| {
+            let q = point_ref(sk, p.get("point"), cmd, "point")?;
+            let _ = drag_entity(sk, Ent::Point(q), &[], to, to, false, None);
+            Ok(())
+        })?;
+        return Ok(json!({"sketch": report}));
+    }
     let id = sketch_store::target(s, p, cmd)?;
     let state = s.model.result(id).map(|r| r.state.clone());
     let last = state.as_ref().and_then(|state| state.sketch(id));
@@ -4317,6 +5228,22 @@ fn move_points(s: &mut Session, p: &Value) -> Result<Value> {
             };
             picked.push((q, to));
         }
+        // A point placed by parameters follows them, so it does not move (#16554).
+        for (q, _) in &picked {
+            if let Some(pt) = sk.points.get(*q)
+                && let Some(e) = pt.exprs.as_deref()
+            {
+                return Err(bad(
+                    cmd,
+                    format!(
+                        "point `{}` is placed by the expression {}, so it follows the parameters and does not move; release it with sketch.constraint.fix {{entity: \"{}\", fixed: false}} first",
+                        pt.id,
+                        e.describe(),
+                        pt.id
+                    ),
+                ));
+            }
+        }
         let mut left = Left::Unsolved;
         for (q, to) in &picked {
             left = drag_entity(sk, Ent::Point(*q), &[], *to, *to, false, last).1.solve_again();
@@ -4324,15 +5251,15 @@ fn move_points(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((picked, left))
     })?;
     let solved = sketch_store::read(&s.doc, id).ok();
-    let moved: Vec<Value> = picked
+    let moved: Vec<MovedPoint> = picked
         .iter()
         .map(|(q, to)| {
             let point = solved.and_then(|sk| sk.points.get(*q)).map(|pt| pt.id.clone());
             let at = solved.and_then(|sk| sk.point(*q));
-            json!({"point": point, "to": [to.x, to.y], "at": at.map(|a| [a.x, a.y]), "reached": at.is_some_and(|a| a.dist(*to) <= 1e-6)})
+            MovedPoint { point, to: [to.x, to.y], at: at.map(|a| [a.x, a.y]), reached: at.is_some_and(|a| a.dist(*to) <= 1e-6) }
         })
         .collect();
-    Ok(json!({"moved": moved, "sketch": rep.as_ref().map(report_json)}))
+    reply(cmd, MovePointsResult { moved, sketch: rep.as_ref().map(solve_info), param_warnings: Vec::new() })
 }
 
 fn drag(s: &mut Session, p: &Value) -> Result<Value> {
@@ -4351,6 +5278,36 @@ fn drag_frame(s: &mut Session, p: &Value, live: bool) -> Result<(Value, Option<c
         None | Some(Value::Null) => to,
         Some(v) => vec2(v).ok_or_else(|| bad(cmd, "`from` must be a point [x, y]"))?,
     };
+    if s.sheet_sketching() {
+        // The drawing editor publishes a complete gesture once. Live frames remain
+        // model-only until the common UI gesture host owns a sheet transaction.
+        if live || p.get("live").is_some_and(|v| !v.is_null() && v != &Value::Bool(false)) {
+            return Err(bad(cmd, "live sheet drag needs the Drawing pointer gesture host; use a completed non-live sketch.drag edit"));
+        }
+        let entry = sketch_store::sheet_target(s, p, cmd)?;
+        let (moved, report) = edit(s, p, cmd, false, |sk, _| {
+            let id = p.get("entity").and_then(Value::as_str).ok_or_else(|| bad(cmd, "entity must be a sketch point or curve"))?;
+            let entity = ent(sk, id).ok_or_else(|| bad(cmd, format!("unknown sketch entity `{id}`")))?;
+            let companions = match p.get("with") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(Value::Array(ids)) if ids.len() <= sk.points.len() + sk.curves.len() => ids
+                    .iter()
+                    .map(|v| {
+                        let name = v.as_str().ok_or_else(|| bad(cmd, "with must list sketch point or curve ids"))?;
+                        ent(sk, name).ok_or_else(|| bad(cmd, format!("unknown sketch entity `{name}`")))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                _ => return Err(bad(cmd, "with must be a bounded list of sketch point or curve ids")),
+            };
+            let (out, _) = drag_entity(sk, entity, &companions, from, to, false, None);
+            Ok(out)
+        })?;
+        let owner = s.drawing(cmd)?;
+        let sketch = &owner.sheet_sketch(entry.sketch).ok_or_else(|| bad(cmd, "the edited sheet sketch no longer exists"))?.sketch;
+        let at = moved.at(sketch, from, to);
+        let result = json!({"sketch": report, "reached": moved.reached, "at": [at.x, at.y], "retry": moved.retry});
+        return Ok((result, None));
+    }
     let id = sketch_store::target(s, p, cmd)?;
     // The sketch's report as last evaluated: a live frame keeps its degrees of freedom.
     let state = s.model.result(id).map(|r| r.state.clone());
@@ -4467,9 +5424,12 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let set = |k: &str| bool_(p, k);
     if keys.iter().all(|k| set(k).is_none()) {
-        let id = sketch_store::target(s, p, cmd)?;
-        let options = OptionsReply::Read { options: options_of(&sketch_store::read(&s.doc, id)?.view) };
+        let sk = sketch_store::read_for_command(s, p, cmd)?;
+        let options = OptionsReply::Read { options: options_of(&sk.view) };
         return reply(cmd, OptionsResult { options, param_warnings: Vec::new() });
+    }
+    if s.sheet_sketching() && (set("slice") == Some(true) || set("sketch_3d") == Some(true)) {
+        return Err(bad(cmd, "slice and 3D sketch options are model-only"));
     }
     let (v, info) = edit_solve(s, p, cmd, false, |sk, _| {
         let v = &mut sk.view;
@@ -4495,19 +5455,31 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn chain_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chain";
-    let id = sketch_store::target(s, p, cmd)?;
-    let sk = sketch_store::read(&s.doc, id)?;
-    let c = curve_ref(sk, p.get("curve"), cmd, "curve")?;
-    reply(cmd, ChainResult { curves: ids_of(sk, &sk.chain(c)), param_warnings: Vec::new() })
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let c = curve_ref(&sk, p.get("curve"), cmd, "curve")?;
+    reply(cmd, ChainResult { curves: ids_of(&sk, &sk.chain(c)), param_warnings: Vec::new() })
 }
 
 fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.solve";
+    if s.sheet_sketching() {
+        let entry = sketch_store::sheet_target(s, p, cmd)?;
+        let solved = s.drawing(cmd)?.solve_sheet_sketch(&s.doc, entry.sketch)?;
+        let profiles = solidcraft_sketch::find_drawn_profiles(&solved.sketch).len();
+        return Ok(json!({
+            "status": solved.report.status,
+            "dof": solved.report.dof,
+            "failing": solved.report.failing,
+            "profiles": profiles,
+        }));
+    }
     let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch has not been evaluated".into()))?;
-    let (status, dof, failing, profiles) = (ss.report.status.into(), ss.report.dof, ss.report.failing.clone(), ss.profiles.len());
-    reply(cmd, SolveResult { status, dof, failing, profiles, param_warnings: Vec::new() })
+    let (status, dof, planar_dof) = (ss.report.status.into(), ss.report.shown_dof(), ss.report.dof);
+    let (failing, profiles) = (ss.report.failing.clone(), ss.profiles.len());
+    let wires_solve = serde_json::to_value(&ss.report.wires).unwrap_or_default();
+    reply(cmd, SolveResult { status, dof, planar_dof, failing, wires_solve, profiles, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

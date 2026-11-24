@@ -6,6 +6,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "params_import_order.rs"]
+mod import_order;
+
 use serde::{Deserialize, Serialize};
 
 use crate::expr::{self, Expr, Kind, ParamDef, Value};
@@ -552,19 +555,57 @@ impl Document {
         if rows.len() > MAX_PARAMS {
             return Err(DocError::Invalid("too many parameters".into()));
         }
-        // Each row is checked and applied as `change_param` would, but the parameters are
-        // evaluated once for all of them, not once per row (thousands of rows took minutes).
+        let mut row_by_name: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut previous_row = vec![None; rows.len()];
+        let mut text_rows = vec![false; rows.len()];
+        for (index, (name, expression, unit, _)) in rows.iter().enumerate() {
+            // Validate before reference extraction, which caches expressions independently
+            // of the document transaction.
+            if expression.len() > 4096 {
+                return Err(DocError::Expr("expression too long".into()));
+            }
+            previous_row[index] = row_by_name.insert(name, index);
+            let was_text = previous_row[index].map_or(self.text_param(name).is_some(), |previous| text_rows[previous]);
+            text_rows[index] = unit.as_deref().map_or(was_text, crate::text_params::is_text_unit);
+        }
+        let graph: Vec<_> =
+            rows.iter().zip(&text_rows).map(|((name, expression, ..), is_text)| (name.as_str(), expression.as_str(), *is_text)).collect();
+        let ordered_rows =
+            import_order::order(&graph, expr::references).ok_or_else(|| DocError::Expr("circular parameter references in import".into()))?;
+
+        // Evaluate in dependency order, but keep the Parameters table and reply in input
+        // order. Existing parameters retain their positions; new ones follow first appearance.
         let mut next = self.clone();
         let (mut vals, _) = next.param_values();
-        for (n, e, u, c) in &rows {
+        for index in ordered_rows {
+            let (n, e, u, c) = &rows[index];
             next.import_row(n, e, u.as_deref(), c.as_deref(), &mut vals)?;
         }
+        let numeric_order: BTreeMap<String, usize> =
+            self.params.iter().map(|p| p.name.clone()).chain(rows.iter().map(|(n, ..)| n.clone())).enumerate().fold(
+                BTreeMap::new(),
+                |mut order, (index, name)| {
+                    order.entry(name).or_insert(index);
+                    order
+                },
+            );
+        next.params.sort_by_key(|p| numeric_order.get(&p.name).copied().unwrap_or(usize::MAX));
+        let text_order: BTreeMap<String, usize> =
+            self.text_params.iter().map(|p| p.name.clone()).chain(rows.iter().map(|(n, ..)| n.clone())).enumerate().fold(
+                BTreeMap::new(),
+                |mut order, (index, name)| {
+                    order.entry(name).or_insert(index);
+                    order
+                },
+            );
+        next.text_params.sort_by_key(|p| text_order.get(&p.name).copied().unwrap_or(usize::MAX));
+        let names = rows.iter().map(|(name, ..)| name.clone()).collect();
         let (_, errors) = next.param_values();
         if let Some(e) = rows.iter().find_map(|(n, ..)| errors.get(n)) {
             return Err(DocError::Expr(e.clone()));
         }
         *self = next;
-        Ok(rows.into_iter().map(|(n, ..)| n).collect())
+        Ok(names)
     }
 
     /// One imported row: the checks and change of `change_param` (a feature's parameter) or
@@ -790,13 +831,23 @@ impl Document {
                     }
                 }
             }
-            if f.kind.placement_exprs().iter().any(|e| expr::references(e).iter().any(|r| r == name)) {
-                out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Position".into() });
+            // A placement expression is a point that places the feature (a length), or a
+            // primitive's axis (unitless, #18822).
+            let (mut position, mut axis) = (false, false);
+            f.kind.walk_exprs(&mut |(_, e, kind, role)| {
+                if role == ExprRole::Placement && expr::references(e).iter().any(|r| r == name) {
+                    if kind == Kind::Unitless { axis = true } else { position = true }
+                }
+            });
+            for (used, input) in [(position, "Position"), (axis, "Axis")] {
+                if used {
+                    out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: input.into() });
+                }
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                for c in &sketch.constraints {
-                    if c.param.as_deref() == Some(name) {
-                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: c.id.clone() });
+                for (id, param) in sketch.dimension_param_ids() {
+                    if param == name {
+                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: id.to_string() });
                     }
                 }
                 for pattern in &sketch.patterns {
@@ -830,9 +881,10 @@ impl Document {
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
         let rule_uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| r == name);
         for o in &self.occurrences {
-            let axes: BTreeSet<&str> = o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(axis, _)| axis).collect();
-            for axis in axes {
-                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input: format!("translate {axis}") });
+            let inputs: BTreeSet<String> =
+                o.expressed_moves.iter().flat_map(|m| m.exprs()).filter(|(_, e)| uses(e)).map(|(input, _)| input).collect();
+            for input in inputs {
+                out.push(ParamUser::Occurrence { occurrence: o.id, name: o.name.clone(), input });
             }
         }
         for r in &self.sheet.rules {
@@ -946,9 +998,9 @@ impl Document {
                 }
             }
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-                for c in &mut sketch.constraints {
-                    if c.param.as_deref() == Some(old) {
-                        c.param = Some(new.to_string());
+                for param in sketch.dimension_params_mut() {
+                    if param.as_deref() == Some(old) {
+                        *param = Some(new.to_string());
                         n += 1;
                     }
                 }
@@ -1008,7 +1060,7 @@ impl Document {
                 }
             }
         }
-        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.translate.iter_mut().flatten()) {
+        for e in self.occurrences.iter_mut().flat_map(|o| &mut o.expressed_moves).flat_map(|m| m.exprs_mut()) {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
                 *e = r;
@@ -1085,7 +1137,7 @@ impl Document {
         for f in &self.features {
             let mut names: BTreeSet<String> = f.param_names.iter().filter(|n| !n.is_empty()).cloned().collect();
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                names.extend(sketch.dimension_params().into_iter().cloned());
             }
             names.extend(self.feature_reads(f));
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
@@ -1140,7 +1192,7 @@ impl Document {
             hit |= (sheet && f.kind.is_sheet()) || (plastic && f.kind.is_plastic());
             hit |= f.kind.expressions().iter().any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                hit |= sketch.constraints.iter().any(|c| c.param.as_ref().is_some_and(|p| affected.contains(p)));
+                hit |= sketch.dimension_params().into_iter().any(|p| affected.contains(p));
                 hit |= sketch.patterns.iter().flat_map(|p| p.expressions.values()).any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_exprs().iter().any(|(_, e)| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_word_exprs().iter().any(|e| crate::text_params::references(e).iter().any(|r| affected.contains(r)));

@@ -1095,3 +1095,55 @@ mod tests {
         assert!(compared * 10 >= 800 * 8, "only {compared} compared cases");
     }
 }
+
+/// #14246 G1 (WR-662 retired): the skin-from-faces rows whose success became a refusal.
+/// Each skins through a single section (one disc). A skin surface runs from one section to
+/// the next, so through one section it has no extent across the sections: its knot vector
+/// in that direction has fewer than two unique knots, and the face main made on it had no
+/// area. The refusal names exactly that.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+
+    const ROWS: [&str; 10] = [
+        "gen0067", "gen0089", "gen0243", "gen0321", "gen0415", "gen0453", "gen0631",
+        "gen0671", "gen0690", "gen0740",
+    ];
+
+    #[test]
+    fn each_moved_skin_of_one_section_is_refused() {
+        for name in ROWS {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().unwrap();
+            let Inputs::SkinFromFaces { circles, degree } = &i else {
+                panic!("{name}");
+            };
+            assert_eq!(circles.len(), 1, "{name}: one section");
+            let mut k = Kernel::default();
+            let discs: Vec<_> = circles
+                .iter()
+                .map(|(c, r)| {
+                    solidcore::primitive::api_primitives::create_planar_circle(&mut k, pt(c), *r)
+                        .unwrap()
+                })
+                .collect();
+            let faces: Vec<_> = discs
+                .iter()
+                .map(|b| (b, solidcore::topology::brep::p1::faces(b, None).unwrap()[0]))
+                .collect();
+            let error = api::create_skin_from_faces(&mut k, &faces, usize::try_from(*degree).unwrap())
+                .map(|_| ())
+                .expect_err(name);
+            assert_eq!(
+                error.operation(),
+                "surface::surface::p6::Surface::calculate_continuities",
+                "{name}: {error:?}"
+            );
+            assert!(
+                error.to_string().contains("fewer than two unique knots"),
+                "{name}: {error}"
+            );
+        }
+    }
+}

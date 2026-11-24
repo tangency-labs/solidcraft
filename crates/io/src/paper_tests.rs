@@ -7,6 +7,20 @@ use super::*;
 
 const BLUES: [PaperColour; 2] = [PaperColour::Blueprint, PaperColour::PrussianBlue];
 
+/// The listed grids are the writers' own: SVG's and PNG's whole nanometres, PDF's 10 nm. Each
+/// writer's number text ends on its grid's step.
+#[test]
+fn the_writers_grids_are_listed_with_their_number_text() {
+    use solidcraft_geom::paper::Grid;
+    assert_eq!(writer_grids().unwrap(), [Grid::NANOMETRE, Grid::new(1e5).unwrap()]);
+    for (decimals, step) in [(NANOMETRES, "0.000001"), (TEN_NANOMETRES, "0.00001")] {
+        let mut text = String::new();
+        decimals.push(&mut text, 1);
+        assert_eq!(text, step);
+        assert_eq!(decimals.grid().unwrap().per_mm(), decimals.per_mm());
+    }
+}
+
 fn p(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
 }

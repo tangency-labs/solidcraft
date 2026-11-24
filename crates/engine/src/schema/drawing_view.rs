@@ -178,10 +178,11 @@ impl JsonSchema for ScaleParam {
         "DrawingScale".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let ws = super::types::whitespace_class();
         json_schema!({
-            "description": "The scale as paper:model text, such as \"1:2\" or \"5:1\", from 1:100000 to 1000:1. When not given, the largest ISO 5455 scale at which the view fits the sheet's drawing area.",
+            "description": "The scale as paper:model text, such as \"1:2\" or \"5:1\", from 1:100000 to 1000:1; spaces round each number are ignored. When not given, the largest ISO 5455 scale at which the view fits the sheet's drawing area.",
             "type": "string",
-            "pattern": "^[0-9]+(\\.[0-9]+)?:[0-9]+(\\.[0-9]+)?$"
+            "pattern": format!("^[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*:[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*$")
         })
     }
 }
@@ -846,6 +847,60 @@ pub struct EditResult {
     pub changed: Vec<String>,
     /// The other views whose resolved settings changed with it: the views projected from it.
     pub followers: Vec<String>,
+    /// It and the views lined up with it, when the edit moved it or changed its size and their
+    /// boundary leaves the sheet's drawing space or lies over its title block; none is moved back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<OutsideResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `drawing.view.standard` takes: the sheet, and how its standard views are drawn and spaced.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct StandardParams {
+    /// The sheet, by id or name.
+    #[serde(deserialize_with = "super::drawing_sheet::sheet_ref")]
+    pub sheet: String,
+    /// Which way the main view looks (front when not given); the other two are projected from it.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewParam")]
+    pub view: Option<ViewParam>,
+    /// The scale they are all drawn at (when not given, the largest preset at which all of them lie
+    /// inside the sheet's drawing space and off its title block); saved either way.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ScaleParam")]
+    pub scale: Option<ScaleParam>,
+    /// The paper gap between neighbouring views, 0 to 1000 mm (20 when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub gap_mm: Option<f64>,
+    /// Whether an isometric view goes in the fourth corner (true when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub iso: Option<bool>,
+}
+
+/// What `drawing.view.standard` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StandardResult {
+    /// The main view, a base view.
+    pub view: String,
+    /// The view above or below it, lined up with it: its top view in the drawing's projection.
+    pub top: String,
+    /// The view beside it, lined up with it: its right view in the drawing's projection.
+    pub right: String,
+    /// The isometric view, a base view of its own, when one was asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iso: Option<String>,
+    pub sheet: String,
+    /// The scale they all draw at.
+    pub scale: ScaleResult,
+    /// Those whose boundary leaves the sheet's drawing space or lies over its title block, at a
+    /// given scale that doesn't fit; none is moved back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<OutsideResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
@@ -1129,6 +1184,42 @@ pub struct ProjectionForResult {
     pub why: Option<String>,
 }
 
+/// What `drawing.view.detail` takes: its parent, the region of the parent it shows (on the parent's
+/// plane, or as drawn on the sheet), its scale and where it sits.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DetailParams {
+    pub parent: ViewIdParam,
+    /// The region on the parent's plane, in model millimetres from its origin (give this or
+    /// `boundary_mm`).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "DetailBoundaryParam")]
+    pub boundary: Option<DetailBoundaryParam>,
+    /// The region as drawn round the parent on its sheet, in paper millimetres (give this or
+    /// `boundary`).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "DetailBoundaryParam")]
+    pub boundary_mm: Option<DetailBoundaryParam>,
+    /// Its scale (twice its parent's when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ScaleParam")]
+    pub scale: Option<ScaleParam>,
+    /// Where its centre sits on the sheet (right of its parent, a gap past the parent's boundary,
+    /// when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlaceParam")]
+    pub place: Option<PlaceParam>,
+}
+
+/// A detail's region: a circle or a rectangle with its sides along x and y.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum DetailBoundaryParam {
+    Circle { centre: Point2, radius: f64 },
+    Rectangle { min: Point2, max: Point2 },
+}
+
 /// What `drawing.view.section` takes: its parent, the cutting line drawn across the parent, and
 /// where it sits.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1313,6 +1404,29 @@ pub struct LineResult {
     pub pieces: Vec<PieceResult>,
 }
 
+/// One cosmetic thread's lines in a view.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ThreadResult {
+    /// The occurrences that place its body, from the design's root.
+    pub occurrence: Vec<u64>,
+    /// Its body's name in its definition.
+    pub body: String,
+    /// Whether the body is a reference part.
+    pub reference: bool,
+    pub pieces: Vec<ThreadPieceResult>,
+}
+
+/// A run of a thread line at one visibility, in paper millimetres.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ThreadPieceResult {
+    /// `root`: the root diameter's line, drawn thin (a three-quarter arc seen end on); `limit`: the
+    /// line across where the thread stops inside its face.
+    pub stroke: &'static str,
+    /// `visible` or `hidden`.
+    pub visibility: &'static str,
+    pub path: Vec<PathSegResult>,
+}
+
 /// What drew a line: an edge of the body (as `model.edges` numbers them), or a silhouette across
 /// one of its faces.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -1437,15 +1551,15 @@ impl JsonSchema for SceneResult {
         "ViewPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(generator, &[ObjectKind::View], false)
+        paper_scene_schema::<PathSegResult>(generator, &[ObjectKind::View], false)
     }
 }
 
 /// A paper scene's schema ([`solidcraft_geom::paper::Scene`]): its groups of `kinds`, each holding
 /// strokes, and fills, pictures, text and its fonts too when it is a `whole_sheet`'s.
-pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
+pub(super) fn paper_scene_schema<S: JsonSchema>(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
     let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
-    let segment = generator.subschema_for::<PathSegResult>();
+    let segment = generator.subschema_for::<S>();
     // A dashed stroke's pattern, as `solidcraft_geom::paper::Dashes` checks it; a solid one has none.
     let dashes = json!({
         "type": "object",
@@ -1606,6 +1720,9 @@ pub struct SnapshotResult {
     pub boundary_mm: BoxResult,
     /// Each placed source's lines, in placement order, then edges before silhouettes.
     pub lines: Vec<LineResult>,
+    /// Each cosmetic thread's lines, in placement order: drawn by ISO 6410's convention where the
+    /// view drew the thread's crest, and seen where that crest is seen.
+    pub threads: Vec<ThreadResult>,
     pub status: LinesStatusResult,
     pub stats: LinesStatsResult,
     /// With `scene: true`: the lines as a paper scene of the sheet.

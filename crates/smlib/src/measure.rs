@@ -85,6 +85,15 @@ impl Brep {
         core::edge_face_distance(self.core(), edge, face)
     }
 
+    /// A proved upper bound on how far the record curve `curve` (a spline or rational spline)
+    /// over its parameters `interval` lies from the surface of face `face` (the body's face
+    /// order), in mm: no point of the curve there is farther. `floor` is the scale below which a
+    /// tighter bound changes nothing. `None` when SMLib does not enclose the gap (a surface
+    /// with no NURBS net, a piece it cannot bound) or there is no such face.
+    pub fn curve_face_gap_bound(&self, curve: &solidcore_record::brep::Curve, interval: [f64; 2], face: usize, floor: f64) -> Result<Option<f64>> {
+        core::curve_face_gap_bound(self.core(), curve, interval, face, floor)
+    }
+
     /// Total area of every face, each counted once, so sheets and open shells too.
     pub fn area(&self, relative_accuracy: f64) -> Result<f64> {
         core::area(self.core(), relative_accuracy)

@@ -2,6 +2,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::render_jobs::Job;
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CheckReport {
@@ -73,6 +75,78 @@ pub struct BatchParams {
 pub struct BatchResult {
     /// Total accepted shots, including the first active job. At most 32.
     pub queued: u32,
+}
+
+/// Which view of a retained render result the Render workspace shows. `render.result.view` names
+/// one; `render.result.close` is the Escape key's way back to [`ResultViewName::Model`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ResultViewName {
+    /// The model preview: no render result is shown, and any comparison is left.
+    Model,
+    /// The selected result's image, as the canvas already shows it.
+    Image,
+    /// The selected result's image, scaled to fit the canvas.
+    Fit,
+    /// The selected result's image, one image pixel to one screen pixel.
+    Actual,
+    /// The denoising guide mask of the selected result, which only a result captured with
+    /// denoising diagnostics has.
+    DenoiseMask,
+}
+
+/// The name of a view the handler refuses, in its own words: the five names are read exactly as
+/// they are spelled, so another name or another case gets this. The contract leaves the name to
+/// [`ResultViewName::parse`], so the call is refused this way with the parameter check off and in
+/// strict alike. A value that is not text is serde's to refuse.
+pub const RESULT_VIEW_FORMS: &str = "view must be model, image, fit, actual or denoise_mask";
+
+impl ResultViewName {
+    /// The view named by `name`, exactly as the handler reads it: the names below, in lower case,
+    /// and nothing else.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "model" => Some(Self::Model),
+            "image" => Some(Self::Image),
+            "fit" => Some(Self::Fit),
+            "actual" => Some(Self::Actual),
+            "denoise_mask" => Some(Self::DenoiseMask),
+            _ => None,
+        }
+    }
+}
+
+/// `render.result.view`: which view of the render result to show. The name is read as text and
+/// looked up by [`ResultViewName::parse`] in the handler, so a name that is not one of the five is
+/// refused the same way with the parameter check off and in strict. A value that is not text is
+/// serde's to refuse: the handler gives its message, the check its own (`view` must be text).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResultViewParams {
+    /// One of `model`, `image`, `fit`, `actual`, `denoise_mask`. `denoise_mask` needs a selected
+    /// completed result that was captured with denoising diagnostics.
+    #[schemars(with = "ResultViewName")]
+    pub view: String,
+}
+
+/// No parameters: `render.result.close` returns to the model preview. A call that gives a key is
+/// refused by the check as an unknown key, or, with the check off, by the handler's own
+/// `expected no parameters`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CloseResultParams {}
+
+/// What `render.result.view` and `render.result.close` answer with: the view the workspace shows
+/// now. The same JSON the handlers built by hand before they built their reply from this type.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ResultViewResult {
+    /// The view the workspace shows now.
+    pub view: ResultViewName,
+    /// The retained result whose guide mask is shown. Only with `view: denoise_mask`, which is
+    /// refused when the selected result has no guide mask. The key is absent, never null, without it.
+    #[schemars(with = "Job")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job: Option<Job>,
 }
 
 /// `render.output.size`: the Render workspace's output-size draft. The command answers with what it

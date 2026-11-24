@@ -2,7 +2,7 @@
 //! and bars measured in its viewport.
 use crate::navigation::NavCaps;
 use crate::navigation_bar::*;
-use crate::navigation_slots::{CATALOGUE, SELECTION_MODE_ICONS};
+use crate::navigation_slots::{CATALOGUE, SELECTION_MODE_ICONS, selection_mode_icons};
 use crate::ui_kit::nav_bar_layout::measure;
 use crate::ui_kit::{NavigationEdge, NavigationKind, NavigationSize};
 use egui::{Rect, pos2, vec2};
@@ -12,11 +12,26 @@ use serde_json::json;
 fn selection_mode_icons_resolve_to_real_masters() {
     crate::navigation_slots::install();
     assert_eq!(SELECTION_MODE_ICONS.len(), 6);
-    for (mode, icon) in SELECTION_MODE_ICONS {
+    for (mode, icon) in selection_mode_icons() {
         let resolved = crate::icon_svg::resolve(icon);
-        assert!(!resolved.placeholder, "{mode}: {icon}");
-        assert_eq!(resolved.master, *icon);
+        assert!(!resolved.placeholder, "{mode:?}: {icon}");
+        assert_eq!(resolved.master, icon);
     }
+}
+
+#[test]
+fn the_selection_mode_slot_shows_each_modes_icon_and_name() {
+    crate::navigation_slots::install();
+    let slot = find("selection_mode").unwrap();
+    assert_eq!(selection_mode_icons().map(|(mode, _)| mode).collect::<Vec<_>>(), solidcraft_engine::PickMode::ALL);
+    for (mode, icon) in selection_mode_icons() {
+        let ui = crate::UiState { pick_mode: mode, ..Default::default() };
+        assert_eq!(slot.current_icon(crate::navigation_slots::value(&ui, slot)), icon);
+    }
+    // The menus whose icon shows the setting they hold offer "Shows: Icon and value / Icon only".
+    let holds_value = |id| !find(id).unwrap().value_icons.is_empty();
+    assert!(holds_value("selection_mode") && holds_value("visual_style") && !holds_value("display"));
+    assert_eq!(NavigationBar::default().menu_display("selection_mode"), MenuDisplay::IconAndValue);
 }
 
 #[test]
@@ -44,7 +59,7 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
         assert!(ids.insert(slot.id), "duplicate catalogue id {}", slot.id);
         match slot.command {
             Some(command) => assert!(solidcraft_engine::find_command(command).is_some(), "{}", slot.id),
-            None => assert!(["projection", "display", "separator"].contains(&slot.id)),
+            None => assert!(["projection", "display", "sheet_zoom", "separator"].contains(&slot.id)),
         }
         if slot.kind != NavigationKind::Separator {
             assert!(!crate::icon_svg::resolve(slot.icon).placeholder, "{}: {}", slot.id, slot.icon);
@@ -65,7 +80,7 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
                 canvas,
                 &[],
                 1.0,
-                crate::prefs::NavigatorStyle::Cube,
+                crate::prefs::NavigatorStyle::Custom,
                 egui::Vec2::ZERO,
                 bar.rect,
             );
@@ -92,7 +107,8 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
     }
     let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 720.0));
     assert!(measure(wide, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 50.0).labels);
-    let middle = Rect::from_min_size(pos2(0.0, 0.0), vec2(380.0, 720.0));
+    // The default row without labels or menu values is 382 wide, with 12 at each edge: 406.
+    let middle = Rect::from_min_size(pos2(0.0, 0.0), vec2(430.0, 720.0));
     let bar = measure(middle, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 50.0);
     assert!(!bar.labels && bar.overflow.is_empty(), "text disappears before slots fold");
 }
@@ -139,9 +155,9 @@ fn a_bar_on_the_top_edge_sits_under_the_top_and_keeps_the_corner_controls_below_
             }
             for corner in [egui::Vec2::ZERO, vec2(120.0, 32.0)] {
                 let layout =
-                    crate::viewport_layout::Layout::with_content(canvas, canvas, &[], 1.0, crate::prefs::NavigatorStyle::Cube, corner, bar.rect);
+                    crate::viewport_layout::Layout::with_content(canvas, canvas, &[], 1.0, crate::prefs::NavigatorStyle::Custom, corner, bar.rect);
                 // The axis view keeps its full size: on top, it moves down past the bar instead.
-                assert_eq!(layout.axis_view.width(), crate::viewport::axis_view_size(crate::prefs::NavigatorStyle::Cube));
+                assert_eq!(layout.axis_view.width(), crate::viewport::axis_view_size(crate::prefs::NavigatorStyle::Custom));
                 assert!(!layout.axis_view.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
                 assert!(!layout.confirm.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
                 assert!(!layout.confirm.intersect(layout.axis_view).is_positive(), "{position:?} {edge:?}");

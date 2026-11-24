@@ -142,7 +142,7 @@ pub struct TagAddParams {
     pub sheet: String,
     /// Its centre, in paper millimetres from the sheet's lower-left corner.
     pub at: [f64; 2],
-    /// The length of its side, 1 to 50 mm (default 5).
+    /// The length of its side, 1 to 50 mm (default 8.3, which shows a revision 2.5 mm high).
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "f64")]
     pub size_mm: Option<f64>,

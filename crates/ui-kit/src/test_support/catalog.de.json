@@ -1,5 +1,7 @@
 {
   "ui.save": "Speichern",
   "ui.cancel": "Abbrechen",
-  "ui.don_t_save": "Nicht speichern"
+  "ui.don_t_save": "Nicht speichern",
+  "prefs.sketch.state_icons": "Statussymbole",
+  "prefs.sketch_state_icons": "Skizzensymbole in der Farbe ihres Zustands"
 }

@@ -1,0 +1,8 @@
+{
+  "entry": "plate",
+  "params": {"size": 40, "thickness": 3},
+  "expect": {
+    "reply": {"result": {"plate": [40, 40, 3]}},
+    "model": {"body_count": 1, "total": {"volume_mm3": 4800}}
+  }
+}

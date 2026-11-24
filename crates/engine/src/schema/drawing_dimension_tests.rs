@@ -7,13 +7,16 @@ use crate::schema::tests::assert_keys;
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<AddParams>(), &["decimals", "dry_run", "kind", "offset_mm", "override_text", "text", "view"]);
+    assert_keys(
+        input_schema_for::<AddParams>(),
+        &["decimals", "dry_run", "kind", "line_through_mm", "offset_mm", "override_text", "text", "text_to_mm", "view"],
+    );
     assert_keys(input_schema_for::<InspectParams>(), &["dimension"]);
     assert_keys(input_schema_for::<EditParams>(), &["dimension", "set"]);
     assert_keys(input_schema_for::<RepairParams>(), &["dimension", "pick", "slot"]);
     assert_keys(
         input_schema_for::<DimensionSet>(),
-        &["decimals", "diameter", "direction", "offset_mm", "other_side", "override_text", "reading", "text"],
+        &["decimals", "diameter", "direction", "line_through_mm", "offset_mm", "other_side", "override_text", "reading", "text", "text_to_mm"],
     );
 }
 

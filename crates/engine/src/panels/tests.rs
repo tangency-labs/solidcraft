@@ -41,6 +41,22 @@ fn fixed_bottom_height_is_validated_without_weakening_other_zone_bounds() {
 }
 
 #[test]
+fn discovered_plugin_panel_kinds_register_without_changing_existing_placements() {
+    let registry = synthetic_registry().unwrap();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("plugin.panel.sample.jobs").unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    open(&mut service, "existing", "logs");
+    let before = service.inspect();
+    service.register_panel(spec.clone()).unwrap();
+    assert_eq!(service.inspect(), before);
+    assert_eq!(service.registry().get(&spec.kind).unwrap(), &spec);
+    assert_eq!(service.register_panel(spec).unwrap_err().rule, Rule::DuplicateId);
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
 fn fixed_bottom_rows_normalize_placement_but_reject_collapse_and_height_commands_atomically() {
     use serde_json::json;
     let mut registry = synthetic_registry().unwrap();
@@ -1599,6 +1615,7 @@ fn command_inputs() -> Vec<(&'static str, serde_json::Value)> {
     native["location"] = json!({"type":"window","host":"native","origin":{"x":20,"y":30},"return_to":{"zone":"left","index":0,"size":{"width":280,"height":240},"collapsed":false}});
     let mut inputs = vec![
         ("layout.apply", json!({"name":"Fixture default"})),
+        ("layout.delete", json!({"name":"Saved"})),
         ("layout.get", json!({})),
         ("layout.reset", json!({})),
         ("layout.save", json!({"name":"Saved"})),
@@ -1677,6 +1694,9 @@ fn panel_command_success_replies_describe_committed_state_for_every_executable_o
         let mut backend = command_ready_backend();
         if id == "panel.peek" {
             backend.execute("panel.collapse", &serde_json::json!({"target":command_target("one"),"collapsed":true})).unwrap();
+        }
+        if id == "layout.delete" {
+            backend.execute("layout.save", &serde_json::json!({"name":"Saved"})).unwrap();
         }
         let result = backend.execute(id, &input);
         if ContextualPanelAction::from_command_id(id).is_some() {
@@ -2144,6 +2164,51 @@ fn saved_layout_names_ignore_case_and_replacement_preserves_the_named_slot() {
     let hydrated = commands::CatalogueState::hydrate(&snapshot, backend.service.registry()).unwrap();
     assert_eq!(hydrated.preset_kind("ος").unwrap(), Some(commands::PresetKind::User));
     assert_eq!(hydrated.preset_kind("strasse").unwrap(), Some(commands::PresetKind::User));
+}
+
+#[test]
+fn deleting_a_saved_layout_removes_only_that_name_and_leaves_the_panels() {
+    use commands::LayoutCatalogue;
+    let mut backend = command_ready_backend();
+    backend.execute("layout.save", &serde_json::json!({"name":"Bench setup"})).unwrap();
+    backend.execute("layout.save", &serde_json::json!({"name":"Keep me"})).unwrap();
+    // The panels match "Bench setup" exactly, as after applying it.
+    backend.execute("layout.apply", &serde_json::json!({"name":"Bench setup"})).unwrap();
+    let layout = backend.service.layout().clone();
+    let reply = backend.execute("layout.delete", &serde_json::json!({"name":"  bench SETUP "})).unwrap();
+    assert_eq!(reply["name"], "Bench setup", "the reply names the layout as it was saved");
+    assert_eq!(backend.catalogue.state().preset_kind("Bench setup").unwrap(), None);
+    assert_eq!(backend.catalogue.state().preset_kind("Keep me").unwrap(), Some(commands::PresetKind::User));
+    assert_eq!(backend.catalogue.state().user_count(), 1);
+    assert_eq!(backend.service.layout(), &layout, "deleting the applied layout leaves the panels where they are");
+    assert_eq!(backend.execute("layout.apply", &serde_json::json!({"name":"Bench setup"})).unwrap_err().rule, Rule::MissingTarget);
+    let snapshot = backend.catalogue.state().export().unwrap();
+    let hydrated = commands::CatalogueState::hydrate(&snapshot, backend.service.registry()).unwrap();
+    assert_eq!(hydrated.preset_kind("Bench setup").unwrap(), None, "the deletion is in the stored library");
+    assert_eq!(hydrated.preset_kind("Keep me").unwrap(), Some(commands::PresetKind::User));
+
+    let catalogue = backend.catalogue.state().clone();
+    let state = backend.service.inspect();
+    for (params, rule) in [
+        (serde_json::json!({"name":"Fixture default"}), Rule::Capability),
+        (serde_json::json!({"name":"fIXTURE DEFAULT"}), Rule::Capability),
+        (serde_json::json!({"name":"Bench setup"}), Rule::MissingTarget),
+        (serde_json::json!({"name":""}), Rule::Schema),
+        (serde_json::json!({"name":"Keep me","replace":true}), Rule::Schema),
+        (serde_json::json!({"name":"Keep me","expected_revision":state.revision + 1}), Rule::Revision),
+    ] {
+        assert_eq!(backend.execute("layout.delete", &params).unwrap_err().rule, rule, "{params}");
+        assert_eq!(backend.catalogue.state(), &catalogue, "a refused delete keeps the library: {params}");
+        assert_eq!(backend.service.inspect(), state);
+    }
+    backend.catalogue.fail_stage = true;
+    assert_eq!(backend.execute("layout.delete", &serde_json::json!({"name":"Keep me"})).unwrap_err().rule, Rule::Capability);
+    assert_eq!(backend.catalogue.state(), &catalogue, "nothing is deleted when the library can't be stored");
+    backend.catalogue.fail_stage = false;
+    let reply = backend.execute("layout.delete", &serde_json::json!({"name":"Keep me","expected_revision":state.revision})).unwrap();
+    assert_eq!(reply["name"], "Keep me");
+    assert_eq!(backend.catalogue.state().user_count(), 0);
+    assert_eq!(backend.service.layout(), &layout);
 }
 
 #[test]
@@ -2654,6 +2719,31 @@ fn headless_cannot_claim_native_support_even_when_an_injected_service_sets_nativ
     let before = backend.service.inspect();
     assert_eq!(backend.execute("panel.popout", &input).unwrap_err().rule, Rule::Capability);
     assert_eq!(backend.service.inspect(), before);
+}
+
+/// A catalogue snapshot as plain JSON, as preferences and profiles keep it, never base64: its
+/// presets, workspaces and remembered layouts with their records' text and recovery bytes, written
+/// back to the same snapshot byte for byte, bytes that aren't text included.
+#[test]
+fn a_catalogue_snapshot_round_trips_through_plain_json_byte_for_byte() {
+    use commands::LayoutCatalogue;
+    let grown = future_registry(&["a", "b", "c"]);
+    let fallback = persistence_fallback();
+    let dormant = decode(&serde_json::to_vec(&future_group()).unwrap(), &future_registry(&["a"]), &fallback).unwrap().envelope;
+    let mut catalogue = fixture_command_catalogue(&grown).unwrap();
+    catalogue.remember(&dormant, Some(&[0xff, 0x00, b'r', 0xfe]), &grown).unwrap();
+    let snapshot = catalogue.state().export().unwrap();
+    let value = commands::snapshot_value(&snapshot).unwrap();
+    assert!(value["remembered"][0]["record"]["text"].is_string(), "{value}");
+    assert_eq!(value["remembered"][0]["rejected"], serde_json::json!({"bytes": [255, 0, 114, 254]}), "bytes that aren't text, as numbers");
+    assert_eq!(commands::snapshot_from_value(&value).unwrap(), snapshot);
+    let text = value.to_string();
+    let reread: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(commands::snapshot_from_value(&reread).unwrap(), snapshot, "through its text too");
+    for broken in [serde_json::json!({}), serde_json::json!({"builtins": [], "users": [], "workspaces": [], "remembered": [{"workspace": "x"}]})] {
+        assert!(commands::snapshot_from_value(&broken).is_err(), "{broken}");
+    }
+    assert!(commands::snapshot_value(b"not a snapshot").is_err());
 }
 
 #[test]
@@ -5034,7 +5124,7 @@ fn explicit_side_extent_means_requested_height_and_survives_sole_stack_and_colla
         env.content.push(SideContentMeasure { request, needed_height: 180.0, policy: SideHeightPolicy::Content });
     }
     let sole = allocate_layout(service.layout(), service.registry(), &env).unwrap();
-    assert_eq!(sole.sections[0].outer.size.height, 180.0, "sole Content uses captured needed height despite the stored stack request");
+    assert_eq!(sole.sections[0].outer.size.height, 400.0, "a sole panel respects its explicit height");
     assert_eq!(service.layout().sections[0].preferred_extent, Some(400.0));
     service
         .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("two"), destination: None }]))
@@ -7791,4 +7881,31 @@ fn native_close_then_resize_cannot_inherit_a_reused_window_primary_priority() {
         let saved = with_live_layout(&recovered, owner.layout().clone(), &grown).unwrap();
         assert_eq!(saved.retained_data[&id("q")]["instance"], raw_q);
     }
+}
+
+#[test]
+fn side_column_widths_snap_and_intersect_with_other_members() {
+    let mut registry = synthetic_registry().unwrap();
+    let kind = PanelKind::new("fixture.log").unwrap();
+    registry.set_side_widths(&kind, vec![(160.0, 160.0), (220.0, 320.0)]).unwrap();
+    let mut tight = registry.get(&kind).unwrap().clone();
+    tight.kind = PanelKind::new("fixture.tight").unwrap();
+    tight.min_size.width = 200.0;
+    registry.register(tight).unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    open(&mut service, "one", "first");
+    let column = service.layout().section(&section("first")).unwrap().column.clone().unwrap();
+    for (request, expected) in [(189.0, 160.0), (190.0, 160.0), (191.0, 220.0), (250.0, 250.0)] {
+        service.dispatch(transaction(vec![Mutation::SetColumnWidth { column: column.clone(), width: request }])).unwrap();
+        assert_eq!(service.layout().column(&column).unwrap().width, expected);
+    }
+    service
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.tight").unwrap(),
+            instance: id("tight"),
+            destination: Some(Destination::JoinTab { section: section("first"), index: 1 }),
+        }]))
+        .unwrap();
+    assert_eq!(column_widths(service.layout(), service.registry(), &column).unwrap(), vec![(220.0, 320.0)]);
 }

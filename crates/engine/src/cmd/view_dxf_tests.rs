@@ -85,9 +85,13 @@ fn view_dxf_blind_back_hole_is_omitted_or_dashed_and_front_hole_is_visible() {
     assert_eq!(top["hidden"], 0);
     assert!(dashed["hidden"].as_u64().unwrap() > 12, "{dashed}");
     assert_eq!(top["visible"], dashed["visible"]);
-    assert!(!top["dxf"].as_str().unwrap().contains("HIDDEN"));
-    assert!(dashed["dxf"].as_str().unwrap().contains("LWPOLYLINE"));
-    assert!(dashed["dxf"].as_str().unwrap().contains("128\n"));
+    let top_file = solidcraft_io::read_dxf_file(top["dxf"].as_str().unwrap()).unwrap();
+    let dashed_file = solidcraft_io::read_dxf_file(dashed["dxf"].as_str().unwrap()).unwrap();
+    assert!(!top_file.layers().iter().any(|layer| layer.name() == "HIDDEN"));
+    let hidden = dashed_file.entities().iter().filter(|entity| dashed_file.layer(entity.layer()).unwrap().name() == "HIDDEN").collect::<Vec<_>>();
+    assert!(!hidden.is_empty());
+    assert!(hidden.iter().all(|entity| matches!(entity.geometry(), solidcraft_io::DxfShape::Polyline { points } if points.len() >= 2)));
+    assert!(hidden.iter().all(|entity| dashed_file.layer(entity.layer()).unwrap().linetype() == solidcraft_io::DxfLinetype::Hidden));
     let bottom = export(&mut s, camera(StandardView::Bottom), "omit");
     assert!(bottom["visible"].as_u64().unwrap() > top["visible"].as_u64().unwrap());
     assert_eq!(s.undo.len(), undo);
@@ -329,7 +333,11 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     };
     let active = export(&mut s, camera(StandardView::Top), "omit");
     assert_eq!(active["sketch"], 1, "{active}");
-    assert!((length(&active) - 80.).abs() < 1e-3 && active["dxf"].as_str().unwrap().contains("SKETCH"));
+    let active_file = solidcraft_io::read_dxf_file(active["dxf"].as_str().unwrap()).unwrap();
+    assert!(
+        (length(&active) - 80.).abs() < 1e-3
+            && active_file.entities().iter().any(|entity| active_file.layer(entity.layer()).unwrap().name() == "SKETCH")
+    );
     run(&mut s, "sketch.finish", json!({}));
     let finished = export(&mut s, camera(StandardView::Top), "omit");
     assert_eq!(finished["sketch"], 2, "{finished}");
@@ -337,6 +345,47 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     let dashed = export(&mut s, camera(StandardView::Top), "dashed");
     assert_eq!(dashed["sketch"], 2);
     assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
+}
+
+/// A shown sketch under an extrusion's outline is drawn once, as the body's black line, not again
+/// in blue on SKETCH: a cutting service reads the blue copy as a marking line (#19507).
+#[test]
+fn view_dxf_draws_a_shown_sketch_under_a_bodys_outline_once() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Panel"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Panel","distance":2,"body_name":"Panel"}));
+    let sketch = s.doc.features[0].id;
+    let sides = |v: &Value| {
+        let mut sides: Vec<i64> = lines(v).iter().map(|(a, b)| (a.dist(*b) * 1000.).round() as i64).collect();
+        sides.sort_unstable();
+        sides
+    };
+    for hidden in ["omit", "dashed"] {
+        // The body's own lines, with the sketch hidden. The top view is tilted a hair, so the
+        // panel's bottom edge on one side can show beside the top one: that line is the body's.
+        s.visibility.shown_sketches.retain(|id| *id != sketch);
+        let body = sides(&export(&mut s, camera(StandardView::Top), hidden));
+        assert!(
+            body.iter().filter(|l| **l == 30_000).count() >= 2 && body.iter().filter(|l| **l == 40_000).count() >= 2,
+            "hidden={hidden}: {body:?}"
+        );
+        s.visibility.shown_sketches.push(sketch);
+        assert!(crate::view::sketch_shown(&s, sketch));
+        let v = export(&mut s, camera(StandardView::Top), hidden);
+        assert_eq!(v["sketch"], 0, "hidden={hidden}: {v}");
+        let file = solidcraft_io::read_dxf_file(v["dxf"].as_str().unwrap()).unwrap();
+        assert!(file.entities().iter().all(|e| file.layer(e.layer()).unwrap().name() != "SKETCH"), "hidden={hidden}");
+        // Showing the sketch adds no line: the drawing is the body's lines alone.
+        assert_eq!(sides(&v), body, "hidden={hidden}");
+    }
+    // The sketch past the body keeps its own line: a second rectangle beside the panel.
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Beside"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[50,0],"p1":[60,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let v = export(&mut s, camera(StandardView::Top), "omit");
+    assert!(v["sketch"].as_u64().is_some_and(|n| n > 0), "{v}");
 }
 
 #[test]
@@ -374,12 +423,12 @@ fn view_dxf_zero_origin_puts_the_model_origin_at_the_drawing_zero() {
 
 /// The lines of a regular polygon with `n` sides round `c`, from angle `from` to `to`.
 /// Over a whole turn the last line returns to the first point and the ring is closed.
-fn ring(c: Vec2, r: f64, n: usize, from: f64, to: f64) -> Vec<DxfEntity> {
+fn ring(c: Vec2, r: f64, n: usize, from: f64, to: f64) -> Vec<(Vec2, Vec2)> {
     let at = |i: usize| {
         let t = from + (to - from) * i as f64 / n as f64;
         Vec2::new(c.x + r * t.cos(), c.y + r * t.sin())
     };
-    (0..n).map(|i| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(at(i), at(i + 1)) }).collect()
+    (0..n).map(|i| (at(i), at(i + 1))).collect()
 }
 
 #[test]
@@ -390,12 +439,12 @@ fn view_dxf_arcs_turn_a_tessellated_circle_into_a_circle_and_keep_polygons_as_li
     // circle for the 0.01 mm the drawing was made with, so they are polygons and stay lines.
     let fine = arcs::recognise(ring(c, 10., 64, 0., tau), 0.01);
     assert_eq!(fine.len(), 1, "{fine:?}");
-    let DxfShape::Circle { c: found, r } = &fine[0].shape else { panic!("{fine:?}") };
+    let DxfShape::Circle { c: found, r } = &fine[0] else { panic!("{fine:?}") };
     assert!((*found - c).len() < 1e-9 && (r - 10.).abs() < 1e-9, "{fine:?}");
     for sides in [6, 8, 32] {
         let polygon = arcs::recognise(ring(c, 10., sides, 0., tau), 0.01);
         assert_eq!(polygon.len(), sides, "{sides} sides");
-        assert!(polygon.iter().all(|e| matches!(e.shape, DxfShape::Line(..))));
+        assert!(polygon.iter().all(|shape| matches!(shape, DxfShape::Line(..))));
     }
 }
 
@@ -406,12 +455,10 @@ fn view_dxf_arcs_turn_a_run_of_lines_into_an_arc_that_runs_counter_clockwise() {
     // The run goes round clockwise, from 90 to 0 degrees: the DXF arc names 0 first, then 90.
     let run = arcs::recognise(ring(c, 10., 40, quarter, 0.), 0.01);
     assert_eq!(run.len(), 1, "{run:?}");
-    let DxfShape::Arc { r, a0, a1, .. } = &run[0].shape else { panic!("{run:?}") };
+    let DxfShape::Arc { r, a0, a1, .. } = &run[0] else { panic!("{run:?}") };
     assert!((r - 10.).abs() < 1e-9 && a0.abs() < 1e-6 && (a1 - 90.).abs() < 1e-6, "{run:?}");
     // A straight run, and a few lines, are never an arc.
-    let straight: Vec<DxfEntity> = (0..10)
-        .map(|i| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(Vec2::new(i as f64, 0.), Vec2::new(i as f64 + 1., 0.)) })
-        .collect();
+    let straight: Vec<(Vec2, Vec2)> = (0..10).map(|i| (Vec2::new(i as f64, 0.), Vec2::new(i as f64 + 1., 0.))).collect();
     assert_eq!(arcs::recognise(straight, 0.01).len(), 10);
     assert_eq!(arcs::recognise(ring(c, 10., 3, 0., quarter), 0.01).len(), 3);
 }
@@ -436,4 +483,154 @@ fn view_dxf_curves_arcs_write_a_round_hole_as_one_circle_and_the_default_still_w
     assert!(as_lines.len() > 40);
     let err = s.execute(CMD, &json!({"camera": top, "curves": "splines"})).unwrap_err().to_string();
     assert!(err.contains("curves must be lines or arcs"), "{err}");
+}
+
+/// With `curves: "arcs"` and dashed hidden lines, each kind of entity sits on its own layer: the
+/// circle and the plate's sides on VISIBLE, the blind hole's dashed runs on HIDDEN, and the hidden
+/// runs come first in the file, as they always have (the order is part of the file's bytes).
+#[test]
+fn view_dxf_curves_arcs_with_dashed_hidden_lines_keep_their_layers_and_order() {
+    let mut s = sample();
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":10,"base":[20,15,0],"operation":"cut","targets":["Plate"]}));
+    let v = run(&mut s, CMD, json!({"camera": camera(StandardView::Top), "curves": "arcs", "hidden": "dashed"}));
+    let file = solidcraft_io::read_dxf_file(v["dxf"].as_str().unwrap()).unwrap();
+    let on = |entity: &solidcraft_io::DxfFileEntity<DxfShape>| file.layer(entity.layer()).unwrap().name().to_string();
+    let layers: Vec<String> = file.entities().iter().map(on).collect();
+    let first_visible = layers.iter().position(|name| name == "VISIBLE").unwrap();
+    assert!(first_visible > 0 && layers[..first_visible].iter().all(|name| name == "HIDDEN"), "{layers:?}");
+    assert!(layers[first_visible..].iter().all(|name| name == "VISIBLE"), "{layers:?}");
+    let kinds = |layer: &str| -> Vec<&DxfShape> { file.entities().iter().filter(|e| on(e) == layer).map(|e| e.geometry()).collect() };
+    assert!(kinds("HIDDEN").iter().all(|shape| matches!(shape, DxfShape::Polyline { .. })));
+    assert_eq!(kinds("VISIBLE").iter().filter(|shape| matches!(shape, DxfShape::Circle { .. })).count(), 1);
+    assert_eq!(kinds("VISIBLE").iter().filter(|shape| matches!(shape, DxfShape::Line(..))).count(), 4);
+}
+
+// Frozen pre-X2 assembly recipe, with its real shared projection and legacy
+// byte-baseline seam. This is not another production writer or parser.
+fn legacy_view_projection_bytes(s: &Session, cam: &Camera, dashed: bool) -> String {
+    use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline};
+    let meshes =
+        mesh_lines::prepare(s, &s.world_state().unwrap(), CMD, 0.01, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused).unwrap();
+    let parts = sketch::parts(s, 0.01).unwrap();
+    let mut drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
+    drawing.sketch = mesh_lines::sketch_off_lines(std::mem::take(&mut drawing.sketch), &drawing.lines, 0.02 + drawing.eps);
+    let mut entities = Vec::new();
+    let mut hidden = Vec::new();
+    for line in drawing.lines {
+        if line.hidden {
+            if dashed {
+                hidden.push((line.a, line.b));
+            }
+        } else {
+            entities.push(DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(line.a, line.b) });
+        }
+    }
+    for path in connect(hidden) {
+        entities.push(DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points: path.points } });
+    }
+    let mut shown = 0;
+    for path in drawing.sketch.into_iter().filter(|path| dashed || !path.hidden) {
+        let layer = if path.hidden { "HIDDEN" } else { "SKETCH" };
+        shown += usize::from(!path.hidden);
+        let shape = match <[Vec2; 2]>::try_from(path.points) {
+            Ok([a, b]) => DxfShape::Line(a, b),
+            Err(points) => DxfShape::Polyline { points },
+        };
+        entities.push(DxfEntity { layer: layer.into(), shape });
+    }
+    let mut layers = vec![DxfLayer::new("VISIBLE", 7)];
+    if dashed {
+        layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", 8) });
+    }
+    if shown > 0 {
+        layers.push(DxfLayer::new("SKETCH", 5));
+    }
+    legacy_dxf_baseline(&layers, &entities).unwrap()
+}
+
+#[test]
+fn view_dxf_owned_file_keeps_current_header_tables_and_legacy_projection_bytes() {
+    let mut s = sample();
+    let cam = camera(StandardView::Top);
+    for hidden in ["omit", "dashed"] {
+        let expected = legacy_view_projection_bytes(&s, &cam, hidden == "dashed");
+        let doc = s.doc.clone();
+        let actual = export(&mut s, cam, hidden);
+        assert_eq!(actual["dxf"].as_str().unwrap().as_bytes(), expected.as_bytes());
+        assert!(expected.contains("$DWGCODEPAGE\n") && expected.contains("ACAD_GROUP\n"));
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    }
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,-5],"x_dir":[1,0,0],"y_dir":[0,1,0]}}));
+    run(&mut s, "sketch.line", json!({"points":[[-20,15],[60,15]]}));
+    for finish in [false, true] {
+        if finish {
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        for hidden in ["omit", "dashed"] {
+            let expected = legacy_view_projection_bytes(&s, &cam, hidden == "dashed");
+            let actual = export(&mut s, cam, hidden);
+            assert_eq!(actual["dxf"].as_str().unwrap().as_bytes(), expected.as_bytes(), "finish={finish}, hidden={hidden}");
+        }
+    }
+}
+
+#[test]
+fn hidden_line_runs_keep_endpoint_order_and_disconnected_runs() {
+    let (a, b, c) = (Vec2::new(0., 0.), Vec2::new(1., 0.), Vec2::new(2., 0.));
+    let (d, e) = (Vec2::new(10., 0.), Vec2::new(11., 0.));
+    let paths = connect(vec![(a, b), (c, b), (d, e)]);
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0].points, [a, b, c]);
+    assert_eq!(paths[1].points, [d, e]);
+    assert!(paths.iter().all(|path| path.hidden));
+}
+
+#[test]
+fn hidden_line_junctions_stop_runs_and_cycles_keep_the_repeated_endpoint() {
+    let (a, b, c, d) = (Vec2::new(0., 0.), Vec2::new(1., 0.), Vec2::new(1., 1.), Vec2::new(0., 1.));
+    let junction = connect(vec![(d, a), (a, b), (a, c)]);
+    assert_eq!(junction.len(), 3);
+    assert_eq!(junction[0].points, [d, a]);
+    assert_eq!(junction[1].points, [a, b]);
+    assert_eq!(junction[2].points, [a, c]);
+    let cycle = connect(vec![(a, b), (b, c), (c, d), (d, a)]);
+    assert_eq!(cycle.len(), 1);
+    assert_eq!(cycle[0].points, [a, b, c, d, a]);
+    assert!(junction.iter().chain(&cycle).all(|path| path.hidden));
+}
+
+#[test]
+fn view_dxf_front_view_of_a_tray_with_round_corner_reliefs_is_exported_not_refused() {
+    // #16814: the faces beside round corner reliefs are swept along the front view, and their
+    // mesh triangles tilt either way. Each of their mesh edges counted as a silhouette, and
+    // the hidden-line work budget ran out on the exact front view (yaw 0).
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"Steel 1.2mm","thickness":"1.2 mm","bend_radius":"1.2 mm","k_factor":"0.42","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center":[0,0],"corner":[100,90]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base","body_name":"Chassis"}));
+    run(&mut s, "sheet.flange", json!({"edges":[[0,-90,1.2],[0,90,1.2]],"height":70}));
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"edges":[[-100,0,1.2],[100,0,1.2],[-100,-88.8,35],[100,-88.8,35],[-100,88.8,35],[100,88.8,35]],"height":12,"corner_relief_shape":"round","corner_relief":3}),
+    );
+    let v = run(&mut s, CMD, json!({"hidden":"dashed","camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":2000,"fov":0.0}}));
+    // The tray's outline: the 200 mm base, the 70 mm walls (from z = 0 to 70).
+    let mut points = Vec::new();
+    for g in solidcraft_io::read_dxf(v["dxf"].as_str().unwrap()).unwrap() {
+        if let solidcraft_io::Geom2::Line(a, b) = g {
+            points.extend([a, b]);
+        }
+    }
+    let min = points.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |a, p| Vec2::new(a.x.min(p.x), a.y.min(p.y)));
+    let max = points.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |a, p| Vec2::new(a.x.max(p.x), a.y.max(p.y)));
+    assert!(min.dist(Vec2::new(-100., 0.)) < 1e-6 && max.dist(Vec2::new(100., 70.)) < 1e-6, "{min:?} {max:?}");
+    // Only the B-rep edges and real silhouettes are drawn: 1134 segments, 0.5 million of the
+    // 200 million work steps. Before, 76680 segments ran the budget out.
+    let stats = &v["stats"];
+    assert!(stats["segments"].as_u64().unwrap() < 2_000, "{stats}");
+    assert!(stats["occlusion_work"].as_u64().unwrap() < 2_000_000, "{stats}");
+    assert!(v["visible"].as_u64().unwrap() > 0 && v["hidden"].as_u64().unwrap() > 0, "{v}");
 }

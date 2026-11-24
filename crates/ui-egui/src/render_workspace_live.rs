@@ -480,6 +480,12 @@ pub(crate) fn set_paused(app: &mut SolveApp, paused: bool) {
         app.render_workspace.live.attempted = false;
     }
 }
+/// Show the fast model preview while keeping explicit render jobs and results.
+pub(super) fn show_model_preview(app: &mut SolveApp) {
+    app.render_workspace.view.live_paused = true;
+    app.render_workspace.live.reset();
+    app.render_workspace.live.suspended = true;
+}
 /// Preparation owns the same live-release priority as an explicit final. The
 /// original pending/running owners stay here until their release acknowledgements.
 pub(super) fn suspend_for_preparation(app: &mut SolveApp) {

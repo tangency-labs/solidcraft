@@ -17,11 +17,41 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::Serialize;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::{DesignLink, Document};
+use solidcraft_doc::{DesignLink, Document, FeatureKind};
+use solidcraft_sketch::LinkSource;
 
 /// The folder relative link paths are kept against: the design's own, once it has a file.
 fn base_dir(path: Option<&str>) -> Option<PathBuf> {
-    path.and_then(|p| absolute(Path::new(p)).parent().map(Path::to_path_buf))
+    path.and_then(|p| parent_dir(Path::new(p)))
+}
+
+/// Resolve directory aliases before comparing folders or working out `..`. Keep the final
+/// filename: a missing source or a file symlink must keep the name the user linked.
+fn parent_dir(path: &Path) -> Option<PathBuf> {
+    #[cfg(unix)]
+    if let Some(shown) = path.to_str()
+        && !shown.contains("://")
+        && solidcraft_io::vfs::remote(shown).is_none()
+        && solidcraft_io::vfs::check_new(shown).is_ok()
+        && let Ok(full) = std::path::absolute(path)
+    {
+        let mut parent = full.parent();
+        let mut missing = PathBuf::new();
+        while let Some(dir) = parent {
+            match dir.canonicalize() {
+                Ok(dir) => return Some(dir.join(missing)),
+                // A missing source folder still moves with the project. Stop at a dangling
+                // symlink or an inaccessible folder rather than guessing its destination.
+                Err(e) if e.kind() == ErrorKind::NotFound && dir.symlink_metadata().is_err_and(|e| e.kind() == ErrorKind::NotFound) => {}
+                _ => break,
+            }
+            let Some(name) = dir.file_name() else { break };
+            missing = Path::new(name).join(missing);
+            parent = dir.parent();
+        }
+    }
+    // Browser keys, Windows paths and unavailable folders retain their lexical spelling.
+    absolute(path).parent().map(Path::to_path_buf)
 }
 
 /// A path as given, made absolute when the platform can, with `.` and `..` worked out.
@@ -60,20 +90,28 @@ fn relative(base: &Path, target: &Path) -> Option<PathBuf> {
 
 /// How a link stores `file` for a design saved at `design` (`None`: not saved yet).
 pub(super) fn stored(design: Option<&str>, file: &Path) -> String {
-    let file = absolute(file);
-    match base_dir(design).and_then(|d| relative(&d, &file)) {
+    let whole = absolute(file);
+    let Some(base) = base_dir(design) else {
+        return whole.to_string_lossy().into_owned();
+    };
+    match relative(&base, &link_target(file)) {
         // Relative paths are written with `/`, so a design moves between systems with its parts.
         Some(rel) => rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"),
-        None => file.to_string_lossy().into_owned(),
+        None => whole.to_string_lossy().into_owned(),
     }
+}
+
+/// A link's absolute target, resolving directory aliases while keeping file symlinks distinct.
+pub(super) fn link_target(file: &Path) -> PathBuf {
+    parent_dir(file).zip(file.file_name()).map(|(dir, name)| dir.join(name)).unwrap_or_else(|| absolute(file))
 }
 
 /// The file a stored link path names, for a design saved at `design`.
 pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     let p = Path::new(link);
-    match base_dir(design) {
+    match p.is_relative().then(|| base_dir(design)).flatten() {
         // Browser storage keys do not let the OS resolve `..` for us.
-        Some(d) if p.is_relative() => absolute(&d.join(p)),
+        Some(d) => absolute(&d.join(p)),
         _ => p.to_path_buf(),
     }
 }
@@ -88,12 +126,82 @@ pub(super) fn rebase(link: &str, from: Option<&str>, to: &str) -> String {
 pub(super) fn located(doc: &mut Document, from: Option<&str>) {
     let whole = mapped(doc, &|path: &str| absolute(&resolve(from, path)).to_string_lossy().into_owned());
     put(doc, whole);
+    // A sketch text's font file is read against the design's folder too (#20502).
+    let fonts = {
+        let mut seen = Cow::Borrowed(&*doc);
+        font_paths_through(&mut seen, |font| whole_font(from, font));
+        match seen {
+            Cow::Owned(changed) => Some(changed),
+            Cow::Borrowed(_) => None,
+        }
+    };
+    if let Some(changed) = fonts {
+        *doc = changed;
+    }
 }
 
 /// `design`'s link paths as its file at `to` keeps them, its paths taken against `from`
 /// ([`map_paths`]).
 pub(super) fn filed(design: &mut Cow<'_, Document>, from: Option<&str>, to: &str) {
     map_paths(design, |path| rebase(path, from, to));
+    let base = base_dir(Some(to));
+    font_paths_through(design, |font| kept_font(base.as_deref(), font));
+}
+
+/// A font file path of a sketch text as the design keeps it in memory: relative to the design's
+/// folder, a path is made whole against it. `None`: a family name, a path that is already whole
+/// or spelled with `~` or `%VAR%`, or a design with no folder yet (the path then stays as typed).
+pub(super) fn whole_font(design: Option<&str>, font: &str) -> Option<String> {
+    let name = font.trim();
+    // A `~` or `%VAR%` spelling stays as typed, even where it does not expand (an unset variable).
+    if name.starts_with('~') || name.contains('%') {
+        return None;
+    }
+    let file = solidcraft_sketch::font_file_path(name)?;
+    if file != Path::new(name) || !file.is_relative() {
+        return None;
+    }
+    Some(absolute(&base_dir(design)?.join(&file)).to_string_lossy().into_owned())
+}
+
+/// A whole font file path as the design's file keeps it: relative to the design's folder `base`
+/// when the font lies inside it, so the folder with its fonts moves as one. A font elsewhere
+/// stays as written.
+fn kept_font(base: Option<&Path>, font: &str) -> Option<String> {
+    let file = Path::new(font.trim());
+    if !file.is_absolute() {
+        return None;
+    }
+    let base = base?;
+    // The path as typed, else where it leads through folder aliases, as `base` is resolved
+    // ([`link_target`]): a font typed through a linked folder is still inside the design's.
+    let target = link_target(file);
+    let inside = file.strip_prefix(base).or_else(|_| target.strip_prefix(base)).ok()?;
+    Some(inside.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"))
+}
+
+/// Every sketch text's font put through `map` (`None`: kept as it is). The design is copied only
+/// when a font changes.
+fn font_paths_through(design: &mut Cow<'_, Document>, map: impl Fn(&str) -> Option<String>) {
+    let changes = design.features.iter().any(|f| match &f.kind {
+        FeatureKind::Sketch { sketch, .. } => {
+            sketch.links.iter().any(|l| matches!(&l.source, LinkSource::Text { font: Some(font), .. } if map(font).is_some()))
+        }
+        _ => false,
+    });
+    if !changes {
+        return;
+    }
+    for feature in &mut design.to_mut().features {
+        let FeatureKind::Sketch { sketch, .. } = &mut feature.kind else { continue };
+        for link in &mut sketch.links {
+            if let LinkSource::Text { font: Some(font), .. } = &mut link.source
+                && let Some(new) = map(font)
+            {
+                *font = new;
+            }
+        }
+    }
 }
 
 /// Every link path of `design` put through `map`, whatever its kind: its component links and its
@@ -378,6 +486,53 @@ mod tests {
         assert_eq!(doc.drawings[0].sources[0].path.as_deref(), Some(whole.as_str()), "the design in memory is never rewritten");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn directory_aliases_keep_relative_links_for_existing_and_missing_sources() {
+        let dir = folder("directory-aliases").canonicalize().unwrap();
+        let project = dir.join("projects/example");
+        std::fs::create_dir_all(project.join("out")).unwrap();
+        let output_alias = dir.join("output");
+        let source_alias = dir.join("source");
+        std::os::unix::fs::symlink(project.join("out"), &output_alias).unwrap();
+        std::os::unix::fs::symlink(&project, &source_alias).unwrap();
+        std::fs::write(project.join("part.sc"), b"{}").unwrap();
+        for name in ["part.sc", "missing.sc", "missing-dir/part.sc"] {
+            let expected = format!("../{name}");
+            for design in [project.join("out/assembly.sc"), output_alias.join("assembly.sc"), output_alias.join("../out/assembly.sc")] {
+                for source in [project.join(name), source_alias.join(name)] {
+                    let design = design.to_str().unwrap();
+                    assert_eq!(stored(Some(design), &source), expected);
+                    assert_eq!(resolve(Some(design), &expected), project.join(name));
+                }
+            }
+        }
+        assert!(!project.join("missing.sc").exists());
+        assert!(!project.join("missing-dir").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_file_symlinks_keep_their_names_through_directory_aliases() {
+        let dir = folder("source-alias").canonicalize().unwrap();
+        let project = dir.join("projects/example");
+        std::fs::create_dir_all(project.join("out")).unwrap();
+        let alias = dir.join("source");
+        std::os::unix::fs::symlink(&project, &alias).unwrap();
+        std::fs::write(project.join("first.sc"), b"first").unwrap();
+        std::fs::write(project.join("second.sc"), b"second").unwrap();
+        let current = project.join("current.sc");
+        std::os::unix::fs::symlink("first.sc", &current).unwrap();
+        let design = project.join("out/assembly.sc").to_string_lossy().into_owned();
+        let link = stored(Some(&design), &alias.join("current.sc"));
+        assert_eq!(link, "../current.sc");
+        std::fs::remove_file(&current).unwrap();
+        std::os::unix::fs::symlink("second.sc", &current).unwrap();
+        assert_eq!(std::fs::read(resolve(Some(&design), &link)).unwrap(), b"second");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// One folder per test, with the files it needs.
     fn folder(test: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("solidcraft-design-link-{test}-{}", std::process::id()));
@@ -390,7 +545,7 @@ mod tests {
     fn reading_a_linked_design_reports_its_state_and_reason() {
         let dir = folder("read");
         let good = dir.join("plate.sc");
-        std::fs::write(&good, solidcraft_io::write_design(&Document::new("plate"))).unwrap();
+        std::fs::write(&good, solidcraft_io::write_design(&Document::new("plate")).unwrap()).unwrap();
         let read = read_linked_file(&good, None).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.name).ok());
         assert_eq!(read, Ok(Some("plate".to_string())));
         assert_eq!(link_presence(&good, None), None);
@@ -405,7 +560,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("folder.sc")).unwrap();
         assert!(matches!(state(&dir.join("folder.sc")), Some((LinkState::Unreadable, _))));
         // A design a newer SolidCraft saved is read like any other, and opens saying so (#12166).
-        let mut newer: serde_json::Value = serde_json::from_slice(&solidcraft_io::write_design(&Document::new("next"))).unwrap();
+        let mut newer: serde_json::Value = serde_json::from_slice(&solidcraft_io::write_design(&Document::new("next")).unwrap()).unwrap();
         newer["format"] = serde_json::json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
         std::fs::write(dir.join("next.sc"), newer.to_string()).unwrap();
         let opened =

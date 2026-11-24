@@ -19,6 +19,8 @@ fn schemas_and_the_key_check_agree() {
             "depth",
             "direction",
             "dot_grid",
+            "keepout_clip",
+            "margin",
             "mode",
             "name",
             "participants",
@@ -27,6 +29,7 @@ fn schemas_and_the_key_check_agree() {
             "sides",
             "size",
             "sketch",
+            "snap_inset",
             "targets",
             "through_all",
             "web",
@@ -46,7 +49,7 @@ fn the_contract_refuses_what_the_handler_refuses() {
     // The keywords are checked by the contract's own types.
     for bad in [
         json!({"size": 5, "web": 1, "shape": "blob"}),
-        json!({"size": 5, "web": 1, "mode": "raised"}),
+        json!({"size": 5, "web": 1, "mode": "flat"}),
         json!({"size": 5, "web": 1, "dot_grid": "triangle"}),
         json!({"size": 5, "web": 1, "clip": "x"}),
     ] {
