@@ -547,6 +547,12 @@ pub enum SurfaceFailure {
     /// or not finite): an analytic surface takes only a uniform scale that keeps it a
     /// surface. [`ErrorKind::InvalidInput`].
     ScaleNotUniform,
+    /// A segment of the UV curve to lift lies wholly outside the natural domain of a
+    /// B-spline surface whose evaluation is clamped to it (its box misses the domain by
+    /// more than the kernel's square-root zero relative to its size), where the surface
+    /// has no points to lift it onto (#20239). [`ErrorKind::OutsideDomain`],
+    /// status `SM_ERR`.
+    SegmentOffDomain,
     /// A point of the singular boundary is proven nearer the test point than the point
     /// found, so the boundary is not a pole. Class `failed`.
     SingularBoundaryNotPole {
@@ -957,6 +963,7 @@ impl SurfaceFailure {
             | Self::PointOutsideSweep
             | Self::PointOutsideVolumeDomain { .. }
             | Self::PseudoBoxOutsideDomain
+            | Self::SegmentOffDomain
             | Self::TrimDomainOutside
             | Self::ZeroStepOutsideDomain => ErrorKind::OutsideDomain,
             Self::Defect { .. } | Self::ApproximationNotConverged { .. } => ErrorKind::StageFailed,
@@ -1259,6 +1266,9 @@ impl core::fmt::Display for SurfaceFailure {
             Self::RevolutionAxisDegenerate => f.write_str("the axis of the surface of revolution has no direction"),
             Self::RotationSenseUndefined => f.write_str("the end rows give no sense to turn about the axis"),
             Self::ScaleNotUniform => f.write_str("an analytic surface takes only a uniform scale"),
+            Self::SegmentOffDomain => {
+                f.write_str("a segment of the UV curve lies wholly outside the surface's domain")
+            }
             // The phrase the site reported before it was named, kept word for word: the
             // wr57 replay tape (`goldens` `wr57_replay`, `heal.heal_data_p3`) hashes this
             // error's message as the answer at its substituted calls. The bounds stay in
@@ -1654,7 +1664,7 @@ mod tests {
     #[test]
     fn the_solver_causes_keep_their_status_and_say_their_class() {
         let op = "surface::op";
-        let cases: [(SurfaceFailure, i32, ErrorKind); 17] = [
+        let cases: [(SurfaceFailure, i32, ErrorKind); 18] = [
             (
                 SurfaceFailure::SolverWithout {
                     part: SolverPart::SurfaceCache,
@@ -1741,6 +1751,11 @@ mod tests {
                 ErrorKind::Failed,
             ),
             (SurfaceFailure::NothingLifted, SM_ERR, ErrorKind::Failed),
+            (
+                SurfaceFailure::SegmentOffDomain,
+                SM_ERR,
+                ErrorKind::OutsideDomain,
+            ),
             (
                 SurfaceFailure::SolverWithout {
                     part: SolverPart::CurveTree,

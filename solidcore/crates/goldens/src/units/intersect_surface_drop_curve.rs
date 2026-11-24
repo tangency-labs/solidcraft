@@ -1211,3 +1211,48 @@ impl UnitDiff for Runner {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `adv_trace2_start_outside` starts the trace at `(-5, -5)`, outside the plane's
+    /// domain `[0, 10]²`. A plane has one span in each direction, its knots the domain's
+    /// ends with no break between them, so the continuity domain the trace takes around a
+    /// start below both first knots is the span next to it: the whole `[0, 10]²` (#20239),
+    /// which the working domain `[0, 10]²` keeps. (Upstream compared the direction
+    /// `(4, 4)` with the knots instead and collapsed the domain to the point `(0, 0)`.)
+    #[test]
+    fn a_trace_from_outside_the_plane_works_on_its_whole_domain() {
+        let case = crate::case::regression_case(&Runner, "adv_trace2_start_outside");
+        let i: Inputs = case.parse().unwrap();
+        let k = Kernel::default();
+        let surface = rust_surface(&i.surface).unwrap();
+        let curve = rust_curve(&i.curve).unwrap();
+        let interval = Extent1d::from_min_max(i.interval[0], i.interval[1]);
+        let mut t =
+            SurfaceDropCurve::new(&k, &surface, &ext(i.domain), &curve, &interval).unwrap();
+        t.set_curve_is_on_surface(i.on_surface);
+        if let Some([a, bb]) = i.working_interval {
+            t.working_interval = Extent1d::from_min_max(a, bb);
+        }
+        if let Some(wd) = i.working_domain {
+            t.working_uv_domain = ext(wd);
+        }
+        t.curve_knot_vector.clone_from(&i.knots);
+        t.curve_breaks.clone_from(&i.breaks);
+        let mut r = Run {
+            last: None,
+            acc: TraceOutput::default(),
+        };
+        let mut o = Vec::new();
+        for op in &i.ops {
+            assert!(run_op(&mut t, &k, &surface, &curve, op, &mut r, &mut o).is_ok());
+        }
+        let wd = t.working_uv_domain;
+        assert_eq!(
+            [wd.min().x, wd.min().y, wd.max().x, wd.max().y],
+            [0.0, 0.0, 10.0, 10.0]
+        );
+    }
+}

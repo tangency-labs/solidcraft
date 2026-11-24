@@ -72,6 +72,22 @@
 //!   before. Both reads take the surface's own arrays ([`Surface::continuities`]) and
 //!   no cache: the lift is the same under every history, and makes no cache tree or UV
 //!   trim curves of a face during a Boolean operation.
+//! - **Off-domain segments** (#20239, not upstream). `LiftCurve` refuses a segment of
+//!   the UV curve on a B-spline surface that clamps its evaluation to its natural domain
+//!   (out-of-bounds evaluation not enabled) when the segment provably lies wholly
+//!   outside that domain, in a direction in which the surface is not periodic
+//!   ([`SurfaceFailure::SegmentOffDomain`]): the clamped evaluation there gives only the
+//!   points of the domain's edge, so the lift would be a curve on the edge, not the
+//!   segment. Other kinds (a plane, an extrusion, ...), whose evaluation may continue
+//!   the surface past its domain, are never refused. Upstream refuses such a segment only when its
+//!   continuity domain happens to collapse (WR-20239), which depended on the length of
+//!   the curve's derivative. The proof bisects the segment (at most
+//!   `OFF_DOMAIN_MAX_BOXES` certified boxes, an explicit stack, no recursion) and refuses
+//!   nothing it cannot prove; the segment must miss the domain by `EFF_ZERO_SQRT * (1 +
+//!   size)` of the direction's size (`off_domain_margin`). A curve kind with no certified
+//!   box, a composite whose boxes do not shrink and a proof past the box limit are not
+//!   refused (they are lifted onto the extrapolation); an iso parameter line is clamped onto the domain
+//!   by `sm_ExtractIsoCurve` before the test.
 //! - Debug-only work (`SM_ASSERT`, `SM_DEBUG_CODE` drawing) is not ported.
 
 use crate::curve::composite_curve::CompositeCurve;
@@ -1945,6 +1961,121 @@ fn extract_iso_curve(
     }
 }
 
+/// The most certified boxes [`Surface::uv_segment_off_domain`] makes for one segment
+/// before it gives up the proof (and refuses nothing).
+const OFF_DOMAIN_MAX_BOXES: usize = 256;
+
+/// The margin by which a UV segment must miss the parameter range `[lo, hi]` before
+/// [`Surface::uv_segment_off_domain`] counts it off the domain: [`EFF_ZERO_SQRT`]
+/// relative to the range's size, `EFF_ZERO_SQRT * (1 + (hi - lo))` (the form of
+/// `sm_ExtractIsoCurve`'s snap, `EFF_ZERO * (1 + size)`), so the same curve on the same
+/// surface reparameterised by any scale gets the same answer, and a curve that only
+/// overshoots the domain by rounding of the parameters is lifted as before.
+fn off_domain_margin(lo: f64, hi: f64) -> f64 {
+    EFF_ZERO_SQRT * (1.0 + (hi - lo))
+}
+
+impl Surface {
+    /// Not upstream (#20239): whether `uv_curve` over `ivl` provably lies wholly outside
+    /// the natural domain of this surface, a B-spline surface whose evaluation is
+    /// clamped to that domain (any other kind, or out-of-bounds evaluation, gives
+    /// `false`), by more than [`off_domain_margin`] of that direction's size, in a
+    /// parameter direction in which the surface is not periodic. `start` is the segment's start
+    /// point: one inside the domain shows at once that the segment is not off it. The
+    /// proof bisects `ivl` (an explicit stack of at most [`OFF_DOMAIN_MAX_BOXES`] boxes):
+    /// a part whose certified box ([`Curve::certified_bounding_box`], of the 2D B-spline's
+    /// copy in the plane `z = 0`) misses the domain is off it, a part whose midpoint is inside the domain ends the proof. A curve with
+    /// no certified box, an interval past the curve's natural interval, a failed box or
+    /// evaluation, and the box limit all give `false`: nothing unproved is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and cancellations of the calls (the other failures give
+    /// `false`); those of [`Surface::natural_uv_domain_with_nurb`] and
+    /// [`Surface::is_periodic`].
+    fn uv_segment_off_domain(
+        &self,
+        k: &Kernel,
+        uv_curve: &Curve,
+        ivl: &Extent1d,
+        start: Point2,
+    ) -> Result<bool> {
+        let domain = self.natural_uv_domain_with_nurb(k)?;
+        // Only a B-spline surface that clamps its evaluation to its natural domain (out
+        // of bounds evaluation not enabled, as upstream's `EvaluateSimple`) is tested:
+        // its evaluation at a UV point off the domain is the point of the domain's edge,
+        // so a lift of a segment wholly off it is a curve on that edge, not the segment.
+        // Other kinds may continue the surface past their domain (a plane, an
+        // extrusion's linear direction), so they are never refused.
+        let SurfaceKind::BSpline(b) = self.kind() else {
+            return Ok(false);
+        };
+        if b.is_out_of_bounds_enabled() {
+            return Ok(false);
+        }
+        let (lo, hi) = (domain.min(), domain.max());
+        let (tol_u, tol_v) = (off_domain_margin(lo.x, hi.x), off_domain_margin(lo.y, hi.y));
+        let off_u = |x: f64| x < lo.x - tol_u || x > hi.x + tol_u;
+        let off_v = |y: f64| y < lo.y - tol_v || y > hi.y + tol_v;
+        if !off_u(start.x) && !off_v(start.y) {
+            return Ok(false);
+        }
+        let natural = uv_curve.natural_interval();
+        if !(natural.min() <= ivl.min() && ivl.max() <= natural.max()) {
+            return Ok(false);
+        }
+        // a periodic direction has the surface's points on every period
+        let periodic_u = self.is_periodic(k, &domain, SurfParamType::U)?;
+        let periodic_v = self.is_periodic(k, &domain, SurfParamType::V)?;
+        let misses = |min: Vec3, max: Vec3| {
+            (!periodic_u && (max.x < lo.x - tol_u || min.x > hi.x + tol_u))
+                || (!periodic_v && (max.y < lo.y - tol_v || min.y > hi.y + tol_v))
+        };
+
+        // A 2D B-spline has no certified piece hull (its `z` is the 2D marker), so its
+        // boxes would stop shrinking at the span's: its copy in the plane `z = 0` has the
+        // same `u` and `v`, and boxes that shrink with the part.
+        let flat = match uv_curve.kind() {
+            CurveKind::BSpline(b) if b.dim() == 2 => {
+                let mut c = b.clone();
+                ignored(c.convert_to_3d())?.map(|()| Curve::from(c))
+            }
+            _ => None,
+        };
+        let boxed = flat.as_ref().unwrap_or(uv_curve);
+
+        let mut parts = vec![*ivl];
+        let mut boxes = 0_usize;
+        while let Some(part) = parts.pop() {
+            boxes += 1;
+            if boxes > OFF_DOMAIN_MAX_BOXES {
+                return Ok(false);
+            }
+            let Some(Some(b)) = ignored(boxed.certified_bounding_box(k, &part))? else {
+                return Ok(false);
+            };
+            if misses(b.min(), b.max()) {
+                continue;
+            }
+            let mid = part.evaluate(0.5);
+            let Some(q) =
+                ignored(uv_curve.evaluate(k, mid, 0, true, true))?.and_then(|v| v.first().copied())
+            else {
+                return Ok(false);
+            };
+            if !misses(q, q) {
+                return Ok(false);
+            }
+            if !(part.min() < mid && mid < part.max()) {
+                return Ok(false);
+            }
+            parts.push(Extent1d::from_min_max(mid, part.max()));
+            parts.push(Extent1d::from_min_max(part.min(), mid));
+        }
+        Ok(true)
+    }
+}
+
 /// The lifted curve of [`Surface::lift_curve`].
 #[derive(Debug, Clone)]
 pub struct LiftedCurve {
@@ -1968,7 +2099,11 @@ impl Surface {
     /// # Errors
     ///
     /// `SM_ERR` when no segment could be lifted or a segment's continuous domain is
-    /// empty; those of [`Surface::continuities`] (upstream: `SM_ERR_NULL_POINTER`
+    /// empty; [`SurfaceFailure::SegmentOffDomain`] (`SM_ERR`, not upstream, #20239) when
+    /// certified boxes prove a segment wholly outside the natural domain of a B-spline
+    /// surface with clamped evaluation (an iso
+    /// parameter line is clamped onto the domain by `sm_ExtractIsoCurve` first and is
+    /// not tested); those of [`Surface::continuities`] (upstream: `SM_ERR_NULL_POINTER`
     /// without a surface cache) and of the checked (`SER`) calls.
     #[allow(clippy::too_many_lines)]
     pub fn lift_curve(
@@ -2167,6 +2302,15 @@ impl Surface {
             // skip degenerate curves
             if degenerate {
                 continue;
+            }
+
+            // Not upstream (#20239): a segment wholly off the surface's domain has no
+            // surface points to lift onto
+            if self.uv_segment_off_domain(k, uv_curve, &ivl, pnt)? {
+                return Err(SolidError::surface(
+                    OP_LIFT,
+                    SurfaceFailure::SegmentOffDomain,
+                ));
             }
 
             // approximate the trace with a 3D BSplineCurve to approx_tol_3d (SER:
@@ -2753,6 +2897,189 @@ mod tests {
         asked.continuities(&k).unwrap();
         same(&lift(&k, &asked));
     }
+    /// A biquadratic dome over `[0, 1]²`: the corners and edge midpoints at height 0,
+    /// the middle control point at height 1, not periodic in either direction.
+    fn dome() -> Surface {
+        let row = |x: f64, z: f64| {
+            vec![
+                Vec3::new(x, 0.0, 0.0),
+                Vec3::new(x, 1.0, z),
+                Vec3::new(x, 2.0, 0.0),
+            ]
+        };
+        let rows = [row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)];
+        bspline_surface(2, 2, &[&rows[0], &rows[1], &rows[2]])
+    }
+
+    /// `LiftCurve` refuses a UV segment wholly off its surface's domain, whatever the
+    /// speed of its parameterisation (#20239): the line from `(1.2, 0.2)` along
+    /// `(0.6, 0.7)·f`, `f` in `1e-3`, `1`, `1e3` (and back the other way), keeps
+    /// `u >= 1.2 > 1`, off the dome's domain `[0, 1]²`, where the dome's (clamped)
+    /// evaluation gives only the points of its edge `u = 1`.
+    /// Before the fix the refusal came only from a continuity domain that collapsed when
+    /// `du/dt` was below the last knot, so a fast segment was lifted onto the dome's
+    /// extrapolation. A segment that starts just off the domain and runs into it is not
+    /// refused, and one wholly inside is lifted within the tolerance.
+    #[test]
+    fn lift_curve_refuses_a_segment_wholly_off_the_domain() {
+        let k = Kernel::default();
+        let s = dome();
+        let tol = 1e-6;
+        let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let line = |a: (f64, f64), b: (f64, f64)| {
+            Curve::from(crate::curve::line::Line::from_points(
+                Point3::new(a.0, a.1, 0.0),
+                Point3::new(b.0, b.1, 0.0),
+                2,
+            ))
+        };
+        for f in [1e-3, 1.0, 1e3] {
+            let (a, b) = ((1.2, 0.2), (1.2 + 0.6 * f, 0.2 + 0.7 * f));
+            for uv in [line(a, b), line(b, a)] {
+                let e = s
+                    .lift_curve(&k, &dom, &uv, &interval, tol, false)
+                    .unwrap_err();
+                assert!(
+                    matches!(e.surface_failure(), Some(SurfaceFailure::SegmentOffDomain)),
+                    "f = {f:e}: {e:?}"
+                );
+            }
+        }
+        // not wholly off: not refused (the part off the domain is the caller's)
+        let entering = line((-0.01, 0.2), (0.8, 0.7));
+        assert!(s
+            .lift_curve(&k, &dom, &entering, &interval, tol, false)
+            .is_ok());
+        let inside = line((0.1, 0.2), (0.8, 0.7));
+        let lifted = s
+            .lift_curve(&k, &dom, &inside, &interval, tol, false)
+            .unwrap();
+        assert!(lifted.max_approx_dev <= tol, "{:e}", lifted.max_approx_dev);
+    }
+
+    /// The off-domain refusal of `LiftCurve` is relative to the domain's size (#20239
+    /// review): on the dome reparameterised to `[0, s]²`, `s` in `1e-3`, `1`, `1e3`, a
+    /// segment beside its edge `u = s`, with `u` from `s + g` to `s + 1.5 g`, is lifted
+    /// for `g` half the margin `EFF_ZERO_SQRT * (1 + s)` (it lies within the margin) and
+    /// refused for `g` twice the margin with [`SurfaceFailure::SegmentOffDomain`].
+    #[test]
+    fn lift_curve_off_domain_margin_scales_with_the_domain() {
+        let k = Kernel::default();
+        let tol = 1e-6;
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        for scale in [1e-3, 1.0, 1e3] {
+            let row = |x: f64, z: f64| {
+                vec![
+                    CPoint::from_point(Vec3::new(x, 0.0, 0.0)),
+                    CPoint::from_point(Vec3::new(x, 1.0, z)),
+                    CPoint::from_point(Vec3::new(x, 2.0, 0.0)),
+                ]
+            };
+            let pw = vec![row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)];
+            let knots: Vec<f64> = clamped_knots(2).iter().map(|t| t * scale).collect();
+            let s = Surface::from(
+                BSplineSurface::from_data(
+                    2,
+                    2,
+                    2,
+                    2,
+                    knots.len() - 1,
+                    knots.len() - 1,
+                    &pw,
+                    &knots,
+                    &knots,
+                )
+                .unwrap(),
+            );
+            let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+            assert_eq!(dom.max().x, scale);
+            let edge = scale;
+            let margin = EFF_ZERO_SQRT * (1.0 + scale);
+            // slanted (an iso line is clamped onto the domain by `sm_ExtractIsoCurve`
+            // first): u runs from `edge + gap` to `edge + 1.5 gap`
+            let along_edge = |gap: f64| {
+                Curve::from(crate::curve::line::Line::from_points(
+                    Point3::new(edge + gap, 0.2 * scale, 0.0),
+                    Point3::new(edge + 1.5 * gap, 0.8 * scale, 0.0),
+                    2,
+                ))
+            };
+            let near = s.lift_curve(&k, &dom, &along_edge(0.5 * margin), &interval, tol, false);
+            assert!(near.is_ok(), "scale {scale:e}: {near:?}");
+            let far = s
+                .lift_curve(&k, &dom, &along_edge(2.0 * margin), &interval, tol, false)
+                .unwrap_err();
+            assert!(
+                matches!(
+                    far.surface_failure(),
+                    Some(SurfaceFailure::SegmentOffDomain)
+                ),
+                "scale {scale:e}: {far:?}"
+            );
+        }
+    }
+
+    /// The off-domain refusal holds only where the surface has no points to lift onto
+    /// (#20239 review). On the planar patch `S(u, v) = (u, v, 0)` over `[0, 1]²`, the
+    /// segment from `(3, 0)` to `(4, 1)` lifts, with clamped evaluation, onto the edge
+    /// `u = 1` (its deviation is 3): it is refused. With out-of-bounds evaluation
+    /// enabled the patch's evaluation there is the plane, and the segment is lifted
+    /// onto it. An analytic plane, whose evaluation continues past its domain, is never
+    /// refused, even past its domain's sentinel.
+    #[test]
+    fn lift_curve_refuses_off_the_domain_only_where_evaluation_is_clamped() {
+        let k = Kernel::default();
+        let row = |x: f64| vec![Vec3::new(x, 0.0, 0.0), Vec3::new(x, 1.0, 0.0)];
+        let (r0, r1) = (row(0.0), row(1.0));
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let tol = 1e-6;
+        let at = |u0: f64, u1: f64| {
+            Curve::from(crate::curve::line::Line::from_points(
+                Point3::new(u0, 0.0, 0.0),
+                Point3::new(u1, 1.0, 0.0),
+                2,
+            ))
+        };
+        let clamped = bspline_surface(1, 1, &[&r0, &r1]);
+        let dom = clamped.natural_uv_domain_with_nurb(&k).unwrap();
+        let e = clamped
+            .lift_curve(&k, &dom, &at(3.0, 4.0), &interval, tol, false)
+            .unwrap_err();
+        assert!(
+            matches!(e.surface_failure(), Some(SurfaceFailure::SegmentOffDomain)),
+            "{e:?}"
+        );
+        let mut open = bspline_surface(1, 1, &[&r0, &r1]);
+        let SurfaceKind::BSpline(b) = open.kind_mut() else {
+            unreachable!()
+        };
+        *b.out_of_bounds_enabled_mut() = true;
+        let lifted = open
+            .lift_curve(&k, &dom, &at(3.0, 4.0), &interval, tol, false)
+            .unwrap();
+        assert!(lifted.max_approx_dev <= tol, "{:e}", lifted.max_approx_dev);
+        let ivl = lifted.curve.natural_interval();
+        for t in [ivl.min(), 0.5 * (ivl.min() + ivl.max()), ivl.max()] {
+            let p = lifted.curve.evaluate_point(&k, t).unwrap();
+            assert!(
+                p.z.abs() <= tol && p.x >= 3.0 - tol && p.x <= 4.0 + tol,
+                "{p:?}"
+            );
+        }
+        let flat = plane(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+        let pdom = flat.natural_uv_domain_with_nurb(&k).unwrap();
+        let far = pdom.max().x;
+        let r = flat.lift_curve(&k, &pdom, &at(far + 1.0, far + 2.0), &interval, tol, false);
+        assert!(
+            !matches!(
+                r.as_ref().err().and_then(|e| e.surface_failure()),
+                Some(SurfaceFailure::SegmentOffDomain)
+            ),
+            "{r:?}"
+        );
+    }
+
     /// `LiftCurve` with the continuity checks skipped, during a Boolean operation, on a
     /// curve-bounded surface over the roof (and one nested in another) is the lift on the
     /// bare roof: the segment's continuity domain is the basis's (#20054). With the

@@ -35,12 +35,12 @@
 //! operation, then the query after it. A history step that fails writes `-1`
 //! (`DOM_CONT_HISTORY_FAILED`) before the query's record: only `GetTree` of a
 //! curve-bounded surface fails there (0052, 0074, 0075); any other failed step is a
-//! harness error. A curve-bounded surface answers for its basis (#20054). A case is known
-//! failing under #20239 (`expected/known_failing.json`) exactly when its answer is shown
-//! wrong: it changes with the direction's length, or it is a box of zero width at status
-//! 0; the test `known_failing_domcont_cases_are_shown_wrong` holds that evidence both
-//! ways. A box that does not contain an off-domain start point is not by itself wrong:
-//! whether such a start should be refused or clamped is #20239's decision.
+//! harness error. A curve-bounded surface answers for its basis (#20054). Off the
+//! domain the end knots clamp from the side the start point is on (#20239; upstream
+//! compared the direction's component, WR-20239), so such a start gets the span next to
+//! it whatever the direction: the test
+//! `domcont_answers_are_the_span_next_to_the_start_point` works every such answer out
+//! from the knots and continuities.
 //!
 //! Deferred cases: the paths into unported units (every surface cache build needs
 //! `SmSurface::CalculateContinuities`, `surface.surface_p6`: `Cache`, `BBox` of
@@ -1438,7 +1438,7 @@ mod tests {
     /// The blessed `GetDomainWithContinuity` cases on a curve-bounded surface answer what
     /// the bare basis answers made fresh (no history, outside a Boolean operation)
     /// (#20054). Each start point is on the natural domain except domhist0052's, which is
-    /// off it in u (its answer is not shown wrong: #20239). Where the history step failed
+    /// off it in u (it gets the span next to it: #20239). Where the history step failed
     /// (`GetTree` of the kind), the record is the marker followed by that answer.
     #[test]
     fn curve_bounded_domhist_rows_answer_as_the_fresh_basis() {
@@ -1470,20 +1470,48 @@ mod tests {
         }
     }
 
-    /// The evidence of the known-failing `DomCont` cases, both ways, so a fix of #20239
-    /// shows. Over every `DomCont` case (STEP surfaces included):
-    /// - a case is listed in `expected/known_failing.json` exactly when its answer is shown
-    ///   wrong: (a) it changes when the direction is scaled by a positive factor (the same
-    ///   request about the same surface), or (c) it is a box of zero width in u or v at
-    ///   status 0, which is neither a refusal nor a span;
-    /// - so every case with a golden line answers the same under every scaling, with a box
-    ///   of positive width in both directions.
+    /// The `[lo, hi]` span of `knots` in one direction that `GetDomainWithContinuity`
+    /// answers for a start parameter `x` off that direction's natural domain, worked
+    /// from the knots and their continuities alone (#20239): the knots where the
+    /// surface is less continuous than `c` are its breaks, and the end knots bound the
+    /// domain whatever `c` is. A start before the first knot gets the span from the
+    /// first knot to the next break (the last knot when there is none, as for `c` =
+    /// `Discontinuous`, which no knot is less continuous than); one after the last knot
+    /// gets the span from the break before it (else the first knot) to the last. `None`
+    /// when `x` is on the domain.
+    fn end_span(knots: &[f64], conts: &[ContinuityType], c: ContinuityType, x: f64) -> Option<(f64, f64)> {
+        let breaks: Vec<f64> = knots
+            .iter()
+            .zip(conts)
+            .filter(|(_, k)| (**k as i32) < (c as i32))
+            .map(|(k, _)| *k)
+            .collect();
+        let (first, last) = (*knots.first()?, *knots.last()?);
+        if x < first {
+            Some((first, breaks.iter().copied().find(|b| *b > first).unwrap_or(last)))
+        } else if x > last {
+            Some((breaks.iter().copied().rev().find(|b| *b < last).unwrap_or(first), last))
+        } else {
+            None
+        }
+    }
+
+    /// Every `DomCont` case (STEP surfaces included) answers by construction after the
+    /// fix of #20239 (`GetDomainWithContinuity` clamps at an end knot from the side of it
+    /// the start point is on, not from the direction's component):
+    /// - the answer is the same under every positive scaling of the direction (the same
+    ///   request about the same surface), and a domain is a box of positive width in both
+    ///   directions;
+    /// - in a direction where the start point is off the natural domain, the answer is
+    ///   the span next to it, [`end_span`], worked from the knots and continuities, and
+    ///   does not depend on the direction's sign either;
+    /// - no `DomCont` case is known failing.
     ///
-    /// A box that does not contain the start point is not by itself treated as wrong:
-    /// whether a start point off the domain should be refused or clamped is #20239's
-    /// decision. Every listed case does start off the natural domain.
+    /// Before the fix 30 cases (all off the domain) answered a zero-width box or changed
+    /// with the direction's length; every one of them is among the cases checked here.
     #[test]
-    fn known_failing_domcont_cases_are_shown_wrong() {
+    fn domcont_answers_are_the_span_next_to_the_start_point() {
+        let k = &Kernel::default();
         let tol = solidcore::math::EFF_ZERO_SQRT;
         let dir = crate::case::repo_root().join("crates/goldens/expected");
         let listed = crate::golden::known_failing(&dir, Runner.id()).expect("known failing");
@@ -1493,8 +1521,7 @@ mod tests {
                 seeds: 16,
             })
             .expect("cases");
-        let mut listed_seen = 0;
-        let mut lines_seen = 0;
+        let (mut seen, mut off_seen) = (0, 0);
         for case in cases {
             let Ok(inputs) = case.parse::<Inputs>() else {
                 continue;
@@ -1503,33 +1530,42 @@ mod tests {
                 continue;
             };
             let name = &case.name;
+            seen += 1;
+            assert!(!listed.contains_key(name), "{name}: listed known failing");
             let answers = scaled_answers(&inputs);
-            let varies = answers.iter().any(|a| *a != answers[1]);
+            assert!(answers.iter().all(|a| *a == answers[1]), "{name}: {answers:?}");
             let fresh = fresh_basis(&inputs);
             let s = wrapped_of(fresh.wrap, &fresh.surf).expect("surface");
-            let degenerate = s
-                .domain_with_continuity(
-                    &Kernel::default(),
-                    continuity(*cont).expect("continuity"),
-                    p2(*uv),
-                    Vec2::new(vec[0], vec[1]),
-                )
-                .is_ok_and(|d| d.min().x == d.max().x || d.min().y == d.max().y);
-            let wrong = varies || degenerate;
-            assert_eq!(
-                listed.contains_key(name),
-                wrong,
-                "{name}: varies {varies}, degenerate {degenerate}: {answers:?}"
+            let c = continuity(*cont).expect("continuity");
+            let ask = |f: f64| {
+                s.domain_with_continuity(k, c, p2(*uv), Vec2::new(vec[0] * f, vec[1] * f))
+            };
+            let Ok(got) = ask(1.0) else {
+                continue;
+            };
+            assert!(
+                got.min().x < got.max().x && got.min().y < got.max().y,
+                "{name}: {got:?}"
             );
-            if wrong {
-                listed_seen += 1;
-                let (du, dv) = off_domain(&inputs);
-                assert!(du > tol || dv > tol, "{name}: listed but on the domain");
-            } else {
-                lines_seen += 1;
+            let (du, dv) = off_domain(&inputs);
+            let reversed = ask(-1.0).expect("reversed");
+            for (param, off, x, lo, hi, rlo, rhi) in [
+                (SurfParamType::U, du, uv[0], got.min().x, got.max().x, reversed.min().x, reversed.max().x),
+                (SurfParamType::V, dv, uv[1], got.min().y, got.max().y, reversed.min().y, reversed.max().y),
+            ] {
+                if off <= tol {
+                    continue;
+                }
+                off_seen += 1;
+                let (knots, _) = s.knots_with_nurb(k, param, None).expect("knots");
+                let (_, conts) = s.calculate_continuities(k, param).expect("continuities");
+                let want = end_span(&knots, &conts, c, x).unwrap_or_else(|| {
+                    panic!("{name} {param:?}: start {x} off by {off}, knots {knots:?}, conts {conts:?}, got {got:?}")
+                });
+                assert_eq!((lo, hi), want, "{name} {param:?}: start {x}");
+                assert_eq!((rlo, rhi), want, "{name} {param:?}: reversed direction");
             }
         }
-        assert_eq!(listed_seen, listed.len(), "every listed case is a DomCont case");
-        assert!(lines_seen > 0);
+        assert!(seen > 0 && off_seen >= 30, "{seen} cases, {off_seen} off the domain");
     }
 }

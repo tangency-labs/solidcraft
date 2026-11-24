@@ -2162,6 +2162,13 @@ impl From<HarnessError> for Fail {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The refusals [`status`] recorded on this thread, so that a test can name the
+    /// failure behind a recorded status (test builds only).
+    static REFUSALS: std::cell::RefCell<Vec<SolidError>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// The status of a result (`0` success, the upstream code of an upstream error);
 /// `None` with [`NULL_DEREF`] pushed for undefined behaviour upstream; `Err` for
 /// everything else (unported callees are reported by the caller).
@@ -2172,6 +2179,8 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             Ok(Some(v))
         }
         Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
+            #[cfg(test)]
+            REFUSALS.with(|r| r.borrow_mut().push(e.clone()));
             o.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)));
             Ok(None)
         }
@@ -4568,6 +4577,36 @@ fn zero_header_cases(unit: &str, cases: &[Case]) -> Result<Vec<Case>, HarnessErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// gen0152, gen0258, gen0274 and gen0577 (#20239) are one class: `ExtendTrimEdges`
+    /// lifts an extended UV trim curve that lies wholly outside the extended surface's
+    /// natural domain onto a surface whose evaluation continues past that domain (not
+    /// a B-spline clamped to it). Before the fix `GetDomainWithContinuity` compared the
+    /// direction's component with the end knot, so the lift depended on the length of
+    /// the curve's derivative: gen0274 and gen0577 were lifted and gen0152 and gen0258
+    /// refused at a collapsed continuity domain. Now all four are lifted (gen0274 and
+    /// gen0577 unchanged), and none is refused by `LiftCurve`.
+    #[test]
+    fn extend_trim_edges_lifts_every_curve_of_the_off_domain_class_alike() {
+        for name in ["gen0152", "gen0258", "gen0274", "gen0577"] {
+            let case = crate::case::regression_case(&Runner, name);
+            REFUSALS.with(|r| r.borrow_mut().clear());
+            let output = Runner.run_rust(&case).unwrap();
+            let state = output.values.get("state").unwrap();
+            assert!(
+                state.windows(2).any(|w| w == [12.0, 0.0]),
+                "{name}: no ExtendTrimEdges succeeded"
+            );
+            let refusals = REFUSALS.with(|r| r.borrow().clone());
+            assert!(
+                !refusals.iter().any(|e| matches!(
+                    e.surface_failure(),
+                    Some(solidcore::error::surface::SurfaceFailure::SegmentOffDomain)
+                ) || format!("{e:?}").contains("lift_curve")),
+                "{name}: {refusals:?}"
+            );
+        }
+    }
 
     fn import_input(name: &str) -> Inputs {
         Inputs {
