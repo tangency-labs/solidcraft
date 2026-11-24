@@ -16,11 +16,6 @@ use serde_json::json;
 
 use crate::SolveApp;
 
-#[cfg(test)]
-fn tr(id: &'static str) -> &'static str {
-    solidcraft_ui_text::tr_by_id(id)
-}
-
 /// The PDF's file name: the drawing's name, or the design's.
 fn file_name(app: &SolveApp) -> String {
     let drawing = app.session.drawing("drawing.print").ok().map(|d| d.name.clone()).filter(|n| !n.is_empty());
@@ -152,7 +147,7 @@ mod tests {
         let bytes = std::fs::read(&paths[0]).unwrap();
         let text = String::from_utf8_lossy(&bytes);
         assert!(bytes.starts_with(b"%PDF-") && text.contains("/Count 2") && text.contains("/PrintScaling /None"));
-        assert_eq!(h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default(), tr("ui.drawing_print.opened"));
+        assert_eq!(h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default(), tr!("ui.drawing_print.opened"));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

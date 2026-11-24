@@ -2127,7 +2127,7 @@ fn appearance_inspector_all_users_replaces_exact_look_once_without_changing_mass
     h.step(&json!({"click":{"handle":"render:stage:look"}})).unwrap();
     assert_eq!(selected_editor(&h.app), Editor::Appearance);
     let undo = h.app.session.undo.len();
-    h.step(&json!({"click":{"handle":format!("dialog:{}:{}", h.app.tr_by_id("render.inspector_applies_to"), solidcraft_ui_text::format("render.inspector_all_users", &[("count", "2")]))}}))
+    h.step(&json!({"click":{"handle":format!("dialog:{}:{}", h.app.tr_by_id("render.inspector_applies_to"), tr!("render.inspector_all_users", count = "2"))}}))
         .unwrap();
     h.step(&json!({"click":{"handle":"render:appearance:preview:replace"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog: search"}})).unwrap();
@@ -2644,7 +2644,7 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
     assert!((inspector.width() - 305.0).abs() <= 1.0, "{inspector:?}");
     assert!((inspector.top() - browser.top()).abs() <= 1.0);
     assert!(inspector.bottom() < shots.top());
-    assert!(h.widget(&solidcraft_ui_text::format("render.inspector_all_users", &[("count", "2")])).is_some());
+    assert!(h.widget(&tr!("render.inspector_all_users", count = "2")).is_some());
     assert!(h.widget(h.app.tr_by_id("render.inspector_save_library")).is_some());
     assert_eq!(h.app.session.doc.to_json(), before);
     assert_eq!(h.app.session.undo.len(), undo);

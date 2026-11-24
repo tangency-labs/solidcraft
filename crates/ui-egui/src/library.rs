@@ -492,7 +492,7 @@ pub(super) fn available(app: &SolveApp) -> bool {
 }
 
 fn choose_folder(app: &mut SolveApp) {
-    app.pick_folder(|app, path| {
+    app.pick_folder("", |app, path| {
         if let Some(path) = path {
             app.library.set_root(PathBuf::from(path));
             app.preferences.show_document_browser = true;
@@ -1091,7 +1091,7 @@ mod tests {
     #[test]
     fn document_browser_is_hidden_until_explicitly_enabled() {
         let mut h = Harness::new();
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         h.app.home.open = false;
         h.frames(3);
         assert!(!h.app.preferences.show_document_browser);
@@ -1161,7 +1161,7 @@ mod tests {
 
     fn folder_picker(h: &mut Harness, path: Option<String>) {
         h.app.preferences.show_document_browser = true;
-        h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(path.clone()))));
+        h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(path.clone()))));
     }
 
     #[test]

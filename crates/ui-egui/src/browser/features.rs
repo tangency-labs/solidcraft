@@ -457,6 +457,7 @@ fn feature_row(
     let (component, path) = (here.component, here.path);
     let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
     let is_sketch = matches!(feature.kind, FeatureKind::Sketch { .. });
+    let is_construction = feature.kind.is_construction();
     let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
     // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
     let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
@@ -471,11 +472,18 @@ fn feature_row(
     write_order_key(here, id, &mut order_key);
     app.tree.remember(&order_key);
     let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
-    // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
-    // bodies it made (#5099); a component listed on its own stands for all of its placements.
+    // A sketch row has the eye its Sketches folder row has. A construction plane, axis or point has
+    // its own visibility in the design Origin. A feature's eye shows and hides the bodies it made
+    // (#5099); a component listed on its own stands for all of its placements.
     let placement = (component == 0 || !path.is_empty()).then_some((component, path));
-    let (has_bodies, visible) = if is_sketch { (false, crate::browser::sketch_visible(app, id)) } else { made_bodies_shown(app, id, placement) };
-    let eye = (is_sketch || has_bodies).then_some(visible);
+    let (has_bodies, visible) = if is_sketch {
+        (false, crate::browser::sketch_visible(app, id))
+    } else if is_construction {
+        (false, !app.session.visibility.hidden_origin.contains(&label))
+    } else {
+        made_bodies_shown(app, id, placement)
+    };
+    let eye = (is_sketch || is_construction || has_bodies).then_some(visible);
     let status = match current_model(app) {
         Some(model) => model.status(app, id),
         None => crate::timeline::feature_status(app, id),
@@ -506,6 +514,8 @@ fn feature_row(
     );
     if r.eye && is_sketch {
         crate::browser::set_sketch_visible(app, id, !visible);
+    } else if r.eye && is_construction {
+        let _ = app.run("browser.visibility", json!({ "items": [&label], "visible": !visible }));
     } else if r.eye {
         let mut p = json!({"visible": !visible, "features": [id]});
         if !path.is_empty() {
@@ -766,6 +776,28 @@ mod tests {
         assert_eq!(h.app.session.visibility.hidden_bodies, ["Plate"]);
         h.step(&json!({"click":{"handle":"eye:Box1"}})).unwrap();
         assert!(h.app.session.visibility.hidden_bodies.is_empty());
+    }
+
+    /// A construction plane feature row has an eye to show and hide it in the viewport.
+    #[test]
+    fn a_construction_plane_feature_row_has_an_eye_to_show_and_hide_it() {
+        let mut h = Harness::new();
+        let made = h.app.run("construct.plane.offset", json!({"base":"XY","offset":10,"name":"WorkPlane"})).unwrap();
+        let row = format!("row:browser-feature:c0:{}", made["feature"].as_u64().unwrap());
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        assert!(crate::scenario::handle_at("eye:WorkPlane").is_some(), "plane row has an eye handle");
+        h.step(&json!({"click":{"handle":"eye:WorkPlane"}})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_origin, ["WorkPlane"]);
+        h.step(&json!({"click":{"handle":"eye:WorkPlane"}})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.is_empty());
+
+        // Pressing V on a selected plane row also toggles visibility.
+        h.step(&json!({"click":{"handle": row}})).unwrap();
+        h.step(&json!({"key":"V"})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_origin, ["WorkPlane"]);
+        h.step(&json!({"key":"V"})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.is_empty());
     }
 
     #[test]
@@ -1445,7 +1477,7 @@ mod tests {
         let path = [assembly, part];
         let rows = [occurrence_key(&path[..1]), occurrence_key(&path), format!("{}/bodies", occurrence_key(&path))];
         h.app.ui.show_browser = false;
-        crate::timeline::find_in_browser(&mut h.app, feature);
+        crate::timeline::find_in_browser(&mut h.app, &[feature]);
         assert!(h.app.ui.show_browser);
         assert!(rows.iter().all(|key| row_open(&h.app, key)), "{rows:?}");
         assert_eq!(h.app.session.selection, [Sel::Body { name: "Plate".into() }]);

@@ -32,10 +32,13 @@ pub const SHARED_ENGLISH: &str = include_str!("../locales/en.json");
 pub struct Catalog {
     pub id: &'static str,
     pub name: &'static str,
-    /// The catalog as JSON.
+    /// The catalog as JSON. May be empty for one with a table ([`Catalog::numbered`]).
     pub source: &'static str,
-    /// The catalog as a table of numbered texts ([`numbered`]), or empty when the host has none.
-    table: &'static [u8],
+    /// The catalog's table of numbered texts ([`numbered`]) deflated (zlib), or empty when the
+    /// host has none.
+    packed_table: &'static [u8],
+    /// [`Self::packed_table`] inflated, the first time it is read.
+    table: OnceLock<Vec<u8>>,
     messages: OnceLock<Messages>,
     /// The messages in display order, for a catalog with right-to-left text (see [`bidi`]).
     shown: OnceLock<Option<Messages>>,
@@ -53,7 +56,8 @@ impl Catalog {
             id,
             name,
             source,
-            table: &[],
+            packed_table: &[],
+            table: OnceLock::new(),
             messages: OnceLock::new(),
             shown: OnceLock::new(),
             label_ids: OnceLock::new(),
@@ -63,15 +67,18 @@ impl Catalog {
     }
 
     /// [`Catalog::new`] with the catalog's table of numbered texts ([`numbered::encode`], made by
-    /// a build script of the same messages). A catalog with a table is read from it, by id as by
-    /// number, so only the English one needs its JSON too (for the ids, and for the labels that
-    /// are found by their English text): the others may give an empty `source`.
-    pub const fn numbered(id: &'static str, name: &'static str, source: &'static str, table: &'static [u8]) -> Self {
+    /// a build script of the same messages), deflated (zlib). A catalog with a table is read from
+    /// it, by id as by number, so only the English one needs its JSON too (for the ids, and for
+    /// the labels that are found by their English text): the others may give an empty `source`.
+    /// The table is inflated when the catalog is first read, so a program that embeds many
+    /// languages carries each at a fraction of its size and unpacks only the ones it shows.
+    pub const fn numbered(id: &'static str, name: &'static str, source: &'static str, packed_table: &'static [u8]) -> Self {
         Self {
             id,
             name,
             source,
-            table,
+            packed_table,
+            table: OnceLock::new(),
             messages: OnceLock::new(),
             shown: OnceLock::new(),
             label_ids: OnceLock::new(),
@@ -128,6 +135,25 @@ impl Catalog {
     /// The [`numbered::fingerprint`] of the ids.
     pub(crate) fn ids_fingerprint(&'static self) -> u32 {
         *self.ids_fingerprint.get_or_init(|| numbered::fingerprint(self.ids().iter().copied()))
+    }
+
+    /// The table of numbered texts, inflated the first time it is read; empty when the catalog has
+    /// none. A table that does not inflate is logged and reads as empty, so its messages fall back
+    /// to English.
+    fn table(&'static self) -> &'static [u8] {
+        self.table.get_or_init(|| {
+            if self.packed_table.is_empty() {
+                return Vec::new();
+            }
+            let mut table = Vec::new();
+            match std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(self.packed_table), &mut table) {
+                Ok(_) => table,
+                Err(error) => {
+                    log::error!("invalid packed {} message table: {error}", self.id);
+                    Vec::new()
+                }
+            }
+        })
     }
 
     /// The id of `msg`, when it was numbered among this catalog's ids.
@@ -306,10 +332,10 @@ impl Locale {
     /// This catalog's own text for `id`, as it is shown: from its table when it has one, else from
     /// its JSON. No fall back to English.
     fn own(self, id: &str) -> Option<&'static str> {
-        if self.0.table.is_empty() {
+        if self.0.packed_table.is_empty() {
             return self.0.shown().get(id).map(String::as_str);
         }
-        numbered::lookup(self.0.table, Msg::of(id)?)
+        numbered::lookup(self.0.table(), Msg::of(id)?)
     }
 
     /// The message with the id `id`: in this language, then in English, then the id itself. For
@@ -384,7 +410,7 @@ impl Locale {
     /// installed English catalog's cannot be named that way: it reads as the id the build kept
     /// (with debug assertions), or as nothing.
     pub fn message(self, msg: Msg) -> &'static str {
-        if let Some(text) = numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)) {
+        if let Some(text) = numbered::lookup(self.0.table(), msg).or_else(|| numbered::lookup(english().table(), msg)) {
             return text;
         }
         match english().id_of(msg) {
@@ -535,6 +561,45 @@ mod tests {
 
     fn installed() {
         install(LOCALES);
+    }
+
+    fn deflated(bytes: &[u8]) -> &'static [u8] {
+        let mut packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        std::io::Write::write_all(&mut packer, bytes).unwrap();
+        Box::leak(packer.finish().unwrap().into_boxed_slice())
+    }
+
+    /// A catalog with only a deflated table, as the app embeds all but English, reads its texts
+    /// from it by id and by number, and English where the table lacks one.
+    #[test]
+    fn a_catalog_reads_its_deflated_table() {
+        installed();
+        let ja = |id: &str| match id {
+            "ui.cancel" => Some("キャンセル"),
+            "dialog.selected_count" => Some("{count} 件を選択"),
+            _ => None,
+        };
+        let table = numbered::encode(ENGLISH.ids(), ja).unwrap();
+        let catalog: &'static Catalog = Box::leak(Box::new(Catalog::numbered("ja", "日本語", "", deflated(&table))));
+        let ja = Locale::new(catalog);
+        assert_eq!(ja.text("ui.cancel"), "キャンセル");
+        assert_eq!(ja.tr(Msg::of("ui.cancel").unwrap()), "キャンセル");
+        assert_eq!(ja.fill(Filled::checked(Msg::of("dialog.selected_count").unwrap(), [("count", "2")])), "2 件を選択");
+        assert_eq!(ja.text("ui.open"), "Open");
+    }
+
+    /// Bytes that are no zlib stream, or one cut short, read as no table: English, never a panic.
+    #[test]
+    fn a_broken_deflated_table_reads_as_english() {
+        installed();
+        let table = numbered::encode(ENGLISH.ids(), |id| (id == "ui.cancel").then_some("Abbrechen")).unwrap();
+        let whole = deflated(&table);
+        for broken in [&b"not a zlib stream"[..], &whole[..whole.len() / 2], &[0xff; 4]] {
+            let catalog: &'static Catalog = Box::leak(Box::new(Catalog::numbered("de", "Deutsch", "", broken)));
+            let de = Locale::new(catalog);
+            assert_eq!(de.text("ui.cancel"), "Cancel");
+            assert_eq!(de.tr(Msg::of("ui.cancel").unwrap()), "Cancel");
+        }
     }
 
     #[test]

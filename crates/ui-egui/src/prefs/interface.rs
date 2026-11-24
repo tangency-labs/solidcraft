@@ -252,6 +252,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 app.preferences.ribbon_labels = selected == 0;
                             }
                         });
+                        let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(tr!(app, "prefs.legacy_surface_toolbar_hint"));
+                        crate::scenario::publish_target("prefs:legacy_surface_toolbar", response.rect);
                         ui_kit::row(ui, tr!(app, "prefs.menus"), |ui| {
                             let mut selected = usize::from(app.preferences.ribbon_icon_grid);
                             if ui_kit::segmented(
@@ -635,6 +637,25 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     tr!(app, "prefs.history_steps_component_note"),
                     &mut app.preferences.history_steps_component,
                     "history_steps_component",
+                );
+                layout_check(
+                    ui,
+                    tr!(app, "prefs.history_last_stops_at_component"),
+                    tr!(app, "prefs.history_last_stops_at_component_note"),
+                    &mut app.preferences.history_last_stops_at_component,
+                    "history_last_stops_at_component",
+                );
+            });
+            // What a feature's menu does with several selected features, in a row of its own for
+            // the same reason.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    tr!(app, "prefs.feature_menus_act_on_selection"),
+                    tr!(app, "prefs.feature_menus_act_on_selection_note"),
+                    &mut app.preferences.feature_menus_act_on_selection,
+                    "feature_menus_act_on_selection",
                 );
             });
         });

@@ -556,7 +556,7 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
                         }
                     })
                 });
-                let names = drawing.sheets.iter().map(|sheet| tr("ui.drawing_first.after_named").replace("{name}", &sheet.name)).collect::<Vec<_>>();
+                let names = drawing.sheets.iter().map(|sheet| tr!("ui.drawing_first.after_named", name = &sheet.name)).collect::<Vec<_>>();
                 let names = names.iter().map(String::as_str).collect::<Vec<_>>();
                 ui_kit::choice_row(fields, tr!("ui.drawing_first.position"), "drawing_add_sheet_after", &mut form.after, &names);
             });

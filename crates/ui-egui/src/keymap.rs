@@ -563,13 +563,16 @@ fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
 }
 
 /// Outside a sketch: the SKETCH-tab command bound to `key` that a new sketch would start. Not
-/// Normal/Construction (a mode of the drawing in progress) nor the Finish Sketch panel.
+/// Normal/Construction (a mode of the drawing in progress), the Finish Sketch panel, nor a Modify
+/// tool other than Offset, which offsets a face sketch's projected edges.
 fn sketch_tool_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     if app.session.active_sketch.is_some() || crate::render_workspace::active(app) {
         return None;
     }
     commands_for(app, key).into_iter().find(|id| {
-        solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && c.id != "sketch.construction")
+        solidcraft_engine::find_command(id).is_some_and(|c| {
+            c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && (c.panel != "MODIFY" || c.id == "sketch.offset") && c.id != "sketch.construction"
+        })
     })
 }
 

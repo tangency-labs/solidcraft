@@ -42,7 +42,8 @@ fn main() {
     }
 }
 
-/// `$OUT_DIR/locales/<id>.json`: each catalog in `assets/locales` and the shared crates' catalogs
+/// `$OUT_DIR/locales/<id>.json`, which the tests and the English catalog read, and the tables the
+/// app embeds ([`numbered_tables`]): each catalog in `assets/locales` and the shared crates' catalogs
 /// in `crates/ui-text/locales` (the words of the kit's Preferences window and pages), merged per
 /// language, plus the messages of `assets/locales/pending/*.json` (`{"<locale>": {"<id>": "<text>"}}`,
 /// one file per change, folded into the catalogs on main), so a pull request's new strings work
@@ -137,7 +138,7 @@ fn scenario_tests() {
     let _ = std::fs::write(path, out);
 }
 
-/// `$OUT_DIR/locales/<id>.tbl`: each catalog as a table of its texts in the order of the English
+/// `$OUT_DIR/locales/<id>.tbl.z`: each catalog as a table of its texts in the order of the English
 /// catalog's sorted ids (`solidcraft_ui_text::numbered`), for messages named by their place
 /// (`msg!`) and for the catalogs that are embedded without their JSON. A text is stored as it is
 /// shown: a right-to-left catalog's in display order, as `Catalog::shown` gives them.
@@ -159,7 +160,11 @@ fn numbered_tables(
         }
         let bytes =
             numbered::encode(&ids, |id| texts.get(id).map(String::as_str)).ok_or_else(|| format!("{locale}: the catalog does not fit a table"))?;
-        std::fs::write(out.join(format!("{locale}.tbl")), bytes).map_err(|e| e.to_string())?;
+        // Deflated: a run reads one or two of the catalogs, and packed they take a fraction of
+        // the program's size.
+        let mut packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        std::io::Write::write_all(&mut packer, &bytes).map_err(|e| e.to_string())?;
+        std::fs::write(out.join(format!("{locale}.tbl.z")), packer.finish().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     }
     Ok(())
 }

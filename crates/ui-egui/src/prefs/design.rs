@@ -11,6 +11,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         "prefs.origin_plane_names",
         "prefs.stand_up_unknown",
         "prefs.export_name",
+        "prefs.designs_folder",
+        "prefs.exports_folder",
     ]
     .into_iter()
     .map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)))
@@ -233,6 +235,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:heal_tolerance_defects", heal.rect);
         });
         export_name(app, ui, label_width);
+        folders(app, ui, label_width);
         origin_plane_names(app, ui, label_width);
         ui_kit::settings_section(ui, "linked_designs", tr!(app, "prefs.linked_designs"), |ui| {
             let response = setting::update_changed_links(app, ui);
@@ -254,11 +257,22 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:names_from_file", response.rect);
         });
         ui_kit::settings_section(ui, "assemblies", tr!(app, "prefs.assemblies"), |ui| {
+            let response = setting::joint_moving_first(app, ui);
+            crate::scenario::publish_target("prefs:joint_moving_first", response.rect);
+
             ui.horizontal_wrapped(|ui| {
                 let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(tr!(app, "prefs.joint_drag_trackball_help"));
                 crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
                 if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                     ui_kit::help_icon(ui, tr!(app, "prefs.joint_drag_trackball_help"));
+                }
+            });
+            // Components pasted from another design go to the target's origin (#17621).
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::paste_components_at_origin(app, ui);
+                crate::scenario::publish_target("prefs:paste_components_at_origin", response.rect);
+                if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, tr!(app, "prefs.paste_components_at_origin_help"));
                 }
             });
         });
@@ -288,6 +302,78 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
             if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 ui_kit::help_icon(ui, tr!(app, "ui.glb_export_hierarchy_help"));
             }
+        });
+    });
+}
+
+/// The folders Save and the export dialogs open in (#5522). Only a host that can pick a folder
+/// shows them: the web app saves through the browser and has no folders.
+fn folders(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    if app.services.pick_folder.is_none() {
+        return;
+    }
+    ui_kit::settings_section(ui, "folders", tr!(app, "prefs.folders"), |ui| {
+        ui_kit::settings_form(ui, label_width, |ui| {
+            folder_row(app, ui, Folder::Designs);
+            folder_row(app, ui, Folder::Exports);
+        });
+    });
+}
+
+/// One of the folder settings.
+#[derive(Clone, Copy)]
+enum Folder {
+    Designs,
+    Exports,
+}
+
+impl Folder {
+    fn value(self, prefs: &mut Prefs) -> &mut String {
+        match self {
+            Self::Designs => &mut prefs.designs_folder,
+            Self::Exports => &mut prefs.exports_folder,
+        }
+    }
+
+    /// The setting's name: its label's message id and its scenario target.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Designs => "designs_folder",
+            Self::Exports => "exports_folder",
+        }
+    }
+}
+
+/// A folder setting: the path, typed or chosen with Browse…, and Clear to go back to the folder
+/// last used.
+fn folder_row(app: &mut SolveApp, ui: &mut egui::Ui, folder: Folder) {
+    let name = folder.name();
+    let label = app.tr_by_id(&format!("prefs.{name}")).to_string();
+    let help = app.tr_by_id(&format!("prefs.{name}_help")).to_string();
+    let hint = tr!(app, "prefs.folder_hint").to_string();
+    let browse = tr!(app, "prefs.folder_browse").to_string();
+    let clear = tr!(app, "ui.clear").to_string();
+    ui_kit::settings_row_help(ui, &label, &help, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let response = ui_kit::button(ui, browse, ui_kit::Button::Normal);
+            crate::scenario::publish_target(&format!("prefs:{name}:browse"), response.rect);
+            if response.clicked() {
+                let current = folder.value(&mut app.preferences).clone();
+                app.pick_folder(&current, move |app, path| {
+                    if let Some(path) = path {
+                        *folder.value(&mut app.preferences) = path;
+                    }
+                });
+            }
+            if !folder.value(&mut app.preferences).is_empty() {
+                let response = ui_kit::button(ui, clear, ui_kit::Button::Normal);
+                crate::scenario::publish_target(&format!("prefs:{name}:clear"), response.rect);
+                if response.clicked() {
+                    folder.value(&mut app.preferences).clear();
+                }
+            }
+            let (_, response) = ui_kit::text_field_reserving(ui, folder.value(&mut app.preferences), &hint, 0.0);
+            crate::scenario::publish_target(&format!("prefs:{name}"), response.rect);
         });
     });
 }

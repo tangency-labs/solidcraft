@@ -102,3 +102,5 @@ pollster = { workspace = true }
 serde_json = { workspace = true }
 # The catalogs packed as tables of numbered texts (`solidcraft_ui_text::numbered`), in display order.
 solidcraft-ui-text = { workspace = true }
+# Deflates the tables of the message catalogs the app embeds (build.rs).
+flate2 = { workspace = true }

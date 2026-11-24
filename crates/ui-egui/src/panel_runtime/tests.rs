@@ -13563,6 +13563,327 @@ fn production_controller_keys(app: &crate::SolveApp) -> Vec<ControllerKey> {
         .collect()
 }
 
+fn plugin_table_snapshot() -> solidcraft_engine::plugin::PanelSnapshot {
+    use solidcraft_engine::plugin::ui::*;
+    let mut data = PanelData::default();
+    let updates: Vec<_> = (0..1000)
+        .flat_map(|row| {
+            [
+                Datum { path: format!("/tools/{row}/id"), value: UiValue::Text(format!("tool-{row}")) },
+                Datum { path: format!("/tools/{row}/name"), value: UiValue::Text(format!("Cutter {row}")) },
+                Datum { path: format!("/tools/{row}/diameter"), value: UiValue::Number(25.4) },
+            ]
+        })
+        .collect();
+    data.set_data(&updates).unwrap();
+    data.merge_frame();
+    solidcraft_engine::plugin::PanelSnapshot {
+        plugin: "machining".into(),
+        plugin_name: "Machining".into(),
+        approval: "fixture".into(),
+        ui_version: UI_VERSION,
+        units: "in".into(),
+        panel: solidcraft_engine::plugin::ui::PanelSpec {
+            id: "tools".into(),
+            title: "Tool library".into(),
+            zones: vec![DockZone::Bottom],
+            layout: solidcraft_engine::plugin::ui::Layout {
+                root: 0,
+                nodes: vec![Node {
+                    widget: Widget::Table(TableSpec {
+                        bind: "/tools".into(),
+                        row_id: "id".into(),
+                        columns: vec![
+                            Column { key: "name".into(), label: "Tool".into(), unit: None },
+                            Column { key: "diameter".into(), label: "Diameter".into(), unit: Some("length".into()) },
+                        ],
+                        select: SelectionMode::Single,
+                        on_select: Some("choose".into()),
+                        on_edit: Some("edit".into()),
+                    }),
+                }],
+            },
+        },
+        data,
+        visible: true,
+        visibility_revision: 0,
+    }
+}
+
+#[test]
+fn plugin_panels_register_declared_zones_and_draw_virtual_table_actions() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    let spec = super::plugin::registration(&panel).unwrap();
+    assert_eq!(spec.default_zone, Zone::Bottom);
+    assert_eq!(spec.allowed_zones, [Zone::Bottom, Zone::Floating].into_iter().collect());
+    assert_eq!(spec.edge_rule, EdgeRule::None);
+    assert_eq!(spec.side_height_policy, SideHeightPolicy::Content);
+    let mut long = panel.clone();
+    long.plugin = "a".repeat(64);
+    long.panel.id = "b".repeat(64);
+    let long_spec = super::plugin::registration(&long).unwrap();
+    assert!(long_spec.kind.0.len() <= MAX_ID_BYTES, "manifest names fit the shared host without truncation");
+    long.panel.zones = vec![DockZone::Right];
+    assert_ne!(super::plugin::registration(&long).unwrap().kind, long_spec.kind, "a changed zone contract gets a legal new placement");
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    {
+        let mut frame = |events: Vec<egui::Event>| {
+            crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 220.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    super::plugin::draw(ui, &panel, 0, &mut actions, "in", 0);
+                },
+            )
+        };
+        frame(Vec::new());
+        let output = frame(Vec::new());
+        let text: Vec<_> = crate::test_support::text_shapes(&output).map(|shape| shape.galley.job.text.clone()).collect();
+        assert!(text.iter().any(|text| text == "1.000 in"), "table length uses design units: {text:?}");
+        assert!(text.iter().filter(|text| text.starts_with("Cutter")).count() < 20, "table rows must scroll virtually");
+        let at = crate::scenario::rect_of("plugin-panel:machining:tools:row:tool-0").unwrap().center();
+        frame(crate::test_support::pointer(at, true));
+        frame(crate::test_support::pointer(at, false));
+    }
+    assert_eq!(
+        actions,
+        vec![(
+            "choose".into(),
+            UiEvent { panel: "tools".into(), event: EventKind::Select, path: "/tools".into(), row: Some("tool-0".into()), value: None }
+        )]
+    );
+    panel.data.set_data(&[Datum { path: "/tools/0/name".into(), value: UiValue::Text("Posted operation".into()) }]).unwrap();
+    assert_ne!(panel.data.get("/tools/0/name"), Some(&UiValue::Text("Posted operation".into())), "staged updates do not leak before a frame");
+    panel.data.merge_frame();
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+    assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "Posted operation"));
+}
+
+#[test]
+fn plugin_panels_sync_errors_remain_observable_until_a_successful_frame() {
+    let mut h = plugin_panel_harness();
+    let mut panel = plugin_table_snapshot();
+    panel.panel.zones.clear();
+    install_plugin_panel(&mut h.app, panel);
+    h.frames(1);
+    assert_eq!(h.app.panel_runtime.as_ref().unwrap().last_error().map(|error| error.rule), Some(Rule::Placement));
+    h.app.session.plugin_state.panels.clear();
+    h.frames(1);
+    assert!(h.app.panel_runtime.as_ref().unwrap().last_error().is_none());
+}
+
+#[test]
+fn plugin_panels_visibility_requests_are_scoped_to_the_document() {
+    let mut h = plugin_panel_harness();
+    let panel = plugin_table_snapshot();
+    let instance = InstanceId(super::plugin::registration(&panel).unwrap().kind.0);
+    install_plugin_panel(&mut h.app, panel);
+    h.frames(2);
+    let package = h.app.session.plugin_state.panels.get_mut("machining").unwrap();
+    package.visible.insert("tools".into(), false);
+    package.visibility_revision.insert("tools".into(), 1);
+    h.frames(2);
+    assert!(!h.app.panel_runtime().unwrap().layout().layout().instance(&instance).unwrap().requested_open);
+    h.app.session.document_id = "second-plugin-document".into();
+    let package = h.app.session.plugin_state.panels.get_mut("machining").unwrap();
+    package.visible.insert("tools".into(), true);
+    h.frames(2);
+    assert!(
+        h.app.panel_runtime().unwrap().layout().layout().instance(&instance).unwrap().requested_open,
+        "the second document's first request is independent"
+    );
+    h.app.session.uid = solidcraft_engine::Session::default().uid;
+    h.app.session.plugin_state.panels.get_mut("machining").unwrap().visible.insert("tools".into(), false);
+    h.frames(2);
+    assert!(
+        !h.app.panel_runtime().unwrap().layout().layout().instance(&instance).unwrap().requested_open,
+        "reopening the same document has independent request counters"
+    );
+}
+
+#[test]
+fn plugin_panels_failed_open_does_not_starve_a_later_close() {
+    let mut h = plugin_panel_harness();
+    let closing = plugin_table_snapshot();
+    let closing_id = InstanceId(super::plugin::registration(&closing).unwrap().kind.0);
+    install_plugin_panel(&mut h.app, closing.clone());
+    h.frames(2);
+    h.app
+        .dispatch_panel_layout(transaction(vec![Mutation::Move {
+            instance: closing_id.clone(),
+            destination: Destination::NewSection {
+                section: section("plugin-floating-close"),
+                index: 0,
+                location: SectionLocation::Floating { origin: Point { x: 0.0, y: 0.0 } },
+                size: Size { width: 280.0, height: 200.0 },
+            },
+        }]))
+        .unwrap();
+    h.call("ui.resize", serde_json::json!({"width":350,"height":800}));
+    let mut blocked = closing;
+    blocked.panel.zones = vec![solidcraft_engine::plugin::ui::DockZone::Right];
+    blocked.visibility_revision = 1;
+    let blocked = (0..100)
+        .find_map(|index| {
+            blocked.panel.id = format!("blocked-{index}");
+            (super::plugin::registration(&blocked).unwrap().kind.0 < closing_id.0).then(|| blocked.clone())
+        })
+        .unwrap();
+    let blocked_id = InstanceId(super::plugin::registration(&blocked).unwrap().kind.0);
+    install_plugin_panel(&mut h.app, blocked);
+    let package = h.app.session.plugin_state.panels.get_mut("machining").unwrap();
+    package.visible.insert("tools".into(), false);
+    package.visibility_revision.insert("tools".into(), 1);
+    let failure = super::plugin::sync(&mut h.app).unwrap_err();
+    assert_eq!(failure.rule, Rule::NoSpace);
+    assert!(
+        !h.app.panel_runtime().unwrap().layout().layout().instance(&closing_id).unwrap().requested_open,
+        "a failed earlier open cannot starve this close"
+    );
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":1000}));
+    h.frames(2);
+    assert!(
+        h.app.panel_runtime().unwrap().layout().layout().instance(&blocked_id).unwrap().requested_open,
+        "the unconsumed failed request retries when space becomes available"
+    );
+}
+
+fn plugin_panel_harness() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.frames(3);
+    h.app.plugin_menu.loaded = true;
+    h
+}
+
+fn install_plugin_panel(app: &mut crate::SolveApp, panel: solidcraft_engine::plugin::PanelSnapshot) {
+    use solidcraft_engine::plugin::{PanelPackage, ui::Declarations};
+    let package = app.session.plugin_state.panels.entry(panel.plugin).or_insert_with(|| PanelPackage {
+        name: panel.plugin_name,
+        approval: panel.approval,
+        declarations: Declarations { ui_version: panel.ui_version, panels: Vec::new(), workspaces: Vec::new() },
+        data: Default::default(),
+        visible: Default::default(),
+        visibility_revision: Default::default(),
+    });
+    package.data.insert(panel.panel.id.clone(), panel.data);
+    package.visible.insert(panel.panel.id.clone(), panel.visible);
+    package.visibility_revision.insert(panel.panel.id.clone(), panel.visibility_revision);
+    package.declarations.panels.push(panel.panel);
+}
+
+#[test]
+fn plugin_panels_text_draft_survives_an_older_worker_acknowledgement() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout.nodes = vec![Node {
+        widget: Widget::Form(FormSpec {
+            bind: "/settings".into(),
+            fields: vec![Field {
+                key: "name".into(),
+                label: "Name".into(),
+                kind: FieldKind::Text,
+                choices: Vec::new(),
+                on_change: Some("rename".into()),
+            }],
+        }),
+    }];
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    let mut frame = |panel: &solidcraft_engine::plugin::PanelSnapshot, events| {
+        crate::test_support::frame(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+            super::plugin::draw(ui, panel, 0, &mut actions, "in", 0)
+        })
+    };
+    frame(&panel, Vec::new());
+    let at = crate::scenario::rect_of("dialog:control:Name").unwrap().center();
+    frame(&panel, crate::test_support::pointer(at, true));
+    frame(&panel, crate::test_support::pointer(at, false));
+    frame(&panel, vec![egui::Event::Text("a".into())]);
+    frame(&panel, vec![egui::Event::Text("b".into())]);
+    panel.data.set_data(&[Datum { path: "/settings/name".into(), value: UiValue::Text("a".into()) }]).unwrap();
+    panel.data.merge_frame();
+    let output = frame(&panel, Vec::new());
+    assert!(
+        crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "ab"),
+        "an intermediate acknowledgement must not replace the newer draft"
+    );
+    frame(&panel, vec![egui::Event::Text("c".into())]);
+    panel.data.set_data(&[Datum { path: "/settings/name".into(), value: UiValue::Text("abc".into()) }]).unwrap();
+    panel.data.merge_frame();
+    let output = frame(&panel, Vec::new());
+    assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "abc"));
+    panel.data.set_data(&[Datum { path: "/settings/name".into(), value: UiValue::Text("Updated".into()) }]).unwrap();
+    panel.data.merge_frame();
+    let output = frame(&panel, Vec::new());
+    assert!(
+        crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "Updated"),
+        "a clean field adopts fresh host data after the latest acknowledgement"
+    );
+    assert_eq!(
+        actions.iter().map(|(_, event)| event.value.clone()).collect::<Vec<_>>(),
+        vec![Some(UiValue::Text("a".into())), Some(UiValue::Text("ab".into())), Some(UiValue::Text("abc".into()))]
+    );
+}
+
+#[test]
+fn plugin_panels_text_draft_keeps_deletion_while_an_older_ack_is_pending() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout.nodes = vec![Node {
+        widget: Widget::Form(FormSpec {
+            bind: "/settings".into(),
+            fields: vec![Field {
+                key: "name".into(),
+                label: "Name".into(),
+                kind: FieldKind::Text,
+                choices: Vec::new(),
+                on_change: Some("rename".into()),
+            }],
+        }),
+    }];
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    let mut frame = |panel: &solidcraft_engine::plugin::PanelSnapshot, events| {
+        crate::test_support::frame(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+            super::plugin::draw(ui, panel, 0, &mut actions, "in", 0)
+        })
+    };
+    frame(&panel, Vec::new());
+    let at = crate::scenario::rect_of("dialog:control:Name").unwrap().center();
+    frame(&panel, crate::test_support::pointer(at, true));
+    frame(&panel, crate::test_support::pointer(at, false));
+    frame(&panel, vec![egui::Event::Text("a".into())]);
+    frame(
+        &panel,
+        vec![egui::Event::Key { key: egui::Key::Backspace, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }],
+    );
+    panel.data.set_data(&[Datum { path: "/settings/name".into(), value: UiValue::Text("a".into()) }]).unwrap();
+    panel.data.merge_frame();
+    let output = frame(&panel, Vec::new());
+    assert!(
+        !crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "a"),
+        "an older acknowledgement cannot restore deleted text"
+    );
+    frame(&panel, vec![egui::Event::Text("b".into())]);
+    assert_eq!(actions.last().unwrap().1.value, Some(UiValue::Text("b".into())), "the next edit starts from the newer empty draft");
+}
+
+#[test]
+fn plugin_panels_unknown_widgets_draw_a_newer_host_placeholder() {
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout.nodes = vec![solidcraft_engine::plugin::ui::Node { widget: solidcraft_engine::plugin::ui::Widget::Unknown }];
+    let ctx = crate::fonts::test_context();
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+    assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == tr!("ui.plugin_panel_newer")));
+}
+
 #[test]
 fn production_browser_and_history_mount_existing_content_once_and_preserve_combined_history() {
     for combined in [false, true] {

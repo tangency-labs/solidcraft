@@ -1141,6 +1141,7 @@ impl FilletCorner {
                 }
             }
         }
+        self.end_face = end_face;
         for &(piece, face) in &ribs {
             pseudo
                 .fillet_edge_mut(piece)?
