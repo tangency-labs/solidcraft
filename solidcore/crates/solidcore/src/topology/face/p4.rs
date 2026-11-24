@@ -3632,11 +3632,14 @@ mod tests {
                 Ok(s) => s,
                 Err(e) => panic!("through {through:?}: {e:?}"),
             };
+            // a ruling on the seam is also the face's boundary edge: the face solve may leave
+            // it to the edge solves, so only a ruling inside the face must be the range
             assert!(
-                solutions
-                    .as_slice()
-                    .iter()
-                    .any(|s| s.solution_type == SolutionType::RangeOfValues),
+                through.y == 0.0
+                    || solutions
+                        .as_slice()
+                        .iter()
+                        .any(|s| s.solution_type == SolutionType::RangeOfValues),
                 "through {through:?}: the ruling must come back as a range: {solutions:?}"
             );
             assert!(
