@@ -1817,8 +1817,8 @@ impl SolveApp {
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
-        let selection_changed =
-            self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert" | "select.all");
+        let selection_changed = self.session.selection != selected_before
+            || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert" | "select.all");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
             if id == "select.set" {
