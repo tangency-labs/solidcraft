@@ -77,7 +77,17 @@ fn the_trim_over_the_sliver_is_monotone_and_passes_the_curve_checks() {
     assert_eq!(f.index(), 7);
     let interval = b.edge(edge).unwrap().interval;
 
+    let tolerance = b.edge(edge).unwrap().tolerance;
     let made = create_uv_trim_curve(&k, &mut b, eu, false, None).unwrap();
+
+    // the trim's image stays within the edge's tolerance of the edge (the stretched
+    // span is accepted only where its enclosure proves this; this is the drop's own
+    // measure of it)
+    assert!(
+        made.max_dist_to_surf <= tolerance,
+        "{} > {tolerance}",
+        made.max_dist_to_surf
+    );
 
     // the trim still covers the whole edge
     let ivl = made.curve.natural_interval();
