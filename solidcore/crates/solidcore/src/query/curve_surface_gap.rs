@@ -5751,6 +5751,21 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(bisected >= g, "{bisected:e} against {g:e}");
+        // (#20643 review: both answers carry the net's own distance to the surface, the
+        // cone's seam tear on a full-turn cylinder; `0` off a cone)
+        let net = NetSurface::of(k, s, &[]).unwrap().unwrap();
+        let residual = bisection_residual(k, s, &net).unwrap().unwrap();
+        if matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
+            assert!(residual > 1e-8, "the seam tear {residual:e}");
+        }
+        assert!(
+            answer >= residual,
+            "{answer:e} under the residual {residual:e}"
+        );
+        assert!(
+            bisected >= residual,
+            "{bisected:e} under the residual {residual:e}"
+        );
     }
 
     /// The side of a cylinder of radius 12.5 and its net's row at the top (`v` its domain's
