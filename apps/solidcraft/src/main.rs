@@ -157,6 +157,30 @@ struct App {
     /// Preferences › Layout's `windows_smooth_window_drag`, as winit was given it.
     #[cfg(target_os = "windows")]
     window_move: native_frame::WindowMove,
+    /// After a lost device: the first frame stores it, since the setup's frames save nothing.
+    clear_stored_background: bool,
+}
+
+/// Flushes the stored settings with the background effect off; false when none was stored.
+fn clear_stored_background(storage: &mut dyn eframe::Storage) -> bool {
+    let Some(cleared) = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key)).as_deref().and_then(without_background) else {
+        return false;
+    };
+    storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, cleared);
+    storage.flush();
+    true
+}
+
+/// `None` when no effect is stored or the settings don't read.
+fn without_background(stored: &str) -> Option<String> {
+    let mut prefs: serde_json::Value = serde_json::from_str(stored).ok()?;
+    // Stored as `SolveApp::prefs` writes them: the Preferences fields sit under "preferences".
+    let effect = prefs.get_mut("preferences")?.get_mut("background_shader")?;
+    if effect.as_str().is_none_or(str::is_empty) {
+        return None;
+    }
+    *effect = serde_json::Value::String(String::new());
+    serde_json::to_string(&prefs).ok()
 }
 
 /// Settings written to the settings file soon after they change (#8275). eframe saves them
@@ -383,6 +407,11 @@ impl eframe::App for App {
     /// A frame's UI: the starting page while the setup runs (in the saved language and fonts),
     /// then the app's, whose changed settings are written soon after (#8275).
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if std::mem::take(&mut self.clear_stored_background)
+            && let Some(storage) = frame.storage_mut()
+        {
+            clear_stored_background(storage);
+        }
         // Logic-only control updates cannot present a frame or complete startup.
         let ctx = ui.ctx();
         if self.window_frames < 2 && ctx.current_pass_index() == 0 {
@@ -2076,6 +2105,14 @@ fn main() -> eframe::Result {
             // A design that stopped the last session while it was being reopened is skipped this
             // time, so one bad file cannot brick every launch (#5064).
             app.reopen_guard_dir = recovery_dir.clone();
+            // The effect may be what the driver gave up on; the first frame stores it off, so
+            // another stop, even during the setup, cannot bring it back.
+            let cleared_background = after_loss && !app.preferences.background_shader.is_empty();
+            if cleared_background {
+                let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+                notes.push(language.format("prefs.background_shader_after_loss", &[("name", &app.preferences.background_shader)]));
+                app.preferences.background_shader.clear();
+            }
             let files = if files.is_empty() && !sample && control_port.is_none() {
                 let (reopen, skipped) = solidcraft_ui_egui::documents::reopen_plan(&app, recovery_dir.as_deref());
                 if !skipped.is_empty() {
@@ -2194,6 +2231,7 @@ fn main() -> eframe::Result {
             Ok(Box::new(App {
                 // Before `app` moves: the settings as read, already on disk.
                 prefs_writer: PrefsWriter::read(app.prefs()),
+                clear_stored_background: cleared_background,
                 solve: app,
                 setup,
                 gpu_job: None,
@@ -2742,6 +2780,20 @@ mod tickets_http_tests {
 }
 
 #[cfg(test)]
+mod background_after_loss_tests {
+    #[test]
+    fn the_stored_background_is_cleared_and_nothing_else() {
+        let stored = r#"{"preferences":{"background_shader":"dusk/dusk","language":"de"},"recent":["a"]}"#;
+        let cleared: serde_json::Value = serde_json::from_str(&super::without_background(stored).unwrap()).unwrap();
+        assert_eq!(cleared, serde_json::json!({"preferences": {"background_shader": "", "language": "de"}, "recent": ["a"]}));
+        assert_eq!(super::without_background(r#"{"preferences":{"background_shader":""}}"#), None);
+        assert_eq!(super::without_background(r#"{"background_shader":"dusk/dusk"}"#), None, "only the stored shape counts");
+        assert_eq!(super::without_background(r#"{"preferences":{}}"#), None);
+        assert_eq!(super::without_background("not json"), None);
+    }
+}
+
+#[cfg(test)]
 mod prefs_writer_tests {
     /// In-process MCP-to-UI integration, without opening a native window or socket session.
     #[test]
@@ -2850,6 +2902,23 @@ mod prefs_writer_tests {
 
     fn new_app() -> solidcraft_ui_egui::SolveApp {
         solidcraft_ui_egui::SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default())
+    }
+
+    #[test]
+    fn the_first_frame_after_a_lost_device_stores_the_background_off() {
+        let mut app = new_app();
+        app.preferences.background_shader = "dusk/dusk".into();
+        app.preferences.language = "de".into();
+        let mut disk = Disk::default();
+        disk.pending.insert(STORAGE_KEY.into(), app.prefs());
+        assert!(super::clear_stored_background(&mut disk), "a stored effect is turned off");
+        assert_eq!(disk.flushes, 1);
+        app.preferences.background_shader.clear();
+        let expected: serde_json::Value = serde_json::from_str(&app.prefs()).unwrap();
+        let flushed: serde_json::Value = serde_json::from_str(&disk.flushed[STORAGE_KEY]).unwrap();
+        assert_eq!(flushed, expected, "only the effect changes");
+        assert!(!super::clear_stored_background(&mut disk), "nothing more to turn off");
+        assert_eq!(disk.flushes, 1);
     }
 
     /// #8275: Preferences' View navigator and Display quality, changed and confirmed, are on disk
