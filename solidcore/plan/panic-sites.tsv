@@ -392,6 +392,7 @@ crates/solidcore/src/blend/fillet_standard_solver/p2.rs	LinearCrossSectionFsg::d
 crates/solidcore/src/blend/fillet_standard_solver/p2.rs	VariableRadiusFs::re_calc_fillet_geom	Vec::insert	1	open	insert(index_of_insert, t)	
 crates/solidcore/src/blend/fillet_standard_solver/p2.rs	VariableRadiusFs::re_calc_fillet_geom	Vec::insert	2	open	insert(index_of_insert, vu)	
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::add_span	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/blend/foot_blend.rs	FootBlend::feet_series	f64::clamp	1	proven	clamp(1.0, MAX_PIECES)	constant bounds 1.0 <= MAX_PIECES (1024.0)
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::of_edge	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::of_edge	with_capacity	2	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::prove_feet	f64::clamp	1	proven	clamp(1.0, MAX_PIECES)	constant bounds 1.0 <= MAX_PIECES (1024.0)

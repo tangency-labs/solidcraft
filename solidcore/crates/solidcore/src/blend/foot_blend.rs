@@ -2292,6 +2292,10 @@ fn isub(
     }
 }
 
+/// A proved piece of a foot ([`FootBlend::prove_piece`]): the box of its parameters on the
+/// support's form over the whole piece, and `w = S − e` there in its centred form.
+type ProvedPiece = ([Ivl; 2], crate::blend::fillet_section::series::V3<Ivl>);
+
 /// What [`FootBlend::prove_feet`] proved: the spans' pieces and how many halvings they took.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FeetProof {
@@ -2374,7 +2378,7 @@ impl FootBlend {
                 if depth > 0 {
                     *guess = None;
                 }
-                if !Self::prove_piece(k, support, &leader, a.t, b.t, z, fa, fb, guess)? {
+                if Self::prove_piece(k, support, &leader, a.t, b.t, z, fa, fb, guess)?.is_none() {
                     proved = false;
                     break;
                 }
@@ -2409,6 +2413,9 @@ impl FootBlend {
     /// together, and the centred form keeps them together (enclosed apart, the toe's travel
     /// along the joint would enter the Jacobian at its full size). The unknowns are `δ`, about
     /// 0; the equations `G₁ = w·e′`, `G₂ = |w|² − z²` hold for every `t` in the piece.
+    /// Proved, the box of the foot's parameters on the form over the whole piece (the path
+    /// plus the correction's box) and `w` over it in its centred form (narrow: the root's
+    /// and the toe's travel along the joint cancel in it); `None` where it is not proved.
     #[allow(clippy::too_many_arguments)]
     fn prove_piece(
         k: &Kernel,
@@ -2420,7 +2427,7 @@ impl FootBlend {
         fa: Point3,
         fb: Point3,
         guess: &mut Option<Point2>,
-    ) -> Result<bool> {
+    ) -> Result<Option<ProvedPiece>> {
         use crate::blend::fillet_section::certificate::curve_derivs_over;
         use crate::blend::fillet_section::series::V3;
         use crate::geom::krawczyk::{inverse_of_columns2, krawczyk};
@@ -2430,11 +2437,11 @@ impl FootBlend {
             Some(uv) => uv,
             None => match support.place(k, fa, None)? {
                 Some(uv) => uv,
-                None => return Ok(false),
+                None => return Ok(None),
             },
         };
         let Some(ub) = support.place(k, fb, Some(ua))? else {
-            return Ok(false);
+            return Ok(None);
         };
         let unwrap = |x: f64, near: f64, p: Option<f64>| match p {
             Some(p) if p > 0.0 => x + p * ((near - x) / p).round(),
@@ -2448,7 +2455,7 @@ impl FootBlend {
         let dt = Ivl::new(lo, hi) - Ivl::from(tm);
         let span = tb - ta;
         if span == 0.0 {
-            return Ok(false);
+            return Ok(None);
         }
         let mid = [0.5 * (ua.x + ub.x), 0.5 * (ua.y + ub.y)];
         let slope = [(ub.x - ua.x) / span, (ub.y - ua.y) / span];
@@ -2457,7 +2464,7 @@ impl FootBlend {
         let (Some(&em), Some(&dm), Some(&d), Some(&dd)) =
             (at_mid.first(), at_mid.get(1), over.get(1), over.get(2))
         else {
-            return Ok(false);
+            return Ok(None);
         };
         let scale = |v: V3<Ivl>, a: Ivl| V3 {
             x: v.x * a,
@@ -2512,16 +2519,24 @@ impl FootBlend {
         };
         // the preconditioner: the Jacobian's middle inverted
         let Some(j) = jacobian([Ivl::from(0.0); 2])? else {
-            return Ok(false);
+            return Ok(None);
         };
         let middle = j.map(|col| col.map(Ivl::mid));
         let Some(c) = inverse_of_columns2(&middle) else {
-            return Ok(false);
+            return Ok(None);
         };
         // proved: one foot in the box for every t, and the box holds the path's ends (the
         // stations' feet, δ = 0 there), so that foot is theirs
-        Ok(krawczyk::<2>([0.0; 2], c, &value, &jacobian)?
-            .is_some_and(|b| b.iter().all(|x| x.lo <= 0.0 && x.hi >= 0.0)))
+        let Some(delta) = krawczyk::<2>([0.0; 2], c, &value, &jacobian)?
+            .filter(|b| b.iter().all(|x| x.lo <= 0.0 && x.hi >= 0.0))
+        else {
+            return Ok(None);
+        };
+        let Some((w, ..)) = centred(delta)? else {
+            return Ok(None);
+        };
+        let ([d0, d1], [s0, s1]) = (delta, s);
+        Ok(Some(([m0 + d0 + s0 * dt, m1 + d1 + s1 * dt], w)))
     }
 
     /// The failure of a span from `a` to `b` that stays unproved: no toe at the leg where the
@@ -2574,4 +2589,297 @@ impl FootBlend {
             },
         ))
     }
+}
+
+/// The highest power of the leader's parameter [`FootBlend::feet_series`] encloses: the cubic
+/// Hermite remainder of a section's rows over a piece takes their fourth derivative.
+pub const FEET_SERIES_ORDER: usize = 4;
+
+/// A foot's Taylor coefficients in the leader's parameter, `a_k = a⁽ᵏ⁾ / k!` for
+/// `k <= FEET_SERIES_ORDER`, each enclosed over a piece.
+pub type FootSeries = [crate::blend::fillet_section::series::V3<Ivl>; FEET_SERIES_ORDER + 1];
+
+impl FootBlend {
+    /// Each foot's Taylor coefficients in the leader's parameter `t` ([`FootSeries`]) for
+    /// every `t` in `[ta, tb]`, with the legs `legs`: the span cut into pieces as
+    /// [`FootBlend::prove_feet`] cuts it (no longer than a share of the smaller leg, a piece
+    /// not proved halved), each piece's feet proved, then the coefficients of the foot's
+    /// parameters solved order by order from the foot's equations as series (`G₁ = w·e′`,
+    /// `G₂ = |w|² − z²`, `w = S(x(t)) − e(t)`), each in intervals over the piece's box, the
+    /// foot's point composed from them, and the pieces' enclosures hulled. `None` where a
+    /// piece stays unproved, the span runs across a knot of the leader, a foot's box across
+    /// a knot line of a support that is not analytic (its form is only as smooth as its knots
+    /// allow there), or the equations' linear part is not proved invertible over a box. Feet
+    /// on a support with no NURBS form are not enclosed (`None` too).
+    ///
+    /// # Errors
+    ///
+    /// Native invalid input for a leg that is not finite and positive; those of the
+    /// evaluations and the enclosures.
+    pub fn feet_series(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        ta: f64,
+        tb: f64,
+    ) -> Result<Option<[FootSeries; 2]>> {
+        use crate::blend::fillet_section::certificate::NurbsCurve;
+        use crate::blend::fillet_section::series::v_hull;
+        use crate::surface::surface::p2::SurfaceKind;
+        check_legs(legs)?;
+        let (lo, hi) = (ta.min(tb), ta.max(tb));
+        if hi - lo <= 0.0
+            || !(hi - lo).is_finite()
+            || self.breaks()?.iter().any(|&x| lo < x && x < hi)
+        {
+            return Ok(None);
+        }
+        let leader = NurbsCurve::of(&self.leader)?;
+        let mut supports = Vec::new();
+        for side in &self.sides {
+            let Some(support) = ProofSupport::of(k, &side.surface)? else {
+                return Ok(None);
+            };
+            let analytic = matches!(
+                side.surface.kind(),
+                SurfaceKind::Plane(_)
+                    | SurfaceKind::Cone(_)
+                    | SurfaceKind::Sphere(_)
+                    | SurfaceKind::Torus(_)
+            );
+            supports.push((support, analytic));
+        }
+        let Ok(first) = self.try_station(k, lo, legs, None)? else {
+            return Ok(None);
+        };
+        let Ok(last) = self.try_station(k, hi, legs, Some(&first))? else {
+            return Ok(None);
+        };
+        // pieces as prove_feet cuts a span, each from a work list with its depth
+        let reach = legs.iter().fold(f64::INFINITY, |m, z| m.min(*z)) * PIECE_OF_LEG;
+        let count = (first.root.distance(last.root) / reach)
+            .ceil()
+            .clamp(1.0, MAX_PIECES) as usize;
+        let mut work: Vec<(FootStation, FootStation, usize)> = Vec::new();
+        let mut from = first;
+        for j in 1..=count {
+            let to = if j == count {
+                last
+            } else {
+                let t = lo + (hi - lo) * j as f64 / count as f64;
+                let Ok(s) = self.try_station(k, t, legs, Some(&from))? else {
+                    return Ok(None);
+                };
+                s
+            };
+            work.push((from, to, 0));
+            from = to;
+        }
+        work.reverse();
+        let mut hull: [Option<FootSeries>; 2] = [None, None];
+        while let Some((a, b, depth)) = work.pop() {
+            let mut made: Vec<FootSeries> = Vec::new();
+            for (i, (support, analytic)) in supports.iter().enumerate() {
+                let (Some(&z), Some(&fa), Some(&fb)) = (legs.get(i), a.feet.get(i), b.feet.get(i))
+                else {
+                    return Err(defect("a station lacked the foot of a support it is solved on, though every station is built with both"));
+                };
+                let proved =
+                    Self::prove_piece(k, support, &leader, a.t, b.t, z, fa, fb, &mut None)?;
+                let crosses =
+                    |iv: Ivl, knots: &[f64]| knots.iter().any(|&u| iv.lo < u && u < iv.hi);
+                let series = match proved {
+                    Some(([xu, xv], _))
+                        if !analytic
+                            && (crosses(xu, &support.cn.u) || crosses(xv, &support.cn.v)) =>
+                    {
+                        return Ok(None);
+                    }
+                    Some((x, w0)) => foot_series_over(support, &leader, Ivl::new(a.t, b.t), x, w0)?,
+                    None => None,
+                };
+                match series {
+                    Some(s) => made.push(s),
+                    None => break,
+                }
+            }
+            if let [s1, s2] = made.as_slice() {
+                for (h, s) in hull.iter_mut().zip([*s1, *s2]) {
+                    *h = Some(match h.take() {
+                        None => s,
+                        Some(old) => {
+                            let mut out = old;
+                            for (o, n) in out.iter_mut().zip(s) {
+                                *o = v_hull(*o, n);
+                            }
+                            out
+                        }
+                    });
+                }
+                continue;
+            }
+            if depth >= PROOF_HALVINGS {
+                return Ok(None);
+            }
+            let Ok(mid) = self.try_station(k, 0.5 * (a.t + b.t), legs, Some(&a))? else {
+                return Ok(None);
+            };
+            work.push((mid, b, depth + 1));
+            work.push((a, mid, depth + 1));
+        }
+        Ok(match hull {
+            [Some(f1), Some(f2)] => Some([f1, f2]),
+            _ => None,
+        })
+    }
+}
+
+/// A foot's [`FootSeries`] over the leader's parameters `t`, `x` a proved box of the foot's
+/// parameters on `support`'s form for every `t` there and `w0` an enclosure of `w = S − e`
+/// there (the centred one of the piece's proof: `w` over the box would count the toe's and
+/// the root's travel twice, and with it the linear part would not be proved invertible): the
+/// parameters'
+/// coefficients `x_k` (`k >= 1`) solved from `J x_k = −r_k`, `r_k` the equations' `k`th
+/// coefficient with `x_k` left 0 and `J` their linear part, enclosed by `x_k ∈ −C r_k +
+/// (I − C J) x_k` with `C` the inverse of `J`'s middle and `‖x_k‖ <= ‖C r_k‖ / (1 − q)`,
+/// `q = ‖I − C J‖ < 1`; then the foot's point `S(x(t))` composed (`Σ P_ab Δu^a Δv^b / a! b!`
+/// over the partials `P` enclosed on the box). Each coefficient holds the true one at every
+/// `t` in `t`, the foot there being in the box. `None` where the partials are not enclosed
+/// or `q` is not proved below 1.
+///
+/// # Errors
+///
+/// Those of the enclosures and the series.
+fn foot_series_over(
+    support: &ProofSupport,
+    leader: &crate::blend::fillet_section::certificate::NurbsCurve,
+    t: Ivl,
+    x: [Ivl; 2],
+    w0: crate::blend::fillet_section::series::V3<Ivl>,
+) -> Result<Option<FootSeries>> {
+    use crate::blend::fillet_section::certificate::curve_derivs_over;
+    use crate::blend::fillet_section::series::{Ser, Trunc, VSer, V3};
+    use crate::geom::krawczyk::inverse_of_columns2;
+    const N: usize = FEET_SERIES_ORDER;
+    let tr = Trunc::new(N, 0)?;
+    let zero = V3 {
+        x: Ivl::from(0.0),
+        y: Ivl::from(0.0),
+        z: Ivl::from(0.0),
+    };
+    let Some(p) = support.partials(x, N)? else {
+        return Ok(None);
+    };
+    let d = curve_derivs_over(leader, t, N + 1, None)?;
+    // the leader e and its rate e′ as series: e_k = D_k / k!, e′_k = D_(k+1) / k!
+    let mut e = VSer::constant(zero);
+    let mut de = VSer::constant(zero);
+    let mut fact = 1.0_f64;
+    for kk in 0..=N {
+        if kk > 0 {
+            fact *= kk as f64;
+        }
+        let (Some(dk), Some(dk1)) = (d.get(kk), d.get(kk + 1)) else {
+            return Ok(None);
+        };
+        let f = Ivl::from(1.0) / Ivl::from(fact);
+        for (ser, v) in [(&mut e, dk), (&mut de, dk1)] {
+            for (c, vj) in ser.a.iter_mut().zip([v.x, v.y, v.z]) {
+                c.set(kk, 0, vj * f);
+            }
+        }
+    }
+    // S(x0 + Δ) to order N, Δ = (du, dv) without constant terms, from the partials on the box
+    let compose = |du: &Ser<Ivl>, dv: &Ser<Ivl>| -> VSer<Ivl> {
+        let mut pu = vec![Ser::constant(Ivl::from(1.0))];
+        let mut pv = vec![Ser::constant(Ivl::from(1.0))];
+        for a in 1..=N {
+            if let (Some(lu), Some(lv)) = (pu.last().cloned(), pv.last().cloned()) {
+                pu.push(lu.mul_valued(du, a - 1, 1, tr));
+                pv.push(lv.mul_valued(dv, a - 1, 1, tr));
+            }
+        }
+        let mut s = VSer::constant(zero);
+        let mut fa = 1.0_f64;
+        for (a, pua) in pu.iter().enumerate() {
+            if a > 0 {
+                fa *= a as f64;
+            }
+            let mut fb = 1.0_f64;
+            for (b, pvb) in pv.iter().enumerate().take(N - a + 1) {
+                if b > 0 {
+                    fb *= b as f64;
+                }
+                let mono = pua.mul_valued(pvb, a, b, tr);
+                let f = Ivl::from(1.0) / Ivl::from(fa * fb);
+                let c = p.at(a, b);
+                for (o, cj) in s.a.iter_mut().zip([c.x, c.y, c.z]) {
+                    o.add_scaled(&mono, cj * f, tr);
+                }
+            }
+        }
+        s
+    };
+    let Some(&e1) = d.get(1) else {
+        return Ok(None);
+    };
+    let (su, sv) = (p.at(1, 0), p.at(0, 1));
+    let two = Ivl::from(2.0);
+    // the linear part by columns (in x_u, then x_v), and its middle's inverse by rows
+    let j = [
+        [idot(su, e1), two * idot(w0, su)],
+        [idot(sv, e1), two * idot(w0, sv)],
+    ];
+    let Some(c) = inverse_of_columns2(&j.map(|col| col.map(Ivl::mid))) else {
+        return Ok(None);
+    };
+    // I − C J, by rows, and q its row norm
+    let mut m = [[Ivl::from(0.0); 2]; 2];
+    let mut q = 0.0_f64;
+    for (row, (mi, ci)) in m.iter_mut().zip(c).enumerate() {
+        let mut sum = 0.0_f64;
+        for (col, (mij, jc)) in mi.iter_mut().zip(j).enumerate() {
+            let cj = Ivl::from(ci[0]) * jc[0] + Ivl::from(ci[1]) * jc[1];
+            let id = if row == col { 1.0 } else { 0.0 };
+            *mij = Ivl::from(id) - cj;
+            sum += mij.mag();
+        }
+        q = q.max(sum);
+    }
+    // rounded up: the sum of magnitudes, and 1 − q below
+    let q = crate::blend::fillet_section::interval::round_up(q * (1.0 + 4.0 * f64::EPSILON));
+    if !q.is_finite() || q >= 1.0 {
+        return Ok(None);
+    }
+    let mut du = Ser::constant(Ivl::from(0.0));
+    let mut dv = Ser::constant(Ivl::from(0.0));
+    for kk in 1..=N {
+        let mut w = compose(&du, &dv).sub(&e, tr);
+        // w's constant term the centred one
+        for (c, v) in w.a.iter_mut().zip([w0.x, w0.y, w0.z]) {
+            c.set(0, 0, v);
+        }
+        let r = [w.dot(&de, tr).at(kk, 0), w.dot(&w, tr).at(kk, 0)];
+        let cr = c.map(|ci| Ivl::from(ci[0]) * r[0] + Ivl::from(ci[1]) * r[1]);
+        let size = cr.iter().fold(0.0_f64, |a, x| a.max(x.mag()));
+        let rho = (Ivl::from(size) / (Ivl::from(1.0) - Ivl::from(q))).hi;
+        if !rho.is_finite() {
+            return Ok(None);
+        }
+        let ball = Ivl::new(-rho, rho);
+        let ([cr0, cr1], [m0, m1]) = (cr, m);
+        du.set(kk, 0, Ivl::from(0.0) - cr0 + m0[0] * ball + m0[1] * ball);
+        dv.set(kk, 0, Ivl::from(0.0) - cr1 + m1[0] * ball + m1[1] * ball);
+    }
+    let s = compose(&du, &dv);
+    let mut out = [zero; N + 1];
+    let [sx, sy, sz] = &s.a;
+    for (kk, o) in out.iter_mut().enumerate() {
+        *o = V3 {
+            x: sx.at(kk, 0),
+            y: sy.at(kk, 0),
+            z: sz.at(kk, 0),
+        };
+    }
+    Ok(Some(out))
 }
