@@ -1219,6 +1219,9 @@ fn a_path_of_more_than_64_components_is_refused_before_any_folder_is_made() {
     );
     assert!(!root.join("e").exists(), "no folder made for a refused path");
     state.discard_writes();
+    // The granted folder's handle is still open in `state`; Windows doesn't delete a folder that
+    // is open, so close it first.
+    drop(state);
     std::fs::remove_dir_all(root).unwrap();
 }
 
