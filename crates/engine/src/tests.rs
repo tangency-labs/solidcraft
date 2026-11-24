@@ -1233,6 +1233,7 @@ fn hostile_params_never_panic() {
         "curves",
         "damping",
         "datum",
+        "definition",
         "delete",
         "density",
         "depth",
@@ -1251,6 +1252,7 @@ fn hostile_params_never_panic() {
         "end",
         "entities",
         "entity",
+        "entry",
         "expression",
         "extend",
         "face",
@@ -1278,6 +1280,7 @@ fn hostile_params_never_panic() {
         "keep_with",
         "kind",
         "length",
+        "library",
         "line",
         "line_group",
         "lines",
@@ -1307,6 +1310,7 @@ fn hostile_params_never_panic() {
         "pairs",
         "parallel_to",
         "path",
+        "place",
         "plane",
         "point",
         "points",
@@ -1316,12 +1320,15 @@ fn hostile_params_never_panic() {
         "profile",
         "profiles",
         "project_edges",
+        "provenance",
         "radius",
+        "read_only",
         "reference_hides_model",
         "reference_shown_percent",
         "reference_style",
         "references",
         "refs",
+        "revision",
         "rho",
         "scale",
         "seam",
@@ -3872,8 +3879,7 @@ fn material_and_appearance_colours_export_to_step() {
     run(&mut s, "appearance.assign", json!({"bodies": ["RedAbs"], "color": "#d01c1c"}));
     assert!(s.execute("appearance.assign", &json!({"bodies": ["RedAbs"], "color": "#12"})).is_err());
     let rgb = |c: [u8; 3]| c.map(|x| x as f32 / 255.0);
-    let want =
-        [("BrassBox", Some(rgb(solidcraft_doc::material_color("Brass").unwrap()))), ("RedAbs", Some(rgb([0xd0, 0x1c, 0x1c]))), ("Plain", None)];
+    let want = [("BrassBox", Some(rgb([208, 172, 88]))), ("RedAbs", Some(rgb([0xd0, 0x1c, 0x1c]))), ("Plain", None)];
     let same = |a: Option<[f32; 3]>, b: Option<[f32; 3]>| match (a, b) {
         (Some(a), Some(b)) => a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3),
         (None, None) => true,

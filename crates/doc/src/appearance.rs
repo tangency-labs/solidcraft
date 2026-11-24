@@ -282,10 +282,11 @@ pub fn library(name: &str) -> Option<Look> {
         .or_else(|| crate::appearance_pack::find(name)?.opaque_look().ok())
 }
 
-/// The look a physical material gives a body that has no appearance of its own.
+/// The look a physical material gives a body that has no appearance of its own: its row's look in
+/// [`crate::MATERIALS`], by its exact name.
 pub fn material_look(material: &str) -> Option<Look> {
-    let color = crate::material_color(material)?;
-    let opacity = if material == "Glass" { 0.25 } else { 1.0 };
+    let (_, _, look) = crate::MATERIALS.iter().find(|(name, ..)| *name == material)?;
+    let (color, opacity) = (*look)?;
     Some(Look { name: material.to_string(), color, opacity, pbr: None })
 }
 
@@ -845,8 +846,9 @@ mod tests {
         assert_eq!(library("abs - red").map(|l| l.color), Some([196, 40, 40]));
         assert!(library("Glass - Clear").is_some_and(|l| l.opacity < 0.5));
         assert!(library("nope").is_none());
-        assert_eq!(material_look("Brass").map(|l| l.color), crate::material_color("Brass"));
+        assert_eq!(material_look("Brass").map(|l| l.color), Some([208, 172, 88]));
         assert!(material_look("Glass").is_some_and(|l| l.opacity < 1.0));
+        assert!(material_look("glass").is_none(), "a material's look is found by its exact name");
         assert_eq!(Look::custom([1, 2, 3], 7.0).opacity, 1.0);
         assert_eq!(Look::custom([255, 0, 16], 1.0).hex(), "#ff0010");
     }

@@ -4950,8 +4950,8 @@ impl Document {
     pub fn material_name(&self, name: &str) -> Option<String> {
         MATERIALS
             .iter()
-            .find(|(n, _)| n.eq_ignore_ascii_case(name.trim()))
-            .map(|(n, _)| n.to_string())
+            .find(|(n, ..)| n.eq_ignore_ascii_case(name.trim()))
+            .map(|(n, ..)| n.to_string())
             .or_else(|| self.user_material(name).map(|m| m.name.clone()))
     }
 
@@ -4975,7 +4975,7 @@ impl Document {
 
     /// Every physical material's name: the built-in library, then the design's own.
     pub fn material_names(&self) -> Vec<String> {
-        MATERIALS.iter().map(|(n, _)| n.to_string()).chain(self.user_materials.iter().map(|m| m.name.clone())).collect()
+        MATERIALS.iter().map(|(n, ..)| n.to_string()).chain(self.user_materials.iter().map(|m| m.name.clone())).collect()
     }
 
     /// The component a body belongs to: where it was moved, else its feature's.
@@ -6172,7 +6172,7 @@ impl Document {
 /// The built-in material library: (name, density), and each material's colour.
 #[path = "../../../assets/materials/library.rs"]
 mod materials;
-pub use materials::{DEFAULT_DENSITY, DEFAULT_MATERIAL, MATERIALS, material_color};
+pub use materials::{DEFAULT_DENSITY, DEFAULT_MATERIAL, MATERIALS};
 
 /// A physical material defined in a design (`material.create`): its name, its density and,
 /// optionally, the look it gives bodies without an appearance of their own.
@@ -6201,7 +6201,7 @@ pub fn valid_density(d: f64) -> bool {
 
 /// Density of a built-in physical material (g/cm³).
 pub fn material_density(name: &str) -> Option<f64> {
-    MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).map(|(_, d)| *d)
+    MATERIALS.iter().find(|(n, ..)| n.eq_ignore_ascii_case(name.trim())).map(|(_, d, _)| *d)
 }
 
 /// How a textual reference matches a feature name: ASCII case does not matter.

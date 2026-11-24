@@ -414,6 +414,57 @@ pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Move the file at `from` to the name `to`, never replacing anything there: a second name for the
+/// file (a hard link, which fails if `to` is taken, as [`link_backup`] makes one), then `from` goes.
+/// Not tempfile's rename: on Windows it resets the file's attributes first, and marks it temporary
+/// when refused. A stop between the two steps leaves both names, never neither. A drive without
+/// links (`refused_by_the_drive`) gets a copy published with [`create_atomic`], and `from` goes only
+/// once that copy is whole and `from` still holds what was copied. If `from` can't go, `to` goes
+/// again and the move is refused.
+pub(crate) fn move_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    if cfg!(target_arch = "wasm32") {
+        // The browser's store is one map on one thread: the check, read, write and remove can't interleave.
+        let (from, to) = (from.to_string_lossy(), to.to_string_lossy());
+        if crate::vfs::exists(&to) {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "destination already exists"));
+        }
+        let bytes = crate::vfs::read(&from, usize::MAX)?;
+        crate::vfs::write(&to, &bytes)?;
+        return crate::vfs::remove(&from);
+    }
+    // Windows keeps a read-only file where it is (its other name would be read-only too): refused before any step.
+    if cfg!(windows) && fs::metadata(from).is_ok_and(|m| m.permissions().readonly()) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, format!("{}: the file is read-only", from.display())));
+    }
+    match hard_link(from, to) {
+        Err(e) if refused_by_the_drive(&e) => {
+            let bytes = fs::read(from)?;
+            create_atomic(to, &bytes)?;
+            if fs::read(from)? != bytes {
+                return Err(std::io::Error::other("the file changed while it was moved; both copies were kept"));
+            }
+        }
+        linked => linked?,
+    }
+    // Windows refuses the removal while another program holds the file, as it refuses a save's rename.
+    if let Err(e) = rename_with_retry(|| fs::remove_file(from), cfg!(windows), std::thread::sleep) {
+        let _ = fs::remove_file(to);
+        return Err(e);
+    }
+    sync_dir(to);
+    sync_dir(from);
+    Ok(())
+}
+
+/// [`fs::hard_link`]; tests can make the drive refuse links, as a FAT drive does.
+fn hard_link(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(test)]
+    if tests::LINKS_REFUSED.with(std::cell::Cell::get) {
+        return Err(std::io::ErrorKind::Unsupported.into());
+    }
+    fs::hard_link(from, to)
+}
+
 /// Whether `error` says the drive lacks the step itself (the no-replace rename, or the hard link
 /// tempfile tries where the system lacks the rename's flag), not that it refuses this file now: the
 /// system's "not supported" (`Unsupported`: ENOSYS), EOPNOTSUPP or ENOTSUP, Windows'
@@ -766,6 +817,47 @@ mod tests {
         assert_eq!(create_atomic(&p, b"replacement").unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read(&p).unwrap(), b"first complete image");
         assert!(stale_temps(&p).is_empty());
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    /// A move never replaces what has the new name, and a refused one leaves the file where it was,
+    /// whether the drive takes links or the file is copied (as on a FAT drive).
+    #[test]
+    fn a_move_never_replaces_the_destination_and_a_refused_one_keeps_the_file() {
+        for refused in [false, true] {
+            LINKS_REFUSED.with(|l| l.set(refused));
+            let d = dir(if refused { "move-copied" } else { "move" });
+            let (from, taken, free) = (d.join("Steel.json"), d.join("bin.json"), d.join("bin (2).json"));
+            fs::write(&from, b"steel").unwrap();
+            fs::write(&taken, b"in the bin").unwrap();
+            assert_eq!(move_no_replace(&from, &taken).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+            assert_eq!((fs::read(&from).unwrap(), fs::read(&taken).unwrap()), (b"steel".to_vec(), b"in the bin".to_vec()));
+            move_no_replace(&from, &free).unwrap();
+            assert!(!from.exists());
+            assert_eq!(fs::read(&free).unwrap(), b"steel");
+            assert!(stale_temps(&free).is_empty());
+            LINKS_REFUSED.with(|l| l.set(false));
+            fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    /// Windows keeps a read-only file where it is: the move is refused at once, with nothing left at the new name.
+    #[cfg(windows)]
+    #[test]
+    fn a_read_only_file_is_not_moved_on_windows() {
+        let d = dir("move-read-only");
+        let (from, to) = (d.join("Steel.json"), d.join("bin.json"));
+        fs::write(&from, b"steel").unwrap();
+        let mut read_only = fs::metadata(&from).unwrap().permissions();
+        read_only.set_readonly(true);
+        fs::set_permissions(&from, read_only.clone()).unwrap();
+        let started = std::time::Instant::now();
+        let err = move_no_replace(&from, &to).unwrap_err();
+        assert!(err.to_string().contains("read-only") && started.elapsed() < std::time::Duration::from_secs(1), "{err}");
+        assert!(from.exists() && !to.exists());
+        #[allow(clippy::permissions_set_readonly_false)]
+        read_only.set_readonly(false);
+        fs::set_permissions(&from, read_only).unwrap();
         fs::remove_dir_all(d).unwrap();
     }
 

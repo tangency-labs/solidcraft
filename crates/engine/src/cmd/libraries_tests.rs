@@ -470,3 +470,200 @@ fn physical_catalog_import_respects_design_cap_and_builtin_names_without_partial
     assert_eq!(s.doc, before);
     assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
 }
+
+/// The library places are the user's, like the plugin host fields: one shared value that every copy
+/// of a session reads and that opening or starting a design keeps. New sessions share the built-in one.
+#[test]
+fn a_sessions_library_places_are_shared_with_its_copies_and_kept_across_designs() {
+    use solidcraft_io::library::{Libraries, Place, PlaceRow, scan};
+    let mut s = Session::default();
+    assert!(Arc::ptr_eq(&s.libraries, &Session::default().libraries), "the built-in value is made once");
+    assert_eq!(s.libraries.set().places().len(), 1);
+    assert_eq!(s.libraries.set().places()[0].place(), &Place::BuiltIn);
+
+    let row = PlaceRow { place: Place::Library("/lib/shop".into()), read_only: true };
+    let places = Arc::new(Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, vec![row], &[], &[]));
+    s.libraries = Arc::clone(&places);
+    assert!(Arc::ptr_eq(&s.scratch().libraries, &places), "a copy shares the value, not a new scan");
+    s.replace_design(Session::default());
+    assert!(Arc::ptr_eq(&s.libraries, &places), "opening or starting a design keeps the user's places");
+}
+
+/// A session whose user has listed `rows`, none scanned yet.
+fn with_places(rows: Vec<solidcraft_io::library::PlaceRow>) -> Session {
+    use solidcraft_io::library::{Libraries, Place, scan};
+    Session { libraries: Arc::new(Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, rows, &[], &[])), ..Default::default() }
+}
+
+fn local_folder(name: &str) -> String {
+    solidcraft_io::vfs::temp_dir().join(format!("{name}-{}", std::process::id())).to_string_lossy().into_owned()
+}
+
+/// The place commands check a change by the rule the app applies it with, and echo it for the
+/// app. Nothing in the session changes, and nothing is read.
+#[test]
+fn the_library_place_commands_check_a_change_and_echo_it() {
+    use solidcraft_io::library::{Place, PlaceRow};
+    let shop = local_folder("sc-places-shop");
+    let mine = local_folder("sc-places-mine");
+    let mut s = with_places(vec![PlaceRow { place: Place::Folder(shop.clone()), read_only: false }]);
+    let before = Arc::clone(&s.libraries);
+
+    let added = s.execute("library.places.add", &json!({"path": mine, "kind": "library", "at": 0})).unwrap();
+    assert_eq!(added, json!({"path": mine, "kind": "library", "read_only": false, "at": 0}), "a local folder can be changed");
+    let shared = s.execute("library.places.add", &json!({"path": r"\\server.example\lib", "kind": "folder"})).unwrap();
+    assert_eq!(shared["read_only"], json!(true), "a network folder is read-only unless the user says otherwise");
+    let writable = s.execute("library.places.add", &json!({"path": r"\\server.example\lib", "kind": "folder", "read_only": false})).unwrap();
+    assert_eq!(writable["read_only"], json!(false));
+
+    let set = s.execute("library.places.set", &json!({"path": shop, "read_only": true, "at": 0})).unwrap();
+    assert_eq!(set, json!({"path": shop, "read_only": true, "at": 0}));
+    assert_eq!(s.execute("library.places.remove", &json!({"path": shop})).unwrap(), json!({"path": shop}));
+    assert_eq!(s.execute("library.places.refresh", &json!({"path": shop})).unwrap(), json!({"path": shop}));
+    assert_eq!(s.execute("library.places.refresh", &json!({})).unwrap(), json!({"path": null}));
+    let changed = s.execute("library.places.refresh", &json!({"changed_only": true})).unwrap();
+    assert_eq!(changed, json!({"path": null, "changed_only": true}), "the app checks first");
+
+    for (id, p, why) in [
+        ("library.places.add", json!({"path": shop, "kind": "folder"}), "listed already"),
+        ("library.places.add", json!({"path": mine, "kind": "library", "at": 2}), "past the end"),
+        ("library.places.remove", json!({"path": mine}), "no place is listed"),
+        ("library.places.set", json!({"path": mine, "at": 0}), "no place is listed"),
+        ("library.places.refresh", json!({"path": mine}), "no place is listed"),
+    ] {
+        let e = s.execute(id, &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{id} {p}: {e}");
+    }
+    assert!(Arc::ptr_eq(&s.libraries, &before), "the app applies the change; the engine only checks it");
+}
+
+/// A place is an absolute folder, on this computer or a network share, inside the folders the
+/// caller may reach, named in at most 4096 bytes without control characters.
+#[test]
+fn a_library_place_that_is_no_folder_the_caller_may_reach_is_refused() {
+    let mut s = Session::default();
+    let add = |s: &mut Session, path: &str| s.execute("library.places.add", &json!({"path": path, "kind": "library"}));
+    let too_long = format!("/{}", "a".repeat(4096));
+    for path in ["", "relative/lib", r"\\.\pipe\lib", "/lib/a\u{7}b", too_long.as_str()] {
+        assert!(add(&mut s, path).is_err(), "{path:.40}");
+    }
+    assert!(s.execute("library.places.add", &json!({"path": local_folder("sc-places-kind"), "kind": "shelf"})).is_err());
+
+    let (allowed, elsewhere) = (local_folder("sc-places-allowed"), local_folder("sc-places-elsewhere"));
+    for folder in [&allowed, &elsewhere] {
+        std::fs::create_dir_all(folder).unwrap();
+    }
+    let scope = solidcraft_io::vfs::PathScope::new([std::path::PathBuf::from(&allowed)]);
+    solidcraft_io::vfs::scoped(Some(scope), || {
+        assert!(add(&mut s, &allowed).is_ok());
+        assert!(add(&mut s, &elsewhere).is_err(), "a place outside the caller's folders is refused");
+    });
+    for folder in [&allowed, &elsewhere] {
+        let _ = std::fs::remove_dir(folder);
+    }
+}
+
+/// Listing reads no files: it answers from what the session holds, so it works under a scope
+/// that refuses every path.
+#[test]
+fn listing_the_library_places_reads_no_files() {
+    use solidcraft_io::library::{Place, PlaceRow};
+    let shop = local_folder("sc-places-list");
+    let mut s = with_places(vec![PlaceRow { place: Place::Library(shop.clone()), read_only: true }]);
+    let listed = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::default()), || s.execute("library.places.list", &json!({}))).unwrap();
+    let places = listed["places"].as_array().unwrap();
+    assert_eq!(places.len(), 2, "{listed}");
+    assert_eq!((&places[0]["kind"], &places[0]["scan"]), (&json!("built_in"), &json!("scanned")));
+    let built_in = places[0]["libraries"].as_array().unwrap();
+    assert_eq!(built_in.len(), 1, "{listed}");
+    assert_eq!(built_in[0]["available"], json!(true));
+    assert!(built_in[0]["entries"].as_u64().unwrap() > 0, "{listed}");
+    let expected = json!({"kind": "library", "path": shop, "read_only": true, "my_library": false, "scan": "scanning", "why": null, "libraries": []});
+    assert_eq!(places[1], expected);
+}
+
+/// A session whose places are scanned, as the app gives it once their scans are done.
+fn with_scanned(rows: Vec<solidcraft_io::library::PlaceRow>) -> Session {
+    use solidcraft_io::library::{Libraries, Place, Scanned, scan};
+    let scans: Vec<Arc<Scanned>> = rows.iter().map(|r| Arc::new(scan(&r.place))).collect();
+    Session { libraries: Arc::new(Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, rows, &scans, &[])), ..Default::default() }
+}
+
+/// The write commands: a library made in a place, an entry added, listed, changed from the revision
+/// read, copied from the built-in library and removed, each one seen by the next command. A refusal
+/// says why.
+#[test]
+fn the_library_write_commands_change_files_and_the_next_command_sees_them() {
+    use solidcraft_io::library::{Place, PlaceRow};
+    let folder = local_folder("sc-library-writes");
+    let _ = std::fs::remove_dir_all(&folder);
+    let mut s = with_scanned(vec![PlaceRow { place: Place::Folder(folder.clone()), read_only: false }]);
+    let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+
+    assert_eq!(
+        run(&mut s, "library.create", json!({"place": folder, "name": "Shop"})),
+        json!({"library": "user.shop", "file": "Shop.sclibrary.json"})
+    );
+    let steel = json!({"kind": "material", "value": {"name": "Steel", "density_g_cm3": 7.85}});
+    let added = run(&mut s, "library.entry.add", json!({"library": "user.shop", "definition": steel}));
+    assert_eq!((&added["entry"], &added["file"]), (&json!("user.shop/material-steel"), &json!("materials/Steel.json")), "{added}");
+    let listed = run(&mut s, "library.entry.list", json!({"library": "user.shop"}));
+    let entry = json!({"id": "user.shop/material-steel", "revision": added["revision"], "kind": "material", "name": "Steel", "file": "materials/Steel.json", "why": null});
+    assert_eq!(listed, json!({"library": "user.shop", "available": true, "why": null, "entries": [entry]}));
+
+    let firmer = json!({"kind": "material", "value": {"name": "Steel", "density_g_cm3": 7.9}});
+    let edited = run(&mut s, "library.entry.edit", json!({"entry": added["entry"], "revision": added["revision"], "definition": firmer}));
+    assert_eq!(edited["entry"], added["entry"]);
+    assert_ne!(edited["revision"], added["revision"]);
+
+    // A copy of a built-in entry, found by listing the built-in library.
+    let built_in = run(&mut s, "library.entry.list", json!({"library": "solidcraft.builtin"}));
+    let source = built_in["entries"].as_array().and_then(|e| e.iter().find(|e| e["id"].is_string())).cloned().unwrap_or_default();
+    let copied = run(&mut s, "library.entry.copy", json!({"entry": source["id"], "to": "user.shop"}));
+    assert!(copied["entry"].as_str().is_some_and(|id| id.starts_with("user.shop/")), "{copied}");
+
+    for (id, p, why) in [
+        ("library.entry.edit", json!({"entry": added["entry"], "revision": added["revision"], "definition": firmer}), "changed since it was read"),
+        ("library.entry.edit", json!({"entry": added["entry"], "revision": "0", "definition": firmer}), "64 hex digits"),
+        ("library.entry.remove", json!({"entry": added["entry"], "revision": "g".repeat(64)}), "64 hex digits"),
+        ("library.entry.add", json!({"library": "solidcraft.builtin", "definition": steel}), "built-in library"),
+        (
+            "library.entry.add",
+            json!({"library": "user.shop", "definition": {"kind": "material", "value": {"name": "Bad", "density_g_cm3": -1}}}),
+            "density",
+        ),
+        ("library.entry.add", json!({"library": "user.shop", "definition": steel, "name": "x"}), "name"),
+        ("library.create", json!({"place": local_folder("sc-library-unlisted"), "name": "Shop"}), "no place is listed"),
+        ("library.entry.list", json!({"library": "user.nobody"}), "no library"),
+    ] {
+        let e = s.execute(id, &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{id} {p}: {e}");
+    }
+
+    let removed = run(&mut s, "library.entry.remove", json!({"entry": edited["entry"], "revision": edited["revision"]}));
+    assert_eq!(removed["file"], json!(".removed/materials/Steel.json"));
+    let left = run(&mut s, "library.entry.list", json!({"library": "user.shop"}));
+    assert_eq!(left["entries"].as_array().map(|e| e.iter().map(|e| e["id"].clone()).collect::<Vec<_>>()), Some(vec![copied["entry"].clone()]));
+    assert!(std::path::Path::new(&folder).join("Shop/.removed/materials/Steel.json").is_file(), "moved, never deleted");
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// A read-only place takes no write, and listing reads no files.
+#[test]
+fn a_read_only_place_takes_no_write_and_listing_entries_reads_no_files() {
+    use solidcraft_io::library::{Place, PlaceRow};
+    let folder = local_folder("sc-library-read-only");
+    let _ = std::fs::remove_dir_all(&folder);
+    let mut open = with_scanned(vec![PlaceRow { place: Place::Library(folder.clone()), read_only: false }]);
+    open.execute("library.create", &json!({"place": folder, "name": "Shop"})).unwrap();
+    let mut s = with_scanned(vec![PlaceRow { place: Place::Library(folder.clone()), read_only: true }]);
+    let steel = json!({"kind": "material", "value": {"name": "Steel", "density_g_cm3": 7.85}});
+    let e = s.execute("library.entry.add", &json!({"library": "user.shop", "definition": steel})).unwrap_err().to_string();
+    assert!(e.contains("read-only place"), "{e}");
+    assert_eq!(std::fs::read_dir(std::path::Path::new(&folder).join("materials")).unwrap().count(), 0);
+    let listed = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::default()), || {
+        s.execute("library.entry.list", &json!({"library": "user.shop"}))
+    });
+    assert_eq!(listed.unwrap()["entries"], json!([]));
+    let _ = std::fs::remove_dir_all(&folder);
+}

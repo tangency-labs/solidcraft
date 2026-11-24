@@ -224,7 +224,9 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
         return Verdict::Ask(solidcraft_ui_text::format("ui.plugin_run_consent", &[("entry", &entry), ("path", &path)]));
     }
     // Files, and commands that replace or reload the whole design.
-    let file_command = id.starts_with("file.") || id.starts_with("doc.") || matches!(id, "render.export" | "render.start");
+    // A library write changes files though it names none (only an id).
+    let file_command =
+        id.starts_with("file.") || id.starts_with("doc.") || matches!(id, "render.export" | "render.start") || crate::library_places::writes(id);
     // The question says which program a send to a slicer would start.
     let with_slicer =
         |question: String| match params.get("slicer").and_then(Value::as_str).filter(|_| id.ends_with("save_mesh") || id.ends_with("send_to_slicer"))
@@ -235,6 +237,10 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
     // The model leaves the machine: the user is asked, whatever the agent says about consent.
     if id == "file.open_in_easyprint" {
         return Verdict::Ask(format!("{id}, upload the model to Printables' servers (EasyPrint)"));
+    }
+    // A library write says which library and entry it changes, as a file command names its file.
+    if let Some(what) = crate::library_places::write_names(id, params) {
+        return Verdict::Ask(format!("{id}: {what}"));
     }
     if let Some(p) = names_a_file(id, params) {
         return Verdict::Ask(with_slicer(format!("{id}: {p}")));
@@ -457,6 +463,54 @@ mod tests {
         ] {
             assert!(matches!(exec(id, p.clone()), Verdict::Ask(_)), "{id} {p}");
         }
+    }
+
+    /// A change to a library place names its folder, so it asks first; listing only reads, and
+    /// rescanning every place runs.
+    #[test]
+    fn library_place_changes_ask() {
+        for (id, p) in [
+            ("library.places.add", json!({"path": "/srv/lib", "kind": "library"})),
+            ("library.places.remove", json!({"path": "/srv/lib"})),
+            ("library.places.set", json!({"path": "/srv/lib", "read_only": true})),
+            ("library.places.refresh", json!({"path": "/srv/lib"})),
+        ] {
+            assert!(matches!(exec(id, p.clone()), Verdict::Ask(a) if a.contains("/srv/lib")), "{id} {p}");
+        }
+        assert_eq!(exec("library.places.list", json!({})), Verdict::Run { change: false });
+        assert_eq!(exec("library.places.refresh", json!({})), Verdict::Run { change: true });
+    }
+
+    /// A library write changes files though it names only ids, so each asks first, and its
+    /// question says what it changes; listing a library's entries only reads.
+    #[test]
+    fn library_writes_ask() {
+        let steel = json!({"kind": "material", "value": {"name": "Steel"}});
+        let long = format!("Steel\u{7}{}", "x".repeat(300));
+        for (id, p, question) in [
+            ("library.create", json!({"place": "/srv/lib", "name": "Shop"}), "library.create: /srv/lib, Shop"),
+            ("library.entry.add", json!({"library": "user.shop", "definition": steel}), "library.entry.add: user.shop, Steel"),
+            ("library.entry.add", json!({"library": "user.shop", "definition": {}}), "library.entry.add: user.shop"),
+            (
+                "library.entry.edit",
+                json!({"entry": "user.shop/material-steel", "revision": "0", "definition": steel}),
+                "library.entry.edit: user.shop/material-steel, Steel",
+            ),
+            ("library.entry.remove", json!({"entry": "user.shop/material-steel", "revision": "0"}), "library.entry.remove: user.shop/material-steel"),
+            (
+                "library.entry.copy",
+                json!({"entry": "solidcraft.builtin/material-steel", "to": "user.shop"}),
+                "library.entry.copy: solidcraft.builtin/material-steel, user.shop",
+            ),
+        ] {
+            assert_eq!(exec(id, p.clone()), Verdict::Ask(question.into()), "{id} {p}");
+        }
+        // A hostile name is shown without its control characters and cut at 200 characters.
+        let Verdict::Ask(question) = exec("library.create", json!({"place": "/srv/lib", "name": long})) else { panic!("a write asks") };
+        assert_eq!(question, format!("library.create: /srv/lib, Steel{}", "x".repeat(195)));
+        // Nothing named: the command alone, as before.
+        assert_eq!(exec("library.entry.remove", json!({})), Verdict::Ask("library.entry.remove".into()));
+        assert_eq!(exec("library.entry.list", json!({"library": "user.shop"})), Verdict::Run { change: false });
     }
 
     /// Every registered `file.*` and `doc.*` command asks, so a new one cannot slip through by

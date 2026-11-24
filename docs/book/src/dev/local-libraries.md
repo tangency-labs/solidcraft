@@ -176,6 +176,87 @@ reopening. This library has no dependency on the pending render stack and does n
 the document format. User-visible evidence and actual native/wasm results are recorded in the PR;
 geometry/robustness checks remain separate and no reference baseline is weakened.
 
+## Library folders and places
+
+A library folder holds one `*.sclibrary.json` manifest (format `solidcraft-library-folder/1`:
+`id`, `name`, `provenance`) and one file per entry in `materials/` and `appearances/`. A place is
+where library folders are read from: the built-in library, My Library (the `my_library_folder`
+preference) and the user's places (`library_places`). A place is one library folder (`library`)
+or a folder whose subfolders are library folders (`folder`), named by its whole path on this
+computer or a network share (never a relative path or a device). Libraries are used in that order; a
+library whose id an earlier one has is listed as unavailable, naming the first.
+
+The app scans each place on a thread of its own: at start, when the list changes and on
+`library.places.refresh`. The window never waits for a scan. A library place follows the network
+rules a design's links follow. A scan reads at most:
+
+| What | At most |
+|---|---|
+| The manifest | 16 KiB |
+| One entry file | 256 KiB |
+| Entry files in `materials/`, and again in `appearances/` | 1,024 |
+| One library: the manifest and every entry file together | 4 MiB |
+| Files directly in a library folder (the manifest included), and again its subfolders | 64 |
+| Subfolders of a folder place | 64 |
+| Places in the list, My Library apart | 64 |
+
+A limit reached makes that library or place unavailable, with the reason; nothing is cut short
+quietly.
+
+`library.places.refresh` scans in full. With `changed_only: true` it first lists again each
+folder the last scan listed, with the same limits, and scans only the places where something
+differs: a file's length or time, a file or folder added or gone, or a folder that went missing,
+became unreadable, went over a limit or came back. A place where nothing differs keeps its scan, and
+nothing in it is read. An edit that keeps a file's length and its time isn't seen this way: a drive
+that keeps time in steps (FAT: 2 seconds) can hide an edit made inside one step. A full refresh
+reads it. In the browser, files keep no times, so `changed_only` scans every place.
+
+```json
+{"command":"library.places.add","params":{"path":"/srv/shop-libraries","kind":"folder"}}
+{"command":"library.places.list","params":{}}
+```
+
+`list` answers from what the session holds and reads no files. `add`, `remove`, `set`
+(`read_only`, `at`) and `refresh` check a change and the app applies it; without the app (the
+CLI, a headless MCP server) nothing is saved. A network folder is read-only unless `read_only`
+says otherwise. The place commands are app settings: a plugin can't run them, and the in-app
+Assistant asks before a change.
+
+### Making and changing libraries
+
+```json
+{"command":"library.create","params":{"place":"/srv/shop-libraries","name":"Shop"}}
+{"command":"library.entry.list","params":{"library":"user.shop"}}
+{"command":"library.entry.add","params":{"library":"user.shop","definition":{"kind":"material","value":{"name":"Steel","density_g_cm3":7.85}}}}
+{"command":"library.entry.edit","params":{"entry":"user.shop/material-steel","revision":"<the listed revision>","definition":{"kind":"material","value":{"name":"Steel","density_g_cm3":7.9}}}}
+{"command":"library.entry.copy","params":{"entry":"solidcraft.builtin/material-steel","to":"user.shop"}}
+{"command":"library.entry.remove","params":{"entry":"user.shop/material-steel","revision":"<the listed revision>"}}
+```
+
+`library.create` makes a library in a listed place: in a folder place, a new subfolder named after
+it; in a library place, that folder itself, which must be empty. The kind folders are made first and
+the manifest last, so a write stopped part way leaves a folder a scan skips, never a broken library.
+A new library's id is `user.<name>`, made unique among the libraries listed.
+
+`library.entry.list` gives every entry file of one library, refused ones with why, and each entry's
+id and revision. Like `library.places.list` it reads no files.
+
+`add` and `copy` write a new file under a new id, `<kind>-<name>` made unique in the library, and
+never replace a file. The file's name is only a label, made to work on every system. `copy` takes an
+entry from any library, the built-in one too, and keeps its values and provenance. `edit` and
+`remove` take the revision the caller read: the file is read again first, and a file that holds
+another revision, or is gone, is refused ("list it again"). An edit keeps the entry's id; its
+revision follows the content. `remove` moves the file to the library's own bin,
+`.removed/<kind>/`, which no scan reads; nothing is deleted, and a name already in the bin gets
+` (2)`.
+
+Every write is one file, written whole or not at all, and never follows a link at its name. A write
+is refused in a read-only place, in the built-in library, in an unavailable library, and when it
+would take the library past a limit in the table above. Every path follows the network rules a
+design's links follow. After a write the library is read again, as a scan reads it, so the next
+command sees the write. The writes are in the plugins' "file" group, and the in-app Assistant asks
+before each one.
+
 ## Scope
 
 The catalog carries the document's scalar/opaque `Look` and engineering-card values.

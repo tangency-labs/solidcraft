@@ -905,6 +905,9 @@ pub struct Session {
     pub plugin_state: plugin::AppState,
     /// Trusted UI invocation context; never a command parameter or a saved preference.
     pub plugin_forms_interactive: bool,
+    /// The library places this session reads from and what their scans found, shared with every copy
+    /// of the session; never saved in a design. The app gives it the user's places.
+    pub libraries: std::sync::Arc<io::library::Libraries>,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -1305,6 +1308,15 @@ const MAX_UNDO: usize = 200;
 const MAX_CHECKPOINTS: usize = 16;
 const MAX_LOG: usize = 2000;
 
+/// The libraries a session reads before the app gives it the user's places: the built-in library
+/// alone. Scanned once per process and shared, since every new session starts with it.
+fn built_in_libraries() -> std::sync::Arc<io::library::Libraries> {
+    use io::library::{Libraries, Place, scan};
+    use std::sync::{Arc, OnceLock};
+    static BUILT_IN: OnceLock<Arc<Libraries>> = OnceLock::new();
+    Arc::clone(BUILT_IN.get_or_init(|| Arc::new(Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, Vec::new(), &[], &[]))))
+}
+
 impl Default for Session {
     fn default() -> Self {
         Session::new(Document::new("Untitled"))
@@ -1437,6 +1449,7 @@ impl Session {
             plugin_limits: plugin::default_host_limits(),
             plugin_state: plugin::AppState::for_process(),
             plugin_forms_interactive: false,
+            libraries: built_in_libraries(),
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
@@ -1527,6 +1540,7 @@ impl Session {
             }
         }
         plugin_state.ui_caller = None;
+        let libraries = std::sync::Arc::clone(&self.libraries);
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
@@ -1564,6 +1578,7 @@ impl Session {
         self.plugin_state.link_changes = Default::default();
         self.plugin_state.link_reads = Default::default();
         self.plugin_state.link_read_source = Default::default();
+        self.libraries = libraries;
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.keep_print_faces = keep_print_faces;
@@ -3494,6 +3509,7 @@ impl Session {
                 state
             },
             plugin_forms_interactive: self.plugin_forms_interactive,
+            libraries: std::sync::Arc::clone(&self.libraries),
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             keep_print_faces: self.keep_print_faces,

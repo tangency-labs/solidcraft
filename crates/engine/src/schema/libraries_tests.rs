@@ -1,6 +1,11 @@
 use serde_json::{Value, json};
 
-use super::{LibraryApplied, LibraryApplyParams, LibraryExportParams, LibraryExported, LibraryInspectParams, LibraryInspected};
+use super::{
+    LibraryApplied, LibraryApplyParams, LibraryCreateParams, LibraryEntriesListed, LibraryEntryAddParams, LibraryEntryCopyParams,
+    LibraryEntryEditParams, LibraryEntryListParams, LibraryEntryRemoveParams, LibraryExportParams, LibraryExported, LibraryInspectParams,
+    LibraryInspected, LibraryPlaceChange, LibraryPlacesAddParams, LibraryPlacesListParams, LibraryPlacesListed, LibraryPlacesRefreshParams,
+    LibraryPlacesRefreshed, LibraryPlacesRemoveParams, LibraryPlacesSetParams, LibraryWritten,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -26,6 +31,17 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<LibraryInspectParams>(), &["path"]);
     assert_keys(input_schema_for::<LibraryExportParams>(), &["format", "id", "name", "overwrite", "path", "provenance"]);
     assert_keys(input_schema_for::<LibraryApplyParams>(), &["entry", "name", "path", "revision", "targets"]);
+    assert_keys(input_schema_for::<LibraryPlacesListParams>(), &[]);
+    assert_keys(input_schema_for::<LibraryPlacesAddParams>(), &["at", "kind", "path", "read_only"]);
+    assert_keys(input_schema_for::<LibraryPlacesRemoveParams>(), &["path"]);
+    assert_keys(input_schema_for::<LibraryPlacesSetParams>(), &["at", "path", "read_only"]);
+    assert_keys(input_schema_for::<LibraryPlacesRefreshParams>(), &["changed_only", "path"]);
+    assert_keys(input_schema_for::<LibraryCreateParams>(), &["name", "place", "provenance"]);
+    assert_keys(input_schema_for::<LibraryEntryListParams>(), &["library"]);
+    assert_keys(input_schema_for::<LibraryEntryAddParams>(), &["definition", "library", "provenance"]);
+    assert_keys(input_schema_for::<LibraryEntryEditParams>(), &["definition", "entry", "provenance", "revision"]);
+    assert_keys(input_schema_for::<LibraryEntryRemoveParams>(), &["entry", "revision"]);
+    assert_keys(input_schema_for::<LibraryEntryCopyParams>(), &["entry", "to"]);
 }
 
 #[test]
@@ -40,6 +56,9 @@ fn strict_keeps_todays_errors() {
         ("library.export", json!({"path": file.0, "provenance": {"license": ""}})),
         ("library.apply", json!({"path": file.0, "entry": "user.local/appearance-0", "revision": "0"})),
         ("library.apply", json!({"path": file.0, "entry": "e", "revision": "0", "targets": {"faces": [{"body": "B", "point": [1e10, 0, 0]}]}})),
+        ("library.create", json!({"place": file.0, "name": "Shop"})),
+        ("library.entry.list", json!({"library": "user.nobody"})),
+        ("library.entry.remove", json!({"entry": "user.nobody/x", "revision": "0"})),
     ]);
 }
 
@@ -96,4 +115,58 @@ fn library_commands_reply_with_their_schemas() {
         let error = s.execute("library.inspect", &json!({"path": file.0, "pth": 1})).err().map(|e| e.to_string()).unwrap_or_default();
         assert!(error.contains("pth"), "{level:?}: {error}");
     }
+}
+
+/// The place commands reply as their output schemas say, in Warn without warnings.
+#[test]
+fn library_place_commands_reply_with_their_schemas() {
+    let (listed, change, refreshed) =
+        (output_schema_for::<LibraryPlacesListed>(), output_schema_for::<LibraryPlaceChange>(), output_schema_for::<LibraryPlacesRefreshed>());
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let path = solidcraft_io::vfs::temp_dir().join("sc-places-schema").to_string_lossy().into_owned();
+    for (id, p, schema) in [
+        ("library.places.list", json!({}), &listed),
+        ("library.places.add", json!({"path": path, "kind": "folder"}), &change),
+        ("library.places.refresh", json!({}), &refreshed),
+        ("library.places.refresh", json!({"changed_only": true}), &refreshed),
+    ] {
+        let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &r), "{id}: {r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{id}: {r}");
+    }
+}
+
+/// The write commands reply as their output schemas say, in Warn without warnings: a library made,
+/// an entry added, listed, changed, copied and removed.
+#[test]
+fn library_write_commands_reply_with_their_schemas() {
+    use solidcraft_io::library::{Libraries, Place, PlaceRow, scan};
+    let (written, listed) = (output_schema_for::<LibraryWritten>(), output_schema_for::<LibraryEntriesListed>());
+    let folder = solidcraft_io::vfs::temp_dir().join(format!("sc-library-write-schema-{}", std::process::id())).to_string_lossy().into_owned();
+    let _ = std::fs::remove_dir_all(&folder);
+    let row = PlaceRow { place: Place::Library(folder.clone()), read_only: false };
+    let scans = [std::sync::Arc::new(scan(&row.place))];
+    let libraries = Libraries::new(std::sync::Arc::new(scan(&Place::BuiltIn)), None, vec![row], &scans, &[]);
+    let mut s = Session { param_check: ParamCheck::Warn, libraries: std::sync::Arc::new(libraries), ..Session::default() };
+    let mut check = |id: &str, p: Value, schema: &schemars::Schema| {
+        let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &r), "{id}: {r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{id}: {r}");
+        r
+    };
+    check("library.create", json!({"place": folder, "name": "Shop", "provenance": {"license": "CC0-1.0"}}), &written);
+    let steel = json!({"kind": "material", "value": {"name": "Steel", "density_g_cm3": 7.85}});
+    let added = check("library.entry.add", json!({"library": "user.shop", "definition": steel}), &written);
+    check("library.entry.list", json!({"library": "user.shop"}), &listed);
+    let look = json!({"kind": "material", "value": {"name": "Steel", "density_g_cm3": 7.9, "appearance": {"name": "Grey", "color": [90, 90, 90], "opacity": 1.0}}});
+    let edited = check(
+        "library.entry.edit",
+        json!({"entry": added["entry"], "revision": added["revision"], "definition": look, "provenance": null}),
+        &written,
+    );
+    check("library.entry.copy", json!({"entry": added["entry"], "to": "user.shop"}), &written);
+    check("library.entry.remove", json!({"entry": edited["entry"], "revision": edited["revision"]}), &written);
+    let _ = std::fs::remove_dir_all(&folder);
 }

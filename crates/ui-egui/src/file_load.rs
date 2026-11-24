@@ -916,6 +916,7 @@ fn start(app: &mut SolveApp) {
     scratch.plugin_state = app.session.plugin_state.clone();
     scratch.disabled_plugins = app.session.disabled_plugins.clone();
     scratch.plugin_limits = app.session.plugin_limits;
+    scratch.libraries = std::sync::Arc::clone(&app.session.libraries);
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
     if insert {
         scratch.selection = app.session.selection.clone();

@@ -1328,7 +1328,7 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn material_list(s: &mut Session, _p: &Value) -> Result<Value> {
-    let built_in = solidcraft_doc::MATERIALS.iter().map(|(n, d)| ListedMaterial::BuiltIn { name: n.to_string(), density_g_cm3: *d });
+    let built_in = solidcraft_doc::MATERIALS.iter().map(|(n, d, _)| ListedMaterial::BuiltIn { name: n.to_string(), density_g_cm3: *d });
     let user = s
         .doc
         .user_materials

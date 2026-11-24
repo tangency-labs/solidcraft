@@ -510,6 +510,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         ("sketch.insert_dxf", Some("file")),
         ("canvas.insert", Some("file")),
         ("library.export", Some("file")),
+        ("library.places.add", Some("app")),
         ("doc.open", Some("doc")),
         ("doc.info", Some("doc")),
         ("settings.get", Some("app")),

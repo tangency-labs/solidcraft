@@ -207,7 +207,16 @@ impl<R: Send + 'static> Worker<R> {
     /// Wait up to `limit` for the work to end (the app is closing: the GPU must not go away under
     /// a compile). Whether it ended in time; its result is dropped.
     pub fn wait(&self, limit: std::time::Duration) -> bool {
-        !matches!(self.done.recv_timeout(limit), Err(std::sync::mpsc::RecvTimeoutError::Timeout))
+        !matches!(self.wait_for(limit), Poll::Running)
+    }
+
+    /// Wait up to `limit` for the work's result: [`Poll::Running`] when it isn't done in time.
+    pub fn wait_for(&self, limit: std::time::Duration) -> Poll<R> {
+        match self.done.recv_timeout(limit) {
+            Ok(result) => Poll::Done(result),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Poll::Running,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Poll::Failed,
+        }
     }
 }
 

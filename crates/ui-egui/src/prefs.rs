@@ -1528,9 +1528,14 @@ impl Snapshot {
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         let plugin_grants = std::mem::take(&mut app.preferences.plugin_grants);
         let view_window_setups = std::mem::take(&mut app.preferences.view_window_setups);
+        // Library places change through their commands, not the dialog: Cancel keeps them too.
+        let library_places = std::mem::take(&mut app.preferences.library_places);
+        let my_library_folder = std::mem::take(&mut app.preferences.my_library_folder);
         app.preferences = self.prefs;
         app.preferences.plugin_grants = plugin_grants;
         app.preferences.view_window_setups = view_window_setups;
+        app.preferences.library_places = library_places;
+        app.preferences.my_library_folder = my_library_folder;
         crate::plugins::sync_policy(app);
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
@@ -1599,6 +1604,8 @@ impl Snapshot {
             held.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
             held.plugin_grants.clone_from(&app.preferences.plugin_grants);
             held.view_window_setups.clone_from(&app.preferences.view_window_setups);
+            held.library_places.clone_from(&app.preferences.library_places);
+            held.my_library_folder.clone_from(&app.preferences.my_library_folder);
             held == app.preferences
         };
         same_prefs
@@ -1636,6 +1643,8 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
     prefs.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
     prefs.plugin_grants.clone_from(&app.preferences.plugin_grants);
     prefs.view_window_setups.clone_from(&app.preferences.view_window_setups);
+    prefs.library_places.clone_from(&app.preferences.library_places);
+    prefs.my_library_folder.clone_from(&app.preferences.my_library_folder);
     let mut shortcut_box = app.sbox.prefs();
     if let Some(o) = shortcut_box.as_object_mut() {
         o.insert("pinned".into(), serde_json::json!(s.favourites));
@@ -3128,6 +3137,28 @@ fn themes_that_read<'de, D: serde::Deserializer<'de>>(saved: D) -> Result<Vec<cr
     Vec::<serde_json::Value>::deserialize(saved)?.iter().map(|value| theme_from_preferences(value, false).map_err(serde::de::Error::custom)).collect()
 }
 
+/// The saved library places that still read, at most [`MAX_PLACES`](solidcraft_engine::io::library::MAX_PLACES).
+/// A row this version can't read (a kind from a newer release) is dropped on its own, with a log
+/// line, not with the others.
+fn places_that_read<'de, D: serde::Deserializer<'de>>(saved: D) -> Result<Vec<solidcraft_engine::io::library::PlaceRow>, D::Error> {
+    use solidcraft_engine::io::library::MAX_PLACES;
+    let saved = Vec::<serde_json::Value>::deserialize(saved)?;
+    if saved.len() > MAX_PLACES {
+        log::warn!("preferences: {} library places saved; keeping the first {MAX_PLACES}", saved.len());
+    }
+    Ok(saved
+        .into_iter()
+        .filter_map(|row| match serde_json::from_value(row) {
+            Ok(row) => Some(row),
+            Err(error) => {
+                log::warn!("preferences: a library place can't be read ({error}); leaving it out");
+                None
+            }
+        })
+        .take(MAX_PLACES)
+        .collect())
+}
+
 /// Shared action for the Preferences button and `ui.prefs`.
 pub(super) fn forget_stand_up(app: &mut SolveApp) {
     app.preferences.stand_up_answers.clear();
@@ -4067,6 +4098,19 @@ fn prepare_preferences(
         for grant in grants.folders.iter().filter(|g| !before.is_some_and(|b| b.folders.contains(g))) {
             solidcraft_engine::io::vfs::check(&grant.folder.to_string_lossy()).map_err(|e| format!("`plugin_grants` folder for `{id}`: {e}"))?;
         }
+    }
+    // The same for a library place: a later scan reads it as the app.
+    if new.library_places.iter().any(|row| row.place.path().is_none()) {
+        return Err("`library_places` rows each name a folder; the built-in library is always listed".into());
+    }
+    let new_folders = new.library_places.iter().filter(|row| !app.preferences.library_places.contains(row)).filter_map(|row| row.place.path());
+    let my_library = (new.my_library_folder != app.preferences.my_library_folder && !new.my_library_folder.trim().is_empty())
+        .then_some(new.my_library_folder.as_str());
+    for folder in new_folders.chain(my_library) {
+        if let Some(why) = solidcraft_engine::io::library::place_refusal(folder) {
+            return Err(format!("library place {folder}: {why}"));
+        }
+        solidcraft_engine::io::vfs::check(folder).map_err(|e| format!("library place {folder}: {e}"))?;
     }
     if new.disabled_plugins.len() > crate::plugins::MAX_DISABLED || new.disabled_plugins.iter().any(|id| !crate::plugins::valid_id(id)) {
         return Err(format!("`disabled_plugins` must be at most {} ids of lowercase letters, digits and hyphens", crate::plugins::MAX_DISABLED));
@@ -7056,6 +7100,43 @@ mod tests {
         other.load_prefs(&saved);
         assert_eq!(serde_json::to_value(&other.preferences.personal_sheet_rules).unwrap(), expected);
         assert!(other.session.doc.sheet.rules.is_empty(), "a personal rule is not a rule of the design");
+    }
+
+    /// The library places are saved and read back, survive every page reset, and keep the rows
+    /// that read when one doesn't; a list over the cap is cut on load.
+    #[test]
+    fn library_places_survive_a_save_page_resets_and_a_row_that_does_not_read() {
+        use serde_json::json;
+        // Whole paths on every platform: a place needs one, and "/x" is not one on Windows.
+        let root = std::env::temp_dir();
+        let place = |name: &str| root.join(name).to_string_lossy().into_owned();
+        let row = |i: usize| json!({"place": {"kind": "folder", "path": place(&format!("libraries-{i}"))}, "read_only": i.is_multiple_of(2)});
+        let p = super::lenient(&json!({"length_decimals": 4, "library_places": [row(0), {"place": {"kind": "shelf", "path": "/x"}}, null, row(1)]}));
+        assert_eq!(p.length_decimals, 4);
+        assert_eq!(serde_json::to_value(&p.library_places).unwrap(), json!([row(0), row(1)]), "the row from a newer version is dropped alone");
+        let many: Vec<_> = (0..100).map(row).collect();
+        assert_eq!(super::lenient(&json!({"library_places": many})).library_places.len(), solidcraft_engine::io::library::MAX_PLACES);
+
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        super::set(&mut app, &json!({"library_places": [row(0)], "my_library_folder": place("my-libraries")})).unwrap();
+        for page in 0..super::PAGES.len() {
+            super::reset_preferences(&mut app.preferences, page);
+        }
+        let saved = app.prefs();
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&saved);
+        assert_eq!(serde_json::to_value(&other.preferences.library_places).unwrap(), json!([row(0)]));
+        assert_eq!(other.preferences.my_library_folder, place("my-libraries"));
+    }
+
+    /// My Library is the `libraries` folder in SolidCraft's data folder, or none without one.
+    #[test]
+    fn my_library_is_in_the_data_folder() {
+        let folder = super::Prefs::default().my_library_folder;
+        match solidcraft_engine::recovery::data_dir() {
+            Some(data) => assert_eq!(std::path::Path::new(&folder), data.join("libraries")),
+            None => assert!(folder.is_empty(), "{folder}"),
+        }
     }
 
     /// The interface font (#1290): a font that can be read, or empty for the built-in one; saved

@@ -45,6 +45,14 @@ macro_rules! unpaged_preferences {
             /// Personal Hole parameter combinations, shared by every design in this profile.
             /// No page reset discards this user-authored library.
             hole_presets: crate::hole_presets::Library = crate::hole_presets::Library::default();
+            /// The user's library places, in the order their libraries are used, after the built-in library
+            /// and My Library (`library_places`). Changed through `library.places.*`; no page reset
+            /// discards them.
+            #[serde(deserialize_with = "places_that_read")]
+            library_places: Vec<solidcraft_engine::io::library::PlaceRow> = Vec::new();
+            /// My Library: the folder new libraries are saved to, listed right after the built-in library.
+            /// Empty where there is no data folder (the browser): then there is no My Library.
+            my_library_folder: String = solidcraft_engine::recovery::data_dir().map(|d| d.join("libraries").to_string_lossy().into_owned()).unwrap_or_default();
             /// The Parameters dialog applies an expression as soon as its field is left (#9279). Off: the
             /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
             /// step. Its checkbox is in the dialog itself.

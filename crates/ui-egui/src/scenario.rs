@@ -193,6 +193,8 @@ impl Harness {
             screen_scale: None,
             cam_mark: None,
         };
+        // Test-owned like the import cache: no frame reads the developer's own My Library folder.
+        h.app.preferences.my_library_folder.clear();
         WIDTHS.with(|m| m.borrow_mut().clear());
         h.install();
         h.ctx.enable_accesskit();

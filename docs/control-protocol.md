@@ -1242,6 +1242,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and `remember_toolbar_tab` decides the toolbar tab, #9360)
 - `language` (`en`, `ar`, `ja`, `de`, `fr`, `he`, `ko`, `ms`, `ru`, `uk`, `zh`; see [localization](localization.md))
 - `length_decimals`
+- `library_places` (default empty: the user's library places, used after the built-in library and My Library in this order, at most 64, each `{"place": {"kind": "library" | "folder", "path": "…"}, "read_only": bool}`; `library.places.*` changes them one at a time and checks each change; a folder outside the caller's allowed folders is refused; no page reset clears them, #12982)
 - `line_drag_draws_one` (default false: in the Line tool, a press, a drag and the release draw one line from the press to the release and end there, snapping as clicks do; clicks still chain, and a drag under 24 points is a click; off, a drag places a point where it is let go, #7247)
 - `line_hover_tangent_arc` (default false: in the Line tool, after a segment, moving away from the chain's last point and resting back on it for about a third of a second makes the next click a tangent arc, and the same again goes back to lines; off, resting there does nothing, #9489)
 - `logo_accent` (bool, default false: the application bar's logo in shades of the theme's accent instead of the theme's logo colours)
@@ -1254,6 +1255,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `mcp_compact` (default false): compact tool output for agents bridged to this app through the MCP server (Preferences › AI › Agents through MCP; the server reads it with `mcp.options`; [MCP compact output](mcp.md#compact-output))
 - `middle_double_click` (`home` (default), `fit`, `off`)
 - `msaa`
+- `my_library_folder` (default the `libraries` folder in SolidCraft's data folder; empty in the web app, which has no My Library): the folder new libraries are saved to, used right after the built-in library; a folder outside the caller's allowed folders is refused, #12982
 - `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `maya`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
 - `navigator_arrows` (default true: the custom view navigator has orbit and roll arrows around its body; also `view.navigator {arrows}`)

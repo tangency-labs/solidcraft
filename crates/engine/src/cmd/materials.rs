@@ -76,7 +76,7 @@ fn new_name(s: &Session, cmd: &str, name: &str, except: Option<&str>) -> Result<
     if name.is_empty() || name.chars().count() > 128 {
         return Err(bad(cmd, "`name` must have 1–128 characters"));
     }
-    if MATERIALS.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)) {
+    if MATERIALS.iter().any(|(n, ..)| n.eq_ignore_ascii_case(name)) {
         return Err(bad(cmd, format!("`{name}` is a built-in material (material.list)")));
     }
     let taken = |m: &&UserMaterial| m.name.eq_ignore_ascii_case(name) && except.is_none_or(|e| !m.name.eq_ignore_ascii_case(e));
@@ -199,8 +199,8 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         let density = MATERIALS
             .iter()
-            .find(|(n, _)| *n == canonical.as_str())
-            .map(|(_, density)| *density)
+            .find(|(n, ..)| *n == canonical.as_str())
+            .map(|(_, density, _)| *density)
             .ok_or_else(|| bad(cmd, "material is unavailable"))?;
         MaterialInspected {
             name: canonical,
