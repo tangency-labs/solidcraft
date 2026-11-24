@@ -634,7 +634,7 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok((Vec3::ZERO, None));
         }
         if let Some(fp) = p.get(fk).and_then(vec3) {
-            let n = planar_face_normal(&*s.world_state()?, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
+            let n = planar_face_normal(&*s.world_state()?, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face of a solid body")))?;
             return Ok((fp, Some(n)));
         }
         side_pick(&*s.world_state()?, p.get(pk), pk, fk).map_err(|why| bad(cmd, why))
@@ -690,6 +690,7 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             from_normal: from_normal.map(Dir),
             to_normal: to_normal.map(Dir),
             flip,
+            flip_moves_only: false,
             from_plane,
             to_plane,
             axes,
@@ -719,12 +720,16 @@ pub(crate) fn take_align_picks(set: &mut Value) -> Result<[Option<AlignPick>; 2]
     Ok([side("from")?, side("to")?])
 }
 
+/// The keys of an Align's `timeline.edit` besides its picks that decide the stored ways again.
+pub(crate) const ALIGN_WAY_KEYS: [&str; 5] = ["from_plane", "to_plane", "from_frame", "to_frame", "flip"];
+
 /// The edited Align `new` (`old` before the edit, feature `id` in `component`) with the sides
 /// `picks` gives picked again in the model before it ([`side_pick`]), and both stored ways worked
-/// out again ([`mate_ways`]), so none is left from an old pick. A side not picked again keeps
-/// its stored way; one that was stored as the exact opposite of the side picked again may have
-/// been taken from it, so then the new pick must face as the old one did, or both sides are asked
-/// for. `flip` with no side that faces a way is refused.
+/// out again ([`mate_ways`]), so none is left from an old pick, plane or frame. A side not picked
+/// again keeps its stored way; one that was stored as the exact opposite of the side picked again
+/// may have been taken from it, so then the new pick must face as the old one did, or both sides
+/// are asked for. `flip` with no side that faces a way is refused. An edit of an Align from an
+/// older design takes this build's reading of `flip` (`flip_moves_only` is cleared).
 pub(crate) fn repick_align(
     s: &Session,
     id: u64,
@@ -736,12 +741,14 @@ pub(crate) fn repick_align(
     let cmd = "timeline.edit";
     let (
         FeatureKind::Align { from_normal: was_from, to_normal: was_to, .. },
-        FeatureKind::Align { from, to, from_normal, to_normal, flip, from_plane, to_plane, from_frame, to_frame, axes, .. },
+        FeatureKind::Align { from, to, from_normal, to_normal, flip, flip_moves_only, from_plane, to_plane, from_frame, to_frame, axes, .. },
     ) = (old, new)
     else {
         return Ok(());
     };
     let st = s.model.state_before(id);
+    let (vals, _) = s.doc.param_values();
+    let held = |plane: &Option<solidcraft_doc::PlaneRef>, frame: &Option<AlignFrame>| held_way(&s.doc, &vals, &st, component, plane, frame);
     let way = |n: &Option<Dir>| n.as_ref().map(|d| d.0);
     let (mut from_way, mut to_way) = (way(from_normal), way(to_normal));
     let [from_pick, to_pick] = picks;
@@ -761,7 +768,7 @@ pub(crate) fn repick_align(
             AlignPick::Point(v) => side_pick(&st, Some(v), key, &format!("{key}_face")).map_err(|why| bad(cmd, why))?,
             AlignPick::Face(v) => {
                 let fp = vec3(v).ok_or_else(|| bad(cmd, format!("`{key}_face` must be [x, y, z]")))?;
-                (fp, Some(planar_face_normal(&st, fp).ok_or_else(|| bad(cmd, format!("`{key}_face` must be on a planar face")))?))
+                (fp, Some(planar_face_normal(&st, fp).ok_or_else(|| bad(cmd, format!("`{key}_face` must be on a planar face of a solid body")))?))
             }
         };
         let opposite = matches!((was, other), (Some(a), Some(b)) if a * -1.0 == b);
@@ -781,9 +788,9 @@ pub(crate) fn repick_align(
     if let Some(v) = &to_pick {
         repick(v, "to", to_plane.is_some() || to_frame.is_some(), to, &mut to_way, way(was_to), way(was_from), from_pick.is_some())?;
     }
-    let (vals, _) = s.doc.param_values();
-    let from_held = held_way(&s.doc, &vals, &st, component, from_plane, from_frame)?;
-    let to_held = held_way(&s.doc, &vals, &st, component, to_plane, to_frame)?;
+    let (from_held, to_held) = (held(&*from_plane, &*from_frame)?, held(&*to_plane, &*to_frame)?);
+    from_way = from_way.filter(|_| from_held.is_none());
+    to_way = to_way.filter(|_| to_held.is_none());
     let facing = from_way.is_some() || to_way.is_some() || from_held.is_some() || to_held.is_some();
     if *flip && !facing {
         return Err(bad(cmd, FLIP_NEEDS));
@@ -792,7 +799,7 @@ pub(crate) fn repick_align(
         return Err(bad(cmd, "`axes` applies to point-to-point alignment: pick two points, or set `axes` to null"));
     }
     let (f, t) = mate_ways(from_way, to_way, from_held, to_held);
-    (*from_normal, *to_normal) = (f.map(Dir), t.map(Dir));
+    (*from_normal, *to_normal, *flip_moves_only) = (f.map(Dir), t.map(Dir), false);
     Ok(())
 }
 
@@ -1012,15 +1019,17 @@ pub(crate) fn held_way(
     Ok(Some(doc.resolve_plane_in(vals, pl, 0, component, Some(st))?.normal()))
 }
 
-/// The stored directions of an Align's two sides, from each pick's own (`from`, `to`) and a held
-/// side's now (`from_held`, `to_held`). A side that faces no way takes the opposite of the other
-/// side's way, so the bodies keep their turn and `flip` turns them over about it; a held side is
-/// worked out when evaluated, so it stores none of its own.
+/// The stored directions of an Align's two sides, from each pick's own (`from`, `to`), with the
+/// sides held as a plane or a frame (`from_held`, `to_held`). A held side is worked out when
+/// evaluated, so it stores none. A side that faces no way takes the opposite of the other side's
+/// pick, so the bodies keep their turn and `flip` turns them half round about an axis square to
+/// it; against a plane or a frame it stores none, and is turned against it when evaluated.
 pub(crate) fn mate_ways(from: Option<Vec3>, to: Option<Vec3>, from_held: Option<Vec3>, to_held: Option<Vec3>) -> (Option<Vec3>, Option<Vec3>) {
-    let (from_way, to_way) = (from.or(from_held), to.or(to_held));
-    let from = if from_way.is_none() { to_way.map(|b| b * -1.0) } else { from };
-    let to = if to_way.is_none() { from_way.map(|a| a * -1.0) } else { to };
-    (from, to)
+    let take = |own: Option<Vec3>, held: Option<Vec3>, other: Option<Vec3>| match held {
+        Some(_) => None,
+        None => own.or(other.map(|b| b * -1.0)),
+    };
+    (take(from, from_held, to), take(to, to_held, from))
 }
 
 fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {

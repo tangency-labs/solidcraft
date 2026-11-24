@@ -1768,10 +1768,11 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let set = expand_dotted(set, Some(&before), cmd, 0)?;
     let set = hole_position_expressions(set, &f.kind);
     let mut set = numbers_as_expressions(command_profiles(&set, cmd)?, &before);
-    // An Align's `from`, `to` and faces are picks, and they and `flip` decide the stored ways again.
+    // An Align's `from`, `to` and faces are picks; they, its planes and frames and `flip` decide the stored ways again.
     let align = matches!(f.kind, FeatureKind::Align { .. });
     let align_picks = if align { super::features_more::take_align_picks(&mut set)? } else { [None, None] };
-    let repick_align = align && (align_picks.iter().any(Option::is_some) || set.get("flip").is_some());
+    let repick_align =
+        align && (align_picks.iter().any(Option::is_some) || super::features_more::ALIGN_WAY_KEYS.iter().any(|k| set.get(k).is_some()));
     // A Frame Member's corner entry may give a Flip, input only: saved as an order below, as `frame.member` saves it.
     let mut flips = Vec::new();
     if matches!(f.kind, FeatureKind::FrameMember { .. }) {

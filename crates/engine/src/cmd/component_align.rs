@@ -116,7 +116,7 @@ fn world_pick(
         }
         let fp = vec3(fv).ok_or_else(|| bad(cmd, format!("`{fk}` must be [x, y, z]")))?;
         let n = super::super::features_more::planar_face_normal(&*s.world_state()?, fp)
-            .ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
+            .ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face of a solid body")))?;
         return Ok((fp, Some(n)));
     }
     if p.get(pk).and_then(Value::as_str).is_some_and(|o| o.eq_ignore_ascii_case("origin")) {

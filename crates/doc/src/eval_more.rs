@@ -122,7 +122,21 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::Align { bodies, from, to, from_normal, to_normal, flip, from_plane, to_plane, axes, from_frame, to_frame, angle } => {
+        FeatureKind::Align {
+            bodies,
+            from,
+            to,
+            from_normal,
+            to_normal,
+            flip,
+            flip_moves_only,
+            from_plane,
+            to_plane,
+            axes,
+            from_frame,
+            to_frame,
+            angle,
+        } => {
             // A plane on either side is worked out now, so the bodies follow it when it moves.
             let (mut from, mut from_normal) = (from.0, from_normal.and_then(|n| n.normalized()));
             if let Some(p) = from_plane {
@@ -143,8 +157,18 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 (None, Some(pl)) => (pl.origin, Some(pl.normal())),
                 (None, None) => (to.0, to_normal.and_then(|n| n.normalized())),
             };
+            // Flipped, a side that faces no way faces against a plane or frame on the other side.
+            let derive = *flip && !*flip_moves_only;
+            let from_held = from_plane.is_some() || from_frame.is_some();
+            let to_held = to_frame.is_some() || target.is_some();
+            let ways = match (from_normal, to_normal) {
+                (Some(a), Some(b)) => Some((a, b)),
+                (None, Some(b)) if derive && to_held => Some((b * -1.0, b)),
+                (Some(a), None) if derive && from_held => Some((a, a * -1.0)),
+                _ => None,
+            };
             let mut m = translation(Vec3::ZERO);
-            if let (Some(a), Some(b)) = (from_normal, to_normal) {
+            if let Some((a, b)) = ways {
                 // Turn `a` onto −b (faces meet) or b (flipped), about the `from` point.
                 let want = if *flip { b } else { b * -1.0 };
                 let axis = a.cross(want);
