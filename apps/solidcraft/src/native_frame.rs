@@ -8,10 +8,11 @@
 //! published (`solidcraft_ui_egui::window_chrome::caption`):
 //!
 //! - `WM_NCHITTEST`: the band along the top edge resizes (Windows' resize-border width for the
-//!   window's current DPI, 8 px at 100 %, with corners at its ends), the bare title bar is
-//!   `HTCAPTION` (Windows drags the window from the first pixel, maximizes it on a double-click
-//!   and snaps it) and the maximize button is `HTMAXBUTTON` (Windows 11's snap layouts). The bar's
-//!   controls stay the UI's.
+//!   window's current DPI, 8 px at 100 %), the four corners resize as squares twice that wide
+//!   (the size they have where the UI answers for every edge; the system frame's own corners are
+//!   only as long as the frame is thick), the bare title bar is `HTCAPTION` (Windows drags the
+//!   window from the first pixel, maximizes it on a double-click and snaps it) and the maximize
+//!   button is `HTMAXBUTTON` (Windows 11's snap layouts). The bar's controls stay the UI's.
 //! - What Windows then keeps for itself is told to the UI: where the pointer is over the caption
 //!   (the UI sees it there as anywhere else in the window), a press on the caption or on the
 //!   maximize button (to the UI a press on its bar, so its menus close as on a bar of its own), a
@@ -223,8 +224,8 @@ fn previous(hwnd: HWND) -> WNDPROC {
 }
 
 /// Answers the system for one window from the title bar its UI published: the resize band along
-/// the top, the caption and the maximize button. The system frame answers for the left, right
-/// and bottom.
+/// the top, the four corners, the caption and the maximize button. The system frame answers for
+/// the left, right and bottom between the corners.
 unsafe extern "system" fn caption_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let prev = previous(hwnd);
     // SAFETY: the arguments are the message as Windows delivered it to this window. A window
@@ -239,11 +240,16 @@ unsafe extern "system" fn caption_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpa
     match msg {
         WM_NCHITTEST => {
             let default = call_previous();
+            let (x, y) = screen_point(lparam);
+            // The corners first, in the system frame and in the client area alike: the frame's own
+            // corners end where the frame's thickness does.
+            if let Some(corner) = corner_hit(hwnd, x, y) {
+                return corner as LRESULT;
+            }
             // The system frame (left, right, bottom) answers for itself.
             if default != HTCLIENT as LRESULT {
                 return default;
             }
-            let (x, y) = screen_point(lparam);
             // The client area: the resize band along the top, then the title bar the UI published.
             if let Some(hit) = top_border_hit(hwnd, x, y) {
                 return hit as LRESULT;
@@ -583,6 +589,32 @@ fn top_border_code(r: RECT, x: i32, y: i32, edge: f32) -> Option<u32> {
     titlebar::resize_hit(w, egui::pos2(x as f32, y as f32), edge).map(hit_code)
 }
 
+/// The `HT*` code of the resize corner at screen point (`x`, `y`), where it lies in one of the
+/// four corner squares of the window with its frame.
+fn corner_hit(hwnd: HWND, x: i32, y: i32) -> Option<u32> {
+    if !resizable(hwnd) {
+        return None;
+    }
+    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    // SAFETY: `r` is a valid RECT to fill.
+    if unsafe { GetWindowRect(hwnd, &mut r) } == 0 {
+        return None;
+    }
+    corner_code(r, x, y, border_px(hwnd))
+}
+
+/// The corner's resize code at screen point (`x`, `y`) of window rect `r` whose resize border is
+/// `edge` wide, by the shared rule (`titlebar::resize_hit`: a corner is a square twice the border
+/// wide, and corners win over edges); `None` anywhere else, an edge included.
+fn corner_code(r: RECT, x: i32, y: i32, edge: f32) -> Option<u32> {
+    use egui::ResizeDirection::{NorthEast, NorthWest, SouthEast, SouthWest};
+    let w = egui::Rect::from_min_max(egui::pos2(r.left as f32, r.top as f32), egui::pos2(r.right as f32, r.bottom as f32));
+    match titlebar::resize_hit(w, egui::pos2(x as f32, y as f32), edge)? {
+        d @ (NorthWest | NorthEast | SouthWest | SouthEast) => Some(hit_code(d)),
+        _ => None,
+    }
+}
+
 fn hit_code(d: egui::ResizeDirection) -> u32 {
     use egui::ResizeDirection::*;
     match d {
@@ -705,6 +737,32 @@ mod tests {
         for x in [100, 107, 115, 116, 600, 1083, 1084, 1099] {
             assert_eq!(top_border_code(WINDOW, x, 53, EDGE), titlebar::resize_hit(w, egui::pos2(x as f32, 53.0), EDGE).map(hit_code), "x = {x}");
         }
+    }
+
+    /// The corners are squares twice the border wide on the whole window, its system frame
+    /// included: what `tools/windows-resize-smoke.ps1` asks at the ends of the edges.
+    #[test]
+    fn the_corners_are_twice_the_border_wide_in_the_frame_and_in_the_client_area() {
+        // The window's last column and row are at `right - 1` and `bottom - 1`.
+        let (l, t, rt, bt) = (100, 50, 1099, 749);
+        // Up the right edge from the bottom corner: 16 px of corner, then the edge is the frame's.
+        assert_eq!(corner_code(WINDOW, rt, bt, EDGE), Some(HTBOTTOMRIGHT));
+        assert_eq!(corner_code(WINDOW, rt, bt - 15, EDGE), Some(HTBOTTOMRIGHT));
+        assert_eq!(corner_code(WINDOW, rt, bt - 16, EDGE), None);
+        // Along the top from the left corner.
+        assert_eq!(corner_code(WINDOW, l + 15, t, EDGE), Some(HTTOPLEFT));
+        assert_eq!(corner_code(WINDOW, l + 16, t, EDGE), None);
+        // Past the frame's thickness, in the client area: still the corner's square.
+        assert_eq!(corner_code(WINDOW, rt - 12, bt - 12, EDGE), Some(HTBOTTOMRIGHT));
+        assert_eq!(corner_code(WINDOW, l + 12, bt - 12, EDGE), Some(HTBOTTOMLEFT));
+        assert_eq!(corner_code(WINDOW, rt - 12, t + 12, EDGE), Some(HTTOPRIGHT));
+        // The edges and the inside are no corners, nor is a point off the window.
+        for (x, y) in [(l, 400), (rt, 400), (600, t), (600, bt), (600, 400), (l - 1, t), (rt + 1, bt)] {
+            assert_eq!(corner_code(WINDOW, x, y, EDGE), None, "({x}, {y})");
+        }
+        // At 150 % the border is 12 px and a corner 24.
+        assert_eq!(corner_code(WINDOW, rt, bt - 23, 12.0), Some(HTBOTTOMRIGHT));
+        assert_eq!(corner_code(WINDOW, rt, bt - 24, 12.0), None);
     }
 
     #[test]
