@@ -13666,6 +13666,55 @@ fn plugin_panels_register_declared_zones_and_draw_virtual_table_actions() {
 }
 
 #[test]
+fn plugin_panels_table_rows_support_optional_indent_level() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    let ctx = crate::fonts::test_context();
+
+    // Set row 0 with no indent, row 1 with indent 2, and row 2 with an oversized indent 20 (clamped to MAX_TABLE_ROW_INDENT = 8)
+    panel
+        .data
+        .set_data(&[
+            Datum { path: "/tools/0/name".into(), value: UiValue::Text("Root Setup".into()) },
+            Datum { path: "/tools/1/name".into(), value: UiValue::Text("Pocket Operation".into()) },
+            Datum { path: "/tools/1/indent".into(), value: UiValue::Integer(2) },
+            Datum { path: "/tools/2/name".into(), value: UiValue::Text("Deep Nested Item".into()) },
+            Datum { path: "/tools/2/indent".into(), value: UiValue::Integer(20) },
+        ])
+        .unwrap();
+    panel.data.merge_frame();
+
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+
+    let Some(shape_root) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Root Setup") else {
+        panic!("root setup shape missing")
+    };
+    let Some(shape_indented) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Pocket Operation") else {
+        panic!("indented shape missing")
+    };
+    let Some(shape_clamped) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Deep Nested Item") else {
+        panic!("clamped shape missing")
+    };
+
+    let base_x = shape_root.pos.x;
+    let expected_indent_2 = base_x + 2.0 * super::plugin::TABLE_ROW_INDENT;
+    let expected_clamped_8 = base_x + (MAX_TABLE_ROW_INDENT as f32) * super::plugin::TABLE_ROW_INDENT;
+
+    assert!(
+        (shape_indented.pos.x - expected_indent_2).abs() < 1e-3,
+        "indent level 2 shifts first cell by 28.0 pt: got {}, expected {}",
+        shape_indented.pos.x,
+        expected_indent_2
+    );
+    assert!(
+        (shape_clamped.pos.x - expected_clamped_8).abs() < 1e-3,
+        "indent level 20 clamped to 8 shifts first cell by 112.0 pt: got {}, expected {}",
+        shape_clamped.pos.x,
+        expected_clamped_8
+    );
+}
+
+#[test]
 fn plugin_panels_sync_errors_remain_observable_until_a_successful_frame() {
     let mut h = plugin_panel_harness();
     let mut panel = plugin_table_snapshot();
