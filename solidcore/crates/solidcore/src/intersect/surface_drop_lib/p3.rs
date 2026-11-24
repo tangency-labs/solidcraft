@@ -1853,6 +1853,7 @@ impl Surface {
                                     &s_uv_domain,
                                     last.start.t,
                                     end.t,
+                                    (uv_tol_x, uv_tol_y),
                                     approx_tol_3d,
                                 )
                             }
@@ -1905,6 +1906,7 @@ impl Surface {
                                             &s_uv_domain,
                                             from.t,
                                             end.t,
+                                            (uv_tol_x, uv_tol_y),
                                             approx_tol_3d,
                                         )
                                     } else {

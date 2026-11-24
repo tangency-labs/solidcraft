@@ -11,6 +11,8 @@
 //! | [`Span`], [`Span::stretch`] | none    |
 //! | [`gap_within`]             | none     |
 //! | `polygon_in_domain` (private) | none  |
+//! | `fix_up_moves` (private)   | none     |
+//! | `straightened` (private)   | none     |
 //!
 //! **The defect.** `sm_AddToCurve` makes a span's Bezier polygon from its Hermite data:
 //! `P1 = uv(t0)`, `P2 = P1 + h uv'(t0) / 3`, `P3 = P4 - h uv'(t1) / 3`, `P4 = uv(t1)`, and
@@ -44,9 +46,11 @@
 //! it would lose the flush's fix-up of the knot it shared with the sliver (the neighbours
 //! of an interior knot on the boundary move onto it; those of an end knot are only
 //! clamped), which can make its fold larger than the sliver's. Only a neighbour whose
-//! polygon neither the clamp nor the fix-up moves takes over. Any span after a first one
-//! was left out is added as before: at
-//! most one first span is left out, and a last span is left out only after another was
+//! polygon neither the clamp nor the fix-up moves takes over: its polygon lies in the
+//! domain, the fix-up's tests (made the same way) leave the point next to the knot it
+//! keeps where it is (`fix_up_moves`), and it is not a dog-leg polygon with an end on a
+//! pole, which the straightening moves (`straightened`). Any span after a first one was
+//! left out is added as before: at most one first span is left out, and a last span is left out only after another was
 //! added. A sliver is left out only where the trace has no bounded boundary fix-up (whose
 //! budget each span added spends).
 //!
@@ -88,9 +92,10 @@ use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::Nurbs;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::Result;
+use crate::error::{native_failure, Result};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::geom_utility::p1::is_dog_leg;
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
@@ -103,11 +108,14 @@ use super::p1::DropPt;
 /// Whether the span from `start` to `end` is a clamped sliver (module docs): its polygon
 /// leaves `uv_domain`, clamped into it spans at most `uv_tol_x` by `uv_tol_y`, and the curve piece
 /// over it is proved within `tol_3d` across. `false` for a span of no length, a span with
-/// an end on a pole, and a curve with no certified box.
+/// an end on a pole, and a curve with no certified box (including one whose box fails
+/// with an error that may stand for an ordinary failure, [`native_failure`]: the span
+/// is then added as before).
 ///
 /// # Errors
 ///
-/// Those of the curve's certified box.
+/// Those of the curve's certified box that [`native_failure`] passes on (unported,
+/// cancelled and port-invariant errors).
 #[allow(clippy::too_many_arguments)] // the span, the domain and the drop's tolerances
 pub(crate) fn is_clamped_sliver(
     k: &Kernel,
@@ -131,12 +139,20 @@ pub(crate) fn is_clamped_sliver(
     if !clamped_box_within(uv_domain, polygon, uv_tol_x, uv_tol_y) {
         return Ok(false);
     }
-    let Some(piece) = curve.certified_bounding_box(k, &Extent1d::from_min_max(start.t, end.t))?
-    else {
+    let piece =
+        native_failure(curve.certified_bounding_box(k, &Extent1d::from_min_max(start.t, end.t)))?
+            .flatten();
+    let Some(piece) = piece else {
         return Ok(false);
     };
-    let diagonal = piece.size().length();
-    Ok(diagonal.is_finite() && round_up(round_up(diagonal)) <= tol_3d)
+    // the box's diagonal in rounded interval arithmetic: its upper end bounds the length
+    let (lo, hi) = (piece.min(), piece.max());
+    let side = |a: f64, b: f64| {
+        let d = Ivl::from(b) - Ivl::from(a);
+        d * d
+    };
+    let diagonal = (side(lo.x, hi.x) + side(lo.y, hi.y) + side(lo.z, hi.z)).sqrt();
+    Ok(diagonal.is_finite() && diagonal.mag() <= tol_3d)
 }
 
 /// The Bezier polygon `sm_AddToCurve` makes of the span from `start` to `end`, before its
@@ -155,8 +171,7 @@ fn polygon(start: &DropPt, end: &DropPt, scale: f64) -> Option<[Point2; 4]> {
 }
 
 /// The polygon `sm_AddToCurve` makes of the span from `start` to `end` with tangent
-/// scale `scale`, where it lies in `uv_domain`, so that neither its clamp nor the flush's
-/// fix-up moves it.
+/// scale `scale`, where it lies in `uv_domain`, so that its clamp does not move it.
 fn polygon_in_domain(
     uv_domain: &Extent2d,
     start: &DropPt,
@@ -164,6 +179,45 @@ fn polygon_in_domain(
     scale: f64,
 ) -> Option<[Point2; 4]> {
     polygon(start, end, scale).filter(|q| q.iter().all(|&p| uv_domain.clamp_point(p) == p))
+}
+
+/// Whether `add_span_with_policy` straightens `polygon`, the span from `start` to `end`
+/// (its dog-leg test, made the same way): an end on a pole, or not known to be off one,
+/// with a dog-leg polygon. The straightening moves the polygon, so a stretch proved on
+/// the polygon as made would not be proved on the one added.
+fn straightened(start: &DropPt, end: &DropPt, polygon: [Point2; 4]) -> bool {
+    let [p1, p2, p3, p4] = polygon;
+    (start.on_pole != Some(false) || end.on_pole != Some(false))
+        && is_dog_leg(p1, p2, p3, p4, 35.0, 45.0)
+}
+
+/// Whether the flush's fix-up (`fix_boundary_curves`) moves `ours`, the polygon point
+/// next to the interior knot point `knot` on the stretched span's side, made with the
+/// fix-up's own tests the same way: the knot lies within the `uv_tol_x` by `uv_tol_y`
+/// band of a boundary and is on it or the curve runs along it there, which needs
+/// `ours` to lie no farther across the boundary than along it; the point then takes the
+/// knot's coordinate, a move unless it has it already. The fix-up's other moves leave
+/// a polygon in the domain alone (the knots are not snapped, the end neighbours not
+/// clamped), and a move of the neighbour on the other side is the same with the
+/// stretch or without it.
+fn fix_up_moves(
+    domain: &Extent2d,
+    knot: Point2,
+    ours: Point2,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+) -> bool {
+    let (u0, v0) = (domain.min().x, domain.min().y);
+    let (u1, v1) = (domain.max().x, domain.max().y);
+    let along_u = (ours.x - knot.x).abs() <= (ours.y - knot.y).abs();
+    let along_v = (ours.y - knot.y).abs() <= (ours.x - knot.x).abs();
+    let moves_u = (knot.x < u0 + uv_tol_x || knot.x > u1 - uv_tol_x)
+        && ((knot.x == u0 || knot.x == u1) || along_u)
+        && ours.x != knot.x;
+    let moves_v = (knot.y < v0 + uv_tol_y || knot.y > v1 - uv_tol_y)
+        && ((knot.y == v0 || knot.y == v1) || along_v)
+        && ours.y != knot.y;
+    moves_u || moves_v
 }
 
 /// Whether the points clamped into `domain` lie in a box at most `tol_x` by `tol_y`.
@@ -217,8 +271,11 @@ impl Span {
 
     /// This span stretched to run over `from..to` (module docs, the stretch enclosure),
     /// where the range contains its own with one end in common, its polygon lies in
-    /// `uv_domain`, and the image on `surface` of the stretched span is proved within
-    /// `tol_3d` of `curve` at every parameter ([`gap_within`]). `None` otherwise,
+    /// `uv_domain`, the drop's flush leaves that polygon where it is (it is not one
+    /// `add_span_with_policy` straightens, [`straightened`], and the fix-up with the
+    /// `uv_tol` band does not move the point next to the end in common,
+    /// [`fix_up_moves`]), and the image on `surface` of the stretched span is proved
+    /// within `tol_3d` of `curve` at every parameter ([`gap_within`]). `None` otherwise,
     /// including where a certified box fails: the proof is then not made, and the sliver
     /// is kept, so the drop builds the curve it builds without this rule.
     #[allow(clippy::too_many_arguments)] // the span, the geometry, the range and the tolerance
@@ -230,6 +287,7 @@ impl Span {
         uv_domain: &Extent2d,
         from: f64,
         to: f64,
+        uv_tol: (f64, f64),
         tol_3d: f64,
     ) -> Option<Self> {
         let one_end_common = (from == self.start.t) != (to == self.end.t);
@@ -237,6 +295,18 @@ impl Span {
             return None;
         }
         let polygon = polygon_in_domain(uv_domain, &self.start, &self.end, self.tangent_scale)?;
+        if straightened(&self.start, &self.end, polygon) {
+            return None;
+        }
+        let [p1, p2, p3, p4] = polygon;
+        let (knot, ours) = if from == self.start.t {
+            (p1, p2)
+        } else {
+            (p4, p3)
+        };
+        if fix_up_moves(uv_domain, knot, ours, uv_tol.0, uv_tol.1) {
+            return None;
+        }
         if !gap_within(k, surface, curve, uv_domain, polygon, from, to, tol_3d) {
             return None;
         }
@@ -737,7 +807,7 @@ mod tests {
         let (start, end) = line_span(0.5, 0.75);
         let span = Span::new(start, end);
         let st = span
-            .stretch(&k, &s, &c, &unit(), 0.5 - 4.2e-8, 0.75, 1e-5)
+            .stretch(&k, &s, &c, &unit(), 0.5 - 4.2e-8, 0.75, (1e-9, 1e-9), 1e-5)
             .unwrap();
         assert_eq!((st.start.t, st.end.t), (0.5 - 4.2e-8, 0.75));
         assert_eq!((st.start.uv_pd, st.end.uv_pd), (start.uv_pd, end.uv_pd));
@@ -747,7 +817,16 @@ mod tests {
         );
         // stretched again over a last sliver
         let st2 = st
-            .stretch(&k, &s, &c, &unit(), 0.5 - 4.2e-8, 0.75 + 4.2e-8, 1e-5)
+            .stretch(
+                &k,
+                &s,
+                &c,
+                &unit(),
+                0.5 - 4.2e-8,
+                0.75 + 4.2e-8,
+                (1e-9, 1e-9),
+                1e-5,
+            )
             .unwrap();
         assert_eq!(st2.tangent_scale, end.t - start.t);
     }
@@ -764,8 +843,9 @@ mod tests {
         let c = line_at(1.0e-7);
         let (start, end) = line_span(0.5, 0.75);
         let span = Span::new(start, end);
-        let stretch =
-            |sp: &Span, c: &Curve, from: f64, to: f64| sp.stretch(&k, &s, c, &d, from, to, 1e-5);
+        let stretch = |sp: &Span, c: &Curve, from: f64, to: f64| {
+            sp.stretch(&k, &s, c, &d, from, to, (1e-9, 1e-9), 1e-5)
+        };
         // both ends moved, or neither; a range inside the span's
         assert!(stretch(&span, &c, 0.4, 0.8).is_none());
         assert!(stretch(&span, &c, 0.5, 0.75).is_none());
@@ -778,6 +858,85 @@ mod tests {
         let mut out = start;
         out.uv_pd = [Point2::new(0.0, 0.1), Vec2::new(-0.3, 0.5)];
         assert!(stretch(&Span::new(out, end), &c, 0.4, 0.75).is_none());
+        // an end on a pole (or not known to be off one) whose polygon is no dog leg is
+        // not straightened, so the stretch stands
+        let mut on_pole = end;
+        on_pole.on_pole = Some(true);
+        assert!(stretch(&Span::new(start, on_pole), &c, 0.5 - 4.2e-8, 0.75).is_some());
+        let mut unknown = start;
+        unknown.on_pole = None;
+        assert!(stretch(&Span::new(unknown, end), &c, 0.5 - 4.2e-8, 0.75).is_some());
+        // the end in common within the tolerance band of a boundary, with the curve
+        // running along it, where the flush's fix-up moves the polygon point next to it:
+        // v = 0.175 within 0.2 of v = 0
+        let near = span.stretch(&k, &s, &c, &d, 0.5 - 4.2e-8, 0.75, (1e-9, 0.2), 1e-5);
+        assert!(near.is_none());
+        let clear = span.stretch(&k, &s, &c, &d, 0.5 - 4.2e-8, 0.75, (1e-9, 0.17), 1e-5);
+        assert!(clear.is_some());
+    }
+
+    /// The fix-up moves the point next to a knot in a boundary's band only where the
+    /// curve runs along the boundary there (or the knot is on it) and the point does not
+    /// already have the knot's coordinate.
+    #[test]
+    fn the_fix_up_moves_only_a_point_along_a_boundary() {
+        let d = unit();
+        let knot = Point2::new(0.5, 0.05);
+        // in the v band, running along v = 0: moved
+        assert!(fix_up_moves(&d, knot, Point2::new(0.6, 0.07), 0.0, 0.1));
+        // running across it: kept
+        assert!(!fix_up_moves(&d, knot, Point2::new(0.52, 0.15), 0.0, 0.1));
+        // out of the band: kept
+        assert!(!fix_up_moves(&d, knot, Point2::new(0.6, 0.07), 0.0, 0.04));
+        // the knot on the boundary moves even a point across it
+        let on = Point2::new(0.5, 0.0);
+        assert!(fix_up_moves(&d, on, Point2::new(0.52, 0.15), 0.0, 0.1));
+        // a point with the knot's coordinate already does not move
+        assert!(!fix_up_moves(&d, knot, Point2::new(0.6, 0.05), 0.0, 0.1));
+    }
+
+    /// A dog-leg polygon is straightened where an end is on a pole or not known to be off
+    /// one, so it is never stretched there; off a pole, or with no dog leg, it is not.
+    #[test]
+    fn a_dog_leg_on_a_pole_is_straightened() {
+        // a 'z': legs (0, 0.02) either side of the middle (0.2, 0), 11 degrees off p1 p4
+        let z = [
+            Point2::new(0.3, 0.3),
+            Point2::new(0.3, 0.32),
+            Point2::new(0.5, 0.32),
+            Point2::new(0.5, 0.34),
+        ];
+        let (start, end) = line_span(0.5, 0.75);
+        let (mut pole, mut unknown) = (start, end);
+        pole.on_pole = Some(true);
+        unknown.on_pole = None;
+        assert!(straightened(&pole, &end, z));
+        assert!(straightened(&start, &unknown, z));
+        assert!(!straightened(&start, &end, z));
+        let straight = polygon(&start, &end, 0.25).unwrap();
+        assert!(!straightened(&pole, &unknown, straight));
+        // the stretch refuses it on a pole
+        let k = Kernel::default();
+        let tan = Vec2::new(0.0, 0.24);
+        let (a, mut b) = (pt(0.5, z[0], tan), pt(0.75, z[3], tan));
+        b.on_pole = Some(true);
+        let span = Span::new(a, b);
+        assert!(straightened(
+            &a,
+            &b,
+            polygon(&a, &b, span.tangent_scale).unwrap()
+        ));
+        let st = span.stretch(
+            &k,
+            &unit_plane(),
+            &line_at(1e-7),
+            &unit(),
+            0.4,
+            0.75,
+            (1e-9, 1e-9),
+            1e-5,
+        );
+        assert!(st.is_none());
     }
 
     /// A B-spline whose interior knot repeats more than its degree may jump there, so it
