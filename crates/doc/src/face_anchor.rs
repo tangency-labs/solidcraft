@@ -234,12 +234,15 @@ impl Document {
                         ));
                         continue;
                     };
-                    if old.normal().dot(new.normal()) > 1. - 1e-8 && (old.origin - new.origin).dot(new.normal()).abs() < 1e-7 {
-                        let origin = old.origin + old.x * anchor.coordinates[0] + old.y * anchor.coordinates[1];
-                        let x = old.x * anchor.x_axis[0] + old.y * anchor.x_axis[1];
-                        let delta = origin - new.origin;
-                        anchor.coordinates = [delta.dot(new.x), delta.dot(new.y)];
-                        anchor.x_axis = [x.dot(new.x), x.dot(new.y)];
+                    if crate::config::same_oriented_plane(&new, &old, 0.) {
+                        // Same plane: carry the point and axis through world space with the
+                        // planes' own maps, so no geometry is computed here.
+                        let origin = old.to_world(solidcore_record::Vec2::new(anchor.coordinates[0], anchor.coordinates[1]));
+                        let x = old.dir_to_world(solidcore_record::Vec2::new(anchor.x_axis[0], anchor.x_axis[1]));
+                        let at = new.to_local(origin);
+                        let along = new.to_local(new.origin + x);
+                        anchor.coordinates = [at.x, at.y];
+                        anchor.x_axis = [along.x, along.y];
                     }
                 }
             }
