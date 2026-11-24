@@ -125,6 +125,24 @@ fn a_blob_whose_part_does_not_hold_the_content_is_encoded_not_copied() {
         assert_eq!(copy.finish().unwrap(), expected, "{what}: encoded, not copied");
     }
 
+    // A part whose entry still says it holds the payload but whose deflated bytes were damaged
+    // (on disk, after the design was opened) is encoded, not carried into the save.
+    let mut damaged = Writer::new(LIMITS);
+    damaged.blob(&payload, "bin", true).unwrap();
+    let mut damaged = damaged.finish().unwrap();
+    let (start, length) = {
+        let mut zip = zip::ZipArchive::new(Cursor::new(damaged.clone())).unwrap();
+        let part = zip.by_name(name).unwrap();
+        (part.data_start().unwrap() as usize, part.compressed_size() as usize)
+    };
+    for byte in &mut damaged[start..start + length] {
+        *byte ^= 0x5a;
+    }
+    let mut reader = Reader::new(Cursor::new(damaged), LIMITS).unwrap();
+    let mut copy = Writer::new(LIMITS);
+    copy.blob_reusing(&payload, "bin", true, Some(&mut reader)).unwrap();
+    assert_eq!(copy.finish().unwrap(), expected, "damaged deflated bytes: encoded, not copied");
+
     // A name the source lacks is encoded.
     let mut writer = Writer::new(LIMITS);
     writer.blob(b"other", "bin", true).unwrap();

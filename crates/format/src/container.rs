@@ -199,11 +199,12 @@ impl Writer {
 
     /// [`Writer::blob`], copying the part from `reuse` (the container being saved over) exactly as
     /// it is stored there, its deflated bytes and all, when that holds this content stored the
-    /// way this writer stores it, instead of encoding it again. A part is only copied when its
-    /// entry says it holds `bytes`: the name (the content's SHA-256), its length and its CRC-32
-    /// all match, and it is not encrypted. So a container that changed on disk since it was read,
-    /// or one whose part does not hold what its name says, is never copied from: that content is
-    /// encoded instead. The CRC-32 of a deflated part is checked again whenever it is read.
+    /// way this writer stores it, instead of encoding it again. A part is only copied when it
+    /// holds `bytes`: its entry's name (the content's SHA-256), length, CRC-32 and compression
+    /// match, it is not encrypted, and its stored bytes inflate to exactly `bytes`. So a container
+    /// that changed on disk since it was read, or whose part is damaged or does not hold what its
+    /// name says, is never copied from: that content is encoded instead. Inflating to check costs a
+    /// fraction of deflating again.
     pub fn blob_reusing<R: Read + Seek>(
         &mut self,
         bytes: &[u8],
@@ -246,13 +247,16 @@ impl Writer {
         }
         let method = if compressed { zip::CompressionMethod::Deflated } else { zip::CompressionMethod::Stored };
         let crc = crc32fast::hash(bytes);
+        {
+            let Ok(mut file) = reader.zip.by_name(name) else { return Ok(false) };
+            if file.encrypted() || file.compression() != method || file.size() != bytes.len() as u64 || file.crc32() != crc {
+                return Ok(false);
+            }
+            if !holds(&mut file, bytes, self.limits.cancelled)? {
+                return Ok(false);
+            }
+        }
         let Ok(file) = reader.zip.by_name(name) else { return Ok(false) };
-        if file.encrypted() || file.compression() != method || file.size() != bytes.len() as u64 || file.crc32() != crc {
-            return Ok(false);
-        }
-        if self.limits.cancelled.is_some_and(|cancelled| cancelled()) {
-            return Err(FormatError::Cancelled);
-        }
         self.expanded = self.expanded.checked_add(bytes.len()).ok_or_else(|| invalid("expanded size overflow"))?;
         if self.expanded > (self.limits.max_expanded)() || self.names.len() >= self.limits.max_entries {
             return Err(invalid("package too large"));
@@ -265,6 +269,27 @@ impl Writer {
         self.names.insert(name.to_owned());
         self.zip.raw_copy_file(file).map_err(invalid)?;
         Ok(true)
+    }
+}
+
+/// Whether `part` reads back as exactly `bytes`, to its end, which is where its CRC-32 is checked:
+/// a read error or a difference is `false`. Stops on cancel a piece at a time.
+fn holds(part: &mut impl Read, bytes: &[u8], cancelled: Option<fn() -> bool>) -> Result<bool, FormatError> {
+    let mut piece = vec![0u8; 1 << 20];
+    let mut at = 0;
+    loop {
+        if cancelled.is_some_and(|cancelled| cancelled()) {
+            return Err(FormatError::Cancelled);
+        }
+        let Ok(n) = part.read(&mut piece) else { return Ok(false) };
+        if n == 0 {
+            return Ok(at == bytes.len());
+        }
+        let (Some(read), Some(expected)) = (piece.get(..n), bytes.get(at..at + n)) else { return Ok(false) };
+        if read != expected {
+            return Ok(false);
+        }
+        at += n;
     }
 }
 
