@@ -2038,16 +2038,17 @@ fn a_point_placed_by_an_expression_says_so_unfixes_and_refuses_a_move() {
     assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "the sketch does not change");
 }
 
-/// #14343: a Tangent between a line and a circle makes a tangent joint: the line's end lies on
-/// the circle and the line touches it there, so the two curves close an area that can be
-/// extruded. The tangency held for the infinite line only, and the gap it left at the line's end
-/// kept the area open.
+/// #14343: a Tangent between a line and a circle whose end is already close to the circle makes
+/// a tangent joint: the line's end lies on the circle and the line touches it there, so the two
+/// curves close an area that can be extruded. The tangency held for the infinite line only, and
+/// the gap it left at the line's end kept the area open.
 #[test]
 fn a_tangent_between_a_line_and_a_circle_closes_the_area() {
     let mut s = new_sketch();
     run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 20, "id": "c1"}));
-    run(&mut s, "sketch.line", json!({"points": [[-10, 25], [0, 40]], "ids": ["l1"]}));
-    run(&mut s, "sketch.line", json!({"points": ["l1.end", [10, 25]], "ids": ["l2"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "radius", "value": 20, "scale_sketch": false}));
+    run(&mut s, "sketch.line", json!({"points": [[-19, 5], [0, 40]], "ids": ["l1"]}));
+    run(&mut s, "sketch.line", json!({"points": ["l1.end", [19, 5]], "ids": ["l2"]}));
     run(&mut s, "sketch.constraint.tangent", json!({"a": "c1", "b": "l1"}));
     run(&mut s, "sketch.constraint.tangent", json!({"a": "c1", "b": "l2"}));
     let sk = sketch(&s);
@@ -2071,6 +2072,36 @@ fn a_tangent_between_a_line_and_a_circle_closes_the_area() {
     // The circle and the two lines close one area.
     let profiles = solidcraft_sketch::find_profiles(&sk);
     assert!(profiles.iter().any(|p| p.outer_curves.len() == 3), "the circle and the two lines close no area: {profiles:?}");
+}
+
+/// #14343: a Tangent between a line and a circle whose end is far from the circle keeps the
+/// plain tangency: the infinite line touches the circle and the line's end stays where it was
+/// drawn. The join is not forced on a line drawn away from the circle.
+#[test]
+fn a_tangent_between_a_line_and_a_circle_whose_end_is_far_from_it_keeps_the_tangency() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 20, "id": "c1"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "radius", "value": 20, "scale_sketch": false}));
+    run(&mut s, "sketch.line", json!({"points": [[-10, 25], [0, 40]], "ids": ["l1"]}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": "c1", "b": "l1"}));
+    let sk = sketch(&s);
+    let circle = sk.curve_index("c1").unwrap();
+    let line = sk.curve_index("l1").unwrap();
+    // No join: the line's end is not tied to the circle.
+    assert!(
+        !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { c: cc, .. } if cc == circle)),
+        "the line's end was joined to the circle"
+    );
+    // The plain tangency holds: the distance from the circle's centre to the line is the radius.
+    let (a, b) = sk.curves[line].kind.ends().unwrap();
+    let (p0, p1) = (sk.points[a].pos, sk.points[b].pos);
+    let d = p1 - p0;
+    let gap = (sk.center(circle).unwrap() - p0).cross(d).abs() / d.len();
+    assert!((gap - 20.0).abs() < 1e-6, "the line does not touch the circle: {gap}");
+    // The line's end is not on the circle: the gap the join would close is still there.
+    let from_centre = |p: Vec2| (p - sk.center(circle).unwrap()).len() - sk.radius(circle).unwrap();
+    let end = if from_centre(p0).abs() < from_centre(p1).abs() { p0 } else { p1 };
+    assert!(from_centre(end).abs() > 1e-6, "the line's end lies on the circle");
 }
 
 /// A negative value on a sided distance dimension flips the free side to the opposite side of its
