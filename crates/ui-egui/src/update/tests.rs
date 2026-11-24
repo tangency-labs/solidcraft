@@ -679,7 +679,7 @@ fn an_update_notice_never_overlaps_community_links_or_document_tabs() {
     // Check the first actual update-offer frame; the registry is reset each frame.
     h.frame();
 
-    for width in [1920.0, 1500.0, 1200.0, 1000.0, 850.0] {
+    for width in [1920.0, 1500.0, 1280.0, 1200.0, 1000.0, 850.0] {
         if width != 1920.0 {
             h.call("ui.resize", json!({"width":width,"height":720}));
         }
