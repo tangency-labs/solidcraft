@@ -2279,7 +2279,7 @@ fn remembering_importer_options_is_a_per_entry_checkbox_off_by_default_not_a_pre
     let loaded = crate::prefs::lenient(&old);
     let memory = &loaded.plugin_importer_options["gears"]["open"];
     assert_eq!((memory.remember, &memory.values), (false, &json!({"teeth":42})));
-    h.app.load_prefs(&serde_json::to_string(&loaded).unwrap());
+    h.app.load_prefs(&old.to_string());
     open_entry(&mut h.app, 0, 0);
     assert!(!h.app.plugin_menu.dialog().unwrap().remember);
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 20, "checkbox off: the entry's defaults");
@@ -2288,7 +2288,7 @@ fn remembering_importer_options_is_a_per_entry_checkbox_off_by_default_not_a_pre
 
     // The new shape round-trips, and it is what gets saved.
     h.app.preferences.plugin_importer_options.get_mut("gears").unwrap().get_mut("open").unwrap().remember = true;
-    let saved = serde_json::to_value(&h.app.preferences).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
     assert_eq!(saved["plugin_importer_options"]["gears"]["open"], json!({"remember":true,"values":{"teeth":42}}));
     let again = crate::prefs::lenient(&saved);
     assert_eq!(again.plugin_importer_options, h.app.preferences.plugin_importer_options);
