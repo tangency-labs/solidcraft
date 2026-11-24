@@ -190,7 +190,7 @@ fn main() -> ExitCode {
     let profiling = match profiling {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: {e}");
+            solidcraft_engine::note!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -199,11 +199,11 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugin_limits(&mut args) {
-        eprintln!("error: {e}");
+        solidcraft_engine::note!("error: {e}");
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugins_dir(&mut args) {
-        eprintln!("error: {e}");
+        solidcraft_engine::note!("error: {e}");
         return ExitCode::FAILURE;
     }
     // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
@@ -475,7 +475,7 @@ fn load_with(path: &str, check: solidcraft_engine::schema::ParamCheck, validatio
     let s = read_session(path, check, validation)?;
     // A newer SolidCraft's file opens all the same; stderr says so, stdout stays the caller's.
     for warning in s.doc.newer_file.iter().flat_map(|file| file.warnings()) {
-        eprintln!("{path}: warning: {warning}");
+        solidcraft_engine::note!("{path}: warning: {warning}");
     }
     Ok(s)
 }
@@ -524,16 +524,18 @@ fn read_session(
 fn warn_if_open_elsewhere(path: &str) {
     use solidcraft_engine::io::design_lock;
     if let Some(lock) = design_lock::held_elsewhere(std::path::Path::new(path), design_lock::now_secs()) {
-        eprintln!(
+        solidcraft_engine::note!(
             "{path}: warning: open in SolidCraft {} by {} on {}; saved all the same, and that window still shows the design it opened",
-            lock.app, lock.user, lock.host
+            lock.app,
+            lock.user,
+            lock.host
         );
     }
 }
 
 fn print_file_warnings(path: &str, reply: &Value) {
     for warning in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
-        eprintln!("{path}: warning: {warning}");
+        solidcraft_engine::note!("{path}: warning: {warning}");
     }
 }
 
@@ -735,12 +737,12 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         let quiet = args.iter().any(|a| a == "--quiet");
         // A body left out of the file is said whatever --quiet says: a part is missing from it.
         for line in skipped_body_lines(out, &reply) {
-            eprintln!("{line}");
+            solidcraft_engine::note!("{line}");
         }
         if !quiet {
             for w in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
                 if !w.contains(SKIPPED_NOTE) {
-                    eprintln!("{out}: warning: {w}");
+                    solidcraft_engine::note!("{out}: warning: {w}");
                 }
             }
         }
@@ -1293,7 +1295,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
     install_renderer();
     let options = solidcraft_mcp::Options::from_args_and_env(args).map_err(|e| format!("mcp: {e}"))?;
     if options.compact {
-        eprintln!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
+        solidcraft_engine::note!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
     }
     let allowed: Vec<std::path::PathBuf> = flags(args, "--allow-path").into_iter().map(std::path::PathBuf::from).collect();
     let scope = (!args.iter().any(|a| a == "--allow-any-path")).then(|| solidcraft_mcp::agent_scope(allowed.iter().cloned()));
@@ -1302,7 +1304,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
         // agent with nothing it asked for stops the start rather than serving a scope it didn't mean.
         let ignored: Vec<&solidcraft_engine::io::vfs::RejectedRoot> = s.rejected().iter().filter(|r| allowed.contains(&r.path)).collect();
         for r in &ignored {
-            eprintln!("solidcraft mcp: allow-path {} ignored: {}", r.path.display(), r.reason);
+            solidcraft_engine::note!("solidcraft mcp: allow-path {} ignored: {}", r.path.display(), r.reason);
         }
         if !allowed.is_empty()
             && args.iter().any(|a| a == "--require-allow-path")
@@ -1486,7 +1488,7 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
     if let Ok(size) = std::fs::metadata(path).map(|m| m.len())
         && let Some(warning) = solidcraft_engine::io::limits::memory_warning(path, size)
     {
-        eprintln!("warning: {path}: {warning}");
+        solidcraft_engine::note!("warning: {path}: {warning}");
     }
     let bytes = solidcraft_engine::io::limits::read(path, kind).map_err(|e| format!("{path}: {e}"))?;
     let read_ms = t.elapsed().as_secs_f64() * 1000.0;

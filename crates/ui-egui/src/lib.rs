@@ -76,6 +76,7 @@ pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
+pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
 pub mod dim_view;
 #[cfg(test)]
@@ -1370,12 +1371,15 @@ impl SolveApp {
                 Ok(solidcraft_viewport_gpu::view::MsaaCheck::Fallback) => {
                     built.target.samples = 1;
                     msaa_fallback = true;
-                    eprintln!("SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session", scene.samples);
+                    solidcraft_engine::note!(
+                        "SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session",
+                        scene.samples
+                    );
                 }
                 Ok(solidcraft_viewport_gpu::view::MsaaCheck::FailedAtOne) => {
-                    eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
+                    solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
                 }
-                Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
+                Err(error) => solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
             }
         }
         WgpuBuilt { built, blur: scene.depth.is_some() && window.depth.is_none() && window.samples == 1, msaa_fallback }
@@ -4797,6 +4801,7 @@ impl SolveApp {
         view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
+        library::drag_cursor(self, ui.ctx());
         if view_tiles::focus_pressed(self) {
             ui.ctx().request_repaint();
         }

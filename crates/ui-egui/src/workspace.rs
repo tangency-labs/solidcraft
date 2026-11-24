@@ -787,7 +787,7 @@ pub const SECTIONS: &[Section] = &[
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section { tab: "WELDMENTS", panel: "CREATE", promoted: 4, ids: &["frame.member", "frame.end_cap", "frame.plate", "frame.gusset"] },
-    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member"] },
+    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member", "frame.trim"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
 
@@ -907,6 +907,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.view.section.planned", "Section View"),
     ("document.units", "Units"),
     ("frame.rotate_member", "Rotate"),
+    ("frame.trim", "Trim"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
     ("inspect.curvature_comb", "Curv. Comb"),
@@ -988,6 +989,7 @@ pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SHEET METAL", "CREATE", "SHEET METAL", "CREATE"),
     ("SHEET METAL", "MODIFY", "SHEET METAL", "FLAT"),
     ("WELDMENTS", "CREATE", "WELDMENTS", "CREATE"),
+    ("WELDMENTS", "MODIFY", "WELDMENTS", "MODIFY"),
     ("PLASTIC", "CREATE", "MODEL", "CREATE"),
     ("PLASTIC", "SETUP", "MANAGE", "RULES"),
     ("MESH", "MODIFY", "INSERT", "FILES"),
