@@ -4759,6 +4759,54 @@ fn a_saved_align_of_two_points_reopens_unchanged() {
     }
 }
 
+/// Box C, 10 a side at (50, 0, 20), and the plane Tilt: XY turned by the parameter `tilt` about
+/// X (#21331).
+fn box_and_tilted_plane(tilt: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 20], "body_name": "C"}));
+    run(&mut s, "parameters.add", json!({"name": "tilt", "expression": tilt}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": "tilt", "name": "Tilt"}));
+    s
+}
+
+/// Box C lies where it lies in `fresh`, and has not turned (it is still 10 a side along x, y and z).
+fn assert_moved_as(s: &mut Session, fresh: &mut Session, turned: bool) {
+    let (lo, hi) = bounds(fresh, "C");
+    assert_bounds(s, "C", lo, hi);
+    let square = (0..3).all(|i| (hi[i] - lo[i] - 10.0).abs() < 1e-6);
+    assert!(turned || square, "C turned: {lo:?}..{hi:?}");
+}
+
+/// The bottom centre of box C, a bare point, onto a plane: the box moves along the plane's normal
+/// and does not turn, also when `timeline.edit` sets a tilted plane; with `flip` it turns over
+/// half round, against the plane it is set on now, as a new Align onto that plane does (#21331).
+#[test]
+fn align_a_point_onto_an_edited_plane_moves_without_turning() {
+    for flip in [false, true] {
+        let mut s = box_and_tilted_plane("30 deg");
+        let id = run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "XY", "flip": flip}))["feature"].clone();
+        let (lo, hi) = if flip { ([50., 0., -10.], [60., 10., 0.]) } else { ([50., 0., 0.], [60., 10., 10.]) };
+        assert_bounds(&mut s, "C", lo, hi);
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": {"to_plane": {"type": "construction", "name": "Tilt"}}}));
+        let mut fresh = box_and_tilted_plane("30 deg");
+        run(&mut fresh, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": flip}));
+        assert_moved_as(&mut s, &mut fresh, flip);
+    }
+}
+
+/// A bare point aligned onto a plane that is tilted later, earlier in the timeline: the box still
+/// only moves along the plane's normal, as a new Align onto the tilted plane does (#21331).
+#[test]
+fn align_a_point_onto_a_plane_tilted_later_moves_without_turning() {
+    let mut s = box_and_tilted_plane("0 deg");
+    run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt"}));
+    assert_bounds(&mut s, "C", [50., 0., 0.], [60., 10., 10.]);
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "30 deg"}));
+    let mut fresh = box_and_tilted_plane("30 deg");
+    run(&mut fresh, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt"}));
+    assert_moved_as(&mut s, &mut fresh, false);
+}
+
 /// The ways the Align of `s` stores for its two sides.
 fn align_ways(s: &Session) -> (Option<solidcore_record::Vec3>, Option<solidcore_record::Vec3>) {
     let way = |n: &Option<solidcraft_doc::Dir>| n.map(|d| d.0);
@@ -4808,4 +4856,106 @@ fn align_refuses_a_curved_face() {
     let centre = json!({"snap": "face_center", "at": [40, 30, 5]});
     let e = s.execute("solid.align", &json!({"bodies": ["Block"], "from": centre, "to_face": [14.5, 5, 0]}));
     assert!(e.as_ref().is_err_and(|e| e.to_string().contains("face_center snaps to the centre of a planar face")), "{e:?}");
+}
+
+/// A bare point flipped onto a plane that is tilted later: the box turns half round about an axis
+/// square to the plane's new normal, as a new Align onto the tilted plane does, not from the way
+/// the plane faced when the Align was made (#21331).
+#[test]
+fn align_a_flipped_point_onto_a_plane_tilted_later_turns_against_its_new_normal() {
+    let mut s = box_and_tilted_plane("0 deg");
+    run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}));
+    assert_bounds(&mut s, "C", [50., 0., -10.], [60., 10., 0.]);
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "30 deg"}));
+    let mut fresh = box_and_tilted_plane("30 deg");
+    run(&mut fresh, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}));
+    assert_moved_as(&mut s, &mut fresh, true);
+}
+
+/// A bare point flipped onto a plane, the plane tilted, then the flip taken off in the timeline:
+/// a plain move along the plane's normal, no turn (#21331).
+#[test]
+fn align_a_point_unflipped_after_its_plane_tilts_only_moves() {
+    let mut s = box_and_tilted_plane("0 deg");
+    let id = run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}))["feature"].clone();
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "30 deg"}));
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"flip": false}}));
+    let mut fresh = box_and_tilted_plane("30 deg");
+    run(&mut fresh, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt"}));
+    assert_moved_as(&mut s, &mut fresh, false);
+}
+
+/// A session opened from the saved design `json`, evaluated.
+fn reopen(json: &str) -> Session {
+    let mut s = Session { doc: solidcraft_doc::format::read(json).unwrap().into(), ..Default::default() };
+    s.refresh();
+    s
+}
+
+/// Box C flipped by a bare point onto the plane, saved by a build before this change: its Align
+/// stores no ways, and the format lacks this change.
+fn legacy_flipped_point_onto_a_plane() -> Session {
+    let mut s = box_and_tilted_plane("0 deg");
+    run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}));
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let align = saved["features"].as_array_mut().unwrap().iter_mut().find(|f| f["type"] == "align").expect("the Align");
+    for k in ["from_normal", "to_normal", "flip_moves_only"] {
+        align.as_object_mut().unwrap().remove(k);
+    }
+    let main: Vec<String> = solidcraft_doc::format::pending_names().into_iter().filter(|n| n != "align-flip-against-plane-or-frame").collect();
+    saved["format_pending"] = json!(main);
+    reopen(&saved.to_string())
+}
+
+/// The Align of `s`: its id and whether it is saved with `flip_moves_only`.
+fn align_moves_only(s: &Session) -> (u64, bool) {
+    let id = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Align { .. })).expect("an Align").id;
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let align = saved["features"].as_array().unwrap().iter().find(|f| f["type"] == "align").expect("the saved Align");
+    (id, align["flip_moves_only"] == json!(true))
+}
+
+/// A design saved before flip turned a bare point against a plane reopens as it evaluated then:
+/// a plain move (#21331).
+#[test]
+fn a_saved_flipped_point_onto_a_plane_reopens_as_a_plain_move() {
+    let mut reopened = legacy_flipped_point_onto_a_plane();
+    assert_bounds(&mut reopened, "C", [50., 0., 0.], [60., 10., 10.]);
+}
+
+/// Saved and reopened, a new flipped point onto a plane still turns, its format already holding
+/// this change; an older design's Align keeps `flip_moves_only` and its plain move, until
+/// `timeline.edit` sets its flip, which clears the flag and turns the box (#21331).
+#[test]
+fn saved_and_reopened_aligns_onto_a_plane_keep_their_flip() {
+    let mut s = box_and_tilted_plane("0 deg");
+    run(&mut s, "solid.align", json!({"bodies": ["C"], "from": [55, 5, 20], "to_plane": "Tilt", "flip": true}));
+    let mut again = reopen(&s.doc.to_json());
+    assert!(!align_moves_only(&again).1);
+    assert_bounds(&mut again, "C", [50., 0., -10.], [60., 10., 0.]);
+    let old = legacy_flipped_point_onto_a_plane();
+    let mut old = reopen(&old.doc.to_json());
+    let (id, moves_only) = align_moves_only(&old);
+    assert!(moves_only);
+    assert_bounds(&mut old, "C", [50., 0., 0.], [60., 10., 10.]);
+    run(&mut old, "timeline.edit", json!({"feature": id, "set": {"flip": true}}));
+    assert!(!align_moves_only(&old).1);
+    assert_bounds(&mut old, "C", [50., 0., -10.], [60., 10., 0.]);
+}
+
+/// A face pick on a mesh body is refused as needing a face of a solid body (#21331).
+#[test]
+fn align_refuses_a_face_of_a_mesh_body() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-align-mesh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl");
+    let mut cube = Session::default();
+    run(&mut cube, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Cube"}));
+    run(&mut cube, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mesh = s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| b.name.clone()).expect("a mesh body");
+    let e = s.execute("solid.align", &json!({"bodies": [mesh], "from_face": [10, 10, 20], "to_plane": "XY"}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("`from_face` must be on a planar face of a solid body")), "{e:?}");
 }
