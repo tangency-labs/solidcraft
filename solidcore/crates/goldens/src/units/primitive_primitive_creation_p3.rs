@@ -1068,6 +1068,8 @@ mod moved_rows {
                 assert_eq!(found.manifold, name.starts_with("capped_"), "{name}: a manifold solid");
                 if let Some(want) = capped_volume(name, theta) {
                     let enc = solidcore::mass::enclosure::enclose_volume(&k, &mut b, 1e-6 * want.hi).unwrap();
+                    // the enclosure reached the width asked, so the overlap is a real check
+                    assert_eq!(enc.stop, solidcore::mass::enclosure::EnclosureStop::Reached, "{name}: {:?}", enc.stop);
                     assert!(
                         enc.lo <= want.hi && want.lo <= enc.hi,
                         "{name}: volume {want:?} apart from [{}, {}]",

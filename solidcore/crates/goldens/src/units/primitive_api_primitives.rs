@@ -1972,7 +1972,7 @@ mod revolve_analytic_rows {
     }
 
     /// Each row's body is sound (`check_brep` level 2 clean, a manifold solid), its volume
-    /// enclosure ([`enclose_volume`] to a relative width of `1e-6`) overlaps the enclosed
+    /// enclosure ([`enclose_volume`] to a relative width of `1e-4`, reached) overlaps the enclosed
     /// closed-form volume, and every edge and vertex tolerance covers its certified gaps
     /// ([`crate::certify::tolerance_covers`]: an edge's tolerance at least the certified
     /// upper end of its uses' edge-face gaps, a vertex's at least the distance to its
@@ -1990,7 +1990,12 @@ mod revolve_analytic_rows {
             let found = solidcore::topology::brep::validation::soundness(&mut k, b).unwrap();
             assert!(found.check.lines().is_empty(), "{name}: {:?}", found.check.lines());
             assert!(found.manifold, "{name}: a manifold solid");
-            let enc = solidcore::mass::enclosure::enclose_volume(&k, b, 1e-6 * want.hi).unwrap();
+            // a relative width of 1e-4, which the refinement budget reaches for every row (1e-6
+            // and 1e-5 are not, for gen0129 and gen0329); it is the proof's resolution, not an
+            // allowance on the body: a face out of place moves the volume far more
+            let enc = solidcore::mass::enclosure::enclose_volume(&k, b, 1e-4 * want.hi).unwrap();
+            // the enclosure reached the width asked, so the overlap is a real check
+            assert_eq!(enc.stop, solidcore::mass::enclosure::EnclosureStop::Reached, "{name}: {:?} width {} of {:?}", enc.stop, enc.hi - enc.lo, want);
             assert!(
                 enc.lo <= want.hi && want.lo <= enc.hi,
                 "{name}: volume {want:?} apart from [{}, {}]",
