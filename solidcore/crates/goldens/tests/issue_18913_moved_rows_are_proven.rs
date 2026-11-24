@@ -32,9 +32,10 @@
 //! * **Previews (PROVEN).** [`Class::Preview`]: each preview surface of the replayed call is
 //!   a cylinder of the radius, its NURBS form on its implicit (`AnalyticSupport::check`),
 //!   its axis along its edge and at the radius from both of the edge's box faces, to the
-//!   rounding of the coordinates. [`Class::PreviewPastFaces`] (`preview0018`, now
-//!   `SM_ERR_INVALID_INPUT`): the radius exceeds the width of every face either selected
-//!   edge bounds, so no round of that radius fits on a face: the input is invalid
+//!   rounding of the coordinates. [`Class::PreviewPastFaces`] (`preview0018`, main a
+//!   preview of 217 blocks, now refused with status 1001, `SM_ERR`): the radius exceeds the
+//!   width of every face either selected edge bounds, so no round of that radius fits on a
+//!   face and main's preview surfaces could not be tangent within them
 //!   ([`radius_past_faces`], closed form from the case's inputs).
 //! * **Executive checkpoints (PROVEN, closed form).** [`Class::Checkpoint`]: the
 //!   intermediate state of `issue_2020_mitred_put_back_d9`. Every corner vertex the row
@@ -1147,7 +1148,7 @@ fn issue_18913_moved_rows_replay_and_are_proven() {
             }
             Class::PreviewPastFaces => {
                 let v = out.values.get("preview").expect("preview");
-                assert_ne!(v[0], 0.0, "{tag}: refused");
+                assert_eq!(v[0], 1001.0, "{tag}: refused with SM_ERR");
                 if !radius_past_faces(&case) {
                     bad.push(format!("{tag}: a refusal of a radius that fits a face"));
                 }
