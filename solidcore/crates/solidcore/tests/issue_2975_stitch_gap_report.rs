@@ -337,6 +337,11 @@ fn a_hermite_shared_edge_reports_a_certified_gap() {
     // The Hermite edge is the exact line its neighbour's edge is (its stored cubic
     // coefficients are zero), so the closed-form gap is 0; the bound holds it and stays
     // within rounding of it. Before Hermite enclosures this closure was refused.
+    // Rounding: the squares' coordinates and the cubic's coefficients are at most 4
+    // in magnitude, every interval operation widens by at most |x| 2.3e-16 + 1e-300,
+    // and the pair bound takes well under 100 operations per axis (shift, hull,
+    // difference, norm), so its excess over 0 is under 100 * 4 * 2.3e-16 * sqrt(3)
+    // < 2e-13; 1e-12 is the floor the line-edge tests above use.
     let (mut k, mut b) = hermite_shared_edge();
     let gaps = stitch_and_orient_reported(&mut k, &mut b, &StitchAndOrientOptions::default())
         .expect("a Hermite edge has a certified enclosure");
