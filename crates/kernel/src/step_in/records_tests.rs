@@ -157,8 +157,8 @@ fn a_record_with_axes_off_square_comes_in_squared() {
                 brep::Surface::Cylinder { frame, .. } => (frame.x_axis, &mut frame.y_axis),
                 _ => continue,
             };
-            for i in 0..3 {
-                b[i] += eps * a[i];
+            for (b, a) in b.iter_mut().zip(a) {
+                *b += eps * a;
             }
             touched += 1;
         }

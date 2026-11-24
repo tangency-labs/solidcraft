@@ -2,7 +2,7 @@
 //! read. The readers take a frame's axes only unit and square to 8 ulps, and a plane's axes only
 //! square to the rounding of their dot product (`gamma(3)`, `from_parameters`), because the
 //! kernel's placement cannot hold a skew one. Records written before the writer squared them
-//! (#21509) carry axes off by about 1e-14, so they did not open. These functions give the axes the
+//! (tangency-labs/solidcraft#21509) carry axes off by about 1e-14, so they did not open. These functions give the axes the
 //! readers take, keeping the first axis (a frame's x, a plane's u) exact:
 //!
 //! - **Plane:** the same plane, reparameterised. Its u axis is kept to the bit; its v axis loses
@@ -19,7 +19,7 @@
 //! A frame's point moves by at most its distance from the origin times the deviation, so at 1e-9
 //! a part a metre across moves by at most 1e-6 mm, the record's own default linear tolerance; a
 //! plane moves nothing. Axes further off are squared all the same (a design is never refused for
-//! them), and the caller warns, naming the face or edge ([`square`](crate::eval::square)'s users).
+//! them), and the caller warns, naming the face or edge.
 //!
 //! Not upstream: SolidCraft's reading of older records. No recursion.
 
@@ -73,14 +73,14 @@ pub fn square_frame(x: [f64; 3], y: [f64; 3]) -> Option<([f64; 3], [f64; 3])> {
     }
     let (_, ux) = v(x).length_and_unit()?;
     let mut w = v(y);
-    // two passes take out what rounding the first leaves along x
+    // a second pass takes out what rounding the first leaves along x
     for _ in 0..3 {
+        w = w - ux * w.dot(ux);
         let (_, uw) = w.length_and_unit()?;
         w = uw;
         if frame_is_square(arr(ux), arr(w)) {
             break;
         }
-        w = w - ux * w.dot(ux);
     }
     let out = (arr(ux), arr(w));
     (frame_is_square(out.0, out.1) && [ux.x, ux.y, ux.z, w.x, w.y, w.z].iter().all(|c| c.is_finite()))

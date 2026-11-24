@@ -1,7 +1,7 @@
 //! A record's frames and planes whose axes are a little off square, squared as it is read
 //! ([`solidcore::eval::square`]): a plane keeps its u axis and its points, its faces' pcurves and
 //! box sheared to the square axes; a frame keeps its x axis and its z. Records written before
-//! the writer squared a plane's axes (#21509) then open, and their faces and edges are where
+//! the writer squared a plane's axes (tangency-labs/solidcraft#21509) then open, and their faces and edges are where
 //! they were.
 //!
 //! Only what a reader would refuse is touched ([`square::frame_is_square`],
@@ -36,7 +36,7 @@ impl Squared {
     /// same, but worth a warning.
     #[must_use]
     pub fn worth_a_warning(&self) -> bool {
-        !(self.deviation <= square::SQUARE_TOLERANCE)
+        self.deviation > square::SQUARE_TOLERANCE || self.deviation.is_nan()
     }
 }
 

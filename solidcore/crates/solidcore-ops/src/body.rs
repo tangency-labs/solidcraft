@@ -1069,8 +1069,8 @@ mod tests {
         use solidcore_record::brep::{Curve as C, Surface as S};
         let (mut record, _) = body.to_record().unwrap();
         let tilt = |a: [f64; 3], b: &mut [f64; 3]| {
-            for i in 0..3 {
-                b[i] += eps * a[i];
+            for (b, a) in b.iter_mut().zip(a) {
+                *b += eps * a;
             }
         };
         let mut touched = 0;
@@ -1091,7 +1091,7 @@ mod tests {
     }
 
     /// A body saved with plane and frame axes off square (1e-12, as the writer left them before
-    /// #21509; 1e-6, well past any rounding) opens: the axes are squared as the record is read,
+    /// tangency-labs/solidcraft#21509; 1e-6, well past any rounding) opens: the axes are squared as the record is read,
     /// the body is the same solid (its volume to the integrator's accuracy, every face, edge and
     /// vertex where the record has it, in the same order, so names hold), and saved again it
     /// is square. Only the larger skew is past the tolerance worth a warning.
