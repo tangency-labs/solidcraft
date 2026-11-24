@@ -33,6 +33,9 @@ can run it.
 | Changes per message | `AgentTurnLimit` | `REG_DWORD` | `1` to `200`: the most changes an agent in the chat makes for one message. `0`: no limit. SolidCraft 0.46 or later. |
 | Let AI agents connect | `AgentControl` | `REG_DWORD` | `1`: the control channel (MCP, this computer only) is on. `0`: SolidCraft opens no port for agents, not even one named with `--control` or `SOLIDCRAFT_CONTROL_PORT`. SolidCraft 0.46 or later. |
 | Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
+| Show labels on the toolbar | `RibbonLabels` | `REG_DWORD` | `1`: the toolbar shows a label under each button. `0`: icons only (Preferences, Layout, Window, Toolbar). SolidCraft 0.48 or later. |
+| Show the status bar | `StatusBar` | `REG_DWORD` | `1`: the status bar shows and people cannot hide it. `0`: hidden (Preferences, Layout, Window, Status bar). SolidCraft 0.48 or later. |
+| Export hidden edges as dashed lines | `DxfDashedHiddenLines` | `REG_DWORD` | `1`: File, Export Current View as DXF writes hidden edges as dashed lines. `0`: it leaves them out. The export dialog shows the choice as set by the organization. SolidCraft 0.48 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 

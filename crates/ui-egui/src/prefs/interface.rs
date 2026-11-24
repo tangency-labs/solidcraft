@@ -239,16 +239,19 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
                             }
                         });
+                        let locked = app.policy.locks("ribbon_labels");
                         ui_kit::row(ui, app.tr("prefs.toolbar"), |ui| {
-                            let mut selected = usize::from(!app.preferences.ribbon_labels);
-                            if ui_kit::segmented(
-                                ui,
-                                &mut selected,
-                                &[app.tr("prefs.labels"), app.tr("prefs.icons_only")],
-                                ui_kit::Segments { intrinsic: true, ..Default::default() },
-                            ) {
-                                app.preferences.ribbon_labels = selected == 0;
-                            }
+                            crate::policy::row(ui, locked, |ui| {
+                                let mut selected = usize::from(!app.preferences.ribbon_labels);
+                                if ui_kit::segmented(
+                                    ui,
+                                    &mut selected,
+                                    &[app.tr("prefs.labels"), app.tr("prefs.icons_only")],
+                                    ui_kit::Segments { intrinsic: true, ..Default::default() },
+                                ) {
+                                    app.preferences.ribbon_labels = selected == 0;
+                                }
+                            });
                         });
                         let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(app.tr("prefs.legacy_surface_toolbar_hint"));
                         crate::scenario::publish_target("prefs:legacy_surface_toolbar", response.rect);
@@ -284,7 +287,15 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 crate::scenario::publish_handle(&format!("prefs:toast_place:{key}"), at);
                             }
                         }
-                        layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
+                        let locked = app.policy.locks("status_bar");
+                        locked_layout_check(
+                            ui,
+                            app.tr("prefs.status_bar"),
+                            app.tr("prefs.status_bar_note"),
+                            &mut app.preferences.status_bar,
+                            "status_bar",
+                            locked,
+                        );
                         // The operations under way, with their Cancel, in the view's corner.
                         layout_check(
                             ui,
@@ -821,6 +832,11 @@ fn browser_tree_check(ui: &mut egui::Ui, app: &mut SolveApp, label: &str, help: 
 
 /// Keep native checkbox responses and one real search target; guidance stays on hover.
 fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str) {
+    locked_layout_check(ui, label, help, value, key, false);
+}
+
+/// A layout checkbox that an organization's policy can lock: greyed out, with "Set by your organization".
+fn locked_layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str, locked: bool) {
     let t = Tokens::get();
     let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16).min(ui.max_rect().width());
     ui.allocate_ui_with_layout(egui::vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -828,7 +844,9 @@ fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, ke
             ui_kit::row(ui, "", |ui| {
                 ui.spacing_mut().item_spacing.x = t.space_6;
                 let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
-                let response = ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, value).backing_on_hover_text(help));
+                let response = crate::policy::row(ui, locked, |ui| {
+                    ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, value).backing_on_hover_text(help))
+                });
                 crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                 ui_kit::help_icon(ui, help);
             })

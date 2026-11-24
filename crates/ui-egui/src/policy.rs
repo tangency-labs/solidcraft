@@ -70,10 +70,13 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: CHECK_FOR_UPDATES, pref: "check_updates", kind: Kind::Switch },
     Lock { policy: "ConnectAiApps", pref: "connect_ai_apps", kind: Kind::Switch },
     Lock { policy: "DefaultUnits", pref: "default_units", kind: Kind::Units },
+    Lock { policy: "DxfDashedHiddenLines", pref: "view_dxf_dashed", kind: Kind::Switch },
     Lock { policy: "Language", pref: "language", kind: Kind::Language },
     Lock { policy: "ReopenDesigns", pref: "reopen_designs", kind: Kind::Switch },
+    Lock { policy: "RibbonLabels", pref: "ribbon_labels", kind: Kind::Switch },
     Lock { policy: "ShowDiscordButton", pref: "show_discord_button", kind: Kind::Switch },
     Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
+    Lock { policy: "StatusBar", pref: "status_bar", kind: Kind::Switch },
 ];
 
 /// A preference's value, as a policy sets it.
@@ -229,8 +232,11 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "default_units" => Setting::Text(p.default_units.clone()),
         "language" => Setting::Text(p.language.clone()),
         "reopen_designs" => Setting::Switch(p.reopen_designs),
+        "ribbon_labels" => Setting::Switch(p.ribbon_labels),
         "show_discord_button" => Setting::Switch(p.show_discord_button),
         "show_donate_button" => Setting::Switch(p.show_donate_button),
+        "status_bar" => Setting::Switch(p.status_bar),
+        "view_dxf_dashed" => Setting::Switch(p.view_dxf_dashed),
         _ => return None,
     })
 }
@@ -252,8 +258,11 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("default_units", Setting::Text(text)) => p.default_units.clone_from(text),
         ("language", Setting::Text(text)) => p.language.clone_from(text),
         ("reopen_designs", Setting::Switch(on)) => p.reopen_designs = *on,
+        ("ribbon_labels", Setting::Switch(on)) => p.ribbon_labels = *on,
         ("show_discord_button", Setting::Switch(on)) => p.show_discord_button = *on,
         ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
+        ("status_bar", Setting::Switch(on)) => p.status_bar = *on,
+        ("view_dxf_dashed", Setting::Switch(on)) => p.view_dxf_dashed = *on,
         _ => {}
     }
 }
@@ -878,6 +887,45 @@ mod tests {
             assert_eq!(boxes[0].1.toggled(), Some(if on { Toggled::True } else { Toggled::False }), "{label} shows the organization's value");
         }
         assert!(h.widget("Set by your organization").is_some(), "the rows say who set them");
+    }
+
+    #[test]
+    fn interface_and_export_switches_are_set_by_the_policy_and_keep_each_persons_choice() {
+        use egui::accesskit::{Role, Toggled};
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let p = &mut h.app.preferences;
+        (p.ribbon_labels, p.status_bar, p.view_dxf_dashed) = (true, false, false);
+        h.app.policy = Policy::from_json(r#"{"RibbonLabels": 0, "StatusBar": 1, "DxfDashedHiddenLines": 1}"#);
+        h.frame();
+        let p = &h.app.preferences;
+        assert_eq!((p.ribbon_labels, p.status_bar, p.view_dxf_dashed), (false, true, true), "the organization's values are in force");
+        for (pref, own) in [("ribbon_labels", true), ("status_bar", false), ("view_dxf_dashed", false)] {
+            assert_eq!(saved(&h.app)[pref], json!(own), "{pref} is saved as the person chose it");
+            let refused = h.call("ui.prefs", json!({ pref: !own }));
+            assert_eq!(refused["ok"], json!(false), "{pref}: {refused}");
+        }
+        // The View-to-DXF dialog starts with the organization's choice and keeps it when another is clicked.
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        h.app.start("file.export_view_dxf");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "dialog:dxf:omit"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ViewDxf { dashed: true, .. })));
+        assert!(h.widget("Set by your organization").is_some(), "the export dialog says who set the choice");
+        h.app.dialog = None;
+        // Preferences shows the status bar row greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.frames(3);
+        crate::prefs::reveal_preference(&mut h, "prefs:status_bar");
+        let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+        let boxes: Vec<_> = tree.nodes.iter().filter(|(_, n)| n.role() == Role::CheckBox && n.label() == Some("Status bar")).collect();
+        assert_eq!(boxes.len(), 1);
+        assert!(boxes[0].1.is_disabled(), "the status bar row is locked");
+        assert_eq!(boxes[0].1.toggled(), Some(Toggled::True));
+        assert!(h.widget("Set by your organization").is_some());
     }
 
     #[test]

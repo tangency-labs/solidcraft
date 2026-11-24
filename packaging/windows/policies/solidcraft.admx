@@ -5,7 +5,7 @@
   Intune's import takes no combo boxes and wants every namespace it references uploaded first, so
   this file uses none of either. The target namespace never changes; a new policy raises revision.
 -->
-<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.4" schemaVersion="1.0">
+<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.5" schemaVersion="1.0">
   <policyNamespaces>
     <target prefix="solidcraft" namespace="TangencyLabs.Policies.SolidCraft" />
   </policyNamespaces>
@@ -14,6 +14,7 @@
     <definitions>
       <definition name="SUPPORTED_SolidCraft_0_44" displayName="$(string.SUPPORTED_SolidCraft_0_44)" />
       <definition name="SUPPORTED_SolidCraft_0_46" displayName="$(string.SUPPORTED_SolidCraft_0_46)" />
+      <definition name="SUPPORTED_SolidCraft_0_48" displayName="$(string.SUPPORTED_SolidCraft_0_48)" />
     </definitions>
   </supportedOn>
   <categories>
@@ -180,6 +181,36 @@
     <policy name="ConnectAiApps" class="Both" displayName="$(string.ConnectAiApps)" explainText="$(string.ConnectAiApps_Explain)" presentation="$(presentation.ConnectAiApps)" key="Software\Policies\SolidCraft" valueName="ConnectAiApps">
       <parentCategory ref="SolidCraft" />
       <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="DxfDashedHiddenLines" class="Both" displayName="$(string.DxfDashedHiddenLines)" explainText="$(string.DxfDashedHiddenLines_Explain)" presentation="$(presentation.DxfDashedHiddenLines)" key="Software\Policies\SolidCraft" valueName="DxfDashedHiddenLines">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="RibbonLabels" class="Both" displayName="$(string.RibbonLabels)" explainText="$(string.RibbonLabels_Explain)" presentation="$(presentation.RibbonLabels)" key="Software\Policies\SolidCraft" valueName="RibbonLabels">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="StatusBar" class="Both" displayName="$(string.StatusBar)" explainText="$(string.StatusBar_Explain)" presentation="$(presentation.StatusBar)" key="Software\Policies\SolidCraft" valueName="StatusBar">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
       <enabledValue>
         <decimal value="1" />
       </enabledValue>
