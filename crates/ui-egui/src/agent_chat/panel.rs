@@ -1271,7 +1271,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                             tr("ui.agent_chat_attach_selection").to_string()
                         };
                         let pick =
-                            ui_kit::checkbox(ui, &label, &mut chat.attach_selection).backing_on_hover_text(tr("ui.agent_chat_attach_selection_tip"));
+                            ui_kit::checkbox(ui, &label, &mut *chat.attach_selection).backing_on_hover_text(tr("ui.agent_chat_attach_selection_tip"));
                         solidcraft_ui_registry::publish_handle("agent_chat:attach_selection", pick.rect.center());
                         // Choose faces, edges, features and bodies on purpose, then OK.
                         let picker = ui_kit::button(ui, tr("ui.agent_chat_pick_context"), ui_kit::Button::Enabled(!view.dialog_open))
