@@ -1950,6 +1950,43 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
     assert_eq!(kept, Some(KeptSeparate::AlongEdge));
 }
 
+/// A chamfer or fillet a design file picks by a point alone (no `body`, no edge name), where
+/// the point lies on edges of two bodies, blends the first body as before but warns, naming both
+/// (#20517): the `solid.chamfer` and `solid.fillet` commands refuse the same pick. A pick on one
+/// body's edge alone gives no warning.
+#[test]
+fn a_blend_picked_on_edges_of_two_bodies_warns_and_names_both() {
+    let blended = |kind: serde_json::Value| {
+        let mut doc = Document::new("two cubes");
+        for corner in [["0", "0", "0"], ["10", "0", "0"]] {
+            let cube = serde_json::json!({"type": "box", "corner": corner, "length": "10", "width": "10", "height": "10", "operation": "new_body"});
+            doc.add_feature(serde_json::from_value(cube).unwrap(), None).unwrap();
+        }
+        let blend = doc.add_feature(serde_json::from_value(kind).unwrap(), None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(blend).unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let st = m.state();
+        let names: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
+        let volumes: Vec<f64> = st.bodies.iter().map(|b| measure(&b.body).unwrap().volume).collect();
+        (result.warning.clone(), names, volumes)
+    };
+    for kind in ["chamfer", "fillet"] {
+        let size = if kind == "chamfer" { "distance" } else { "radius" };
+        let (warning, names, volumes) = blended(serde_json::json!({"type": kind, "edges": [[10.0, 0.0, 5.0]], size: "1"}));
+        assert_eq!(names.len(), 2, "{names:?}");
+        let warning = warning.unwrap_or_default();
+        let both = format!("[10, 0, 5] lies on edges of 2 bodies, {} and {}: `{}` is blended", names[0], names[1], names[0]);
+        assert!(warning.contains(&both) && warning.contains("with `body`"), "{kind}: {warning}");
+        // The result is the same as before: the first body is blended, the second left alone.
+        assert!(volumes[0] < 999.9 && rel(volumes[1], 1000.0) < 1e-9, "{kind}: {volumes:?}");
+
+        let (warning, _, _) = blended(serde_json::json!({"type": kind, "edges": [[0.0, 0.0, 5.0]], size: "1"}));
+        assert!(warning.is_none(), "{kind} on an edge of one body: {warning:?}");
+    }
+}
+
 /// A fillet saved before corner setbacks reads with none and writes no `setbacks`; one with a
 /// setback keeps it through a save, its distance an expression.
 #[test]

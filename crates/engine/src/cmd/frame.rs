@@ -59,6 +59,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
         "sketch?: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); pairs?: [{a, b}] (one straight member from point a to point b each, after the lines' members, found again whenever the design changes; a and b are point references: {vertex: [x,y,z]}, {sketch, point} (a 3D sketch node as `wire:index`), {construct_point: name}, a snap point or the origin, as saved ({type, …}) too; typed coordinates are not points here; each pair is named pair1, pair2… and a pair's id is never given again; Edit Feature gives back the pairs it keeps with their `id` and `next_pair`, and an `id` without `next_pair` is refused); give `sketch`, `pairs` or both; ",
+        "continuous?: bool (default false; one member along explicitly selected lines and circular arcs in connected tangent path order, curves reversed as needed, stable member id `$path`; corner None only, without overrides, Fit Ends, Coped, Flip, gap or point pairs); ",
         profile_doc!(),
         " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); corner?: auto|none|mitre|butt (how members ending at one point are cut; default none); flip?: bool (a butt's other member runs through); fit_ends?: bool (fit free ends to earlier Frame Members' tubes; default false); coped?: bool (cut every butt joint to the other tube's real shape, radii kept: butts, ends on a tube's middle, crossings, overlaps and fitted ends, mitres left as they are; not under none; default false; an older `coped_butt`, the frame's or an override's, reads as butt with coped); corners?: [{members: [2 to 1000 line or pair ids, or {line}], kind: auto|none|mitre|butt, gap?: length expr}] (that corner's, crossing's or overlap's own type, and its own weld gap; the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner; an older script's `corner` reads as `kind`, and its `flip` is saved as the order today's rules give with the first two swapped; an overlap takes no gap); gap?: length expr (the weld gap at every welded end, 0…1000 mm, default 0: each mitre plane half of it back, a butting or fitted end, a crossing's pieces' included, that far off the member it meets; through members keep their length, overlaps are notched without it); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line or pair id: name} (names to keep, as Edit Feature keeps them). One body per line or pair, from its start to its end; each member keeps its name when other lines or pairs are added or deleted. Returns the feature and the bodies it made"
     )),
@@ -446,6 +447,9 @@ const GROUP_KEYS: [&str; 7] = ["lines", "anchor", "locate", "angle", "mirror", "
 /// One group of members as `p` (the command's parameters, or one of its `groups`) gives it; `at`
 /// names the group in errors, and a group of several must list its lines.
 fn member_group(s: &Session, cmd: &str, p: &Value, at: &str, several: bool) -> Result<MemberGroup> {
+    if several && p.get("continuous").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "not supported yet: continuous members cannot be combined with groups; use separate Frame Members"));
+    }
     let lines = match p.get("lines") {
         None | Some(Value::Null) if !several => Vec::new(),
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
@@ -596,6 +600,13 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
         }
         Some(_) => Err(bad(cmd, format!("`lines` must list 1…{} curve ids", frame::MAX_MEMBERS)))?,
     };
+    let continuous = match p.get("continuous") {
+        None | Some(Value::Null) => false,
+        Some(_) => bool_(p, "continuous").ok_or_else(|| bad(cmd, "`continuous` must be true or false"))?,
+    };
+    if continuous && lines.is_empty() {
+        return Err(bad(cmd, "a continuous member needs explicit `lines` in path order"));
+    }
     let body_name = match p.get("body_name") {
         None | Some(Value::Null) => None,
         Some(_) => Some(
@@ -709,6 +720,7 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
     let mut kind = FeatureKind::FrameMember {
         path_sketch: path_sketch.map(SketchId),
         lines,
+        continuous,
         profile,
         anchor,
         locate,
@@ -871,6 +883,15 @@ fn remove_member(s: &mut Session, p: &Value) -> Result<Value> {
         id = Some(f);
     }
     let f = id.and_then(|id| s.doc.feature(id)).cloned().ok_or_else(|| bad(cmd, "`members` must name a Frame Member"))?;
+    if matches!(&f.kind, FeatureKind::FrameMember { continuous: true, .. }) {
+        if members.len() != 1 || members.first().is_none_or(|(_, line)| line != "$path") {
+            return Err(bad(cmd, "a continuous tube is one member, identified by `$path`"));
+        }
+        // This is its only physical member: use main's existing last-tube deletion.
+        let delete = super::find_command("timeline.delete").ok_or_else(|| bad(cmd, "no command `timeline.delete`"))?;
+        delete.run_nested(s, &json!({ "feature": f.id }))?;
+        return frame_reply(cmd, RemoveMemberResult::Deleted(MemberFeatureDeleted { deleted: f.name, param_warnings: Vec::new() }));
+    }
     let mut kind = f.kind.clone();
     let FeatureKind::FrameMember { path_sketch, lines, names, pairs, corners, .. } = &mut kind else {
         return Err(bad(cmd, format!("`{}` is not a Frame Member", f.name)));
