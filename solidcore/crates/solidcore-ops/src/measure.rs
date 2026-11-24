@@ -898,9 +898,12 @@ impl Body {
     }
 
     /// Every point where the ray from `origin` along `direction` meets a face, nearest first
-    /// (the kernel's `query::brep::face_hits`): the face, the point and the distance. A face the
-    /// ray crosses twice gives two hits; a ray through an edge meets each face there at one
-    /// distance; a stretch along a face is no hit. Empty where the ray meets no face. The
+    /// (the kernel's `query::brep::face_hits`): the face, the point and the distance. A hit is a
+    /// point on the body within its zone tolerance, as for [`Body::face_hit_by_ray`]. A face the
+    /// ray crosses twice gives two hits, a crossing on its seam or pole one; a ray through an
+    /// edge or a vertex meets each face there at one point and distance, those hits in `order`'s
+    /// face order, of which [`Body::face_hit_by_ray`] names one. A hit at the origin is at
+    /// distance 0; a stretch along a face is no hit. Empty where the ray meets no face. The
     /// kernel's solves may add UV trim curves to the body.
     ///
     /// # Errors
@@ -917,7 +920,8 @@ impl Body {
         let hits = with_body("face_hits_by_ray", self, |k, b| {
             solidcore::query::brep::face_hits(k, b, ray)
         })?;
-        hits.into_iter()
+        let mut hits = hits
+            .into_iter()
             .map(|hit| {
                 let face = order
                     .faces
@@ -930,7 +934,10 @@ impl Body {
                     distance: hit.distance,
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        // ties (one point, one distance) in the record's face order
+        hits.sort_by(|p, q| p.distance.total_cmp(&q.distance).then(p.face.cmp(&q.face)));
+        Ok(hits)
     }
 
     /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure
@@ -1666,6 +1673,28 @@ impl Body {
             Ok(Ok::<f64, Error>(face::tolerance(b, f)?))
         })??;
         Ok(Some(SquareFaceLevel { level, tolerance }))
+    }
+
+    /// How far record face `face` strays across `direction`, when the kernel proves a bound
+    /// ([`solidcore::prism::measure::face_straying`]): the face lies within it of a surface swept
+    /// along `direction`, taken over the face's own size. Within the zone tolerance
+    /// ([`crate::sweep::zone_tolerance`]) the face runs straight along `direction`. `None` where
+    /// no bound is proved (see the kernel's list), or for a `direction` of no length.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or a `direction` that is not finite; the
+    /// errors of the session.
+    pub fn face_straying(
+        &self,
+        order: &Order,
+        face: usize,
+        direction: [f64; 3],
+    ) -> Result<Option<f64>> {
+        let f = order::face(order, face)?;
+        let d = point(direction)?;
+        read_body("face_straying", self, |k, b| {
+            Ok(solidcore::prism::measure::face_straying(k, b, f, d))
+        })
     }
 
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
