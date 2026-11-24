@@ -400,8 +400,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         // Greyed out and noted; a pick in a locked row changes nothing.
         let (format_locked, quality_locked) = (app.policy.locks("save_mesh_format"), app.policy.locks("save_mesh_quality"));
         let (mut format, mut quality) = (k.format, k.quality);
-        crate::policy::row(ui, format_locked, |ui| choice_row(ui, "Format", "sm_format", &mut format, &FORMATS.map(|f| f.0)));
-        crate::policy::row(ui, quality_locked, |ui| choice_row(ui, "Quality", "sm_quality", &mut quality, &QUALITIES.map(|q| q.0)));
+        crate::policy::row_below(ui, format_locked, |ui| choice_row(ui, "Format", "sm_format", &mut format, &FORMATS.map(|f| f.0)));
+        crate::policy::row_below(ui, quality_locked, |ui| choice_row(ui, "Quality", "sm_quality", &mut quality, &QUALITIES.map(|q| q.0)));
         if !format_locked {
             k.format = format;
         }
@@ -435,10 +435,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         };
     }
 
-    // The note goes beside the whole row, as Format's and Quality's do: inside it the full-width
-    // combo pushes the note out of sight.
+    // The note goes under the whole row, as Format's and Quality's do: beside it, the panel has no
+    // room left for the combo.
     let locked = app.policy.locks("send_slicer");
-    crate::policy::row(ui, locked, |ui| {
+    crate::policy::row_below(ui, locked, |ui| {
         form_row(ui, "Slicer", |ui| {
             if let Some(path) = app.slicer_menu.picked.take() {
                 match add_custom(app, &path) {

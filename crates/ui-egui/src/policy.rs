@@ -545,6 +545,17 @@ pub fn row<R>(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -
     .inner
 }
 
+/// [`row`] for a tool dialog's narrow panel: the note goes on its own line under the control, so
+/// the control keeps its width and the panel does not grow past the window.
+pub fn row_below<R>(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    if !locked {
+        return add(ui);
+    }
+    let inner = ui.add_enabled_ui(false, add).inner;
+    crate::ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("policy.set_by_organization"));
+    inner
+}
+
 /// The width "Set by your organization" takes beside a locked control, with the gap before it.
 pub fn note_width(ui: &egui::Ui) -> f32 {
     let t = solidcraft_theme::Tokens::get();

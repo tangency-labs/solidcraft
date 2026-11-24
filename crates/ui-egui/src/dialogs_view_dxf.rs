@@ -17,7 +17,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
     crate::ui_kit::text(ui, app.tr_label("Hidden edges"), crate::ui_kit::Text::Note("hidden"));
     // An organization's DxfDashedHiddenLines policy sets the choice: shown, greyed out and noted.
     let locked = app.policy.locks("view_dxf_dashed");
-    crate::policy::row(ui, locked, |ui| {
+    crate::policy::row_below(ui, locked, |ui| {
         ui.vertical(|ui| {
             for (value, key, label) in [(false, "omit", "Do not export hidden edges"), (true, "dashed", "Export hidden edges as dashed lines")] {
                 let r = crate::ui_kit::list_picker(ui, key, app.tr_label(label), *dashed == value);
@@ -31,7 +31,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
     crate::ui_kit::text(ui, app.tr("dxf.zero"), crate::ui_kit::Text::Note("zero"));
     // DxfOrigin sets the zero point the same way.
     let zero_locked = app.policy.locks("view_dxf_zero");
-    crate::policy::row(ui, zero_locked, |ui| {
+    crate::policy::row_below(ui, zero_locked, |ui| {
         ui.vertical(|ui| {
             for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
                 let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
@@ -44,7 +44,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
     });
     crate::ui_kit::text(ui, app.tr("dxf.zero_help"), crate::ui_kit::Text::Note("zero help"));
     // DxfTolerance sets the tolerance the same way.
-    crate::policy::row(ui, app.policy.locks("view_dxf_tolerance"), |ui| {
+    crate::policy::row_below(ui, app.policy.locks("view_dxf_tolerance"), |ui| {
         form_row(ui, "dxf.tolerance", |ui| {
             let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
             crate::scenario::publish_handle("dialog:dxf:tolerance", r.rect.center());
