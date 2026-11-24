@@ -335,7 +335,18 @@ fn rename_selected(app: &SolveApp, bodies: &[String]) -> Option<Vec<String>> {
     (selected.len() > 1 && !bodies.is_empty() && bodies.iter().all(|b| selected.contains(b))).then_some(selected)
 }
 
-fn sel_bodies(app: &SolveApp) -> Vec<String> {
+pub(crate) fn sel_bodies(app: &SolveApp) -> Vec<String> {
+    // A whole-body selection names every shown body: resolve it here, once per menu build (about
+    // 5 ms at 56,000 bodies), never per frame.
+    if app.session.all_bodies_selected() {
+        return app
+            .session
+            .selected_items()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|s| if let Sel::Body { name } = s { Some(name) } else { None })
+            .collect();
+    }
     let mut v: Vec<String> = Vec::new();
     for s in &app.session.selection {
         if let Sel::Body { name } = s
@@ -415,7 +426,7 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
         Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(&key),
         None => act("ui.repeat", "Repeat", "redo").key(&key).on(false),
     };
-    let delete = act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty());
+    let delete = act("ui.delete", "Delete", "delete").key("Del").on(app.session.has_selection());
     if app.session.active_sketch.is_some() {
         return vec![
             repeat,
@@ -848,7 +859,14 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     if crate::drawing_workspace::active(app) {
         return drawing_items(app);
     }
-    let sel = &app.session.selection;
+    // After Select All the menu is the bodies' menu: the scope is named once, as the menu opens.
+    let resolved: Vec<Sel>;
+    let sel: &[Sel] = if app.session.all_bodies_selected() {
+        resolved = app.session.selected_items().unwrap_or_default();
+        &resolved
+    } else {
+        &app.session.selection
+    };
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
     if let Some((_, label)) = &app.last_command {
@@ -904,7 +922,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(Item::sep());
         }
         let planar = |s: &&Sel| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some());
-        let one_flat = matches!(sel.as_slice(), [face] if planar(&face));
+        let one_flat = matches!(sel, [face] if planar(&face));
         // A curved face, or several faces, have no one plane to sketch on, offset or extrude from;
         // Press Pull offsets them.
         if one_flat {
@@ -921,7 +939,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
-        let marked = matches!(sel.as_slice(), [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
+        let marked = matches!(sel, [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
         // The face right-clicked (else the last planar one selected) starts a section on its
         // plane, or its plane joins the one on show.
@@ -1244,7 +1262,12 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     let hidden = !joints.iter().any(|j| app.session.joint_visible(*j));
     vec![
-        act("ui.editJoint", "Edit Joint", "joint").with(json!({ "joint": id })),
+        // A constraint is changed in Constrain, under its rule's icon (#6061).
+        match j.constraint {
+            Some(c) => act("ui.editJoint", "Edit Constraint", crate::dialogs_constrain::rule_icon(c)),
+            None => act("ui.editJoint", "Edit Joint", "joint"),
+        }
+        .with(json!({ "joint": id })),
         act("ui.editJointLimits", "Edit Joint Limits", "joint").with(json!({ "joint": id })).on(!rigid),
         act("ui.driveJoint", "Drive Joint", "drive").with(json!({ "joint": id })).on(!rigid),
         act("ui.animateJoint", "Animate Joint", "play").with(json!({ "joint": id })).on(!rigid && !j.suppressed),
@@ -1686,7 +1709,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
-    v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
+    v.push(cmd(app, "sketch.move", "Move/Copy"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
     // Points switch too (#18448): a construction point is reference geometry a Hole leaves out.
     // The origin is the sketch's own and is not offered.
@@ -2362,7 +2385,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.editJoint" | "ui.editJointLimits" | "ui.driveJoint" | "ui.animateJoint" => {
             if let Some(id) = id_of(&p, "joint") {
                 let d = match item.id.as_str() {
-                    "ui.editJoint" => crate::dialogs_assembly::edit_joint(app, id),
+                    "ui.editJoint" => crate::dialogs_assembly::open_joint(app, id),
                     "ui.editJointLimits" => crate::dialogs_assembly::edit_joint_limits(app, id),
                     "ui.animateJoint" => crate::dialogs_assembly::animate_joint(app, id),
                     _ => crate::dialogs_assembly::drive_joint(app, id),

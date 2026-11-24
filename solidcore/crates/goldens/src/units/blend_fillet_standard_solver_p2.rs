@@ -448,7 +448,7 @@ fn rust_edgeuse_body(
     fv: f64,
     seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {
@@ -588,7 +588,7 @@ fn rust_cr_eu_body(
     ext: f64,
     seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {
@@ -1031,7 +1031,7 @@ fn rust_record_seen(
     i: &Inputs,
     seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
 ) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     match i {
         Inputs::CrInit {
@@ -1338,7 +1338,7 @@ fn rust_recalc_seen(
         *tp.uv_pos_mut(SrfIndex::First) = p2(t.uv0);
         *tp.uv_pos_mut(SrfIndex::Second) = p2(t.uv1);
     }
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let a = gp1_surface_of(&ri.a)?;
     let b = gp1_surface_of(&ri.b)?;
     let center = Curve::from(curve_of(&ri.center)?);
@@ -1439,7 +1439,7 @@ fn rust_rollover(ri: &RolloverIn) -> Result<Output, HarnessError> {
             .and_then(IntersectionPointType::from_code)
             .ok_or_else(|| harness("point type"))?;
     }
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let bases = [gp1_surface_of(&ri.a)?, gp1_surface_of(&ri.b)?];
     let ids = [SurfaceId::Free(0), SurfaceId::Free(1)];
     let [a, b] = bases.clone();
@@ -2341,7 +2341,7 @@ mod tests {
         let Inputs::Guess { solver, plane } = input else {
             panic!("guess case");
         };
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let built = solver_of(&k, &solver).unwrap();
         let Solver::Cr(mut fs) = built.solver else {
             panic!("assisted solver");

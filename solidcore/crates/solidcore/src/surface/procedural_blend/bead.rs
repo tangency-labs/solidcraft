@@ -44,7 +44,8 @@ const OP: &str = "surface::procedural_blend::bead";
 pub struct SagittaRefused {
     /// The sagitta asked.
     pub asked: f64,
-    /// The largest `|h|` on the asked side that builds: the open bound.
+    /// The open bound on `|h|` on the asked side: every `|h|` below it builds, the bound
+    /// itself does not.
     pub bound: f64,
 }
 
@@ -64,15 +65,22 @@ impl BeadDefinition {
     ///
     /// `InvalidInput` for a sagitta that is not finite (0 is the flat bead); for a
     /// sagitta past its bound ([`BeadDefinition::check`]) the refusal
-    /// [`NoRoomReason::BeadCutsFace`] with the bound as its fit ([`FitMeasure::Sagitta`]).
+    /// [`NoRoomReason::BeadCutsFace`] with the largest sagitta below the open bound as its fit
+    /// ([`FitMeasure::Sagitta`], a magnitude), so a retry at the fit builds.
     pub fn new(chamfer: ChamferDefinition, sagitta: f64) -> Result<Self> {
         if !sagitta.is_finite() {
             return Err(SolidError::invalid_input(OP, "a bead's sagitta is finite"));
         }
         let bead = Self { chamfer, sagitta };
         bead.check().map_err(|r| {
+            // the float below the open bound; bits, not next_down, for the 1.85 MSRV
+            let fit = if r.bound > 0.0 {
+                f64::from_bits(r.bound.to_bits() - 1)
+            } else {
+                0.0
+            };
             Failure::new(OP, BlendFailure::NoRoom(NoRoomReason::BeadCutsFace))
-                .with_fit(Fit::new(r.bound, FitMeasure::Sagitta, None))
+                .with_fit(Fit::new(fit, FitMeasure::Sagitta, None))
                 .into_error()
         })?;
         Ok(bead)

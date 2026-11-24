@@ -747,6 +747,8 @@ pub struct SolveApp {
     pub(crate) snaps: dialogs_assembly::SnapMemo,
     /// Each command dialog's options and values as last applied (this session only).
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
+    /// Radius of the last new Fillet applied this session, for the next new Fillet dialog.
+    pub(crate) last_fillet_radius: String,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
@@ -1149,6 +1151,7 @@ impl SolveApp {
             dialog: None,
             snaps: Default::default(),
             remembered_commands: Vec::new(),
+            last_fillet_radius: String::new(),
             params: None,
             design_properties: None,
             sketch_report: None,
@@ -1831,8 +1834,8 @@ impl SolveApp {
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
-        let selection_changed =
-            self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert");
+        let selection_changed = self.session.selection != selected_before
+            || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert" | "select.all");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
             if id == "select.set" {
@@ -2356,7 +2359,8 @@ impl SolveApp {
     /// nothing to act on it says what to pick.
     fn ground_selected_occurrences(&mut self) {
         let mut targets: Vec<(u64, bool)> = Vec::new();
-        for sel in &self.session.selection {
+        // Select All grounds the placements of every shown body.
+        for sel in &self.session.selected_items().unwrap_or_default() {
             use solidcraft_engine::Sel;
             // A body, face, edge or vertex picked in the view stands for the placement that owns
             // it, the one a drag on it would move (the outermost inside the active component).
@@ -3052,7 +3056,7 @@ impl SolveApp {
             if let Some(sketch) = finished_sketch {
                 d.take_sketch_profile(&self.session, sketch);
             }
-            if d.wants_picks() && !self.session.selection.is_empty() {
+            if d.wants_picks() && self.session.has_selection() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.view_windows.start_tool_panel(self.docs.current_tab());
@@ -3116,7 +3120,7 @@ impl SolveApp {
                     .collect();
                 let _ = self.session.execute("select.clear", &json!({}));
             }
-            if !self.session.selection.is_empty() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
+            if self.session.has_selection() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.tool = Some(t);
@@ -3128,7 +3132,7 @@ impl SolveApp {
                 d.take_sketch_profile(&self.session, sketch);
             }
             // The pre-selection now belongs to the dialog's inputs.
-            if d.wants_picks() && !self.session.selection.is_empty() {
+            if d.wants_picks() && self.session.has_selection() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });
@@ -3859,6 +3863,21 @@ impl SolveApp {
     /// them first (`import_options`).
     pub fn open_chosen_file(&mut self, path: &str) {
         self.open_path_async(path);
+    }
+
+    /// Open a chosen file read-only (`solidcraft --read-only`): a design's Save then asks for a new
+    /// file. A file the format registry imports (STEP, mesh, KiCad, DXF, ...) opens as
+    /// [`Self::open_chosen_file`] opens it: it becomes a new, unsaved design, with no file of its own
+    /// to protect. Any other file is read as a design, whatever its name (`part.sc.bak`), so it opens
+    /// read-only too.
+    pub fn open_chosen_file_read_only(&mut self, path: &str) {
+        use solidcraft_engine::io::formats::{ImportTarget, import_for_path};
+        let import = import_for_path(path).and_then(|f| f.import.as_ref()).map(|i| i.target);
+        if import.is_none_or(|target| target == ImportTarget::Design) {
+            self.open_path_async_with_options(path, json!({"read_only": true}));
+        } else {
+            self.open_chosen_file(path);
+        }
     }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);

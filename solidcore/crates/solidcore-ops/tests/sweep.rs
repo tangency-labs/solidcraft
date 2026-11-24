@@ -1510,3 +1510,40 @@ fn loft_to_point_through_corners_of_different_weights_stitch() {
     let v = b.volume(1e-8).unwrap();
     assert!(rel(v, 200.0) < 1e-9, "volume {v} vs 200");
 }
+
+/// A circle swept along a line, at a small radius and far from the origin: the record it writes
+/// opens again (tangency-labs/solidcore#3377, where a cap plane was written with axes off square
+/// by 1e-15 to 1e-14 and `from_record` refused it).
+#[test]
+fn a_swept_circle_s_record_opens_again() {
+    let (s, c) = 15f64.to_radians().sin_cos();
+    let mut failed = Vec::new();
+    for (r, start, dir) in [
+        (1.0, [0.0, 0.0, 0.0], [c, s, 0.0]),
+        (0.01, [0.0, 0.0, 0.0], [c, s, 0.0]),
+        (1.0, [10010.0, 9997.58, 10.0], [0.0, 1.0, 0.0]),
+    ] {
+        let end = [0, 1, 2].map(|i| start[i] + 10.0 * dir[i]);
+        let circle = Curve::Arc {
+            center: start,
+            axis: dir,
+            reference: [0.0, 0.0, 1.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        };
+        let (body, _, _) =
+            sweep_placed(&[circle], &[line(start, end)], SweepFrame::Follow, true).unwrap();
+        let (record, _) = body.to_record().unwrap();
+        let again = Body::from_record(&record, true).and_then(|(back, _)| {
+            let (second, _) = back.to_record()?;
+            Body::from_record(&second, true).map(|_| second)
+        });
+        match again {
+            Ok(second) if second == record => {}
+            Ok(_) => failed.push(format!("r {r} from {start:?}: the second record differs")),
+            Err(e) => failed.push(format!("r {r} from {start:?}: {e:?}")),
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}

@@ -1755,7 +1755,6 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
 /// resolve the same fields).
 fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
-        "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
         _ => k
             .fixes
@@ -2478,9 +2477,7 @@ mod tests {
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
         enable_fix(&mut k, "fillet_trace_reaches_rails").unwrap();
-        enable_fix(&mut k, "analytic_copy_keeps_parameterization").unwrap();
         assert!(k.fixes.fillet_trace_reaches_rails);
-        assert!(k.fixes.analytic_copy_keeps_parameterization);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 
