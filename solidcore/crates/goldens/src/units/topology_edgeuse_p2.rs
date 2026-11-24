@@ -188,7 +188,7 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
 }
 
 /// The case's B-rep after its op ran, and the selected edge use: what the case's row
-/// reports (`None` where the setup stops). For the WR-493 trim certificate (`refit::replay`).
+/// reports (`None` where the setup stops). For the rebuilt-trim certificate (`trim_bounds`).
 #[cfg(test)]
 pub(crate) fn after_op(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
     let i = case.parse::<Inputs>()?;
@@ -726,6 +726,10 @@ impl UnitDiff for Runner {
         serde_json::to_value(i).ok()
     }
 }
+
+#[cfg(test)]
+#[path = "topology_edgeuse_p2/trim_bounds.rs"]
+mod trim_bounds;
 
 #[cfg(test)]
 mod tests {
