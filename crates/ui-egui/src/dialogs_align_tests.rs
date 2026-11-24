@@ -128,3 +128,50 @@ fn the_component_the_from_pick_is_on_moves_without_picking_components() {
     let (cmd, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
     assert_eq!((cmd.as_str(), &p["paths"]), ("occurrence.align", &json!([[second]])), "{p}");
 }
+
+/// Clicks the face at `at` into input `input`.
+fn pick_face(h: &mut Harness, input: usize, at: Vec3) {
+    let Some(Sel::Face { body, index, point }) = crate::dialogs::face_sel(&h.app.session, at) else { panic!("no face at {at:?}") };
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = input;
+    let sel = d.candidate(&h.app.session, &Hit::Face { body, index, point }).expect("the input takes the face");
+    d.pick(&h.app.session, sel);
+}
+
+/// No snap to choose first: Auto takes what is under the cursor. A flat face is a face frame (the
+/// faces meet centre on centre), a round face its circle, a straight edge its middle and a vertex
+/// itself; the Snap rows still choose otherwise.
+#[test]
+fn auto_takes_the_kind_of_pick_from_what_is_under_the_cursor() {
+    for (flip, z) in [(false, [4.0, 10.0]), (true, [-2.0, 4.0])] {
+        let mut h = plate_and_peg();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 4, "corner": [0, 50, 0], "body_name": "Pad"})).unwrap();
+        set_flip(&mut h, flip);
+        pick_face(&mut h, 1, Vec3::new(101.0, 21.0, 0.0));
+        pick_face(&mut h, 2, Vec3::new(5.0, 55.0, 4.0));
+        let (p, [min, max]) = apply_and_bound(&mut h, "Peg");
+        assert!(p["from_frame"]["face"].is_array() && p["to_frame"]["face"].is_array(), "{p}");
+        // The peg's bottom centre on the pad's top centre, (10, 60, 4).
+        let (cx, cy) = ((min.x + max.x) / 2.0, (min.y + max.y) / 2.0);
+        assert!((cx - 10.0).abs() < 0.05 && (cy - 60.0).abs() < 0.05, "flip {flip}: {min:?} {max:?}");
+        assert!((min.z - z[0]).abs() < 1e-6 && (max.z - z[1]).abs() < 1e-6, "flip {flip}: {min:?} {max:?}");
+    }
+    let mut h = plate_and_peg();
+    pick_face(&mut h, 1, Vec3::new(104.0, 20.0, 3.0));
+    pick_edge(&mut h, 2, Vec3::new(30.0, 0.0, 10.0));
+    let (_, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert!(p["from_frame"]["circle"].is_array(), "a round face is its circle: {p}");
+    assert_eq!(p["to"]["snap"], json!("edge_mid"), "a straight edge is its middle: {p}");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[2].items = vec![Sel::Vertex { body: "Plate".into(), point: Vec3::new(0.0, 0.0, 10.0) }];
+    let (_, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!(p["to"], json!([0.0, 0.0, 10.0]), "a vertex is itself: {p}");
+    // As Picked keeps a flat face as the picked point and its normal.
+    let d = h.app.dialog.as_mut().unwrap();
+    d.extra.insert("from_snap".into(), json!("picked"));
+    d.extra.insert("to_snap".into(), json!("picked"));
+    pick_face(&mut h, 1, Vec3::new(101.0, 21.0, 0.0));
+    pick_face(&mut h, 2, Vec3::new(10.0, 10.0, 10.0));
+    let (_, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert!(p["from_face"].is_array() && p["to_face"].is_array(), "{p}");
+}
