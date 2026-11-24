@@ -323,6 +323,31 @@ fn drilled_pads_cut_holes_in_the_substrate() {
     assert!((measure.volume - expected).abs() < expected * 0.01, "{measure:?}");
 }
 
+/// A castellated hole (a drill centred on the board's edge) is cut as a half-hole in the edge, and
+/// the board's other drills are kept: one drill reaching the outline used to drop every drill.
+#[test]
+fn a_castellated_hole_is_a_notch_and_keeps_the_other_drills() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "castle" (at 0 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "inner" (at 10 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "castle.kicad_pcb").unwrap();
+    assert_eq!(board.drills.len(), 2);
+    let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let measure = solidcraft_kernel::measure(&body).unwrap();
+    let disc = std::f64::consts::PI * 0.25;
+    let expected = (200.0 - disc - disc / 2.0) * 1.6;
+    assert!((measure.volume - expected).abs() < expected * 0.002, "{measure:?} against {expected}");
+    let mut load = |_: &str| Err("none".to_string());
+    let options = KicadOptions { representation: KicadRepresentation::Brep, ..KicadOptions::default() };
+    let imported = read_kicad(source.as_bytes(), "castle.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.board_step.is_some(), "the board is a solid");
+    assert!(!imported.feature.warnings.iter().any(|w| w.contains("drilled holes")), "{:?}", imported.feature.warnings);
+}
+
 #[test]
 fn missing_model_is_warned_and_the_board_is_kept() {
     let mut load = |_: &str| Err("model file was not found".to_string());
