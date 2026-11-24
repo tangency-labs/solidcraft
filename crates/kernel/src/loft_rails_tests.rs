@@ -326,7 +326,7 @@ fn arcs_of_different_turns_take_rails() {
 /// A section on the plane through the origin with axes `x` and `y` (normal x × y), with no curves:
 /// enough for the normals.
 fn facing(x: Vec3, y: Vec3) -> crate::loft_rails::Section {
-    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new() }
+    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new(), segs: Vec::new() }
 }
 
 /// The sections' oriented normals, with the loft's direction `d(v)` at each section.
