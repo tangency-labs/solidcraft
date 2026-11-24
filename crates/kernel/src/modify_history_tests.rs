@@ -364,6 +364,50 @@ fn offset_an_annular_end_near_either_circular_rim() {
     }
 }
 
+/// #21721's ring: circles of 100 and 50 mm, extruded `h`.
+fn thin_ring(h: f64) -> Body {
+    let region = Region2 { outer: Loop2::circle(Vec2::ZERO, 50.0), holes: vec![Loop2::circle(Vec2::ZERO, 25.0)] };
+    extrude(&Plane::XY, &[region], 0.0, h).unwrap().pop().unwrap()
+}
+
+fn exact_volume(b: &Body) -> f64 {
+    b.measured_volume().unwrap()
+}
+
+#[test]
+fn offsetting_the_outer_wall_of_a_thin_ring_moves_the_wall_and_not_the_bottom() {
+    let (pi, d) = (std::f64::consts::PI, 0.45);
+    for h in [0.1, 0.2, 1.0] {
+        let ring = thin_ring(h);
+        let (outer, bore) = (Vec3::new(50.0, 0.0, h / 2.0), Vec3::new(-25.0, 0.0, h / 2.0));
+        let r = crate::offset_faces(&ring, &[outer], d).unwrap();
+        let want = pi * ((50.0 + d).powi(2) - 25.0f64.powi(2)) * h;
+        assert!((exact_volume(&r) - want).abs() < want * 1e-6, "h {h}: {} vs {want}", exact_volume(&r));
+        assert!(r.face_at_point(Vec3::new(50.0 + d, 0.0, h / 2.0)).unwrap().is_some(), "h {h}: the outer wall did not move");
+        let r = crate::offset_faces(&ring, &[outer, bore], d).unwrap();
+        let want = pi * ((50.0 + d).powi(2) - (25.0 - d).powi(2)) * h;
+        assert!((exact_volume(&r) - want).abs() < want * 1e-6, "h {h}, both walls: {} vs {want}", exact_volume(&r));
+    }
+}
+
+#[test]
+fn shell_and_draft_on_a_thin_ring_take_the_outer_wall_and_not_the_bottom() {
+    let (pi, h) = (std::f64::consts::PI, 0.1);
+    let ring = thin_ring(h);
+    let outer = Vec3::new(50.0, 0.0, h / 2.0);
+    // Open at the outer wall, the skins of the top, bottom and bore are left, joined at the bore.
+    let t = 0.02;
+    let r = crate::shell(&ring, &[outer], t).unwrap();
+    let want = pi * (50.0f64.powi(2) - 25.0f64.powi(2)) * h - pi * (50.0f64.powi(2) - (25.0 + t).powi(2)) * (h - 2.0 * t);
+    assert!((exact_volume(&r) - want).abs() < want * 1e-6, "shell: {} vs {want}", exact_volume(&r));
+    // The outer wall leans in to radius 50 - h tan 5 deg at the top: a frustum less the bore.
+    let a = 5f64.to_radians();
+    let r = crate::draft(&ring, &[outer], &Plane::XY, Vec3::Z, a).unwrap();
+    let top = 50.0 - h * a.tan();
+    let want = pi * h * (2500.0 + 50.0 * top + top * top) / 3.0 - pi * 625.0 * h;
+    assert!((exact_volume(&r) - want).abs() < want * 1e-6, "draft: {} vs {want}", exact_volume(&r));
+}
+
 #[test]
 fn split_a_face() {
     let b = cube();
