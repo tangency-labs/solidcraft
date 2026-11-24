@@ -2153,10 +2153,11 @@ impl Curve {
     /// `CreateMirrorCurve` (base: `SM_ERR`): a copy mirrored about the XY plane of
     /// `mirror_plane`.
     ///
-    /// A line gives a line ([`Line::create_mirror_curve`], not upstream, #15862). Every
-    /// other `SmBSplineCurve`-derived kind (ellipse and circle, parabola, hyperbola)
-    /// inherits the B-spline override: the result is a plain B-spline curve over the
-    /// NURB the kind makes first (on a copy here). A curve on a surface and a
+    /// A line gives a line ([`Line::create_mirror_curve`], not upstream, #15862), an
+    /// ellipse or circle an ellipse or circle ([`Ellipse::create_mirror_curve`], not
+    /// upstream, WR-21139). The other `SmBSplineCurve`-derived kinds (parabola,
+    /// hyperbola) inherit the B-spline override: the result is a plain B-spline curve
+    /// over the NURB the kind makes first (on a copy here). A curve on a surface and a
     /// curve in a volume mirror what they wrap.
     ///
     /// # Errors
@@ -2168,15 +2169,9 @@ impl Curve {
             CurveKind::BSpline(c) => c.create_mirror_curve(mirror_plane),
             // (not upstream, #15862: a line stays a line, see `Line::create_mirror_curve`)
             CurveKind::Line(c) => return c.create_mirror_curve(mirror_plane).map(Self::from),
-            CurveKind::Ellipse(c) => {
-                if c.base().gw_nurb().is_some() {
-                    c.base().create_mirror_curve(mirror_plane)
-                } else {
-                    let mut n = c.copy(k)?;
-                    n.make_nurb(k)?;
-                    n.base().create_mirror_curve(mirror_plane)
-                }
-            }
+            // (not upstream, WR-21139: an ellipse stays an ellipse, see
+            // `Ellipse::create_mirror_curve`)
+            CurveKind::Ellipse(c) => return c.create_mirror_curve(k, mirror_plane).map(Self::from),
             CurveKind::Parabola(c) => {
                 if c.base().gw_nurb().is_some() {
                     c.base().create_mirror_curve(mirror_plane)

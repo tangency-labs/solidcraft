@@ -3360,11 +3360,13 @@ mod tests {
             ("BEND_NOTES", 8, DxfLinetype::Continuous),
             ("PERFORATION", 3, DxfLinetype::Continuous),
             ("ROLL", 3, DxfLinetype::Continuous),
+            ("FORM_UP", 1, DxfLinetype::Dashed),
+            ("FORM_DOWN", 5, DxfLinetype::Dashed),
             ("POCKET_TOP_Z0.000000_TO_1.000000_MM", 3, DxfLinetype::Continuous),
         ] {
             every.declare_layer(name, color, linetype, None).unwrap();
         }
-        assert_eq!(every.layers().len(), 11);
+        assert_eq!(every.layers().len(), 13);
         write_dxf_file(&every).unwrap();
     }
 
@@ -3373,7 +3375,7 @@ mod tests {
     fn flat_with_every_role() -> DxfFile<DxfShape> {
         let neutral = DxfExportProfile::neutral();
         let mut file = DxfFile::for_flat_pattern_export(4, 4, 1).unwrap();
-        for role in DxfRole::ALL {
+        for &role in DxfRole::ALL {
             let style = neutral.role(role).unwrap();
             let name = if role == DxfRole::Pockets { format!("{}_TOP_Z0.000000_TO_1.000000_MM", style.layer) } else { style.layer.clone() };
             // The neutral profile holds what the producer's contract admits, or this is refused.
@@ -3433,7 +3435,7 @@ mod tests {
         let dxf = write_dxf_file_as(&file, &shop).unwrap();
         // 0 first, then by name; outline and cut share CUT, both bend directions share FOLD (layer
         // names ignore case), the notes and the roll have no layer, and what the profile leaves
-        // alone (ETCH, PERFORATION, the letters' colour) is as it was.
+        // alone (ETCH, PERFORATION, the bead layers, the letters' colour) is as it was.
         let row = |name: &str, color: &str, linetype: &str| (name.to_string(), color.to_string(), linetype.to_string());
         assert_eq!(
             layer_rows(&dxf),
@@ -3443,6 +3445,8 @@ mod tests {
                 row("CUT", "7", "Continuous"),
                 row("ETCH", "6", "Continuous"),
                 row("FOLD", "3", "HIDDEN"),
+                row("FORM_DOWN", "5", "DASHED"),
+                row("FORM_UP", "1", "DASHED"),
                 row("MILL_TOP_Z0.000000_TO_1.000000_MM", "6", "DASHED"),
                 row("PERFORATION", "3", "Continuous"),
             ]
@@ -3461,13 +3465,15 @@ mod tests {
                 ("LINE", "fold"),
                 ("LINE", "MILL_TOP_Z0.000000_TO_1.000000_MM"),
                 ("CIRCLE", "PERFORATION"),
+                ("LINE", "FORM_UP"),
+                ("LINE", "FORM_DOWN"),
             ]
         );
         // The linetypes the layers name are defined in the file.
         let types = table_records(&pairs(&dxf), "LTYPE");
         let types: Vec<&str> = types.iter().map(|r| field(r, 2)).collect();
         assert!(types.contains(&"HIDDEN") && types.contains(&"DASHED"), "{types:?}");
-        assert_eq!(crate::read_dxf_file(&dxf).unwrap().entities().len(), 8);
+        assert_eq!(crate::read_dxf_file(&dxf).unwrap().entities().len(), 10);
 
         // Every role off: a file with layer 0 only.
         let off: serde_json::Map<String, serde_json::Value> =

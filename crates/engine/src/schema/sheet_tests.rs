@@ -900,3 +900,82 @@ fn tab_replies_with_feature_result() {
     assert!(e.contains("height"), "{e}");
     assert!(matches!(s.execute("sheet.tab", &json!({"sketch": "Ear"})), Ok(Value::Object(_))));
 }
+
+// ---- Bead (#11054) ----
+
+#[test]
+fn bead_schema_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<super::BeadParams>(),
+        &keys(&[
+            "angle",
+            "base_radius",
+            "body",
+            "crown_radius",
+            "crown_width",
+            "curves",
+            "depth",
+            "end_length",
+            "flip",
+            "margin",
+            "shape",
+            "sketch",
+            "width",
+        ]),
+    );
+}
+
+#[test]
+fn bead_strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("sheet.bead", json!({"sketch": true, "curves": ["c1"], "depth": 2, "width": 10})),
+        ("sheet.bead", json!({"sketch": "Nowhere", "curves": ["c1"], "depth": 2, "width": 10})),
+    ]);
+}
+
+#[test]
+fn a_bead_reply_matches_the_output_schema() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let mut s = Session::default();
+    // A plate 80 x 50 x 1 thickened from its top face (z = 1), and a line on that face.
+    for (id, p) in [
+        ("solid.box", json!({"length": 80, "width": 50, "height": 1, "body_name": "Plate"})),
+        ("sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [40, 25, 1]})),
+        ("sketch.create", json!({"plane": "XY", "offset": 1, "name": "Beads"})),
+        ("sketch.line", json!({"points": [[20, 25], [60, 25]], "ids": ["c1"]})),
+        ("sketch.finish", json!({})),
+    ] {
+        if let Err(e) = s.execute(id, &p) {
+            panic!("{id}: {e}");
+        }
+    }
+    let r = s
+        .execute(
+            "sheet.bead",
+            &json!({"sketch": "Beads", "curves": ["c1"], "depth": 2, "width": 10, "base_radius": 0.5, "crown_radius": 0.5, "name": "Rib"}),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    // A misspelt key, in the warn mode, on a second line clear of the first bead: the call runs,
+    // and the reply carrying its warning still matches.
+    s.param_check = ParamCheck::Warn;
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "offset": 1, "name": "More"})),
+        ("sketch.line", json!({"points": [[20, 40], [60, 40]], "ids": ["c1"]})),
+        ("sketch.finish", json!({})),
+    ] {
+        if let Err(e) = s.execute(id, &p) {
+            panic!("{id}: {e}");
+        }
+    }
+    let r = s
+        .execute(
+            "sheet.bead",
+            &json!({"sketch": "More", "curves": ["c1"], "depth": 2, "width": 10, "base_radius": 0.5, "crown_radius": 0.5, "colour": "red"}),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    let warned = r["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("colour"))));
+    assert!(warned, "{r}");
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+}
