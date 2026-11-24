@@ -3155,6 +3155,8 @@ fn a_write_may_reach_a_missing_folder_exactly_when_its_nearest_existing_folder_i
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        input_folders: Vec::new(),
+        user_data: None,
     };
     solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.clone()])), || {
         assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), true).is_ok(), "two missing levels inside the scope");
