@@ -360,13 +360,13 @@ pub enum BlendFailure {
         /// The curve's kind, as its type string.
         kind: &'static str,
     },
-    /// A curve the step needs as a B-spline curve, the curve of fillet edge `edge` (`None`
-    /// where the step names no edge), is of kind `kind` (its type string), which is not of
+    /// A curve the step needs as a B-spline curve, a curve of edge `edge` (its 3D curve, or
+    /// a UV trim curve of one of its uses; `None` where the step names no edge), is of kind `kind` (its type string), which is not of
     /// a B-spline class. An unsupported kind ([`ErrorKind::Unsupported`]); status `SM_ERR`
     /// unless its site says otherwise (`SM_ERR_NULL_POINTER` where upstream dereferences
     /// the failed cast).
     CurveWithoutNet {
-        /// The fillet edge whose curve it is, where the step names one.
+        /// The edge whose curve (or edge use's UV trim curve) it is, where the step names one.
         edge: Option<crate::topology::EdgeId>,
         /// The curve's kind, as its type string.
         kind: &'static str,
@@ -4521,6 +4521,7 @@ mod tests {
             RemovalInput::EdgeUseOnFace,
             RemovalInput::EdgeUseRadial,
             RemovalInput::EdgeUseVertexUse,
+            RemovalInput::FaceToDelete,
             RemovalInput::PrimaryEdgeUse,
             RemovalInput::ShellRegion,
             RemovalInput::SideEdge,
@@ -4655,6 +4656,11 @@ mod tests {
             ),
             (
                 RemovalStop::VertexNotGiven,
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                RemovalStop::VertexNotOnEdge,
                 ErrorKind::InvalidInput,
                 SM_ERR_NULL_POINTER,
             ),

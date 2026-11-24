@@ -138,6 +138,9 @@ pub enum RemovalInput {
     EdgeUseRadial,
     /// An edge use has no vertex use.
     EdgeUseVertexUse,
+    /// The ring fillet removal has no face to delete: its face was already removed by an
+    /// earlier call of the same removal.
+    FaceToDelete,
     /// A rail edge has no primary edge use.
     PrimaryEdgeUse,
     /// A shell has no region.
@@ -160,6 +163,7 @@ impl RemovalInput {
             Self::EdgeUseOnFace => "an edge the fillet removal reads has no edge use on its face",
             Self::EdgeUseRadial => "an edge use the fillet removal relinks has no radial edge use",
             Self::EdgeUseVertexUse => "an edge use the fillet removal reads has no vertex use",
+            Self::FaceToDelete => "the ring fillet removal has no face left to delete",
             Self::PrimaryEdgeUse => "a rail of the ring fillet has no primary edge use",
             Self::ShellRegion => "a shell the ring fillet removal joins has no region",
             Self::SideEdge => {
@@ -174,6 +178,8 @@ impl RemovalInput {
 /// ([`RemovalStop::class`]) and status ([`RemovalStop::status`]). A drop or a search that
 /// stopped, or found nothing, proves nothing about the geometry (#15034 rule 5), so it is
 /// neither a refusal nor a defect; a call that failed is kept as the cause and decides.
+/// The stops also name the arguments of the removal's public edits that do not hold
+/// (an edge not on the face given, no vertex given: [`ErrorKind::InvalidInput`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RemovalStop {
@@ -261,6 +267,9 @@ pub enum RemovalStop {
     /// The vertex at which to join shells is not given ([`ErrorKind::InvalidInput`];
     /// `SM_ERR_NULL_POINTER`).
     VertexNotGiven,
+    /// The vertex to move is neither end of the edge to move it along
+    /// ([`ErrorKind::InvalidInput`]; `SM_ERR_NULL_POINTER`).
+    VertexNotOnEdge,
 }
 
 impl RemovalStop {
@@ -301,6 +310,7 @@ impl RemovalStop {
             Self::TangentIntersectionNotFound => ErrorKind::NotFound,
             Self::UvTrimNotMade => ErrorKind::Missing,
             Self::VertexNotGiven => ErrorKind::InvalidInput,
+            Self::VertexNotOnEdge => ErrorKind::InvalidInput,
         }
     }
 
@@ -317,6 +327,7 @@ impl RemovalStop {
             Self::NoCertifiedBox => SM_ERR_NULL_POINTER,
             Self::UvTrimNotMade => SM_ERR_NULL_POINTER,
             Self::VertexNotGiven => SM_ERR_NULL_POINTER,
+            Self::VertexNotOnEdge => SM_ERR_NULL_POINTER,
             _ => SM_ERR,
         }
     }
@@ -386,6 +397,7 @@ impl RemovalStop {
             }
             Self::UvTrimNotMade => "an edge use's UV trim curve is not made",
             Self::VertexNotGiven => "the vertex at which to join shells is not given",
+            Self::VertexNotOnEdge => "the vertex to move is neither end of the edge given",
         }
     }
 }

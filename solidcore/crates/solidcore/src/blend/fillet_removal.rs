@@ -54,7 +54,9 @@
 //!   it walks ([`crate::error::blend::BlendFailure::RemovalInputMissing`]), and an object
 //!   the removal holds or has checked as a defect
 //!   ([`crate::error::blend::BlendFailure::Defect`]), each keeping `SM_ERR_NULL_POINTER`.
-//!   An absent argument of a public function is [`SolidError::InvalidInput`].
+//!   An absent or mismatched argument of a public function is a named stop of kind
+//!   [`crate::error::ErrorKind::InvalidInput`]
+//!   ([`crate::error::blend::BlendFailure::RemovalStopped`]).
 //! - **Curve owners.** A curve the removal installs is owned under its edge's
 //!   [`Brep::owner_identity`], the identity the B-rep check compares (`SetOwner(pEdge)`),
 //!   and `ValidateGeometry` checks it under the same identities. `SetCurve` records the
@@ -1868,8 +1870,9 @@ pub fn update_analytical_domain(
 ///
 /// # Errors
 ///
-/// `SM_ERR` when the edge has no edge use on `from_face`; [`SolidError::InvalidInput`]
-/// where upstream dereferences null; [`SolidError::NotFound`] for a dangling id.
+/// `SM_ERR` when the edge has no edge use on `from_face`; `SM_ERR_NULL_POINTER` where
+/// upstream dereferences null (an edge without an end, a vertex that is neither end of the
+/// edge, a missing topology link); [`SolidError::NotFound`] for a dangling id.
 pub fn move_vtx_and_edge_to_adjacent_face(
     b: &mut Brep,
     vtx_to_move: VertexId,
@@ -1877,10 +1880,16 @@ pub fn move_vtx_and_edge_to_adjacent_face(
     from_face: FaceId,
 ) -> Result<()> {
     // Grab this before we change anything:
-    let opp_vtx = edge_vertex(
-        edge::other_vertex(b, edge_to_move, Some(vtx_to_move))?,
-        edge_to_move,
-    )?;
+    let Some(opp_vtx) = edge::other_vertex(b, edge_to_move, Some(vtx_to_move))? else {
+        // Upstream dereferences the null either way; name the vertex given when the edge
+        // has both ends and it is neither.
+        return Err(match edge::start_end_vertices(b, edge_to_move) {
+            Ok((Some(a), Some(c))) if a != vtx_to_move && c != vtx_to_move => {
+                stopped(RemovalStop::VertexNotOnEdge)
+            }
+            _ => SolidError::blend(OP, BlendFailure::EdgeWithoutVertices { edge: edge_to_move }),
+        });
+    };
 
     // Start with the edge use oriented in the direction (vtx_to_move -> edge_to_move),
     // i.e., whose vertex use corresponds to vtx_to_move.
@@ -2037,8 +2046,9 @@ pub fn set_trim_curve(
 ///
 /// # Errors
 ///
-/// `SM_ERR` when `to_delete` is not a lamina edge; [`SolidError::InvalidInput`] where
-/// upstream dereferences null; those of the notifications and list edits.
+/// `SM_ERR` when `to_delete` is not a lamina edge; `SM_ERR_NULL_POINTER` where upstream
+/// dereferences null (a missing topology link or curve); those of the notifications and
+/// list edits.
 pub fn glue_edges(
     k: &mut Kernel,
     b: &mut Brep,
@@ -2281,6 +2291,16 @@ mod tests {
         );
         assert_eq!(failed.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(failed.cause(), Some(&call));
+        // The stop's own kind is its class; the cause decides defect or refusal.
+        assert_eq!(failed.kind(), crate::error::ErrorKind::NotFound);
+        assert!(!failed.is_defect() && !failed.is_refusal());
+        let over_defect = stopped_after(RemovalStop::CornerNotSolved, defect("held"));
+        assert!(over_defect.is_defect() && !over_defect.is_refusal());
+        let over_refusal = stopped_after(
+            RemovalStop::CornerNotSolved,
+            refused(R::EndEdgeMissesTangentEdges),
+        );
+        assert!(over_refusal.is_refusal() && !over_refusal.is_defect());
         let unported = SolidError::unported("SmX::Y", "unit");
         assert_eq!(
             stopped_after(RemovalStop::CornerNotSolved, unported.clone()),
@@ -2350,7 +2370,8 @@ mod tests {
                 RemovalStop::SideEdgeDropFailed
             ))
         );
-        assert!(!failed.is_refusal());
+        assert_eq!(failed.kind(), crate::error::ErrorKind::Failed);
+        assert!(!failed.is_refusal() && !failed.is_defect());
         assert_eq!(failed.cause(), Some(&call));
         assert_eq!(failed.root_cause(), &call);
         assert_eq!(curved_side_edge(false, None).cause(), None);

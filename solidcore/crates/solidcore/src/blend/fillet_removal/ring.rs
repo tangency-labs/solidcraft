@@ -461,10 +461,7 @@ impl RingFilletRemoval {
     /// fillet's seam and the tangent faces' seams at the vertices.
     fn collect_ring_topology(&mut self, k: &Kernel, b: &mut Brep) -> Result<()> {
         let tangency_tol_deg = 2.0; // as SmFilletRemoval::CollectFilletTopology
-        let fil_face = own(
-            self.face_to_delete,
-            "the face to delete is set when the removal is made",
-        )?;
+        let fil_face = have(self.face_to_delete, RemovalInput::FaceToDelete)?;
         if !Self::is_ring(k, b, Some(fil_face), tangency_tol_deg)? {
             return Err(refused(R::NotARing));
         }
@@ -801,11 +798,10 @@ impl RingFilletRemoval {
         let snap = EFF_ZERO * (1.0 + ivl.max_dimension());
         if start_at > ivl.min() + snap && start_at < ivl.max() - snap {
             let mut before = sharp.clone();
-            if bspline_part(&before).is_none() {
-                return Err(defect(
-                    "the sharp curve's B-spline form was checked when it was chosen",
-                ));
-            }
+            own(
+                bspline_part(&before).map(|_| ()),
+                "the sharp curve's B-spline form was checked when it was chosen",
+            )?;
             let mut after_ivl = Extent1d::from_min_max(start_at, ivl.max());
             let mut before_ivl = Extent1d::from_min_max(ivl.min(), start_at);
             sharp.trim(k, &mut after_ivl, TrimMode::Notify)?;
@@ -1332,5 +1328,25 @@ mod tests {
         );
         assert!(!e.is_defect() && !e.is_refusal());
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// A removal whose face is already gone (an earlier call of the same removal took it)
+    /// names the missing face to delete, as upstream's `NER` (`SM_ERR_NULL_POINTER`): the
+    /// public `remove_face` reaches it, so it is not a defect.
+    #[test]
+    fn a_removal_without_its_face_names_it() {
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        let mut removal = RingFilletRemoval::new(FaceId::from_index(0), 1e-6);
+        removal.face_to_delete = None;
+        let e = removal.collect_ring_topology(&k, &mut b).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::RemovalInputMissing(
+                RemovalInput::FaceToDelete
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert!(!e.is_defect() && !e.is_refusal());
     }
 }
