@@ -197,7 +197,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).begins_edit().icon("paste").params(
         "component?: where it goes (default: the active one); component_path?: its placement (default: the active one, else its \
-         only one). Pastes what was copied in another design, at the same world coordinates: its bodies as imported bodies \
+         only one); placement?: `world` (default) or `origin`, where copied components go: at the same world coordinates, or \
+         with the first one's origin on the target's origin, the others kept where they are from it (bodies always keep \
+         their world coordinates). Pastes what was copied in another design: its bodies as imported bodies \
          (no history) in one Import feature, or its components as independent copies with their history, appearances, \
          joints and motion (as `component.paste_new`); the user parameters they use come along, renamed `w_2` when taken. \
          A component that uses what isn't in it (another body, sketch or parameter) is refused, saying what. Returns \
@@ -325,7 +327,7 @@ pub(super) fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u6
 
 pub(super) fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let kk = key(p.get("occurrence")).ok_or_else(|| bad(cmd, "`occurrence` must be an id or name"))?;
-    if let Some(o) = s.doc.occurrences.iter().find(|o| o.id.to_string() == kk || o.name == kk) {
+    if let Some(o) = s.doc.active_occurrences().find(|o| o.id.to_string() == kk || o.name == kk) {
         return Ok(o.id);
     }
     // A component name: its occurrence when it has exactly one (a name that is only digits is an id, never a component).
@@ -334,7 +336,7 @@ pub(super) fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
         Err(_) => s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.filter(|c| *c != 0),
     };
     let Some(component) = component else { return Err(bad(cmd, format!("no occurrence `{kk}`"))) };
-    let of: Vec<_> = s.doc.occurrences.iter().filter(|o| o.component == component).collect();
+    let of: Vec<_> = s.doc.active_occurrences().filter(|o| o.component == component).collect();
     match of.as_slice() {
         [only] => Ok(only.id),
         [] => Err(bad(cmd, format!("no occurrence `{kk}`: component `{kk}` is not placed anywhere"))),
@@ -529,7 +531,7 @@ fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit_in_place(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.edit_in_place";
     let id = component(s, p, "component", cmd)?;
-    if !s.doc.links.contains_key(&id) {
+    if !s.doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         return Err(bad(cmd, "that component is not linked to a design"));
     }
     let path = match p.get("path") {
@@ -601,7 +603,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         features_of.entry(f.component).or_default().push(f);
     }
     let (mut occurrences_of, mut children_of): (HashMap<u64, Vec<&Occurrence>>, HashMap<u64, Vec<&Occurrence>>) = Default::default();
-    for o in &doc.occurrences {
+    for o in doc.active_occurrences() {
         occurrences_of.entry(o.component).or_default().push(o);
         children_of.entry(o.parent).or_default().push(o);
     }
@@ -956,7 +958,7 @@ pub(super) fn occurrence_path(s: &Session, p: &Value, id: u64, cmd: &str) -> Res
         // A world frame requires an explicit containing placement when any ancestor is instanced.
         for ancestor in &path {
             if let Some(a) = s.doc.occurrences.iter().find(|a| a.id == *ancestor)
-                && s.doc.occurrences.iter().filter(|x| x.component == a.component).count() > 1
+                && s.doc.active_occurrences().filter(|x| x.component == a.component).take(2).count() > 1
             {
                 return Err(bad(cmd, "occurrence has multiple placements; supply its `path`"));
             }

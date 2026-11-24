@@ -132,6 +132,9 @@ macro_rules! sketch_preferences {
             sketch_face_activates_part: bool = false, PAGE_SKETCH;
             /// Use the only straight construction line in the preselection as Mirror's reference.
             sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+            /// Move/Copy Sketch Entities has only its X Distance arrow, and a drawn 3D point clicked gets
+            /// its own arrows instead of dragging freely, as before #7664. Off by default.
+            sketch_move_classic: bool = false, PAGE_SKETCH;
             /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
             /// it is, and Look At faces the sketch when asked.
             sketch_open_look_at: bool = true, PAGE_SKETCH;

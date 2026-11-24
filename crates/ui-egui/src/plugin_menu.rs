@@ -981,6 +981,8 @@ pub(crate) struct EntryDialog {
     /// The command's icon ([`command_icon`]), in the window's header.
     pub(crate) icon: String,
     pub(crate) read: bool,
+    /// A long job: never previewed, since a preview would run it whole on every change.
+    pub(crate) job: bool,
     /// The fields, or `None` when the schema needs the agent or the CLI.
     pub(crate) fields: Option<Vec<(Field, Input)>>,
     pub(crate) running: Option<Running>,
@@ -1248,6 +1250,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         icon: command_icon(&plugin, entry).to_owned(),
         entry: entry.name.clone(),
         read: entry.effect == solidcraft_engine::plugin::Effect::Read,
+        job: entry.job,
         fields,
         plugin,
         session: app.session.uid,
@@ -1833,7 +1836,7 @@ pub(crate) fn editing_dialog_open(app: &SolveApp) -> bool {
 
 /// The dialog the viewport previews, and the `plugin.run` it previews: the dialog picking in the
 /// viewport, else the most recently opened one, when it is a command that edits the design on
-/// this design, has Preview on, is not running and its fields make parameters. `None` while a
+/// this design and is not a long job, has Preview on, is not running and its fields make parameters. `None` while a
 /// native tool is open: its own preview is the one shown.
 pub(crate) fn preview_commands(app: &SolveApp) -> Option<(u64, String, Vec<(String, Value)>)> {
     if app.dialog.as_ref().is_some_and(|d| !matches!(d.kind, crate::dialogs::Kind::PluginPick { .. })) {
@@ -1843,7 +1846,7 @@ pub(crate) fn preview_commands(app: &SolveApp) -> Option<(u64, String, Vec<(Stri
         Some(id) => app.plugin_menu.dialogs.iter().find(|d| d.id == id),
         None => app.plugin_menu.dialogs.iter().rev().find(|d| d.session == app.session.uid),
     }?;
-    if dialog.read || dialog.opens.is_some() || !dialog.preview || dialog.running.is_some() {
+    if dialog.read || dialog.job || dialog.opens.is_some() || !dialog.preview || dialog.running.is_some() {
         return None;
     }
     let params = dialog.ready(app).ok()?;
@@ -2204,7 +2207,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     }
     if let Some(key) = browse {
         let id = dialog.id;
-        app.pick_folder(move |app, path| {
+        app.pick_folder("", move |app, path| {
             if let Some(path) = path {
                 apply_browsed_folder(app, id, &key, path);
             }
@@ -2304,7 +2307,7 @@ fn body(
         }
     }
     // Preview: a command that edits the design, as the native tools have it.
-    if !dialog.read && dialog.opens.is_none() && dialog.fields.is_some() {
+    if !dialog.read && !dialog.job && dialog.opens.is_none() && dialog.fields.is_some() {
         ui.add_enabled_ui(editable, |ui| ui_kit::checkbox(ui, app.tr_label("Preview"), &mut dialog.preview));
         if dialog.preview
             && editable

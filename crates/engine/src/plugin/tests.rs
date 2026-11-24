@@ -2378,6 +2378,30 @@ mod native {
         assert!(refused.contains("needs the storage capability"), "{refused}");
     }
     #[test]
+    fn cancelling_a_long_job_changes_nothing() {
+        let f = Fixture::new("call $box (loop br 0)");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","job":true}]);
+        m["runtime"]["limits"]["fuel"] = json!(u64::MAX / 2);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.plugin_limits.max_fuel = u64::MAX;
+        let before = s.doc.to_json();
+        // Cancelled from the operations panel (its watch), it stops and nothing of it lands. The
+        // job's own deadline is tested in the runtime crate.
+        let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
+        let stop = progress.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            stop.cancel();
+        });
+        let failure = solidcraft_doc::progress::watch(progress, || f.run(&mut s)).unwrap_err().to_string();
+        canceller.join().unwrap();
+        assert!(failure.contains("cancelled"), "{failure}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 0));
+    }
+
+    #[test]
     fn named_calls_preserve_input_pass_through() {
         let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
         let mut m = manifest();
@@ -2553,6 +2577,105 @@ fn evaluated_mesh_transfer_refuses_an_oversized_input_without_truncation() {
     assert_eq!(s.doc.to_json(), before);
 }
 
+/// A session holding one mesh body, "Strip": a flat strip of `triangles` triangles, triangle `t`
+/// over the points (k, 0, 0) and (k, 1, 0) numbered `t % period` to `t % period + 2`, each
+/// triangle with three corners of its own, as an STL gives them. Every other triangle writes its
+/// zero coordinates as `-0` (the import writes them as 0, so the body holds one sign).
+fn strip_of_unshared_triangles(triangles: u32, period: u32) -> Session {
+    let point = |k: u32, zero: f64| [f64::from(k / 2), f64::from(k % 2) + zero, zero];
+    let positions: Vec<f64> = (0..triangles)
+        .flat_map(|t| {
+            let (k, zero) = (t % period, if t.is_multiple_of(2) { 0. } else { -0. });
+            [point(k, zero), point(k + 1, zero), point(k + 2, zero)]
+        })
+        .flatten()
+        .collect();
+    let mut doc = solidcraft_doc::Document::default();
+    doc.add_feature(
+        solidcraft_doc::FeatureKind::MeshImport {
+            file: "strip.stl".into(),
+            meshes: vec![solidcraft_doc::MeshData {
+                name: "Strip".into(),
+                positions: positions.into(),
+                triangles: (0..3 * triangles).collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Strip mesh"),
+    )
+    .unwrap();
+    doc.features.last_mut().unwrap().body_names = vec!["Strip".into()];
+    Session::new(doc)
+}
+
+#[test]
+fn evaluated_mesh_transfer_shares_the_corners_of_an_unshared_mesh_body() {
+    // 3000 triangles hand over 9000 corners, past the 8192-vertex budget unshared (#20627); at
+    // 3002 distinct points the body fits
+    let mut s = strip_of_unshared_triangles(3000, 3000);
+    let before = s.doc.to_json();
+    let result = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap();
+    let positions: Vec<[f64; 3]> = serde_json::from_value(result["positions"].clone()).unwrap();
+    let triangles: Vec<[usize; 3]> = serde_json::from_value(result["triangles"].clone()).unwrap();
+    assert_eq!(triangles.len(), 3000);
+    assert_eq!(positions.len(), 3002, "one vertex per distinct point");
+    let mut distinct = positions.iter().map(|p| p.map(|c| (c + 0.).to_bits())).collect::<Vec<_>>();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), positions.len(), "no point is handed over twice");
+    // every triangle keeps its corners where they were: three consecutive points of the strip
+    // (the body may turn a triangle round, so its corners are compared as a set)
+    let mut corners: Vec<[u64; 3]> = triangles
+        .iter()
+        .map(|tri| {
+            let mut ks = tri.map(|i| {
+                let [x, y, z] = positions[i];
+                assert_eq!(z, 0.);
+                (2. * x + y) as u64
+            });
+            ks.sort_unstable();
+            ks
+        })
+        .collect();
+    corners.sort_unstable();
+    let expected: Vec<[u64; 3]> = (0..3000).map(|k| [k, k + 1, k + 2]).collect();
+    assert_eq!(corners, expected);
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn shared_corners_count_both_zeros_as_one_point_and_never_share_what_is_not_finite() {
+    // a mesh body arrives with -0 already written as 0, so -0 is tested on the sharing itself: a
+    // tessellation can compute either sign at a point two faces share
+    let corners = [[0., 1., 0.], [-0., 1., -0.], [f64::NAN, 0., 0.], [f64::NAN, 0., 0.], [2., 0., 0.]];
+    let (positions, triangles) = crate::cmd::plugin_shared_corners(corners.into_iter(), &[[0, 1, 4], [2, 3, 4]]).unwrap();
+    assert_eq!(positions.len(), 4, "{positions:?}");
+    assert_eq!(triangles, vec![[0, 0, 3], [1, 2, 3]]);
+    assert_eq!(positions[0], [0., 1., 0.]);
+    assert!(crate::cmd::plugin_shared_corners(corners.into_iter(), &[[0, 1, 5]]).is_err(), "a corner it does not have");
+}
+
+#[test]
+fn evaluated_mesh_transfer_past_the_triangle_budget_names_its_count() {
+    // 16385 triangles over 3002 distinct points: only the triangle limit is passed
+    let mut s = strip_of_unshared_triangles(16385, 3000);
+    let before = s.doc.to_json();
+    let message = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap_err().to_string();
+    assert!(message.contains("transfer budget: 16385 triangles, at most 16384"), "{message}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn evaluated_mesh_transfer_past_the_vertex_budget_after_sharing_is_refused() {
+    // 8200 triangles over 8202 distinct points: past the vertex limit even shared
+    let mut s = strip_of_unshared_triangles(8200, 8200);
+    let before = s.doc.to_json();
+    let message = s.execute("model.mesh", &json!({"body":"Strip"})).unwrap_err().to_string();
+    assert!(message.contains("transfer budget: more than 8192 distinct vertices"), "{message}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
 #[test]
 fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     let defaults = HostLimits::default();
@@ -2657,6 +2780,45 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), false).is_ok());
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), true).is_err());
     });
+}
+
+#[test]
+fn a_write_may_reach_a_missing_folder_exactly_when_its_nearest_existing_folder_is_in_scope() {
+    // #20493: under `--allow-path`, `New/Deep/x.json` in an allowed folder needs folders that do not exist yet.
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-new-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let outside = root.with_file_name(format!("solidcraft-plugin-new-outside-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut session = Session::default();
+    session.plugin_state.file_grants = vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }];
+    let host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.clone()])), || {
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), true).is_ok(), "two missing levels inside the scope");
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), false).is_err(), "a read still needs the path to exist");
+        assert!(host.authorize_file_path(&root.join("../elsewhere/New/x.json"), true).is_err(), "outside the scope");
+        assert!(host.authorize_file_path(&outside.join("New/Deep/x.json"), true).is_err(), "a missing folder under an out-of-scope one");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+            assert!(host.authorize_file_path(&root.join("link/New/Deep/x.json"), true).is_err(), "an existing link out of scope");
+        }
+    });
+    assert!(!root.join("New").exists() && !outside.join("New").exists(), "checking creates nothing");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&outside);
 }
 
 /// Importer plugins: an installed importer opens the files it claims as new, unsaved designs.
@@ -3356,6 +3518,32 @@ mod install_zip {
         assert!(!root.join("plugins").exists(), "even the plugins root and staging folders stay unwritten");
         assert!(s.plugin_state.grants.is_empty());
         assert!(s.plugin_state.packages.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// #20814: a write that finds another write in progress waits for it, so a job the app gave up on
+    /// never overlaps the next install or removal.
+    #[test]
+    fn a_package_write_waits_for_the_write_in_progress() {
+        let (_s, root) = session("write-lock");
+        let plugin = unpack(&gears("0.1.0")).unwrap();
+        let dir = root.join("plugins");
+        let held = crate::plugin::install::write_lock();
+        let (finished, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn({
+            let dir = dir.clone();
+            move || {
+                let result = crate::plugin::install::install(&plugin, &dir, false);
+                let _ = finished.send(());
+                result
+            }
+        });
+        assert!(done.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the second write started while the first held the lock");
+        assert!(!dir.exists(), "nothing was written yet");
+        drop(held);
+        assert!(done.recv_timeout(std::time::Duration::from_secs(60)).is_ok(), "the waiting write runs once the lock is free");
+        assert!(worker.join().unwrap().is_ok());
+        assert!(dir.join("gears").join("plugin.json").exists());
         let _ = std::fs::remove_dir_all(root);
     }
 

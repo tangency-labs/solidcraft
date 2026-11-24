@@ -641,9 +641,8 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     // the joint keeps following its parameters.
     f.angle = j.exprs.angle.clone().unwrap_or_else(|| num(j.angle.to_degrees(), "deg"));
     f.angle_shown = f.angle.clone();
-    for (text, value) in f.offset.iter_mut().zip(j.offset_xy) {
-        *text = crate::length_input::model(&app.session.doc, value);
-    }
+    f.offset[0] = j.exprs.offset_x.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset_xy[0]));
+    f.offset[1] = j.exprs.offset_y.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset_xy[1]));
     f.offset[2] = j.exprs.offset.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset));
     f.fit_limits(&app.session.doc);
     for (i, l) in f.limits.iter_mut().enumerate() {
@@ -1931,7 +1930,10 @@ fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mes
     let pairs: Vec<_> =
         r["overlaps"].as_array().into_iter().flatten().filter_map(|hit| Some((st.body(hit["a"].as_str()?)?, st.body(hit["b"].as_str()?)?))).collect();
     kernel::map_with_local_pools(&pairs, usize::MAX, |&(a, b)| {
-        let Some(o) = kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)? else { return Ok(None) };
+        // SMLib's check of the shared part runs here, as the interference check that found it ran it.
+        let Some(o) = kernel::validating(kernel::Validation::EachStep, || kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)).0? else {
+            return Ok(None);
+        };
         o.mesh(&kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3))).map(Some)
     })
     .into_iter()
@@ -2487,8 +2489,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             if let Some(id) = f.editing {
                 let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
                 if f.lateral_offsets(&app.session.doc) {
-                    p["offset_x"] = json!(eval(&f.offset[0], ValueKind::Length)?);
-                    p["offset_y"] = json!(eval(&f.offset[1], ValueKind::Length)?);
+                    let _ = eval(&f.offset[0], ValueKind::Length)?;
+                    let _ = eval(&f.offset[1], ValueKind::Length)?;
+                    p["offset_x"] = if f.offset[0].trim().is_empty() { json!(0.0) } else { json!(f.offset[0]) };
+                    p["offset_y"] = if f.offset[1].trim().is_empty() { json!(0.0) } else { json!(f.offset[1]) };
                 }
                 if !custom_name.is_empty() {
                     p["name"] = json!(custom_name);
@@ -2556,8 +2560,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
+            let offset_x = if f.offset[0].trim().is_empty() { json!(0.0) } else { json!(f.offset[0]) };
+            let offset_y = if f.offset[1].trim().is_empty() { json!(0.0) } else { json!(f.offset[1]) };
             let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip,
-                "offset_x": x, "offset_y": y, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+                "offset_x": offset_x, "offset_y": offset_y, "offset": f.offset[2], "angle": f.angle, "limits": limits});
             if !custom_name.is_empty() {
                 p["name"] = json!(custom_name);
             }
@@ -3804,7 +3810,14 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
         std::borrow::Cow::Owned(d)
     };
     let st = s.model.state();
-    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m)))).collect();
+    let inactive = doc.inactive_pattern_occurrences();
+    let v: Vec<_> = doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| !j.uses_any_occurrence(&inactive))
+        .filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m))))
+        .collect();
     JOINT_FRAMES.with(|o| *o.borrow_mut() = Some((key, v.clone())));
     v
 }
@@ -3816,11 +3829,13 @@ pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
     // `Session::joint_drawn` for each joint, with the Joints folder looked up once: it was looked
     // up again for every joint of the design at every frame.
     let folder_shown = !app.session.folder_hidden("c0/joints");
+    let inactive = app.session.doc.inactive_pattern_occurrences();
     app.session
         .doc
         .assembly
         .joints
         .iter()
+        .filter(|j| !j.uses_any_occurrence(&inactive))
         .filter_map(|j| {
             let picked = app.tree.picked_joints.contains(&j.id);
             (picked || (folder_shown && app.session.joint_visible(j.id))).then_some((j.id, picked))

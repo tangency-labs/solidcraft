@@ -73,6 +73,8 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// bit-for-bit identical; its eight polynomial cubic edges now enter SMLib as non-rational
 /// (`w = NOW`, #20422), shifting its eight SMLib-fitted 2D pcurves by at most 2.72e-15 in UV and
 /// line #8 uncertainty by 9e-15 (0.017508281886215407 -> 0.01750828188620642).
+/// `stepped_tapered_hole.step` is new (solidcore#3253): a block whose stepped, tapered hole has
+/// whole-turn cone faces that close on their seams beside a quarter line.
 /// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
 /// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
 /// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
@@ -118,6 +120,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "902c8f135a031308"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "7e5ec3041433853c"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/stepped_tapered_hole.step", "580fd86750a6eb21"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "30a183e14f3b58b3"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),
     ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "be8c91bead2f5a20"),
