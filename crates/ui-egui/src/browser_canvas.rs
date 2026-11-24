@@ -214,9 +214,9 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, screen: Pos2) -> bool {
     if panel.picks_points() {
         [panel.a, panel.b]
             .into_iter()
-            .any(|point| proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))).is_some_and(|p| p.distance(screen) <= 12.0))
+            .any(|point| proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))).is_some_and(|p| (p - screen).length_sq() <= 144.0))
     } else {
-        edit_handles(c, &plane, proj).into_iter().any(|(_, p)| p.distance(screen) <= 12.0)
+        edit_handles(c, &plane, proj).into_iter().any(|(_, p)| (p - screen).length_sq() <= 144.0)
     }
 }
 
@@ -247,9 +247,9 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
                 .enumerate()
                 .filter_map(|(i, point)| {
                     let marker = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1])))?;
-                    Some((marker.distance(screen), i as u8))
+                    Some(((marker - screen).length_sq(), i as u8))
                 })
-                .filter(|(distance, _)| *distance <= 12.0)
+                .filter(|(d2, _)| *d2 <= 144.0)
                 .min_by(|a, b| a.0.total_cmp(&b.0))
                 .map(|(_, i)| i);
         }
@@ -277,7 +277,10 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
     if pressed && panel.edit_drag.is_none() {
         let kind = edit_handles(&c, &plane, proj)
             .into_iter()
-            .filter_map(|(kind, marker)| (marker.distance(screen) <= 12.0).then_some((marker.distance(screen), kind)))
+            .filter_map(|(kind, marker)| {
+                let d2 = (marker - screen).length_sq();
+                (d2 <= 144.0).then_some((d2, kind))
+            })
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, kind)| kind);
         if let Some(kind) = kind {
@@ -330,9 +333,11 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
             }
         }
         2 => {
-            let before = (start.y - centre.y).atan2(start.x - centre.x);
-            let after = (local.y - centre.y).atan2(local.x - centre.x);
-            params["angle"] = json!((drag.angle + after - before).to_degrees());
+            let (u, v) = (start - centre, local - centre);
+            if let Ok(turn) = solidcore_ops::joint_turn([u.x, u.y], [v.x, v.y]) {
+                let signed = if u.x * v.y < u.y * v.x { -turn } else { turn };
+                params["angle"] = json!((drag.angle + signed).to_degrees());
+            }
         }
         3 => {
             let (sin, cos) = drag.angle.sin_cos();
