@@ -905,8 +905,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             let mid = start.y + (crate::ui_kit::placement_field_content_size(ui, "0") + field_frame.total_margin().sum()).y * 0.5;
             // Keep editable dimension fields, but hide passive coordinates when disabled.
             let show_passive = app.preferences.sketch_cursor_coordinates;
-            for (k, (axis, label, value)) in
-                roles.into_iter().filter(|(_, label, _)| show_passive || t.dims.iter().any(|b| b.label == *label)).enumerate()
+            for (k, (axis, label, value)) in roles.into_iter().filter(|(_, label, _)| show_passive || t.dims.iter().any(|b| b.label == *label)).enumerate()
             {
                 if k > 0 {
                     x += tk.space_8;
