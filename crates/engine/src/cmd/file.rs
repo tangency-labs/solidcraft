@@ -5170,11 +5170,12 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5}))?;
         let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false)?;
+        let omitted_reader = DesignContainerReader::new(Cursor::new(omitted.as_slice()))?;
 
         // Without an explicit refusal, it falls back to the default design file budget message.
         assert!(solidcraft_io::take_last_cache_refusal().is_none());
         let default_notice =
-            missing_save_cache(&s, "container", true, false, &omitted).ok_or_else(|| EngineError::Other("expected default notice".into()))?;
+            missing_save_cache(&s, true, false, Some(&omitted_reader)).ok_or_else(|| EngineError::Other("expected default notice".into()))?;
         assert!(default_notice.contains("the cache could not fit or be encoded within the design file budget"), "{default_notice}");
 
         // Now test that when an unencodable body refusal is recorded, missing_save_cache reports it:
@@ -5198,9 +5199,10 @@ mod tests {
         doc.features[0].id = 1;
         doc.features[0].name = "PCIe Board Import".into();
         let bytes = solidcraft_io::write_design_container_with_cache(&doc, solidcraft_io::DesignCompression::Fast, None, Some(&model))?;
-        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes))?.has_model_cache());
+        let reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes))?;
+        assert!(!reader.has_model_cache());
 
-        let notice = missing_save_cache(&s, "container", true, false, &bytes).ok_or_else(|| EngineError::Other("expected notice".into()))?;
+        let notice = missing_save_cache(&s, true, false, Some(&reader)).ok_or_else(|| EngineError::Other("expected notice".into()))?;
         assert!(notice.contains("body 'GraphicsCore' in feature 'PCIe Board Import' could not be stored exactly"), "{notice}");
         assert!(!notice.contains("design file budget"), "must not mention budget: {notice}");
         Ok(())
