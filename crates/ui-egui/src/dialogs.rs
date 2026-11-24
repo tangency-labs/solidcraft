@@ -3852,6 +3852,14 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
                 let enabled = crate::dialogs_assembly::alignment_input_available(d, i);
+                if i == 0 && invert_profile_sketch(d, s).is_some() {
+                    let response = crate::ui_kit::button(ui, solidcraft_ui_text::tr("dialog.invert_profiles"), crate::ui_kit::Button::Small);
+                    crate::scenario::publish_target("dialog:invert_profiles", response.rect);
+                    if response.clicked() {
+                        invert = true;
+                        surrender_keyboard_focus(ui);
+                    }
+                }
                 let chip =
                     ui.add_enabled_ui(enabled, |ui| crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled })).inner;
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
@@ -3886,14 +3894,6 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 if chip.backing_on_hover_text(tooltip).clicked() {
                     activate = Some(i);
                     surrender_keyboard_focus(ui);
-                }
-                if i == 0 && invert_profile_sketch(d, s).is_some() {
-                    let response = crate::ui_kit::button(ui, solidcraft_ui_text::tr("dialog.invert_profiles"), crate::ui_kit::Button::Small);
-                    crate::scenario::publish_target("dialog:invert_profiles", response.rect);
-                    if response.clicked() {
-                        invert = true;
-                        surrender_keyboard_focus(ui);
-                    }
                 }
                 if !inp.items.is_empty() || stored_reference.is_some() {
                     let rect = egui::Rect::from_center_size(

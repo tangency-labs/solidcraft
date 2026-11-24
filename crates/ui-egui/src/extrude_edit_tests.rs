@@ -188,7 +188,9 @@ fn extrude_profiles_invert_selection_uses_one_sketch_and_preserves_the_design() 
     let count =
         |h: &Harness| h.app.dialog.as_ref().expect("Extrude dialog").inputs[0].items.iter().filter(|x| matches!(x, Sel::Profile { .. })).count();
     assert_eq!(count(&h), 0, "two disjoint profiles are not selected automatically");
-    assert!(crate::scenario::handle_at("dialog:invert_profiles").is_some(), "Invert appears next to Profiles");
+    let invert = crate::scenario::rect_of("dialog:invert_profiles").expect("Invert appears next to Profiles");
+    let card = crate::scenario::rect_of("dialog:card").expect("Extrude dialog exists");
+    assert!(card.contains_rect(invert), "Invert must remain inside the dialog: {invert:?}, {card:?}");
     h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
     assert_eq!(count(&h), 2, "empty selection inverts to all drawn profiles");
     let picks = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
