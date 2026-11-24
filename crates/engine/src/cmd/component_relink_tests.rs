@@ -1501,3 +1501,46 @@ fn a_kept_linked_part_moves_up_to_the_component_the_deleted_one_sat_in() {
     assert_eq!(s.doc.components.iter().find(|c| c.id == elbow).map(|c| c.parent), Some(outer));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A saved design of named boxes, each `(name, edge length, x)`, in this build order.
+fn boxes(path: &Path, parts: &[(&str, u32, u32)]) {
+    let mut s = Session::default();
+    for (name, size, x) in parts {
+        run(&mut s, "solid.box", json!({"length": size, "width": size, "height": size, "body_name": name, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "file.save", json!({"path": path}));
+}
+
+/// Each linked body of `component`, by name, with its volume rounded to mm³.
+fn linked_volumes(s: &Session, component: u64) -> std::collections::BTreeMap<String, i64> {
+    let state = s.model.state();
+    state.bodies.iter().filter(|b| b.component == component).map(|b| (b.name.clone(), b.volume().unwrap_or_default().round() as i64)).collect()
+}
+
+/// #21371: a linked design that keeps its number of bodies but lists them in another order (the
+/// first part replaced by a new one built last) leaves each body the parent's name for it, and
+/// what the parent keeps under that name, for Relink Source and Update Links alike. The new body
+/// takes the name of the one it replaced.
+#[test]
+fn linked_body_names_follow_their_bodies_when_the_design_lists_them_in_another_order() {
+    let dir = folder("reordered-names");
+    let (v1, v2) = (dir.join("child_v1.sc"), dir.join("child_v2.sc"));
+    boxes(&v1, &[("PartA", 10, 0), ("PartB", 20, 50), ("PartC", 30, 100)]);
+    boxes(&v2, &[("PartB", 20, 50), ("PartC", 30, 100), ("PartA_New", 10, 0)]);
+    let before = std::collections::BTreeMap::from([("PartA".to_string(), 1000), ("PartB".to_string(), 8000), ("PartC".to_string(), 27000)]);
+    let mut s = Session::default();
+    let component = run(&mut s, "component.insert_design", json!({"path": v1, "name": "SubAsm"}))["component"].as_u64().unwrap();
+    run(&mut s, "material.assign", json!({"bodies": ["PartB"], "material": "Steel"}));
+    assert_eq!(linked_volumes(&s, component), before);
+    run(&mut s, "component.relink", json!({"component": component, "path": v2}));
+    assert_eq!(linked_volumes(&s, component), before, "relink");
+    assert_eq!(s.doc.body_material("PartB"), "Steel");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(linked_volumes(&s, component), before);
+    // The same design saved over in place, read by Update Links.
+    std::fs::copy(&v2, &v1).unwrap();
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(linked_volumes(&s, component), before, "update links");
+    assert_eq!(s.doc.body_material("PartB"), "Steel");
+    let _ = std::fs::remove_dir_all(dir);
+}
