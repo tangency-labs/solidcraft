@@ -382,5 +382,7 @@ fn a_shell_without_a_region_is_a_failure_not_a_sheet() {
             })),
             "{err}"
         );
+        assert_eq!(err.kind(), ErrorKind::Unsupported, "{err}");
+        assert!(!err.is_defect(), "{err}");
     }
 }

@@ -97,6 +97,7 @@ use crate::blend::fillet_geom::p1::{
     FilletGeomId, FilletSolverId, FilletVertex, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType};
+use crate::blend::fillet_solver::p5::edge_bounds_material_linked;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::{BlendFailure, CornerInput, CornerPatchMiss, CornerShape, FilletSetUp};
 use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
@@ -1248,7 +1249,6 @@ impl FilletCorner {
                             // A loop use without a shell or region is refused, as the
                             // convexity test refused it.
                             if opposite {
-                                use crate::blend::fillet_solver::p5::edge_bounds_material_linked;
                                 let bounds = [
                                     edge_bounds_material_linked(b, edge_of(b, eu0)?)?,
                                     edge_bounds_material_linked(b, edge_of(b, eu1_)?)?,

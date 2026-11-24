@@ -335,8 +335,8 @@ pub fn edge_bounds_material(target: &Brep, edge_id: EdgeId) -> Result<bool> {
 
 /// [`edge_bounds_material`], but a loop edge use without a shell, or in a shell without a
 /// region, is refused rather than taken for "no material" when no use bounds material: a
-/// sheet's edges (loop uses in void regions, or no loop uses) bound none, a broken
-/// ownership link is a failure. It refuses exactly the edges [`is_concave_edge`] refuses
+/// sheet's edges (loop uses in void regions) and a wire edge (no loop uses) bound none, a
+/// broken ownership link is a failure. It refuses exactly the edges [`is_concave_edge`] refuses
 /// and a sheet does not explain (#19829).
 ///
 /// # Errors
