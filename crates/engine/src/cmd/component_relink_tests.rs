@@ -2881,6 +2881,8 @@ fn a_design_open_without_work_files_gets_them_when_the_environment_turns_hybrid(
     run(&mut s, "component.insert_design", json!({"path": root.join("bracket.scprt")}));
     run(&mut s, "component.make_internal", json!({"component": "bracket"}));
     run(&mut s, "file.save", json!({}));
+    let mut s = Session::default();
+    assert_eq!(run(&mut s, "doc.open", json!({"path": design}))["errors"], 0);
     std::fs::remove_dir_all(&work).unwrap();
     assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["found"], false);
     assert!(crate::unpack_work_files(&mut s));
@@ -2893,5 +2895,41 @@ fn a_design_open_without_work_files_gets_them_when_the_environment_turns_hybrid(
     run(&mut read_only, "doc.open", json!({"path": design, "read_only": true}));
     assert!(!crate::unpack_work_files(&mut read_only));
     assert!(!work.exists(), "a read-only open writes nothing");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A save without the bodies of linked designs (#8170) leaves an internal component's bodies in
+/// (#6892): its part travels in the file, so the design opened alone somewhere else shows it at
+/// once. The part linked to a file of its own is left out, as asked.
+#[test]
+fn a_save_without_linked_bodies_keeps_an_internal_components_bodies() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("left-out-internal");
+    let (job, away) = (root.join("job"), root.join("away"));
+    std::fs::create_dir_all(&job).unwrap();
+    std::fs::create_dir_all(&away).unwrap();
+    part(&job.join("bracket.scprt"), 10);
+    part(&job.join("bolt.scprt"), 20);
+    let design = job.join("counter.sc");
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": design}));
+    run(&mut s, "component.insert_design", json!({"path": job.join("bracket.scprt")}));
+    run(&mut s, "component.insert_design", json!({"path": job.join("bolt.scprt"), "translate": [50, 0, 0]}));
+    run(&mut s, "component.make_internal", json!({"component": "bracket"}));
+    run(&mut s, "file.save", json!({"linked_bodies": false}));
+    let saved = solidcraft_io::read_design(&std::fs::read(&design).unwrap()).unwrap();
+    let kept = |name: &str| {
+        let comp = saved.components.iter().find(|c| c.name == name).unwrap().id;
+        let feature = saved.links[&comp].feature;
+        matches!(&saved.feature(feature).unwrap().kind, solidcraft_doc::FeatureKind::Import { step, .. } if !step.is_empty())
+    };
+    assert!(kept("bracket"), "the internal component keeps its bodies");
+    assert!(!kept("bolt"), "the part in a file of its own is left out");
+
+    // Alone somewhere else: the bracket is there (10 x 20 x 10); the bolt's file is not.
+    std::fs::copy(&design, away.join("counter.sc")).unwrap();
+    let mut alone = Session::default();
+    run(&mut alone, "doc.open", json!({"path": away.join("counter.sc")}));
+    assert!((volume(&mut alone) - 2000.0).abs() < 1e-6, "{}", volume(&mut alone));
     let _ = std::fs::remove_dir_all(root);
 }

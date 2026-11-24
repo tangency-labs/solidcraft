@@ -235,13 +235,20 @@ fn left_out(doc: &Document, comp: u64, link: &DesignLink) -> bool {
 /// ([`Document::linked_bodies_left_out`]), so opening it reads them from the linked files again
 /// ([`read_left_out_bodies`]). A link whose file cannot be reached now, or changed since the
 /// link read it, keeps its bodies: they may be the only copy ([`link_file_problem`]). A link to
-/// a STEP file (Insert STEP) keeps its bodies too: only linked designs are left out. `doc` is
+/// a STEP file (Insert STEP) keeps its bodies too: only linked designs are left out, and of
+/// those only the ones in files of their own (not an internal component). `doc` is
 /// the design in the session, saved at `from`, whose link paths are whole.
 pub(super) fn leave_out_linked_bodies(design: &mut std::borrow::Cow<'_, Document>, doc: &Document, from: Option<&str>) {
     let features: Vec<u64> = doc
         .links
         .iter()
-        .filter(|(comp, link)| link.step_names.is_none() && link_file_problem(doc, **comp, link, from).is_none())
+        // An internal component (#6892) keeps its bodies as well: its part is in this file, so
+        // the design sent alone shows it before any work file exists to read it from.
+        .filter(|(comp, link)| {
+            link.step_names.is_none()
+                && solidcraft_doc::internal::linked(&link.path).is_none()
+                && link_file_problem(doc, **comp, link, from).is_none()
+        })
         .map(|(_, l)| l.feature)
         .collect();
     let design = design.to_mut();

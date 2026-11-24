@@ -1383,7 +1383,7 @@ fn step_and_component_link_schema_keys_and_replies() {
         ),
         (
             "component.update_links",
-            json!({"updated": ["Part"], "unchanged": [], "failed": [{"component": 2, "name": "Missing", "error": "file missing"}], "warnings": ["Missing keeps its bodies"]}),
+            json!({"updated": ["Part"], "unchanged": [], "failed": [{"component": 2, "name": "Missing", "error": "file missing", "path": "missing.scprt"}], "warnings": ["Missing keeps its bodies"]}),
         ),
         ("component.break_link", json!({"component": 1, "path": "part.step"})),
         ("component.links", json!({"links": [], "param_warnings": ["unknown parameter"]})),
