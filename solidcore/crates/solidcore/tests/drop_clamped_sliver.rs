@@ -113,3 +113,70 @@ fn the_trim_over_the_sliver_is_monotone_and_passes_the_curve_checks() {
         assert!(!failed.contains(&test), "test {test} fails: {failed:?}");
     }
 }
+
+/// A sliver whose end shared with its neighbour lies outside the domain is kept.
+///
+/// The goldens' `surface.plane_p1` gen0059 drops a rational cubic onto a bounded plane
+/// whose domain corner `(u0, v0)` the curve starts beyond, in both coordinates. The
+/// first span (`t` in `[0, 1/128]`) clamps to that corner bar a fold of its polygon's
+/// second point to `v0 + 0.0356`; its end at `t = 1/128` is outside the domain too, so
+/// the second span's first point was clamped onto the corner as well. Between the two
+/// spans the flush moves that knot's neighbours onto the corner (an interior knot on the
+/// boundary), which makes the second span one point. Stretched over the first span's
+/// range, the second span became the first and kept its unclamped tangent (an end knot's
+/// neighbour is only clamped): a fold to `v0 + 0.0363`, larger than the sliver's. The
+/// sliver stays, and so does the second span's single point.
+#[test]
+fn a_sliver_whose_neighbour_was_clamped_too_is_kept() {
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::geom::extent2d::Extent2d;
+    use solidcore::geom::vector2d::Vec2;
+    use solidcore::geom::vector3d::Vec3;
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    use solidcore::nurbs::math::CPoint;
+    use solidcore::surface::plane::Plane;
+
+    let k = Kernel::default();
+    let (u0, v0) = (-3.939751354186126, -2.2663521374286457);
+    let domain = Extent2d::from_bounds(u0, v0, 1.4990071576082489, 3.416408169619536);
+    let plane = Plane::new(
+        Vec3::new(-5.506926495872477, -5.321096480489718, 2.0483477950681728),
+        Vec3::new(0.6832481332704575, 0.514387417094488, -0.5182447042829248),
+        Vec3::new(0.6603198186441991, -0.7382291802009027, 0.13782385354355428),
+        Vec2::new(1.0, 1.0),
+        &domain,
+    );
+    let pw = [
+        [-6.071826408556264, -3.757976352056512, 1.248345966817094, 0.5563792854718375],
+        [-6.316452876656257, -5.431616967682362, 2.14903822675801, 0.5922278942243393],
+        [-6.242326367663992, -8.216051640221346, 4.188315303320852, 1.9490570872199018],
+        [-6.536393280361178, -6.482309386164908, 3.0338705324600865, 1.4995658539132009],
+        [-4.895568399450589, -6.662479819186284, 2.227089209672163, 1.0772178787446909],
+    ]
+    .map(|q| CPoint {
+        x: q[0],
+        y: q[1],
+        z: q[2],
+        w: q[3],
+    });
+    let knots = [0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+    let curve = Curve::from(BSplineCurve::from_data(3, 4, 8, 3, &pw, &knots).unwrap());
+
+    let natural = plane.natural_uv_domain();
+    let dropped = plane
+        .drop_curve(
+            &k,
+            &natural,
+            &curve,
+            &Extent1d::from_min_max(0.0, 1.0),
+            2.0,
+            false,
+            true,
+            None,
+        )
+        .unwrap();
+    let (points, knots) = polygon(&dropped.uv_curves[0]);
+    let corner = (u0, v0);
+    assert_eq!(knots[4], 1.0 / 128.0, "{knots:?}");
+    assert!(points[3..=6].iter().all(|&p| p == corner), "{points:?}");
+}

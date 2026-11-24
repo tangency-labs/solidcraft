@@ -86,9 +86,9 @@
 //! - **Clamped sliver at a trace end.** A first or last span whose clamped UV image
 //!   is one point (its clamped Hermite polygon fits in the UV tolerance box) and whose
 //!   curve piece is certified within the 3D tolerance is not added
-//!   ([`super::clamped_sliver`]); the neighbouring span is stretched over its range and
-//!   the stretch's bound `h sup|C'|` is added to the approximation deviation. Upstream
-//!   adds it with the unclamped end tangents, and the span folds into an S.
+//!   ([`super::clamped_sliver`]); the neighbouring span is stretched over its range
+//!   where the stretched span passes the trace's span test (else the sliver is kept).
+//!   Upstream adds it with the unclamped end tangents, and the span folds into an S.
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
@@ -150,11 +150,11 @@ use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
 use super::boundary_moves::MoveBound;
-use super::clamped_sliver::{is_clamped_sliver, stretch_deviation};
+use super::clamped_sliver::{is_clamped_sliver, polygon_in_domain, stretched};
 use super::knot_lines::{KnotLine, KnotLines};
 use super::p1::{
-    remove_duplicate_drop_point_solutions, DropFailRecord, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN,
-    SM_SUCCESS,
+    remove_duplicate_drop_point_solutions, DropFailRecord, DropPt, SpanAccuracy,
+    SM_ERR_OUTSIDE_OF_DOMAIN, SM_SUCCESS,
 };
 use super::p2::{
     add_to_curve_with_policy, flush_curve_with_policy, BoundaryPolicy, DropOffset,
@@ -555,6 +555,43 @@ fn uv_curve_gap(
         None,
     ))?;
     Ok(gap.map_or((0.0, 0.0), |g| (g.max_dist, g.max_dev)))
+}
+
+/// Not upstream: the span test of a span stretched over a clamped sliver
+/// (`clamped_sliver`): the trace's own test of every span it accepts,
+/// [`DropPt::test_span_accuracy`] and [`span_proved_off`], with no short-span pass.
+/// `Some` with what the test measured where the span passes, `None` where it fails.
+///
+/// # Errors
+///
+/// Those of the span test.
+#[allow(clippy::too_many_arguments)] // the span, the surface, the curve and the tolerances
+fn stretch_accuracy(
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    curve: &Curve,
+    start: &DropPt,
+    end: &DropPt,
+    approx_tol_3d: f64,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+) -> Result<Option<SpanAccuracy>> {
+    let acc = start.test_span_accuracy(
+        k,
+        surface,
+        uv_domain,
+        curve,
+        end,
+        approx_tol_3d,
+        uv_tol_x,
+        uv_tol_y,
+        true,
+    )?;
+    if !acc.passes || span_proved_off(k, surface, curve, start, end, approx_tol_3d)? {
+        return Ok(None);
+    }
+    Ok(Some(acc))
 }
 
 /// Not upstream: whether, on an analytic sphere, the surface image of the UV Hermite span
@@ -1445,9 +1482,12 @@ impl Surface {
             // the UV curve being built
             let mut ctrl_poly: Vec<Point3> = Vec::new();
             let mut knots: Vec<f64> = Vec::new();
-            // (not upstream: the start of a first span left out as a clamped sliver,
-            // which the next span added stretches back to, see `clamped_sliver`)
-            let mut lead: Option<f64> = None;
+            // (not upstream: a first span left out as a clamped sliver, which the next
+            // span added stretches back over or, where the stretched span fails the span
+            // test, adds back first; and the last span added, which a last span left out
+            // stretches; see `clamped_sliver`)
+            let mut lead: Option<(DropPt, DropPt)> = None;
+            let mut last_span: Option<(DropPt, DropPt)> = None;
             let mut have_start_uv_tan = false;
             let mut fix_bc_change = false;
 
@@ -1627,6 +1667,7 @@ impl Surface {
                         default_path(&mut record, CreateUvTrimCurvePathType::DropStartPointFail);
                         ctrl_poly.clear();
                         knots.clear();
+                        lead = None;
                         max_drop_to_surf = max_drop_to_surf_before_trace;
                         max_approx_dev = max_approx_dev_before_trace;
                         break;
@@ -1790,10 +1831,11 @@ impl Surface {
 
                         // (not upstream: a first or last span that clamping into the
                         // domain collapses to one point is left out, and its neighbour
-                        // stretched over its range; the stretch's bound is added to the
-                        // deviation, see `clamped_sliver`)
+                        // stretched over its range where the stretched span's polygon lies
+                        // in the domain and passes the span test; see `clamped_sliver`)
                         let at_trace_end = end.t >= s_interval.max();
                         let sliver = !preserve_uv
+                            && move_bound.is_none()
                             && (knots.is_empty() != at_trace_end)
                             && is_clamped_sliver(
                                 k,
@@ -1805,56 +1847,59 @@ impl Surface {
                                 uv_tol_y,
                                 approx_tol_3d,
                             )?;
-                        let stretch_range = Extent1d::from_min_max(start.t, s_interval.max());
-                        let skip_lead = sliver
-                            && knots.is_empty()
-                            && lead.is_none()
-                            && curve.speed_bound(&stretch_range).is_some();
-                        let tail_bound = match (sliver && !knots.is_empty(), knots.len()) {
-                            (true, n) if n >= 2 => {
-                                knots
-                                    .get(n - 2)
-                                    .zip(knots.last())
-                                    .and_then(|(&from, &last)| {
-                                        stretch_deviation(
-                                            curve,
-                                            &Extent1d::from_min_max(from, end.t),
-                                            end.t - last,
-                                        )
-                                    })
+                        let skip_lead = sliver && knots.is_empty() && lead.is_none();
+                        // a last span left out: the last span added, still the end of the
+                        // curve being built, stretched to the sliver's end
+                        let tail = match last_span {
+                            Some((last_start, last_end))
+                                if sliver
+                                    && last_end.t == start.t
+                                    && knots.len() >= 2
+                                    && knots.last() == Some(&last_end.t)
+                                    && knots.len().checked_sub(2).and_then(|i| knots.get(i))
+                                        == Some(&last_start.t) =>
+                            {
+                                let (s2, e2) =
+                                    stretched(&last_start, &last_end, last_start.t, end.t);
+                                if polygon_in_domain(&s_uv_domain, &s2, &e2) {
+                                    stretch_accuracy(
+                                        k,
+                                        this,
+                                        &s_uv_domain,
+                                        curve,
+                                        &s2,
+                                        &e2,
+                                        approx_tol_3d,
+                                        uv_tol_x,
+                                        uv_tol_y,
+                                    )?
+                                    .map(|acc| (s2, e2, acc))
+                                } else {
+                                    None
+                                }
                             }
                             _ => None,
                         };
                         if skip_lead {
-                            lead = Some(start.t);
-                        } else if let Some(bound) = tail_bound {
-                            if let Some(last) = knots.last_mut() {
-                                *last = end.t;
-                            }
-                            max_approx_dev += bound;
-                        } else {
-                            // add the span to the curve (status ignored, SE)
-                            // (not upstream: on a B-spline surface or an offset of one, the
-                            // boundary fix-up of a curve it flushes keeps the curve in the
-                            // domain and moves each span by a proved bound within the
-                            // tolerance the trace left, or refuses the curve; the bound is
-                            // added to the deviation, see `boundary_moves`)
-                            if let Some(b) = move_bound.as_mut() {
-                                b.budget = approx_tol_3d - max_approx_dev;
-                            }
-                            let policy = if preserve_uv {
-                                BoundaryPolicy::Preserve
+                            lead = Some((start, end));
+                        } else if let Some((s2, e2, acc)) = tail {
+                            // the last span is built again over the sliver's range: the
+                            // curve is put back as it was before that span was added (with
+                            // no bounded fix-up, adding a span only appends its knot and
+                            // polygon, after the first knot and point of a first span)
+                            if knots.len() == 2 {
+                                knots.clear();
+                                ctrl_poly.clear();
                             } else {
-                                move_bound.as_ref().map_or(BoundaryPolicy::Unbounded, |b| {
-                                    BoundaryPolicy::Bounded(k, b)
-                                })
-                            };
-                            let added = add_to_curve_with_policy(
+                                knots.pop();
+                                ctrl_poly.truncate(ctrl_poly.len().saturating_sub(3));
+                            }
+                            ignore_status(add_to_curve_with_policy(
                                 k,
                                 this,
                                 &s_uv_domain,
-                                &start,
-                                &end,
+                                &s2,
+                                &e2,
                                 &mut ctrl_poly,
                                 &mut knots,
                                 approx_tol_3d,
@@ -1862,56 +1907,103 @@ impl Surface {
                                 uv_tol_y,
                                 &mut out.uv_curves,
                                 &mut fix_bc_change,
-                                policy,
-                            );
-                            let refusal = if preserve_uv {
-                                // A failed whole-span domain proof fails the construction;
-                                // it must not leave a partial UV curve behind as success.
-                                added?;
-                                None
-                            } else {
-                                // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
-                                let refusal = added.as_ref().err().cloned();
-                                ignore_status(added)?;
-                                refusal
-                            };
-                            if let Some(b) = move_bound.as_ref() {
-                                if b.refused() {
-                                    let stop = Failure::new(
-                                        OP_REFUSED,
-                                        IntersectFailure::BoundaryFixRefused,
-                                    );
-                                    return Err(match refusal {
-                                        Some(cause) => stop.caused_by(cause),
-                                        None => stop,
+                                BoundaryPolicy::Unbounded,
+                            ))?;
+                            max_drop_to_surf = max_drop_to_surf.max(acc.max_drop_to_surf);
+                            max_approx_dev = max_approx_dev.max(acc.max_approx_dev);
+                            last_span = Some((s2, e2));
+                        } else {
+                            // a first span left out before this one: this span is
+                            // stretched back over it where the stretched span passes the
+                            // span test, else the first span is added back ahead of it
+                            let spans = match lead.take() {
+                                Some((from, to)) => {
+                                    let (s2, e2) = stretched(&start, &end, from.t, end.t);
+                                    let accuracy = if polygon_in_domain(&s_uv_domain, &s2, &e2) {
+                                        stretch_accuracy(
+                                            k,
+                                            this,
+                                            &s_uv_domain,
+                                            curve,
+                                            &s2,
+                                            &e2,
+                                            approx_tol_3d,
+                                            uv_tol_x,
+                                            uv_tol_y,
+                                        )?
+                                    } else {
+                                        None
+                                    };
+                                    match accuracy {
+                                        Some(acc) => {
+                                            max_drop_to_surf =
+                                                max_drop_to_surf.max(acc.max_drop_to_surf);
+                                            max_approx_dev = max_approx_dev.max(acc.max_approx_dev);
+                                            vec![(s2, e2)]
+                                        }
+                                        None => vec![(from, to), (start, end)],
                                     }
-                                    .into_error());
                                 }
-                                max_approx_dev += b.spent();
-                            }
-
-                            // stretch the first span back over the clamped slivers left out
-                            // before it
-                            if let (Some(from), Some(&first), Some(&second)) =
-                                (lead, knots.first(), knots.get(1))
-                            {
-                                let bound = stretch_deviation(
-                                    curve,
-                                    &Extent1d::from_min_max(from, second),
-                                    first - from,
-                                )
-                                .or_else(|| {
-                                    stretch_deviation(
-                                        curve,
-                                        &Extent1d::from_min_max(from, s_interval.max()),
-                                        first - from,
-                                    )
-                                });
-                                if let (Some(bound), Some(knot)) = (bound, knots.first_mut()) {
-                                    *knot = from;
-                                    max_approx_dev += bound;
-                                    lead = None;
+                                None => vec![(start, end)],
+                            };
+                            for (span_start, span_end) in spans {
+                                // add the span to the curve (status ignored, SE)
+                                // (not upstream: on a B-spline surface or an offset of one, the
+                                // boundary fix-up of a curve it flushes keeps the curve in the
+                                // domain and moves each span by a proved bound within the
+                                // tolerance the trace left, or refuses the curve; the bound is
+                                // added to the deviation, see `boundary_moves`)
+                                if let Some(b) = move_bound.as_mut() {
+                                    b.budget = approx_tol_3d - max_approx_dev;
                                 }
+                                let policy = if preserve_uv {
+                                    BoundaryPolicy::Preserve
+                                } else {
+                                    move_bound.as_ref().map_or(BoundaryPolicy::Unbounded, |b| {
+                                        BoundaryPolicy::Bounded(k, b)
+                                    })
+                                };
+                                let added = add_to_curve_with_policy(
+                                    k,
+                                    this,
+                                    &s_uv_domain,
+                                    &span_start,
+                                    &span_end,
+                                    &mut ctrl_poly,
+                                    &mut knots,
+                                    approx_tol_3d,
+                                    uv_tol_x,
+                                    uv_tol_y,
+                                    &mut out.uv_curves,
+                                    &mut fix_bc_change,
+                                    policy,
+                                );
+                                let refusal = if preserve_uv {
+                                    // A failed whole-span domain proof fails the construction;
+                                    // it must not leave a partial UV curve behind as success.
+                                    added?;
+                                    None
+                                } else {
+                                    // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
+                                    let refusal = added.as_ref().err().cloned();
+                                    ignore_status(added)?;
+                                    refusal
+                                };
+                                if let Some(b) = move_bound.as_ref() {
+                                    if b.refused() {
+                                        let stop = Failure::new(
+                                            OP_REFUSED,
+                                            IntersectFailure::BoundaryFixRefused,
+                                        );
+                                        return Err(match refusal {
+                                            Some(cause) => stop.caused_by(cause),
+                                            None => stop,
+                                        }
+                                        .into_error());
+                                    }
+                                    max_approx_dev += b.spent();
+                                }
+                                last_span = Some((span_start, span_end));
                             }
                         }
 
@@ -2028,10 +2120,32 @@ impl Surface {
                     );
                     ctrl_poly.clear();
                     knots.clear();
+                    lead = None;
                     max_drop_to_surf = max_drop_to_surf_before_trace;
                     max_approx_dev = max_approx_dev_before_trace;
                     break;
                 }
+            }
+
+            // (not upstream: a first span left out that no span followed is added back,
+            // so the curve keeps it, see `clamped_sliver`; it was left out only with no
+            // bounded fix-up, so the policy is unbounded)
+            if let Some((sliver_start, sliver_end)) = lead.take() {
+                ignore_status(add_to_curve_with_policy(
+                    k,
+                    this,
+                    &s_uv_domain,
+                    &sliver_start,
+                    &sliver_end,
+                    &mut ctrl_poly,
+                    &mut knots,
+                    approx_tol_3d,
+                    uv_tol_x,
+                    uv_tol_y,
+                    &mut out.uv_curves,
+                    &mut fix_bc_change,
+                    BoundaryPolicy::Unbounded,
+                ))?;
             }
 
             // output the curve built for this start point (not upstream: the bounded

@@ -379,7 +379,10 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         }
         let committed = golden.get(name);
         if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+            failures.push(format!(
+                "{name}: the row put back is not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
@@ -683,6 +686,7 @@ const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
 /// branch's committed line.
 #[test]
 fn rows_the_lazy_raise_keeps_are_main_s() {
+    let mut failures = Vec::new();
     for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
         assert!(
             !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
@@ -696,13 +700,17 @@ fn rows_the_lazy_raise_keeps_are_main_s() {
             .get(name)
             .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
         let line = run(u.as_ref(), case);
-        assert_eq!(hash(&line), main_hash, "{unit_id} {name}: not main's line");
-        assert_eq!(
-            golden.get(name),
-            Some(&line),
-            "{unit_id} {name}: not the committed line"
-        );
+        if hash(&line) != main_hash {
+            failures.push(format!(
+                "{unit_id} {name}: not main's line ({:#018x})",
+                hash(&line)
+            ));
+        }
+        if golden.get(name) != Some(&line) {
+            failures.push(format!("{unit_id} {name}: not the committed line"));
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:
@@ -903,7 +911,10 @@ fn classified_read_rows_are_mains_without_the_trims() {
             failures.push(format!("{unit_id} {name}: no read put back"));
         }
         if hash(&line) != main_hash {
-            failures.push(format!("{unit_id} {name}: not main's row"));
+            failures.push(format!(
+                "{unit_id} {name}: not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
