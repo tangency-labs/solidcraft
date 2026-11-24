@@ -126,6 +126,7 @@ plain!(
     solidcore::geom::vector3d::Point3,
     crate::history::Raw,
     crate::MassProperties,
+    (crate::MassProperties, Option<([f64; 3], [f64; 3])>),
     Vec<crate::trace::Pick>
 );
 

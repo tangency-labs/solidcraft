@@ -100,11 +100,21 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
         let m = measure(b)?;
         return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox, measured_by: m.measured_by, notes: m.notes });
     }
-    let m = crate::guard("SMLib mass properties", || {
-        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::smlib("SMLib mass properties", e))
+    // The exact box is measured with the mass properties when it isn't kept yet: both read the
+    // same tight box, which on curved faces costs as much as half the integration.
+    let kept = b.kept_bounds();
+    let (m, measured) = crate::guard("SMLib mass properties", || {
+        let smlib = b.smlib()?;
+        if kept.is_some() { smlib.mass_properties(ACCURACY).map(|m| (m, None)) } else { smlib.mass_properties_and_bounds(ACCURACY) }
+            .map_err(|e| crate::KernelError::smlib("SMLib mass properties", e))
     })?;
+    let bbox = match (kept, measured) {
+        (Some(bbox), _) => bbox,
+        (None, Some((lo, hi))) => b.keep_bounds(lo, hi),
+        (None, None) => b.exact_bounds()?,
+    };
     let [x, y, z] = m.centroid;
-    Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
+    Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox, measured_by: "smlib", notes: Vec::new() })
 }
 
 #[cfg(test)]
@@ -167,6 +177,29 @@ mod tests {
         let got = measure_mass(&ring).unwrap().volume;
         assert!((got - want).abs() < 1e-3 * want, "{got} against {want}");
         assert!(measure(&ring).unwrap().merged.faces > 0);
+    }
+
+    /// A body whose exact box isn't kept yet has it measured with its mass properties, and kept
+    /// for [`Body::exact_bounds`]: the box and the mass properties are, to the bit, those of a body
+    /// whose box was measured on its own first.
+    #[test]
+    fn mass_measures_and_keeps_the_exact_box() {
+        let shape = || {
+            let ring = torus(Vec3::ZERO, 10.0, 2.0).unwrap();
+            let post = cylinder(Vec3::new(10.0, 0.0, -5.0), Vec3::Z, 1.5, 10.0).unwrap();
+            boolean(&ring, &post, BoolOp::Intersect).unwrap().unwrap()
+        };
+        let bits = |v: Vec3| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()];
+        let (fresh, boxed) = (shape(), shape());
+        assert_eq!(fresh.kept_bounds(), None);
+        let alone = boxed.exact_bounds().unwrap();
+        let (with, after) = (measure_mass(&fresh).unwrap(), measure_mass(&boxed).unwrap());
+        assert_eq!((bits(with.bbox.min), bits(with.bbox.max)), (bits(alone.min), bits(alone.max)));
+        assert_eq!(fresh.kept_bounds(), Some(with.bbox));
+        assert_eq!(fresh.exact_bounds().unwrap(), with.bbox);
+        assert_eq!(with.volume.to_bits(), after.volume.to_bits());
+        assert_eq!(with.area.to_bits(), after.area.to_bits());
+        assert_eq!(bits(with.centroid), bits(after.centroid));
     }
 
     /// A body's exact box is measured once and its clones share it; a moved copy is a new body

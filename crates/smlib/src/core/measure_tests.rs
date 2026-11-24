@@ -2,7 +2,7 @@
 //! against their closed forms ([`crate::measure::closed`]), one solid each, edges on their faces.
 
 use super::{Body, area, bounds, check, edge_face_distance, is_manifold_solid, make_box, make_cone, make_cylinder, make_sphere, make_torus};
-use super::{counts, mass_properties, solid_count};
+use super::{counts, mass_properties, mass_properties_and_bounds, solid_count};
 use crate::check::CheckLevel;
 use crate::measure::MEASURE_ACCURACY;
 use crate::measure::closed::{self, Closed};
@@ -183,6 +183,25 @@ fn hostile_numbers_are_refused() {
     // Out of range is clamped, not refused.
     assert!(rel(mass_properties(&b, 1e-30).unwrap().volume, 6000.0) < TOL);
     assert!(rel(mass_properties(&b, 10.0).unwrap().volume, 6000.0) < TOL);
+}
+
+/// One tight box serves both: [`mass_properties_and_bounds`] gives [`bounds`]'s box, to the bit,
+/// with [`mass_properties`]'s answer, on every primitive and on the sealed voids; it refuses what
+/// [`mass_properties`] refuses.
+#[test]
+fn mass_properties_and_bounds_are_the_two_calls_answers() {
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let flat = |m: &crate::MassProperties| [[m.area, m.volume].as_slice(), &m.centroid, &m.moments, &m.products].concat();
+    let mut bodies: Vec<(&str, Body)> = ["box", "cylinder", "sphere", "cone", "frustum", "torus"].into_iter().map(|n| (n, case(n).0)).collect();
+    bodies.extend(sealed_voids());
+    for (name, b) in &bodies {
+        let (m, both) = mass_properties_and_bounds(b, MEASURE_ACCURACY).unwrap();
+        assert_eq!(bits(&flat(&m)), bits(&flat(&mass_properties(b, MEASURE_ACCURACY).unwrap())), "{name}");
+        let ((lo, hi), (blo, bhi)) = (bounds(b).unwrap(), both.unwrap());
+        assert_eq!((bits(&blo), bits(&bhi)), (bits(&lo), bits(&hi)), "{name}");
+    }
+    let (b, _) = case("box");
+    assert_eq!(mass_properties_and_bounds(&b, f64::NAN).unwrap_err(), crate::Error::Argument);
 }
 
 /// A 20 mm box minus a centred 10 mm box (a sealed void), as solidcore's boolean makes it and as
