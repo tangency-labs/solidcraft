@@ -248,6 +248,7 @@ pub use kicad_in::is_kicad_path;
 pub use kicad_in::kicad_board_mesh;
 pub use kicad_in::kicad_board_path;
 pub use kicad_in::kicad_board_thickness;
+pub use kicad_in::kicad_file_thickness;
 pub use kicad_in::parse_kicad_board;
 pub use kicad_in::parse_kicad_board_with;
 pub use kicad_in::read_kicad;
