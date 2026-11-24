@@ -1,7 +1,10 @@
 //! Bounded presentation of an owned scene-linear CPU pass. Transport and film remain separate.
 //! The caller supplies the cumulative work debit; every mutating stage checks it first.
 use super::denoise::{DenoiseTask, Guide};
-use super::{CancelToken, DenoiseDiagnostics, DenoiseGuideClass, DenoiseSettings, ErrorCode, JobError, Phase, Progress, Result, TaskPoll};
+use super::denoise_oidn::OidnTask;
+use super::{
+    CancelToken, DenoiseDiagnostics, DenoiseGuideClass, DenoiseMethod, DenoiseSettings, ErrorCode, JobError, Phase, Progress, Result, TaskPoll,
+};
 use super::{bloom::BloomTask, encoding::PngEncoding, linear_exr::ExrTask, photographic::PhotographicTask, presentation::Presentation};
 use crate::film::adaptive::CountsPlane;
 
@@ -37,6 +40,7 @@ enum Stage {
     Resolve(Resolve),
     Exr(ExrTask),
     Denoise(DenoiseTask),
+    Oidn(OidnTask),
     Bloom(BloomTask),
     Display(usize),
     Photographic(PhotographicTask),
@@ -52,6 +56,7 @@ pub(crate) struct OutputTask {
     supersampling: u32,
     denoise_settings: DenoiseSettings,
     retain_exr: bool,
+    native_denoise_failed: bool,
     original: Option<Vec<[f32; 4]>>,
     resolved_alpha: Vec<u8>,
     diagnostics: Option<DenoiseDiagnostics>,
@@ -92,6 +97,10 @@ impl OutputTask {
         presentation.validate()?;
         cancel.check()?;
         denoise_settings.validate()?;
+        if denoise && denoise_settings.method == DenoiseMethod::Oidn {
+            let (trace_width, trace_height) = super::supersampled_dimensions(width, height, supersampling)?;
+            super::denoise_oidn::validate_request(trace_width, trace_height, presentation.transparent_background, diagnostics)?;
+        }
         if (denoise || supersampling != 1) && preserve_display {
             return Err(invalid("CPU denoising cannot preserve an unfiltered display buffer"));
         }
@@ -112,6 +121,7 @@ impl OutputTask {
             supersampling,
             denoise_settings,
             retain_exr,
+            native_denoise_failed: false,
             original: None,
             resolved_alpha: Vec::new(),
             diagnostics: diagnostics.then(|| DenoiseDiagnostics::new(trace_width, trace_height)),
@@ -145,6 +155,9 @@ impl OutputTask {
         self.mask_png.take()
     }
 
+    pub(crate) fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
+        if self.native_denoise_failed { self.exr.take() } else { None }
+    }
     fn prepare_raw(&mut self, linear: Vec<[f32; 4]>, charge: &mut impl FnMut(u64) -> Result<()>) -> Result<()> {
         if self.retain_exr {
             if self.supersampling == 2 {
@@ -180,13 +193,25 @@ impl OutputTask {
     }
     fn prepare_display(&mut self, linear: Vec<[f32; 4]>, charge: &mut impl FnMut(u64) -> Result<()>) -> Result<()> {
         if self.denoise {
-            charge(1)?; // one fallible, prepaid colour scratch reservation
-            let task = if self.denoise_settings.is_default() {
-                DenoiseTask::new(self.trace_width, self.trace_height, linear)?
-            } else {
-                DenoiseTask::new_with_settings(self.trace_width, self.trace_height, linear, self.denoise_settings)?
-            };
-            self.stage = Some(Stage::Denoise(task));
+            match self.denoise_settings.method {
+                DenoiseMethod::Spatial => {
+                    charge(1)?; // one fallible, prepaid colour scratch reservation
+                    let task = if self.denoise_settings.is_default() {
+                        DenoiseTask::new(self.trace_width, self.trace_height, linear)?
+                    } else {
+                        DenoiseTask::new_with_settings(self.trace_width, self.trace_height, linear, self.denoise_settings)?
+                    };
+                    self.stage = Some(Stage::Denoise(task));
+                }
+                DenoiseMethod::Oidn => {
+                    // Work units are pixel visits, not bytes. Admission already prepaid
+                    // the RGB/native workspace before transport started.
+                    charge(u64::from(self.trace_width) * u64::from(self.trace_height))?;
+                    let task = OidnTask::new(self.trace_width, self.trace_height, linear, self.denoise_settings, self.cancel.clone())
+                        .map_err(|failure| failure.record(&mut self.native_denoise_failed))?;
+                    self.stage = Some(Stage::Oidn(task));
+                }
+            }
             Ok(())
         } else {
             self.prepare_resolve(linear, charge)
@@ -335,6 +360,13 @@ impl OutputTask {
                     self.stage = Some(Stage::Denoise(task));
                 }
             }
+            Stage::Oidn(mut task) => {
+                if let Some(linear) = task.poll().map_err(|failure| failure.record(&mut self.native_denoise_failed))? {
+                    self.prepare_resolve(linear, charge)?;
+                } else {
+                    self.stage = Some(Stage::Oidn(task));
+                }
+            }
             Stage::Bloom(mut task) => {
                 charge(task.next_line_pixels())?;
                 if task.step(1)? {
@@ -441,6 +473,7 @@ impl OutputTask {
             Some(Stage::Resolve(_)) => "resolve",
             Some(Stage::Exr(_)) => "exr",
             Some(Stage::Denoise(_)) => "denoise",
+            Some(Stage::Oidn(_)) => "oidn",
             Some(Stage::Bloom(_)) => "bloom",
             Some(Stage::Display(_)) => "display",
             Some(Stage::Photographic(_)) => "photographic",

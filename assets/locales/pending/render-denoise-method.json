@@ -1,0 +1,101 @@
+{
+  "en": {
+    "render.denoise_method": "Denoiser",
+    "render.denoise_method_spatial": "Spatial filter",
+    "render.denoise_method_oidn": "Open Image Denoise",
+    "render.denoise_oidn_diagnostics_unavailable": "Guide diagnostics describe the Spatial filter only. Turn diagnostics off or choose Spatial filter to render.",
+    "render.denoise_oidn_help": "Experimental color-only denoising on the CPU. Opaque output only. CPU ray tracing needs Studio or Workstation; Compact cannot admit the provisional workspace. Size and memory limits still apply.",
+    "render.denoise_oidn_unavailable": "Open Image Denoise is unavailable in this build. Choose Spatial filter or turn denoising off to render. The saved choice is kept.",
+    "render.denoise_oidn_quality": "Denoise quality",
+    "render.denoise_oidn_quality_fast": "Fast",
+    "render.denoise_oidn_quality_balanced": "Balanced",
+    "render.denoise_oidn_quality_high": "High"
+  },
+  "en-GB": {
+    "render.denoise_oidn_help": "Experimental colour-only denoising on the CPU. Opaque output only. CPU ray tracing needs Studio or Workstation; Compact cannot admit the provisional workspace. Size and memory limits still apply."
+  },
+  "ar": {
+    "render.denoise_method": "مزيل التشويش",
+    "render.denoise_method_spatial": "المرشح المكاني",
+    "render.denoise_method_oidn": "Open Image Denoise",
+    "render.denoise_oidn_diagnostics_unavailable": "تصف تشخيصات الإرشاد المرشح المكاني فقط. أوقف التشخيصات أو اختر المرشح المكاني للتصيير.",
+    "render.denoise_oidn_help": "إزالة تشويش تجريبية للألوان فقط على المعالج. للإخراج المعتم فقط. يتطلب تتبع الأشعة على المعالج ملف Studio أو Workstation؛ لا يسمح Compact بذاكرة العمل التقديرية. تبقى حدود الحجم والذاكرة سارية.",
+    "render.denoise_oidn_unavailable": "Open Image Denoise غير متاح في هذا الإصدار. اختر المرشح المكاني أو أوقف إزالة التشويش للتصيير. يُحتفظ بالخيار المحفوظ.",
+    "render.denoise_oidn_quality": "جودة إزالة التشويش",
+    "render.denoise_oidn_quality_fast": "سريع",
+    "render.denoise_oidn_quality_balanced": "متوازن",
+    "render.denoise_oidn_quality_high": "عالٍ"
+  },
+  "de": {
+    "render.denoise_method": "Entrauschen",
+    "render.denoise_method_spatial": "Räumlicher Filter",
+    "render.denoise_method_oidn": "Open Image Denoise",
+    "render.denoise_oidn_diagnostics_unavailable": "Die Führungsdiagnose beschreibt nur den räumlichen Filter. Deaktivieren Sie die Diagnose oder wählen Sie den räumlichen Filter zum Rendern.",
+    "render.denoise_oidn_help": "Experimentelles Entrauschen nur anhand der Farben auf der CPU. Nur für undurchsichtige Ausgaben. CPU-Raytracing benötigt Studio oder Workstation; Compact erlaubt den vorläufigen Arbeitsspeicherbedarf nicht. Größen- und Speichergrenzen gelten weiterhin.",
+    "render.denoise_oidn_unavailable": "Open Image Denoise ist in diesem Build nicht verfügbar. Wählen Sie den räumlichen Filter oder deaktivieren Sie das Entrauschen zum Rendern. Die gespeicherte Auswahl bleibt erhalten.",
+    "render.denoise_oidn_quality": "Entrauschungsqualität",
+    "render.denoise_oidn_quality_fast": "Schnell",
+    "render.denoise_oidn_quality_balanced": "Ausgeglichen",
+    "render.denoise_oidn_quality_high": "Hoch"
+  },
+  "he": {
+    "render.denoise_method": "מסנן רעש",
+    "render.denoise_method_spatial": "המסנן המרחבי",
+    "render.denoise_method_oidn": "Open Image Denoise",
+    "render.denoise_oidn_diagnostics_unavailable": "אבחון נתוני ההנחיה מתאר רק את המסנן המרחבי. יש לכבות את האבחון או לבחור במסנן המרחבי כדי לרנדר.",
+    "render.denoise_oidn_help": "הסרת רעש ניסיונית במעבד לפי צבע בלבד. לפלט אטום בלבד. מעקב קרניים במעבד דורש Studio או Workstation; פרופיל Compact אינו מאפשר את אומדן זיכרון העבודה הזמני. מגבלות הגודל והזיכרון עדיין חלות.",
+    "render.denoise_oidn_unavailable": "Open Image Denoise אינו זמין בגרסה זו. יש לבחור במסנן המרחבי או לכבות הסרת רעש כדי לרנדר. הבחירה השמורה נשמרת.",
+    "render.denoise_oidn_quality": "איכות הסרת הרעש",
+    "render.denoise_oidn_quality_fast": "מהיר",
+    "render.denoise_oidn_quality_balanced": "מאוזן",
+    "render.denoise_oidn_quality_high": "גבוה"
+  },
+  "ja": {
+    "render.denoise_method": "ノイズ除去方式",
+    "render.denoise_method_spatial": "空間フィルター",
+    "render.denoise_method_oidn": "Open Image Denoise",
+    "render.denoise_oidn_diagnostics_unavailable": "ガイドの診断は空間フィルターのみを対象とします。診断をオフにするか、空間フィルターを選んでレンダリングしてください。",
+    "render.denoise_oidn_help": "CPU で色のみを使う実験的なノイズ除去です。不透明な出力のみ対応します。CPU レイトレーシングには Studio または Workstation が必要です。Compact では暫定的な作業メモリを確保できません。サイズとメモリの制限は引き続き適用されます。",
+    "render.denoise_oidn_unavailable": "このビルドでは Open Image Denoise を使用できません。レンダリングするには空間フィルターを選ぶか、ノイズ除去をオフにしてください。保存済みの選択は保持されます。",
+    "render.denoise_oidn_quality": "ノイズ除去の品質",
+    "render.denoise_oidn_quality_fast": "速い",
+    "render.denoise_oidn_quality_balanced": "バランス",
+    "render.denoise_oidn_quality_high": "高品質"
+  },
+  "ko": {
+    "render.denoise_method": "노이즈 제거 방식",
+    "render.denoise_method_spatial": "공간 필터",
+    "render.denoise_method_oidn": "Open Image Denoise",
+    "render.denoise_oidn_diagnostics_unavailable": "가이드 진단은 공간 필터만 설명합니다. 진단을 끄거나 공간 필터를 선택하여 렌더링하세요.",
+    "render.denoise_oidn_help": "CPU에서 색상만 사용하는 실험적 노이즈 제거입니다. 불투명 출력만 지원합니다. CPU 레이 트레이싱에는 Studio 또는 Workstation이 필요합니다. Compact에서는 잠정 작업 메모리 요구량을 허용하지 않습니다. 크기와 메모리 제한은 계속 적용됩니다.",
+    "render.denoise_oidn_unavailable": "이 빌드에서는 Open Image Denoise를 사용할 수 없습니다. 렌더링하려면 공간 필터를 선택하거나 노이즈 제거를 끄세요. 저장된 선택은 유지됩니다.",
+    "render.denoise_oidn_quality": "노이즈 제거 품질",
+    "render.denoise_oidn_quality_fast": "빠름",
+    "render.denoise_oidn_quality_balanced": "균형",
+    "render.denoise_oidn_quality_high": "높음"
+  },
+  "vi": {
+    "render.denoise_method": "Bộ lọc khử nhiễu",
+    "render.denoise_method_spatial": "Bộ lọc không gian",
+    "render.denoise_method_oidn": "Open Image Denoise",
+    "render.denoise_oidn_diagnostics_unavailable": "Chẩn đoán dữ liệu dẫn hướng chỉ mô tả Bộ lọc không gian. Tắt chẩn đoán hoặc chọn Bộ lọc không gian để kết xuất.",
+    "render.denoise_oidn_help": "Khử nhiễu thử nghiệm trên CPU chỉ dựa vào màu. Chỉ hỗ trợ đầu ra không trong suốt. Dò tia trên CPU cần Studio hoặc Workstation; Compact không cho phép mức bộ nhớ làm việc ước tính tạm thời. Các giới hạn kích thước và bộ nhớ vẫn áp dụng.",
+    "render.denoise_oidn_unavailable": "Open Image Denoise không có trong bản dựng này. Chọn Bộ lọc không gian hoặc tắt khử nhiễu để kết xuất. Lựa chọn đã lưu được giữ nguyên.",
+    "render.denoise_oidn_quality": "Chất lượng khử nhiễu",
+    "render.denoise_oidn_quality_fast": "Nhanh",
+    "render.denoise_oidn_quality_balanced": "Cân bằng",
+    "render.denoise_oidn_quality_high": "Cao"
+  },
+  "zh": {
+    "render.denoise_method": "降噪器",
+    "render.denoise_method_spatial": "空间滤波",
+    "render.denoise_method_oidn": "Open Image Denoise",
+    "render.denoise_oidn_diagnostics_unavailable": "引导诊断仅描述空间滤波。请关闭诊断或选择空间滤波后再渲染。",
+    "render.denoise_oidn_help": "在 CPU 上仅使用颜色进行实验性降噪。仅支持不透明输出。CPU 光线追踪需要 Studio 或 Workstation 资源配置；Compact 无法容纳暂定的工作内存需求。尺寸和内存限制仍然适用。",
+    "render.denoise_oidn_unavailable": "此构建不支持 Open Image Denoise。请选择空间滤波或关闭降噪后再渲染。已保存的选择会保留。",
+    "render.denoise_oidn_quality": "降噪质量",
+    "render.denoise_oidn_quality_fast": "快速",
+    "render.denoise_oidn_quality_balanced": "均衡",
+    "render.denoise_oidn_quality_high": "高"
+  }
+}

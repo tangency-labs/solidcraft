@@ -221,10 +221,17 @@ impl JsonSchema for RenderRequest {
         put("supersampling", count("GPU: 1 or 2. At 2 the image is traced at twice the width and height and averaged down. Default: 1."));
         put(
             "denoise_settings",
-            json!({"description": "GPU: the denoiser's `passes` (1 to 3), `strength` (0 to 1), \
-            `firefly_suppression` and `optical_filter`.", "type": "object"}),
+            json!({"description": "GPU: `method` is spatial (default) or oidn. Spatial uses `passes` (1 to 3), \
+            `strength` (0 to 1), `firefly_suppression` and `optical_filter`. OIDN uses `oidn_quality`: \
+            fast, balanced or high (default), and requires a native OIDN build and opaque output.", "type": "object"}),
         );
-        put("denoise_diagnostics", switch("GPU: keep the denoiser's guide mask, for `render.export` with `format: denoise_mask`. Default: false."));
+        put(
+            "denoise_diagnostics",
+            switch(
+                "GPU: keep the Spatial filter's guide mask, even with denoising off, for `render.export` with \
+            `format: denoise_mask`. Cannot combine with active OIDN. Default: false.",
+            ),
+        );
         put(
             "caustics",
             section(
@@ -455,14 +462,14 @@ pub struct Checked {
 /// How a denoised image is filtered.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Denoising {
-    /// The filter: `edge_aware_atrous`.
+    /// The selected filter: `edge_aware_atrous` or `open_image_denoise`.
     pub method: &'static str,
-    /// For CPU ray tracing: `native_cpu`.
+    /// `native_cpu` for CPU ray tracing and for OIDN on either renderer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<&'static str>,
     /// How many passes the filter makes, 1 to 3.
     pub passes: u32,
-    /// Each pass's step between taps, in pixels: 1, 2 and 4.
+    /// Spatial pass steps in pixels: 1, 2 and 4. Empty for OIDN.
     pub steps: Vec<u32>,
     /// The denoise settings, as the render crate gives them.
     pub settings: Map<String, Value>,
@@ -480,7 +487,7 @@ pub struct Denoising {
     pub limitation: &'static str,
     /// Always true: the unfiltered linear image is kept.
     pub raw_linear_accumulator_preserved: bool,
-    /// For CPU ray tracing, always true: a kept linear EXR is unfiltered.
+    /// A kept linear EXR is unfiltered; present for CPU ray tracing and OIDN.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_linear_exr_preserved: Option<bool>,
     /// Where in the pipeline the filter runs: `linear_before_tone_map`.

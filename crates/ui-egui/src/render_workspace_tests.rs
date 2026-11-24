@@ -16190,7 +16190,7 @@ fn render_quality_edit_number(h: &mut Harness, handle: &str, value: &str) {
 
 #[test]
 fn render_quality_settings_roundtrip_offline_runtime_and_one_step_undo() {
-    use solidcraft_engine::render::job::DenoiseSettings;
+    use solidcraft_engine::render::job::{DenoiseMethod, DenoiseSettings, OidnQuality};
     for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
         let mut h = render_quality_controls_fixture(method, 32);
         let name = h.app.render_workspace.view.name.clone();
@@ -16199,7 +16199,14 @@ fn render_quality_settings_roundtrip_offline_runtime_and_one_step_undo() {
         let camera = h.app.cam;
         let before = setups::draft(&h.app).unwrap();
         let undo = h.app.session.undo.len();
-        let settings = DenoiseSettings { passes: 2, strength: 0.45, firefly_suppression: false, optical_filter: false };
+        let settings = DenoiseSettings {
+            passes: 2,
+            strength: 0.45,
+            firefly_suppression: false,
+            optical_filter: false,
+            method: DenoiseMethod::Oidn,
+            oidn_quality: OidnQuality::Balanced,
+        };
         h.app.render_workspace.view.studio.supersampling = 2;
         h.app.render_workspace.view.studio.denoise = false;
         h.app.render_workspace.view.studio.denoise_settings = settings;
@@ -16258,6 +16265,108 @@ fn render_quality_settings_roundtrip_offline_runtime_and_one_step_undo() {
         assert_eq!(h.app.render_workspace.view.studio.denoise_settings, settings);
         assert!(h.app.render_workspace.view.studio.denoise_diagnostics);
         assert!(h.app.render_workspace.view.job.is_none(), "quality editing and offline reopen never launch a render");
+    }
+}
+
+fn render_denoiser_controls_frame(h: &mut Harness, width: f32, events: Vec<egui::Event>) -> String {
+    crate::scenario::clear_handles();
+    let mut output = h.ctx.run_ui(
+        egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 900.0))), events, ..Default::default() },
+        |ui| quality::denoise_controls(&mut h.app, ui),
+    );
+    let text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.job.text.clone()).collect::<Vec<_>>().join("\n");
+    output.textures_delta.clear();
+    text
+}
+
+fn render_denoiser_controls_click(h: &mut Harness, width: f32, handle: &str) {
+    let at = crate::scenario::handle_at(handle).unwrap();
+    for pressed in [true, false] {
+        render_denoiser_controls_frame(
+            h,
+            width,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() },
+            ],
+        );
+    }
+    render_denoiser_controls_frame(h, width, vec![egui::Event::PointerGone]);
+}
+
+#[test]
+fn render_denoiser_controls_preserve_saved_oidn_and_offer_an_explicit_spatial_exit() {
+    use solidcraft_engine::render::job::{DenoiseMethod, DenoiseSettings, OidnQuality, denoise_oidn};
+
+    for width in [308.0, 220.0] {
+        let mut h = Harness::new();
+        let settings = DenoiseSettings {
+            method: DenoiseMethod::Oidn,
+            oidn_quality: OidnQuality::Balanced,
+            passes: 2,
+            strength: 0.45,
+            firefly_suppression: true,
+            optical_filter: false,
+        };
+        h.app.render_workspace.view.studio.denoise = true;
+        h.app.render_workspace.view.studio.denoise_settings = settings;
+        h.app.render_workspace.view.dirty = false;
+        let document = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        for _ in 0..3 {
+            render_denoiser_controls_frame(&mut h, width, vec![]);
+        }
+        let text = render_denoiser_controls_frame(&mut h, width, vec![]);
+        assert_eq!(h.app.render_workspace.view.studio.denoise_settings, settings, "painting never substitutes a supported method");
+        assert!(!h.app.render_workspace.view.dirty);
+        assert_eq!(crate::scenario::rect_of("render:denoise-enable"), crate::scenario::rect_of("render:gpu-denoise"));
+        assert!(!text.contains(h.app.tr("render.denoise_settings_help")), "Spatial-only guidance must not describe OIDN");
+        for target in ["render:denoise-passes", "render:denoise-strength", "render:denoise-firefly", "render:denoise-optical-filter"] {
+            assert!(crate::scenario::rect_of(target).is_none(), "{target} is Spatial-only");
+        }
+        for target in ["render:denoise-method:spatial", "render:denoise-method:oidn", "render:denoise-oidn-quality:fast"] {
+            let rect = crate::scenario::rect_of(target).unwrap();
+            assert!(rect.left() >= 0.0 && rect.right() <= width, "{target}: {rect:?} must fit a {width}-wide inspector");
+        }
+        let help = if denoise_oidn::available() { "render.denoise_oidn_help" } else { "render.denoise_oidn_unavailable" };
+        assert!(text.contains(h.app.tr(help)), "saved OIDN intent must have accurate help: {text}");
+        render_denoiser_controls_click(&mut h, width, "render:denoise-diagnostics");
+        assert!(h.app.render_workspace.view.studio.denoise_diagnostics, "an incompatible saved diagnostics choice is never silently cleared");
+        let text = render_denoiser_controls_frame(&mut h, width, vec![]);
+        assert!(text.contains(h.app.tr("render.denoise_oidn_diagnostics_unavailable")), "Spatial-only diagnostics need an actionable reason: {text}");
+        assert!(!text.contains(h.app.tr("render.denoise_diagnostics_help")), "OIDN must not claim Spatial bypass counts");
+        assert_eq!(h.app.render_workspace.view.studio.denoise_settings, settings);
+        render_denoiser_controls_click(&mut h, width, "render:denoise-diagnostics");
+        assert!(!h.app.render_workspace.view.studio.denoise_diagnostics, "the diagnostics checkbox remains available to resolve the incompatibility");
+        render_denoiser_controls_click(&mut h, width, "render:denoise-oidn-quality:fast");
+        let expected_quality = if denoise_oidn::available() { OidnQuality::Fast } else { OidnQuality::Balanced };
+        assert_eq!(h.app.render_workspace.view.studio.denoise_settings.oidn_quality, expected_quality);
+
+        render_denoiser_controls_click(&mut h, width, "render:denoise-method:spatial");
+        let spatial = DenoiseSettings { method: DenoiseMethod::Spatial, oidn_quality: expected_quality, ..settings };
+        assert_eq!(h.app.render_workspace.view.studio.denoise_settings, spatial);
+        assert!(h.app.render_workspace.view.dirty);
+        assert!(h.app.render_workspace.view.studio.denoise, "choosing a method retains the original enable checkbox");
+        let text = render_denoiser_controls_frame(&mut h, width, vec![]);
+        assert!(text.contains(h.app.tr("render.denoise_settings_help")));
+        assert!(crate::scenario::rect_of("render:denoise-optical-filter").is_some());
+        assert!(crate::scenario::rect_of("render:denoise-oidn-quality").is_none());
+
+        render_denoiser_controls_click(&mut h, width, "render:denoise-method:oidn");
+        assert_eq!(
+            h.app.render_workspace.view.studio.denoise_settings.method,
+            if denoise_oidn::available() { DenoiseMethod::Oidn } else { DenoiseMethod::Spatial },
+        );
+        let before_disable = h.app.render_workspace.view.studio.denoise_settings;
+        render_denoiser_controls_click(&mut h, width, "render:denoise-enable");
+        assert!(!h.app.render_workspace.view.studio.denoise);
+        render_denoiser_controls_click(&mut h, width, "render:denoise-method:spatial");
+        assert_eq!(h.app.render_workspace.view.studio.denoise_settings, before_disable, "disabled controls retain method and tuning");
+        render_denoiser_controls_click(&mut h, width, "render:denoise-diagnostics");
+        assert!(h.app.render_workspace.view.studio.denoise_diagnostics, "diagnostics remain independent of the filter checkbox");
+        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(h.app.render_workspace.view.job.is_none());
     }
 }
 

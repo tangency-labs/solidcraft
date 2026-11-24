@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use solidcraft_render::job::{CpuHost, JobId, Phase};
 
 use super::{
-    CancelParams, CopyParams, ExportParams, ImageCopied, ImageExported, JobPhase, PinParams, RegradeParams, RenderCancelled, RenderProgress,
+    CancelParams, CopyParams, ExportParams, ImageCopied, JobPhase, PinParams, RegradeParams, RenderCancelled, RenderExported, RenderProgress,
     ResultPinned, StatusParams,
 };
 use crate::Session;
@@ -212,7 +212,7 @@ fn render_job_commands_reply_with_their_schemas() {
     let copied = reply(&mut s, "render.result.copy", json!({}), &output_schema_for::<ImageCopied>());
     assert_eq!(copied, json!({"frame": state["frame"]}));
     let path = std::env::temp_dir().join(format!("solidcraft-render-jobs-schema-{}.png", std::process::id()));
-    let exported = reply(&mut s, "render.export", json!({"job": job, "path": path, "overwrite": true}), &output_schema_for::<ImageExported>());
+    let exported = reply(&mut s, "render.export", json!({"job": job, "path": path, "overwrite": true}), &output_schema_for::<RenderExported>());
     let written = std::fs::metadata(&path).map(|m| m.len()).unwrap_or_default();
     let _ = std::fs::remove_file(&path);
     assert_eq!(
@@ -260,7 +260,7 @@ fn regrade_and_export_of_a_linear_master_reply_with_their_schemas() {
         reply(&mut s, "render.result.regrade", json!({"job": master, "presentation": {"exposure_ev": -1}}), &output_schema_for::<super::JobState>());
     let regraded: JobId = serde_json::from_value(regraded["job"].clone()).unwrap_or_else(|e| panic!("{e}"));
     wait(&s, regraded);
-    let exported = output_schema_for::<ImageExported>();
+    let exported = output_schema_for::<RenderExported>();
     for (job, format, extension) in
         [(master, "exr", "exr"), (regraded, "png", "png"), (master, "denoise_mask", "png"), (regraded, "denoise_mask", "png")]
     {
@@ -290,4 +290,128 @@ fn regrade_and_export_of_a_linear_master_reply_with_their_schemas() {
             assert!(r["presentation"].is_object(), "{r}");
         }
     }
+}
+
+/// Test the command contract against a real post-trace native error. Device selection is
+/// process-wide in OIDN: disable its CPU device only in this isolated copy of the test.
+#[cfg(all(feature = "raytrace-cpu", feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn failed_oidn_master_is_exportable_only_by_id_while_its_status_is_retained() {
+    use sha2::{Digest, Sha256};
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    const CHILD: &str = "SOLIDCRAFT_TEST_FAILED_OIDN_MASTER";
+    if std::env::var_os(CHILD).is_none() {
+        let name = concat!(module_path!(), "::failed_oidn_master_is_exportable_only_by_id_while_its_status_is_retained");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name.split_once("::").unwrap().1, "--test-threads=1", "--nocapture"])
+            .env(CHILD, "1")
+            .env("OIDN_DEVICE_CPU", "0")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success() && stdout.contains("1 passed"), "{stdout}\n{}", String::from_utf8_lossy(&output.stderr));
+        return;
+    }
+
+    let mut s = Session::default();
+    s.set_render_job_host(Some(CpuHost::for_platform().unwrap())).unwrap();
+    s.execute("solid.box", &json!({"length":13,"width":9,"height":5})).unwrap();
+    let run = |s: &mut Session, denoise, keep| {
+        let request = json!({"integrator":"raytrace", "settings":{"width":17,"height":13},
+            "raytrace":{"budget":"studio", "progressive":{"samples_per_pixel":1,"seed":71}, "denoise":denoise,
+                       "denoise_settings":{"method":"oidn"}, "output":{"linear_exr":keep}}});
+        let job: JobId = serde_json::from_value(s.execute("render.start", &request).unwrap()["job"].clone()).unwrap();
+        let handle = s.render_job_handle(job).unwrap();
+        let terminal = handle.wait_timeout(Duration::from_secs(30)).unwrap();
+        assert_eq!(terminal.progress.phase, if denoise { Phase::Failed } else { Phase::Completed }, "{:?}", terminal.error);
+        let status = reply(s, "render.status", json!({"job":job}), &output_schema_for::<RenderProgress>());
+        // The registry's eviction/reset assertions must not race the worker's last handle.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !handle.work_released() {
+            assert!(Instant::now() < deadline, "terminal render worker did not release its backing");
+            std::thread::yield_now();
+        }
+        (job, handle, status)
+    };
+    let (control, handle, _) = run(&mut s, false, true);
+    let control_frame = handle.frame().unwrap().unwrap();
+    let expected = control_frame.linear_exr().unwrap();
+    let (failed, handle, state) = run(&mut s, true, true);
+    assert_eq!(state["error"]["code"], "host_unavailable");
+    assert!(state["error"]["message"].as_str().unwrap().contains("Open Image Denoise"), "{state}");
+    assert_eq!(state["frame"], Value::Null);
+    assert!(handle.frame().unwrap().is_none());
+    let master = handle.failed_linear_master().unwrap().unwrap();
+    assert_eq!(master.bytes(), expected);
+    assert_eq!(state["linear_master"], json!(master.info()));
+    let weak = Arc::downgrade(&master);
+    drop(master);
+    drop(handle);
+    // No failed handle is required by the engine, only an artifact in status history.
+    assert!(s.render_job_handle(failed).is_err());
+    assert_eq!(s.render_retained_results().unwrap().len(), 1);
+    assert_eq!(s.render_selected_result(), Some(control));
+
+    let dir = std::env::temp_dir().join(format!("solidcraft-failed-master-{}-{}", std::process::id(), failed.session));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("recover.exr");
+    let params = json!({"job":failed,"format":"exr","path":path});
+    let exported = reply(&mut s, "render.export", params.clone(), &output_schema_for::<RenderExported>());
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes, expected, "failed job exports the exact same raw pixels as the undenoised control");
+    assert_eq!(state["linear_master"]["sha256"], format!("{:x}", Sha256::digest(&bytes)));
+    assert_eq!(state["linear_master"]["bytes"], bytes.len());
+    assert_eq!(
+        exported,
+        json!({"job":failed, "path":path, "format":"exr", "bytes":bytes.len(), "encoding":"scene_linear_srgb_d65",
+        "alpha":"coverage_premultiplied", "phase":"failed", "frame":null, "linear_master":state["linear_master"], "error":state["error"]})
+    );
+    assert_eq!(s.execute("render.status", &json!({"job":failed})).unwrap(), state);
+    std::fs::write(&path, b"keep").unwrap();
+    assert!(s.execute("render.export", &params).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"keep");
+    let overwrite = json!({"job":failed,"format":"exr","path":path,"overwrite":true});
+    assert!(s.scratch().execute("render.export", &overwrite).is_err());
+    assert!(solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([])), || s.execute("render.export", &overwrite)).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"keep", "neither a foreign document nor an out-of-scope caller can overwrite");
+    s.execute("render.export", &overwrite).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    for format in ["png", "denoise_mask"] {
+        let png = dir.join("refused.png");
+        assert!(s.execute("render.export", &json!({"job":failed,"path":png,"format":format})).is_err());
+        assert!(!png.exists());
+    }
+    let implicit = dir.join("implicit.exr");
+    assert_eq!(s.execute("render.export", &json!({"job":null,"path":implicit,"format":"exr"})).unwrap()["job"], json!(control));
+    s.execute("render.result.pin", &json!({"job":null})).unwrap();
+    assert!(s.execute("render.export", &json!({"path":path,"format":"exr","overwrite":true})).is_err());
+    assert!(s.execute("render.result.pin", &json!({"job":failed})).is_err());
+    assert!(s.execute("render.result.copy", &json!({"job":failed})).is_err());
+    assert!(s.execute("render.result.regrade", &json!({"job":failed,"presentation":{}})).is_err());
+
+    // One failed job without the opt-in and three successful ones age out the first
+    // failure. Export must neither refresh the four-entry window nor add a shelf item.
+    let (no_raw, _, no_raw_state) = run(&mut s, true, false);
+    assert!(no_raw_state.get("linear_master").is_none());
+    assert!(s.execute("render.export", &json!({"job":no_raw,"path":path,"format":"exr","overwrite":true})).is_err());
+    for _ in 0..2 {
+        run(&mut s, false, false);
+    }
+    s.execute("render.export", &overwrite).unwrap();
+    run(&mut s, false, false);
+    assert!(s.execute("render.export", &overwrite).is_err());
+    assert!(s.execute("render.status", &json!({"job":failed})).is_err());
+    assert!(weak.upgrade().is_none(), "history eviction releases its EXR owner");
+    let (latest, handle, _) = run(&mut s, true, true);
+    let weak = Arc::downgrade(&handle.failed_linear_master().unwrap().unwrap());
+    drop(handle);
+    s.execute("file.new", &json!({})).unwrap();
+    assert!(s.execute("render.export", &json!({"job":latest,"path":path,"format":"exr","overwrite":true})).is_err());
+    assert!(weak.upgrade().is_none(), "document replacement releases its EXR owner");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    std::fs::remove_dir_all(dir).unwrap();
 }

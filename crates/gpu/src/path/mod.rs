@@ -2,6 +2,7 @@
 //! features. Small measured quanta adapt to the device, then check cancellation.
 use solidcore_record::Vec3;
 use solidcraft_geom::Vec3Geom;
+use solidcraft_render::job::DenoiseMethod;
 #[cfg(test)]
 use solidcraft_render::job::ToneMap;
 use solidcraft_render::{
@@ -664,6 +665,17 @@ fn admission_with_device_limits(scene: &ProductScene, request: &ImageRequest, op
     // Peak preparation: f64 triangles + nodes + serialized upload. After preparation:
     // serialized + device geometry + accumulation/readback/RGBA/PNG. These phases don't overlap.
     let pixels = u64::from(request.width) * u64::from(request.height);
+    let oidn_bytes = if options.denoise && options.denoise_settings.method == DenoiseMethod::Oidn {
+        solidcraft_render::job::denoise_oidn::validate_request(
+            request.width,
+            request.height,
+            request.transparent_background,
+            options.denoise_diagnostics,
+        )?;
+        solidcraft_render::job::denoise_oidn::required_bytes(request.width, request.height)?
+    } else {
+        0
+    };
     let image_pages = image_pages::Layout::new(request.width, request.height, options, glass_tile_bytes(scene, request), limits)?;
     let denoise_bytes = image_pages.filter_scratch_bytes()?;
     let optical_tile_bytes = image_pages.optical_scratch_bytes()?;
@@ -733,8 +745,8 @@ fn admission_with_device_limits(scene: &ProductScene, request: &ImageRequest, op
     // final-grid RGBA plane and its bounded PNG after the beauty image completes.
     let resolve_bytes = output_pixels * if options.supersampling == 2 { 16 } else { 0 };
     let diagnostic_bytes = if options.denoise_diagnostics { output_pixels * 12 + 65_536 } else { 0 };
-    admission.pixel_scratch_bytes += resolve_bytes + diagnostic_bytes;
-    admission.preparation_bytes += resolve_bytes + diagnostic_bytes;
+    admission.pixel_scratch_bytes += resolve_bytes + diagnostic_bytes + oidn_bytes;
+    admission.preparation_bytes += resolve_bytes + diagnostic_bytes + oidn_bytes;
     admission.estimated_total_bytes = admission.geometry_bytes + admission.preparation_bytes;
     if admission.estimated_total_bytes > GPU_PATH_LIMITS.max_scratch_bytes {
         return Err(JobError::new(
@@ -793,8 +805,8 @@ fn admit_device_resources(
             ),
         ));
     }
-    let guide_bytes =
-        u64::from(image_pages.max_window_pixels()) * if options.denoise || options.denoise_diagnostics { denoise::GUIDE_BYTES_PER_PIXEL } else { 0 };
+    let needs_guides = (options.denoise && options.denoise_settings.method == DenoiseMethod::Spatial) || options.denoise_diagnostics;
+    let guide_bytes = u64::from(image_pages.max_window_pixels()) * if needs_guides { denoise::GUIDE_BYTES_PER_PIXEL } else { 0 };
     for (name, bytes) in [
         ("BVH", node_bytes),
         ("environment", environment_bytes),
@@ -1003,6 +1015,7 @@ struct Task {
     optical_resolve: Option<wgpu::ComputePipeline>,
     photons: Option<photons::Resources>,
     denoiser: Option<denoise::Resources>,
+    oidn_work: Option<solidcraft_render::job::denoise_oidn::OidnTask>,
     denoise_diagnostics: Option<solidcraft_render::job::DenoiseDiagnostics>,
     denoise_mask_png: Option<PngTask>,
     denoise_mask: Option<Vec<u8>>,
@@ -1022,6 +1035,7 @@ struct Task {
     exr_work: Option<solidcraft_render::job::linear_exr::ExrTask>,
     bloom_work: Option<solidcraft_render::job::bloom::BloomTask>,
     exr: Option<Vec<u8>>,
+    native_denoise_failed: bool,
     started: Instant,
     // Uniform environment is used only by the numerical furnace test, never advertised as HDRI.
     environment: f32,
@@ -1173,7 +1187,7 @@ impl Task {
             let first = pages.first().ok_or_else(|| gpu("GPU image has no storage page"))?;
             let accumulation = first.accumulation.clone();
             let bind = first.bind.clone();
-            let denoiser = if options.denoise || options.denoise_diagnostics {
+            let denoiser = if (options.denoise && options.denoise_settings.method == DenoiseMethod::Spatial) || options.denoise_diagnostics {
                 Some(denoise::Resources::new_for_layout(
                     &context,
                     &uniform,
@@ -1232,6 +1246,7 @@ impl Task {
             optical_resolve,
             photons,
             denoiser,
+            oidn_work: None,
             denoise_diagnostics: None,
             denoise_mask_png: None,
             denoise_mask: None,
@@ -1251,6 +1266,7 @@ impl Task {
             exr_work: None,
             bloom_work: None,
             exr: None,
+            native_denoise_failed: false,
             started: Instant::now(),
             environment: 0.0,
             environment_bottom_only: false,
@@ -1706,6 +1722,9 @@ impl ImageWork for Task {
     fn take_linear_exr(&mut self) -> Option<Vec<u8>> {
         self.exr.take()
     }
+    fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
+        if self.native_denoise_failed { self.exr.take() } else { None }
+    }
     fn step(&mut self, units: usize) -> Result<TaskPoll> {
         self.cancel.check()?;
         self.context.ensure_available()?;
@@ -1713,6 +1732,14 @@ impl ImageWork for Task {
         // here never changes accumulated samples or final output. The image host
         // takes every publication immediately after this quantum.
         self.preview = None;
+        if let Some(mut task) = self.oidn_work.take() {
+            if let Some(linear) = task.poll().map_err(|failure| failure.record(&mut self.native_denoise_failed))? {
+                let linear = self.resolve_output(linear)?;
+                return self.finish_filtered_output(linear);
+            }
+            self.oidn_work = Some(task);
+            return Ok(TaskPoll::Pending(Progress { phase: Phase::Encoding, done: 0, total: 1 }));
+        }
         if let Some(png) = &mut self.denoise_mask_png {
             if let TaskPoll::Complete(bytes) = png.step(units)? {
                 self.denoise_mask = Some(bytes);
@@ -1827,12 +1854,36 @@ impl Task {
     }
 
     fn finish_output(&mut self, mut linear: Vec<[f32; 4]>) -> Result<TaskPoll> {
-        if let Some(denoiser) = self.denoiser.as_ref().filter(|_| self.options.denoise) {
-            // Diagnose the raw path buffer before filtering: never hide invalid media
-            // or nonfinite radiance by replacing a pixel with neighbouring values.
+        if self.options.denoise {
+            // Validate/read raw trace-grid radiance before filtering, never the resolved
+            // argument: filtering that argument would change the X2 filter order.
             drop(linear);
-            linear = self.resolve_output(denoiser.read_filtered(self, self.encoding_preview && self.options.adaptive.is_some())?)?;
+            match self.options.denoise_settings.method {
+                DenoiseMethod::Spatial => {
+                    let denoiser = self.denoiser.as_ref().ok_or_else(|| gpu("missing spatial denoiser resources"))?;
+                    linear = self.resolve_output(denoiser.read_filtered(self, self.encoding_preview && self.options.adaptive.is_some())?)?;
+                }
+                DenoiseMethod::Oidn => {
+                    // Adaptive checkpoints normalize pilot/production counts differently
+                    // from final output. Keep the same complete-pass source as raw preview.
+                    let raw = if self.encoding_preview { self.read_checkpoint()? } else { self.read_linear()? };
+                    self.oidn_work = Some(
+                        solidcraft_render::job::denoise_oidn::OidnTask::new(
+                            self.request.width,
+                            self.request.height,
+                            raw,
+                            self.options.denoise_settings,
+                            self.cancel.clone(),
+                        )
+                        .map_err(|failure| failure.record(&mut self.native_denoise_failed))?,
+                    );
+                    return Ok(TaskPoll::Pending(Progress { phase: Phase::Encoding, done: 0, total: 1 }));
+                }
+            }
         }
+        self.finish_filtered_output(linear)
+    }
+    fn finish_filtered_output(&mut self, linear: Vec<[f32; 4]>) -> Result<TaskPoll> {
         if let Some(options) = self.options.finishing.bloom.filter(|options| options.active()) {
             self.bloom_work = Some(solidcraft_render::job::bloom::BloomTask::new(
                 self.output_request.width,

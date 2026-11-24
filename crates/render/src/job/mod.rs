@@ -23,6 +23,7 @@ mod cpu_sky;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) mod denoise;
 mod denoise_diagnostics;
+pub mod denoise_oidn;
 pub(crate) mod encoding;
 pub mod finishing;
 mod host;
@@ -69,6 +70,7 @@ pub use host::CpuHost;
 pub use host::DenoiseMaskInfo;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) use host::FRAME_METADATA_BYTES;
+pub use host::FailedLinearMaster;
 pub use host::HostKind;
 pub use host::ImageHost;
 pub use host::JobEnvironmentInfo;
@@ -120,6 +122,7 @@ pub use punctual::PunctualDiagnostics;
 pub use punctual::PunctualLightOptions;
 pub use punctual::PunctualLights;
 pub use punctual::SpotConeOptions;
+pub use quality::DenoiseMethod;
 pub use quality::DenoiseSettings;
 pub use quality::MAX_CPU_THREADS;
 pub use quality::MAX_OUTPUT_DIMENSION;
@@ -127,6 +130,7 @@ pub use quality::MAX_OUTPUT_PIXELS;
 pub use quality::MAX_TRACE_DIMENSION;
 pub use quality::MAX_TRACE_PIXELS;
 pub use quality::MAX_UI_SAMPLES;
+pub use quality::OidnQuality;
 pub use quality::resolve_supersampling;
 pub use quality::single_supersample;
 pub use quality::supersampled_dimensions;
@@ -370,6 +374,11 @@ pub trait ImageWork: Send {
     /// Optional raw linear companion, moved exactly once after PNG completion.
     /// The host validates intent, bounds, hashes and retains its memory lease.
     fn take_linear_exr(&mut self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Called only after a failed step, never for provisional results. The executor
+    /// may hand off its already encoded final master only for a native OIDN failure.
+    fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
         None
     }
     fn step(&mut self, units: usize) -> Result<TaskPoll>;

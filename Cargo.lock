@@ -4327,6 +4327,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oidn"
+version = "2.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c750490adf2813dad251dace8cff2f57b6d67cd2d29e3127ba9e9bd13b46e32"
+dependencies = [
+ "bitflags 2.13.2",
+ "num_enum",
+ "pkg-config",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6448,6 +6459,7 @@ dependencies = [
  "flate2",
  "image",
  "moxcms",
+ "oidn",
  "png",
  "rayon",
  "robust",

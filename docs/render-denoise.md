@@ -1,4 +1,92 @@
-# Optional spatial denoising
+# Optional render denoising
+
+## Experimental Open Image Denoise
+
+`denoise_settings.method` selects `spatial` (the existing default) or `oidn`.
+`oidn_quality` selects `fast`, `balanced` or `high` (default). Spatial passes,
+strength, firefly suppression and optical-filter settings remain saved but do
+not control OIDN. Old files and commands keep their existing Spatial behavior.
+Disabled denoising preserves the selected method without executing it.
+
+OIDN is a non-default native build feature, `denoise-oidn`, forwarded by the
+engine, desktop app and CLI. A developer build uses the pinned `oidn = 2.5.1`
+Rust wrapper and an installed Open Image Denoise 2.5.1 CPU runtime. For example,
+on macOS with Homebrew:
+
+```sh
+brew install open-image-denoise
+OIDN_DIR="$(brew --prefix open-image-denoise)" \
+  cargo build -p solidcraft-cli --features denoise-oidn
+```
+
+`OIDN_DIR` points to the installation containing `lib/`; otherwise the wrapper
+uses pkg-config. Do not enable the wrapper's `bundled` download feature: the
+published archive omits checksum inputs, and its platform list does not cover
+all SolidCraft targets. The app does not download models at runtime. Default
+builds and wasm retain portable settings but refuse an explicit OIDN render
+with a reason, rather than silently substituting Spatial. A feature-enabled
+build directly links the native library: a missing base library can prevent
+startup. Runtime/device errors are not a missing-library loading fallback.
+
+Both ray-traced renderers pass normalized scene-linear trace-grid RGB to the
+CPU RT filter with HDR enabled, sRGB disabled and no auxiliary guides. OIDN runs
+before supersampling resolve, bloom, exposure/tone mapping and photographic
+finishing. The GPU remains the renderer; validated HDR readback supplies its
+OIDN input. The raw film stays unfiltered. To keep an EXR, set `linear_exr: true`
+under `job.options.output` for a saved CPU job or `job.options` for a saved GPU job.
+If native OIDN fails **after the final raw EXR is encoded**, `render.status` reports
+`failed`, the original error and `linear_master`, but no display frame. In the same
+session, call `render.export` with the full failed job ID, `format: "exr"` and an
+`.exr` path. This writes the original bytes without retracing. Export promptly:
+failed masters share the four-entry terminal history and are not selectable images.
+
+This recovery is available through a persistent command session (for example,
+`solidcraft-cli mcp --headless`), not the one-shot PNG CLI or the completed-image
+picker. Cancellation, a failed nonfinal pass, or a job without a retained final
+master has nothing to export. Nothing is written automatically.
+
+Coverage alpha is copied unchanged, but transparent-background output is explicitly refused: preserving
+alpha alone does not qualify RGB reconstruction at transparent silhouettes.
+Opaque antialiased silhouettes still need image-quality comparisons.
+
+Native objects and buffers are owned by an OIDN worker. Output steps only poll
+completion and do not report a fabricated native progress percentage. Admission
+refuses cooperative hosts, so task retirement cannot block their caller's UI
+thread. Cancellation discards late results; the owning native host retains its
+work lease until the native worker joins. The current safe wrapper cannot
+interrupt inference, limit native threads, set `maxMemoryMB`, or query tiling.
+A cancelled job can therefore remain retiring until inference returns. OIDN's
+native progress callback itself only attempts cancellation; it does not guarantee
+an interruption or a retirement deadline. Adding a safe wrapper callback would
+not change that native guarantee.
+
+The in-place path admits 24 extra bytes per trace pixel: one packed caller RGB
+plane and the wrapper's native RGB plane, in addition to the existing raw RGBA.
+It also reserves a provisional 512 MiB allowance for models, native workspace
+and runtime state. This is **an estimate, not an enforced native memory cap**.
+OIDN documents `maxMemoryMB` as a request that actual allocations may exceed,
+even if a future wrapper exposes it. See the official
+[filter and cancellation contracts](https://www.openimagedenoise.org/documentation.html#filters).
+X2 charges its four-times-larger trace grid. The allowance alone exceeds the
+Compact CPU profile's 384 MiB limit; choose Studio or Workstation explicitly for
+CPU OIDN. Those profiles still enforce their image and memory admission limits.
+Color-only OIDN does not allocate Spatial guides. Active OIDN refuses
+`denoise_diagnostics`: those guide masks describe Spatial eligibility and bypasses,
+not OIDN processing. Turn diagnostics off or choose Spatial explicitly. With
+`denoise: false`, guide inspection remains available without changing the saved
+OIDN choice. Every complete published checkpoint currently runs OIDN as well, creating fresh native objects;
+total render timings therefore include repeated inference and initialization.
+They are not isolated final-denoise timings or live-preview qualification.
+
+This feature remains experimental and is not enabled in release defaults.
+Shipping still requires audited safe progress/cancellation, memory/thread and
+resource-reuse controls, measured large-image/native memory admission, qualified
+platform packaging and installed-app startup, representative CAD image/detail
+comparisons, and an explicit progressive-preview policy. A developer-linked
+proof alone does not complete [#16902](https://github.com/tangency-labs/solidcraft/issues/16902).
+Retained-master regrading still uses the raw EXR and does not reapply OIDN.
+
+## Existing Spatial filter
 
 CPU ray-traced requests accept `raytrace.denoise: true`; saved CPU jobs store
 `job.options.denoise`. GPU path requests keep their existing `denoise` flag and

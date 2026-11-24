@@ -381,6 +381,22 @@ pub struct LinearMasterInfo {
     pub bytes: u64,
     pub sha256: String,
 }
+/// Final raw transport bytes retained when native OIDN failed. This is not a
+/// colour frame: recovery never fabricates a PNG or completes the render job.
+pub struct FailedLinearMaster {
+    bytes: Vec<u8>,
+    info: LinearMasterInfo,
+    _reservation: Reservation,
+}
+impl FailedLinearMaster {
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+    pub fn info(&self) -> &LinearMasterInfo {
+        &self.info
+    }
+}
+
 struct RetainedPresentation {
     info: super::presentation::MasterPresentation,
     _reservation: Reservation,
@@ -596,6 +612,7 @@ struct Data {
     error: Option<JobError>,
     frame: Option<Arc<RenderFrame>>,
     preview: Option<Arc<RenderPreview>>,
+    failed_master: Option<Arc<FailedLinearMaster>>,
 }
 struct Record {
     work_released: AtomicBool,
@@ -619,6 +636,15 @@ struct Record {
 }
 
 impl Record {
+    fn retains_oidn_master(&self) -> Result<bool> {
+        let options = self.options()?;
+        let (raw, denoise, method) = if let Some(cpu) = &self.request.raytrace {
+            (cpu.output.as_ref().is_some_and(|out| out.linear_exr), cpu.denoise, cpu.denoise_settings.method)
+        } else {
+            (options.linear_exr, options.denoise, options.denoise_settings.method)
+        };
+        Ok(raw && denoise && method == super::DenoiseMethod::Oidn)
+    }
     fn options(&self) -> Result<JobOptions> {
         match &self.options {
             None => Ok(JobOptions::default()),
@@ -672,7 +698,12 @@ impl JobHandle {
             punctual_diagnostics: data.punctual_diagnostics,
             presentation: self.0.presentation.as_deref().map(|retained| retained.info.clone()),
             sampling: data.sampling.clone(),
-            linear_master: data.frame.as_ref().and_then(|frame| frame.linear_master_info().cloned()),
+            linear_master: data
+                .frame
+                .as_ref()
+                .and_then(|frame| frame.linear_master_info())
+                .or_else(|| data.failed_master.as_ref().map(|raw| raw.info()))
+                .cloned(),
             preview: data.preview.as_ref().map(|preview| preview.info.clone()),
             textures: self.0.textures.clone(),
             options: self.0.options()?,
@@ -721,6 +752,12 @@ impl JobHandle {
             return Err(JobError::new(ErrorCode::WrongOwner, "render frame identity does not match its job"));
         }
         Ok(frame)
+    }
+
+    /// Only an explicitly retained final master, atomically published with an OIDN failure.
+    pub fn failed_linear_master(&self) -> Result<Option<Arc<FailedLinearMaster>>> {
+        let data = self.0.data.lock().map_err(|_| JobError::new(ErrorCode::Internal, "render result lock poisoned"))?;
+        Ok(data.failed_master.clone())
     }
 
     /// A provisional complete-pass image, never the final/export frame slot.
@@ -1023,6 +1060,30 @@ const _: [(); 1] =
     [(); (std::mem::size_of::<PreparedSubmission>() + std::mem::size_of::<Work>() + std::mem::size_of::<Record>() + std::mem::size_of::<Running>()
         <= super::image::PREPARATION_METADATA_BYTES as usize) as usize];
 
+/// Exactly one publication is pending. Failed transport has no colour payload.
+enum PendingPublication {
+    Png(PendingPng),
+    FailedMaster { error: JobError, bytes: Vec<u8>, digest: Sha256, hashed: usize },
+}
+
+fn hash_chunk(digest: &mut Sha256, bytes: &[u8], hashed: &mut usize) -> Result<()> {
+    let end = hashed.saturating_add(PNG_HASH_CHUNK_BYTES).min(bytes.len());
+    digest.update(bytes.get(*hashed..end).ok_or_else(|| JobError::new(ErrorCode::Internal, "missing completed image digest chunk"))?);
+    *hashed = end;
+    Ok(())
+}
+
+impl LinearMasterInfo {
+    fn new(bytes: &[u8], digest: sha2::digest::Output<Sha256>) -> Self {
+        Self {
+            bytes: bytes.len() as u64,
+            sha256: format!("{digest:x}"),
+            encoding: LinearColourEncoding::SceneLinearSrgbD65,
+            alpha: LinearAlphaConvention::CoveragePremultiplied,
+        }
+    }
+}
+
 struct PendingPng {
     png: Vec<u8>,
     digest: Sha256,
@@ -1082,9 +1143,7 @@ impl PendingPng {
             } else {
                 break;
             };
-            let end = hashed.saturating_add(PNG_HASH_CHUNK_BYTES).min(bytes.len());
-            self.digest.update(bytes.get(*hashed..end).ok_or_else(|| JobError::new(ErrorCode::Internal, "missing completed image digest chunk"))?);
-            *hashed = end;
+            hash_chunk(&mut self.digest, bytes, hashed)?;
             cancel.check()?;
         }
         self.finish_digests();
@@ -1116,6 +1175,15 @@ impl PendingPng {
                 + self.denoise_mask.as_ref().map_or(0, |bytes| bytes.len() as u64),
         }
     }
+}
+
+fn valid_failed_master(bytes: &Vec<u8>, request: &ImageRequest) -> bool {
+    let (w, h) = (request.width, request.height);
+    // Native encoders hand off only fully finished scanlines. Also reject a
+    // wrong-sized, partial or over-budget handoff without decoding another image.
+    super::linear_exr::encoded_limit(w, h).is_ok_and(|limit| bytes.capacity() as u64 <= limit)
+        && super::linear_exr::native_header(bytes, w, h)
+            .is_ok_and(|header| bytes.len() as u64 == header.len() as u64 + u64::from(h) * (16 * u64::from(w) + 16))
 }
 
 fn validate_denoise_mask(bytes: &Vec<u8>, request: &ImageRequest, scale: u32, report: Option<super::DenoiseDiagnostics>) -> Result<()> {
@@ -1150,7 +1218,7 @@ fn validate_denoise_mask(bytes: &Vec<u8>, request: &ImageRequest, scale: u32, re
 struct Running {
     source_master: Option<Arc<RenderFrame>>,
     task: Option<WorkTask>,
-    pending_png: Option<PendingPng>,
+    pending: Option<PendingPublication>,
     handle: JobHandle,
     reservation: Option<Reservation>,
     next_preview_sequence: u32,
@@ -1248,6 +1316,14 @@ impl WorkTask {
         }
     }
 
+    fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
+        match self {
+            Self::Registered(task) => task.take_failed_linear_exr(),
+            #[cfg(feature = "raytrace-cpu")]
+            Self::Raytrace(task) => task.0.first_mut()?.take_failed_linear_exr(),
+            _ => None,
+        }
+    }
     fn source_master(&self) -> Result<Option<Arc<RenderFrame>>> {
         match self {
             Self::Regrade(slot) => {
@@ -1326,8 +1402,12 @@ impl WorkTask {
 }
 
 fn terminal(handle: &JobHandle, error: JobError) {
+    terminal_with_master(handle, error, None);
+}
+
+fn terminal_with_master(handle: &JobHandle, error: JobError, master: Option<Arc<FailedLinearMaster>>) {
     if let Ok(mut data) = handle.0.data.lock() {
-        if data.progress.phase == Phase::Completed {
+        if data.progress.phase.terminal() {
             return;
         }
         if handle.0.cancel.is_cancelled() || error.code == ErrorCode::Cancelled {
@@ -1336,6 +1416,7 @@ fn terminal(handle: &JobHandle, error: JobError) {
         } else {
             data.progress.phase = Phase::Failed;
             data.error = Some(error);
+            data.failed_master = master;
         }
         data.frame = None;
         data.preview = None;
@@ -1415,7 +1496,7 @@ impl Running {
             Ok(task) => Some(Self {
                 source_master: None,
                 task: Some(task),
-                pending_png: None,
+                pending: None,
                 handle: work.handle,
                 reservation: Some(work.reservation),
                 next_preview_sequence: 1,
@@ -1433,10 +1514,32 @@ impl Running {
 
     fn advance(&mut self, units: usize) -> Result<bool> {
         self.handle.0.cancel.check()?;
-        if self.pending_png.is_some() {
-            return self.advance_png(units);
+        match self.pending.take() {
+            Some(PendingPublication::Png(pending)) => return self.advance_png(pending, units),
+            Some(PendingPublication::FailedMaster { error, bytes, digest, hashed }) => {
+                return Ok(self.advance_failed_master(error, bytes, digest, hashed, units));
+            }
+            None => {}
         }
-        let result = self.task.as_mut().ok_or_else(|| JobError::new(ErrorCode::Internal, "missing render task"))?.step(units)?;
+        let task = self.task.as_mut().ok_or_else(|| JobError::new(ErrorCode::Internal, "missing render task"))?;
+        let result = match task.step(units) {
+            Ok(result) => result,
+            Err(error) => {
+                if error.code != ErrorCode::Cancelled
+                    && !self.handle.0.cancel.is_cancelled()
+                    && self.handle.0.retains_oidn_master().unwrap_or(false)
+                    && let Some(bytes) = task.take_failed_linear_exr()
+                    && valid_failed_master(&bytes, &self.handle.0.request)
+                {
+                    // Retire all native workers, transport and scratch before hashing
+                    // off-lock under the original work lease. Never rerender or encode.
+                    self.task = None;
+                    self.pending = Some(PendingPublication::FailedMaster { error, bytes, digest: Sha256::new(), hashed: 0 });
+                    return Ok(true);
+                }
+                return Err(error);
+            }
+        };
         let mut data = self.handle.0.data.lock().map_err(|_| JobError::new(ErrorCode::Internal, "render status lock poisoned"))?;
         data.punctual_diagnostics = self.task.as_ref().and_then(WorkTask::punctual_diagnostics);
         if let Some(diagnostics) = self.task.as_ref().and_then(WorkTask::denoise_diagnostics) {
@@ -1498,7 +1601,7 @@ impl Running {
                 pending.exr = exr;
                 pending.denoise_mask = denoise_mask;
                 data.progress = pending.progress();
-                self.pending_png = Some(pending);
+                self.pending = Some(PendingPublication::Png(pending));
                 Ok(true)
             }
             WorkPoll::Preview { png, samples_per_pixel } => {
@@ -1506,24 +1609,60 @@ impl Running {
                 // Hash the checkpoint before making immutable bytes observable.
                 let pending = PendingPng::preview(png, samples_per_pixel);
                 data.progress = pending.progress();
-                self.pending_png = Some(pending);
+                self.pending = Some(PendingPublication::Png(pending));
                 Ok(true)
             }
         }
     }
 
-    fn advance_png(&mut self, units: usize) -> Result<bool> {
+    fn advance_failed_master(&mut self, error: JobError, bytes: Vec<u8>, mut digest: Sha256, mut hashed: usize, units: usize) -> bool {
+        for _ in 0..units.min(PNG_HASH_CHUNKS_PER_ADVANCE) {
+            if hashed == bytes.len() {
+                break;
+            }
+            if self.handle.0.cancel.is_cancelled() || hash_chunk(&mut digest, &bytes, &mut hashed).is_err() {
+                terminal(&self.handle, error);
+                return false;
+            }
+        }
+        if hashed != bytes.len() {
+            self.pending = Some(PendingPublication::FailedMaster { error, bytes, digest, hashed });
+            return true;
+        }
+        let info = LinearMasterInfo::new(&bytes, digest.finalize());
+        // Failure to retain must never replace the original denoiser error.
+        let retained = (bytes.capacity() as u64).checked_add(FRAME_METADATA_BYTES);
+        let master = retained.and_then(|retained| {
+            let reservation = self.reservation.as_mut()?;
+            if std::mem::size_of::<Running>() + std::mem::size_of::<FailedLinearMaster>() + 32 + info.sha256.capacity()
+                > FRAME_METADATA_BYTES as usize
+            {
+                return None;
+            }
+            reservation.shrink(retained).ok()?;
+            reservation.settle().ok()?;
+            Some(Arc::new(FailedLinearMaster { bytes, info, _reservation: self.reservation.take()? }))
+        });
+        if let Some(credits) = &self.checkpoints {
+            credits.close();
+        }
+        // This is the same decision under the same lock as every other terminal
+        // result. A cancellation after the last digest chunk still discards it.
+        terminal_with_master(&self.handle, error, master);
+        false
+    }
+
+    fn advance_png(&mut self, mut pending: PendingPng, units: usize) -> Result<bool> {
         // No status/data lock is held while scanning the encoded image.
-        let pending = self.pending_png.as_mut().ok_or_else(|| JobError::new(ErrorCode::Internal, "missing pending PNG"))?;
         if !pending.step(units, &self.handle.0.cancel)? {
             let progress = pending.progress();
             let mut data = self.handle.0.data.lock().map_err(|_| JobError::new(ErrorCode::Internal, "render status lock poisoned"))?;
             self.handle.0.cancel.check()?;
             data.progress = progress;
+            self.pending = Some(PendingPublication::Png(pending));
             return Ok(true);
         }
-        let PendingPng { png, png_digest, preview_samples, exr, exr_digest, denoise_mask, denoise_mask_digest, .. } =
-            self.pending_png.take().ok_or_else(|| JobError::new(ErrorCode::Internal, "missing completed PNG digest"))?;
+        let PendingPng { png, png_digest, preview_samples, exr, exr_digest, denoise_mask, denoise_mask_digest, .. } = pending;
         let info = FrameInfo {
             job: self.handle.0.id,
             scene_generation: self.handle.0.scene_generation,
@@ -1635,12 +1774,8 @@ impl Running {
         }
         let exr = exr
             .map(|bytes| -> Result<_> {
-                let info = LinearMasterInfo {
-                    bytes: bytes.len() as u64,
-                    sha256: format!("{:x}", exr_digest.ok_or_else(|| JobError::new(ErrorCode::Internal, "missing linear master digest"))?),
-                    encoding: LinearColourEncoding::SceneLinearSrgbD65,
-                    alpha: LinearAlphaConvention::CoveragePremultiplied,
-                };
+                let info =
+                    LinearMasterInfo::new(&bytes, exr_digest.ok_or_else(|| JobError::new(ErrorCode::Internal, "missing linear master digest"))?);
                 Ok((bytes, info))
             })
             .transpose()?;
@@ -2271,6 +2406,15 @@ impl ImageHost {
             credit.check_request(self, &request, &cancel, retained)?;
         }
         cancel.check()?;
+        let oidn = (request.integrator == Integrator::Raytrace
+            && request.raytrace.as_ref().is_some_and(|options| options.denoise && options.denoise_settings.method == super::DenoiseMethod::Oidn))
+            || (self.0.executor.is_some() && options.denoise && options.denoise_settings.method == super::DenoiseMethod::Oidn);
+        if oidn && self.0.kind != HostKind::NativeWorker {
+            return Err(JobError::new(
+                ErrorCode::HostUnavailable,
+                "Open Image Denoise requires a native background image host; use the spatial filter",
+            ));
+        }
         if retained.is_some_and(|lease| !Arc::ptr_eq(&lease.0.budget, &self.0.shared.budget)) {
             return Err(JobError::new(ErrorCode::WrongOwner, "retained metadata belongs to a different host pool"));
         }
@@ -2540,6 +2684,7 @@ impl ImageHost {
                 error: None,
                 frame: None,
                 preview: None,
+                failed_master: None,
             }),
             #[cfg(not(target_arch = "wasm32"))]
             done: Condvar::new(),
@@ -2680,6 +2825,7 @@ impl ImageHost {
                 error: None,
                 frame: None,
                 preview: None,
+                failed_master: None,
             }),
             #[cfg(not(target_arch = "wasm32"))]
             done: Condvar::new(),
@@ -3211,7 +3357,7 @@ mod retained_request_tests {
                 let mut running = Running::begin(work).unwrap();
                 let mut stopped = false;
                 for _ in 0..200_000 {
-                    if mode == "late_cancel" && running.pending_png.as_ref().is_some_and(|pending| pending.preview_samples.is_none()) {
+                    if mode == "late_cancel" && running.pending_png().is_some_and(|pending| pending.preview_samples.is_none()) {
                         job.cancel().unwrap();
                         assert!(!running.guarded_step(1));
                         stopped = true;

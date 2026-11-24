@@ -1,8 +1,259 @@
 use super::*;
 use solidcraft_geom::{Aabb3, Mesh, MeshGeom};
 
+impl Running {
+    pub(super) fn pending_png(&self) -> Option<&PendingPng> {
+        match &self.pending {
+            Some(PendingPublication::Png(png)) => Some(png),
+            _ => None,
+        }
+    }
+    fn pending_png_mut(&mut self) -> Option<&mut PendingPng> {
+        match &mut self.pending {
+            Some(PendingPublication::Png(png)) => Some(png),
+            _ => None,
+        }
+    }
+}
+
 fn fixed_request_metadata_bytes() -> u64 {
     request().retained_resource_metadata_bytes()
+}
+
+#[test]
+fn oidn_cooperative_host_refuses_native_work_before_reserving_but_keeps_disabled_intent() {
+    struct OptionsExecutor;
+    impl ImageExecutor for OptionsExecutor {
+        fn supports_denoise_controls(&self) -> bool {
+            true
+        }
+        fn descriptor(&self) -> Result<ExecutorDescriptor> {
+            CpuExecutor.descriptor()
+        }
+        fn admit(&self, scene: &ProductScene, request: &ImageRequest, _: JobOptions) -> Result<Admission> {
+            admit(scene, request)
+        }
+        fn begin(&self, scene: ProductScene, request: ImageRequest, _: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>> {
+            CpuExecutor.begin(scene, request, JobOptions::default(), cancel)
+        }
+    }
+    let host = ImageHost::cooperative_with(Arc::new(OptionsExecutor));
+    let options = JobOptions {
+        denoise: true,
+        denoise_settings: super::super::DenoiseSettings { method: super::super::DenoiseMethod::Oidn, ..Default::default() },
+        ..Default::default()
+    };
+    let failure = host.submit_with_options(id(7971, 1), 1, empty(), request(), options).err().unwrap();
+    assert_eq!(failure.code, ErrorCode::HostUnavailable);
+    assert!(failure.message.contains("native background"));
+    assert_eq!(host.admitted_bytes(), 0);
+    let handle = host.submit_with_options(id(7971, 2), 1, empty(), request(), JobOptions { denoise: false, ..options }).unwrap();
+    assert_eq!(handle.status().unwrap().options.denoise_settings.method, super::super::DenoiseMethod::Oidn);
+    handle.cancel().unwrap();
+    assert!(!host.pump(1).unwrap());
+    assert!(handle.work_released());
+}
+
+#[cfg(all(feature = "raytrace-cpu", feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_cancelled_worker_retires_before_host_work_lease_is_released() {
+    let host = ImageHost(Arc::new(Owner {
+        executor: None,
+        shared: CpuHost::shared(super::super::NATIVE_CPU_POOL_BYTES),
+        kind: HostKind::NativeWorker,
+        running: Mutex::new(None),
+        _worker: None,
+    }));
+    let request = ImageRequest {
+        integrator: Integrator::Raytrace,
+        raytrace: Some(super::super::RaytraceOptions {
+            threads: 1,
+            denoise: true,
+            denoise_settings: super::super::DenoiseSettings { method: super::super::DenoiseMethod::Oidn, ..Default::default() },
+            budget: super::super::CpuBudget::Studio,
+            lights: Some(Vec::new()),
+            ..Default::default()
+        }),
+        width: 32,
+        height: 32,
+        ..request()
+    };
+    let handle = host.submit(id(7972, 1), 1, empty(), request).unwrap();
+    let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+    let mut running = Running::begin(work).unwrap();
+    for _ in 0..100_000 {
+        let at_oidn = match running.task.as_ref().unwrap() {
+            WorkTask::Raytrace(task) => task.0.first().unwrap().output_stage_for_test() == Some("oidn"),
+            _ => false,
+        };
+        if at_oidn {
+            break;
+        }
+        assert!(running.guarded_step(1));
+    }
+    let at_oidn = match running.task.as_ref().unwrap() {
+        WorkTask::Raytrace(task) => task.0.first().unwrap().output_stage_for_test() == Some("oidn"),
+        _ => false,
+    };
+    assert!(at_oidn, "fixture must reach native output before cancelling");
+    let admitted = host.admitted_bytes();
+    assert!(admitted > 512 * 1024 * 1024);
+    handle.cancel().unwrap();
+    assert!(!running.guarded_step(1));
+    assert!(!handle.work_released(), "terminal phase cannot release an unjoined worker's lease");
+    assert_eq!(host.admitted_bytes(), admitted);
+    assert!(handle.frame().unwrap().is_none());
+    drop(running);
+    assert!(handle.work_released(), "retirement joins worker before marking work released");
+    assert!(host.admitted_bytes() < admitted);
+    drop(handle);
+    assert_eq!(host.admitted_bytes(), 0);
+}
+
+#[cfg(all(feature = "raytrace-cpu", feature = "denoise-oidn", not(target_arch = "wasm32")))]
+mod failed_oidn_master {
+    use super::*;
+    use crate::job::{CpuBudget, DenoiseMethod, DenoiseSettings, OutputOptions, RaytraceOptions, linear_exr::ExrTask};
+
+    fn original() -> JobError {
+        JobError::new(ErrorCode::HostUnavailable, "original native device failure")
+    }
+
+    // Only the producer is replaced: exercise ordinary admission, error dispatch,
+    // host hashing, cancellation and the same immutable result/lease as a real job.
+    struct FailedProducer(Option<Vec<u8>>);
+    impl ImageWork for FailedProducer {
+        fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
+            self.0.take()
+        }
+        fn step(&mut self, _: usize) -> Result<TaskPoll> {
+            Err(original())
+        }
+    }
+    fn fixture(raw: bool, method: DenoiseMethod, denoise: bool, edit: impl FnOnce(&mut Vec<u8>)) -> (CpuHost, JobHandle, Running) {
+        let host = ImageHost(Arc::new(Owner {
+            executor: None,
+            shared: CpuHost::shared(crate::job::NATIVE_CPU_POOL_BYTES),
+            kind: HostKind::NativeWorker,
+            running: Mutex::new(None),
+            _worker: None,
+        }));
+        let (width, height) = (96, 64);
+        let req = ImageRequest {
+            width,
+            height,
+            integrator: Integrator::Raytrace,
+            raytrace: Some(RaytraceOptions {
+                denoise,
+                threads: 1,
+                denoise_settings: DenoiseSettings { method, ..Default::default() },
+                output: Some(Box::new(OutputOptions { linear_exr: raw, ..Default::default() })),
+                budget: CpuBudget::Studio,
+                lights: Some(Vec::new()),
+                ..Default::default()
+            }),
+            ..request()
+        };
+        let job = host.submit(id(7972, 2), 1, empty(), req).unwrap();
+        let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+        let mut run = Running::begin(work).unwrap();
+        let mut encoder = ExrTask::new_cpu(width, height, vec![[1.5, 0.0, 0.0, 1.0]; (width * height) as usize], CancelToken::default()).unwrap();
+        while !encoder.step(16).unwrap() {}
+        let mut bytes = encoder.finish().unwrap().0;
+        bytes.reserve_exact(128); // within the native cap; bill the allocation, not len.
+        edit(&mut bytes);
+        run.task = Some(WorkTask::Registered(Box::new(FailedProducer(Some(bytes)))));
+        (host, job, run)
+    }
+
+    #[test]
+    fn raw_only_failure_moves_the_paid_master_and_hashes_bounded_quanta() {
+        let (host, job, mut run) = fixture(true, DenoiseMethod::Oidn, true, |_| ());
+        let admitted = host.admitted_bytes();
+        assert!(run.guarded_step(1));
+        let Some(PendingPublication::FailedMaster { bytes, .. }) = &run.pending else { panic!("expected failed-master handoff") };
+        let pointer = bytes.as_ptr();
+        let expected = format!("{:x}", Sha256::digest(bytes));
+        let retained = bytes.capacity() as u64 + FRAME_METADATA_BYTES;
+        assert!(bytes.capacity() > bytes.len());
+        assert!(run.task.is_none());
+        assert!(run.advance(0).unwrap());
+        assert!(matches!(run.pending, Some(PendingPublication::FailedMaster { hashed: 0, .. })));
+        assert!(run.guarded_step(usize::MAX));
+        assert!(
+            matches!(run.pending, Some(PendingPublication::FailedMaster { hashed, .. }) if hashed == PNG_HASH_CHUNKS_PER_ADVANCE * PNG_HASH_CHUNK_BYTES)
+        );
+        assert!(job.status().unwrap().linear_master.is_none());
+        assert_eq!(host.admitted_bytes(), admitted);
+        while run.guarded_step(1) {}
+        let s = job.status().unwrap();
+        assert_eq!(s.progress.phase, Phase::Failed);
+        assert_eq!(s.error, Some(original()));
+        assert!(s.frame.is_none() && s.preview.is_none() && job.frame().unwrap().is_none());
+        let master = job.failed_linear_master().unwrap().unwrap();
+        let info = s.linear_master.unwrap();
+        assert_eq!((&info.sha256, info.bytes), (&master.info().sha256, master.info().bytes));
+        assert!(matches!((info.encoding, info.alpha), (LinearColourEncoding::SceneLinearSrgbD65, LinearAlphaConvention::CoveragePremultiplied)));
+        assert_eq!(master.bytes().as_ptr(), pointer);
+        assert_eq!(master.info().bytes, master.bytes().len() as u64);
+        assert_eq!(master.info().sha256, expected);
+        assert!(!job.work_released());
+        drop(run);
+        assert!(job.work_released());
+        drop(job);
+        assert_eq!(host.admitted_bytes(), retained);
+        let budget = host.0.shared.budget.clone();
+        drop(host);
+        assert_eq!(budget.used.load(Ordering::Acquire), retained);
+        drop(master);
+        assert_eq!(budget.used.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn invalid_unrequested_unpaid_or_non_oidn_handoff_keeps_original_error_without_artifact() {
+        for (raw, method, denoise, bad_bytes, underpaid) in [
+            (false, DenoiseMethod::Oidn, true, false, false),
+            (true, DenoiseMethod::Spatial, true, false, false),
+            (true, DenoiseMethod::Oidn, false, false, false),
+            (true, DenoiseMethod::Oidn, true, true, false),
+            (true, DenoiseMethod::Oidn, true, false, true),
+        ] {
+            let (host, job, mut run) = fixture(raw, method, denoise, |bytes| {
+                if bad_bytes {
+                    bytes.pop();
+                }
+            });
+            if underpaid {
+                run.reservation.as_mut().unwrap().shrink(1).unwrap();
+            }
+            while run.guarded_step(1) {}
+            assert_eq!(job.status().unwrap().error, Some(original()));
+            assert!(job.failed_linear_master().unwrap().is_none());
+            assert!(job.status().unwrap().linear_master.is_none());
+            drop(run);
+            drop(job);
+            assert_eq!(host.admitted_bytes(), 0);
+        }
+    }
+
+    #[test]
+    fn cancel_after_raw_hash_but_before_failed_publication_wins() {
+        let (host, job, mut run) = fixture(true, DenoiseMethod::Oidn, true, |_| ());
+        assert!(run.guarded_step(1));
+        let Some(PendingPublication::FailedMaster { bytes, mut digest, error, .. }) = run.pending.take() else {
+            panic!("expected failed-master handoff")
+        };
+        digest.update(&bytes);
+        let hashed = bytes.len();
+        job.cancel().unwrap();
+        assert!(!run.advance_failed_master(error, bytes, digest, hashed, 1));
+        assert_eq!(job.status().unwrap().progress.phase, Phase::Cancelled);
+        assert!(job.status().unwrap().error.is_none() && job.status().unwrap().linear_master.is_none());
+        assert!(job.failed_linear_master().unwrap().is_none() && job.frame().unwrap().is_none());
+        drop(run);
+        drop(job);
+        assert_eq!(host.admitted_bytes(), 0);
+    }
 }
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
@@ -41,7 +292,7 @@ mod progressive_checkpoints {
 
     fn before_preview(running: &mut Running) {
         for _ in 0..100_000 {
-            if running.pending_png.as_ref().is_some_and(|p| p.preview_samples.is_some()) {
+            if running.pending_png().is_some_and(|p| p.preview_samples.is_some()) {
                 return;
             }
             assert!(running.advance(1).unwrap());
@@ -56,7 +307,7 @@ mod progressive_checkpoints {
         let mut held = Vec::new();
         for (sequence, samples) in [(1, 1), (2, 2)] {
             before_preview(&mut running);
-            let pointer = running.pending_png.as_ref().unwrap().png.as_ptr();
+            let pointer = running.pending_png().unwrap().png.as_ptr();
             assert!(running.task.is_some(), "a preview must retain film, BVH and task state");
             assert!(running.advance(1).unwrap());
             let preview = job.preview().unwrap().unwrap();
@@ -185,7 +436,7 @@ mod progressive_checkpoints {
         let second = job.preview().unwrap().unwrap();
         let second_bytes = second.png().to_vec();
         before_preview(&mut running);
-        assert_eq!(running.pending_png.as_ref().unwrap().preview_samples, Some(3));
+        assert_eq!(running.pending_png().unwrap().preview_samples, Some(3));
         assert!(running.advance(1).unwrap());
         assert_eq!(job.status().unwrap().preview_retention_skips, 1);
         let retained = job.preview().unwrap().expect("a skipped publication must keep the latest published preview available");
@@ -254,7 +505,7 @@ mod progressive_checkpoints {
             let held = job.preview().unwrap().unwrap();
             before_preview(&mut running);
             if finish_digest {
-                let pending = running.pending_png.as_mut().unwrap();
+                let pending = running.pending_png_mut().unwrap();
                 while !pending.step(1, &job.0.cancel).unwrap() {}
                 assert_eq!(pending.hashed, pending.png.len());
             }
@@ -279,7 +530,7 @@ mod progressive_checkpoints {
         assert!(running.advance(1).unwrap());
         let held = job.preview().unwrap().unwrap();
         before_preview(&mut running);
-        running.pending_png.as_mut().unwrap().preview_samples = Some(3);
+        running.pending_png_mut().unwrap().preview_samples = Some(3);
         assert!(!running.guarded_step(1));
         assert_eq!(job.status().unwrap().progress.phase, Phase::Failed);
         assert!(job.preview().unwrap().is_none());
@@ -565,7 +816,7 @@ fn pending_digest_fixture() -> (CpuHost, JobHandle, Running, usize) {
     let mut running = Running::begin(work).unwrap();
     // Exactly the same state transition used when WorkTask returns Complete.
     running.task = None;
-    running.pending_png = Some(PendingPng::new(png));
+    running.pending = Some(PendingPublication::Png(PendingPng::new(png)));
     (host, job, running, length)
 }
 
@@ -573,13 +824,13 @@ fn pending_digest_fixture() -> (CpuHost, JobHandle, Running, usize) {
 fn png_digest_is_incremental_and_keeps_the_original_allocation_and_lease_until_completion() {
     let (host, job, mut running, length) = pending_digest_fixture();
     let before = host.admitted_bytes();
-    let pointer = running.pending_png.as_ref().unwrap().png.as_ptr();
+    let pointer = running.pending_png().unwrap().png.as_ptr();
     assert!(running.advance(0).unwrap());
-    assert_eq!(running.pending_png.as_ref().unwrap().hashed, 0, "zero units cannot hash a chunk");
+    assert_eq!(running.pending_png().unwrap().hashed, 0, "zero units cannot hash a chunk");
     assert_eq!(host.admitted_bytes(), before);
     assert!(job.frame().unwrap().is_none());
     assert!(running.advance(usize::MAX).unwrap());
-    assert_eq!(running.pending_png.as_ref().unwrap().hashed, PNG_HASH_CHUNK_BYTES * PNG_HASH_CHUNKS_PER_ADVANCE);
+    assert_eq!(running.pending_png().unwrap().hashed, PNG_HASH_CHUNK_BYTES * PNG_HASH_CHUNKS_PER_ADVANCE);
     assert_eq!(host.admitted_bytes(), before, "hashing must retain the full original work lease");
     assert!(job.frame().unwrap().is_none());
     let mut previous = job.status().unwrap().progress.done;
@@ -592,7 +843,7 @@ fn png_digest_is_incremental_and_keeps_the_original_allocation_and_lease_until_c
         assert!(job.frame().unwrap().is_none());
         previous = progress.done;
     }
-    assert!(running.task.is_none() && running.pending_png.is_none() && running.reservation.is_none());
+    assert!(running.task.is_none() && running.pending.is_none() && running.reservation.is_none());
     let status = job.status().unwrap();
     assert_eq!(status.progress.phase, Phase::Completed);
     let frame = job.frame().unwrap().unwrap();
@@ -629,7 +880,7 @@ fn cancellation_during_png_hashing_and_host_disposal_cannot_publish_a_frame() {
         let budget = host.0.shared.budget.clone();
         *host.0.running.lock().unwrap() = Some(running);
         assert!(host.pump(1).unwrap());
-        assert!(host.0.running.lock().unwrap().as_ref().unwrap().pending_png.as_ref().unwrap().hashed > 0);
+        assert!(host.0.running.lock().unwrap().as_ref().unwrap().pending_png().unwrap().hashed > 0);
         assert_eq!(job.status().unwrap().progress.phase, Phase::Encoding);
         assert!(job.frame().unwrap().is_none());
         if close_host {
@@ -650,7 +901,7 @@ fn cancellation_during_png_hashing_and_host_disposal_cannot_publish_a_frame() {
 #[test]
 fn a_cancel_after_the_last_digest_chunk_still_wins_the_publication_lock() {
     let (host, job, mut running, _) = pending_digest_fixture();
-    let pending = running.pending_png.as_mut().unwrap();
+    let pending = running.pending_png_mut().unwrap();
     while !pending.step(1, &job.0.cancel).unwrap() {}
     assert_eq!(pending.hashed, pending.png.len());
     job.cancel().unwrap();
@@ -1496,7 +1747,7 @@ mod cpu_output_masters {
             {
                 held.push(preview);
             }
-            if running.pending_png.as_ref().is_some_and(|png| png.exr.is_some()) {
+            if running.pending_png().is_some_and(|png| png.exr.is_some()) {
                 return held;
             }
             assert!(running.advance(1).unwrap());
@@ -1641,7 +1892,7 @@ mod cpu_adaptive_checkpoints {
         let mut saw_reset_production = false;
         let mut published = Vec::new();
         for _ in 0..200_000 {
-            if let Some(png) = running.pending_png.as_ref()
+            if let Some(png) = running.pending_png()
                 && let Some(absolute) = png.preview_samples
             {
                 assert!(job.frame().unwrap().is_none());
@@ -3120,7 +3371,7 @@ mod native_memory_admission {
                 }),
                 supersampling: 2,
                 denoise: true,
-                denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+                denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true, ..Default::default() },
                 denoise_diagnostics: true,
                 output: Some(Box::new(OutputOptions {
                     linear_exr: true,

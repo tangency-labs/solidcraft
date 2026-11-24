@@ -3,7 +3,7 @@
 
 use solidcraft_render::{
     ExecutorDescriptor,
-    job::{CpuHost, ErrorCode, HostKind, Integrator, JobError, JobHandle, JobId, JobStatus, Phase, RenderFrame},
+    job::{CpuHost, ErrorCode, FailedLinearMaster, HostKind, Integrator, JobError, JobHandle, JobId, JobStatus, Phase, RenderFrame},
 };
 use std::collections::VecDeque;
 use std::sync::{
@@ -51,6 +51,20 @@ struct Completed {
     info: RetainedResult,
 }
 
+/// A failed job never enters the completed shelf. Keep only its leased EXR (if any)
+/// alongside its status: evicting the status also ends the document's export window.
+struct HistoryEntry {
+    status: JobStatus,
+    failed_master: Option<Arc<FailedLinearMaster>>,
+}
+
+impl HistoryEntry {
+    fn new(status: JobStatus, handle: &JobHandle) -> Result<Self, JobError> {
+        let failed_master = if status.progress.phase == Phase::Failed { handle.failed_linear_master()? } else { None };
+        Ok(Self { status, failed_master })
+    }
+}
+
 pub(crate) struct BatchShot {
     pub name: String,
     pub camera: solidcraft_viewport::Camera,
@@ -86,7 +100,7 @@ pub(crate) struct Jobs {
     pub(crate) descriptor: Option<ExecutorDescriptor>,
     pub(crate) additional: Vec<(CpuHost, ExecutorDescriptor)>,
     live: Vec<LiveJob>,
-    history: VecDeque<JobStatus>,
+    history: VecDeque<HistoryEntry>,
     completed: VecDeque<Completed>,
     selected: Option<solidcraft_render::job::JobId>,
     waiting: VecDeque<BatchShot>,
@@ -170,6 +184,13 @@ impl Jobs {
         jobs
     }
 
+    fn remember(&mut self, entry: HistoryEntry) {
+        self.history.push_back(entry);
+        if self.history.len() > 4 {
+            self.history.pop_front();
+        }
+    }
+
     pub(crate) fn collect(&mut self) -> Result<(), JobError> {
         let mut i = 0;
         while i < self.live.len() {
@@ -179,7 +200,8 @@ impl Jobs {
                 continue;
             }
             let job = self.live.remove(i);
-            if let Some(frame) = status.frame.as_ref().filter(|_| status.progress.phase == Phase::Completed) {
+            let entry = HistoryEntry::new(status, &job.handle)?;
+            if let Some(frame) = entry.status.frame.as_ref().filter(|_| entry.status.progress.phase == Phase::Completed) {
                 let seconds = job.handle.completed_duration()?.map_or(0.0, |duration| duration.as_secs_f64());
                 let completed_id = job.handle.id();
                 self.completed.push_back(Completed {
@@ -194,10 +216,7 @@ impl Jobs {
                     self.selected = Some(completed_id);
                 }
             }
-            self.history.push_back(status);
-            while self.history.len() > 4 {
-                self.history.pop_front();
-            }
+            self.remember(entry);
         }
         Ok(())
     }
@@ -263,7 +282,7 @@ impl Jobs {
         }
         prepared.check_cancel()?;
         if replace {
-            for job in self.live.drain(..) {
+            for job in std::mem::take(&mut self.live) {
                 let mut status = job.handle.cancel()?;
                 // Replaced handles are deliberately abandoned: keep a cancellation tombstone,
                 // not a permanently "cancelling" snapshot. The token already prevents any
@@ -271,10 +290,7 @@ impl Jobs {
                 if !status.progress.phase.terminal() {
                     status.progress.phase = Phase::Cancelled;
                 }
-                self.history.push_back(status);
-            }
-            while self.history.len() > 4 {
-                self.history.pop_front();
+                self.remember(HistoryEntry::new(status, &job.handle)?);
             }
         }
         if self.live.len() >= 2 {
@@ -358,7 +374,7 @@ impl Jobs {
         self.check_owner(id)?;
         if self.live.iter().any(|job| job.handle.id() == id)
             || self.completed.iter().any(|result| result.handle.id() == id)
-            || self.history.iter().any(|status| status.job == id)
+            || self.history.iter().any(|entry| entry.status.job == id)
         {
             Ok(())
         } else {
@@ -378,18 +394,25 @@ impl Jobs {
         }
         self.history
             .iter()
-            .find(|status| status.job == id)
-            .cloned()
+            .find(|entry| entry.status.job == id)
+            .map(|entry| entry.status.clone())
             .ok_or_else(|| JobError::new(ErrorCode::UnknownJob, "render job is no longer retained"))
     }
 
     pub(crate) fn status(&mut self, id: JobId) -> Result<JobStatus, JobError> {
         self.check_owner(id)?;
         self.collect()?;
-        if let Ok(handle) = self.handle(id) {
-            return handle.status();
-        }
-        self.history.iter().find(|s| s.job == id).cloned().ok_or_else(|| JobError::new(ErrorCode::UnknownJob, "render job is no longer retained"))
+        self.peek_status(id)
+    }
+
+    /// Only explicit EXR export reads this after collecting. Do not expose a failed job
+    /// as a frame or retain its host handle, request resources, previews or guides.
+    pub(crate) fn failed_master(&self, id: JobId) -> Result<Option<(&FailedLinearMaster, &JobError)>, JobError> {
+        self.check_owner(id)?;
+        let Some(entry) = self.history.iter().find(|entry| entry.status.job == id) else { return Ok(None) };
+        let Some(master) = entry.failed_master.as_deref() else { return Ok(None) };
+        let error = entry.status.error.as_ref().ok_or_else(|| JobError::new(ErrorCode::Internal, "failed render has no recorded error"))?;
+        Ok(Some((master, error)))
     }
 
     pub(crate) fn pin(&mut self, id: Option<JobId>) -> Result<Option<solidcraft_render::job::FrameInfo>, JobError> {
@@ -422,9 +445,13 @@ impl Jobs {
         Ok(())
     }
 
+    pub(crate) fn collected_frame(&self, id: JobId) -> Result<Arc<RenderFrame>, JobError> {
+        self.handle(id)?.frame()?.ok_or_else(|| JobError::new(ErrorCode::NotCompleted, "render has no completed image"))
+    }
+
     pub(crate) fn frame(&mut self, id: JobId) -> Result<Arc<RenderFrame>, JobError> {
         self.collect()?;
-        self.handle(id)?.frame()?.ok_or_else(|| JobError::new(ErrorCode::NotCompleted, "render has no completed image"))
+        self.collected_frame(id)
     }
 }
 
@@ -813,7 +840,7 @@ mod displayed_result_tests {
                 // Defensive hostile registry-state injection, not an ordinary
                 // UI Discard claim: public regrade/replace cannot rotate this
                 // status while preserving the same native ticket.
-                s.render_jobs.history.retain(|status| status.job != first);
+                s.render_jobs.history.retain(|entry| entry.status.job != first);
             }
             let bytes = plan.retained_bytes();
             let held = host.admitted_bytes();
@@ -878,7 +905,7 @@ mod displayed_result_tests {
                 (
                     s.render_jobs.live.iter().map(|job| job.handle.id()).collect::<Vec<_>>(),
                     s.render_jobs.completed.iter().map(|result| result.handle.id()).collect::<Vec<_>>(),
-                    s.render_jobs.history.iter().map(|status| status.job).collect::<Vec<_>>(),
+                    s.render_jobs.history.iter().map(|entry| entry.status.job).collect::<Vec<_>>(),
                     s.render_jobs.serial,
                     s.render_jobs.generation,
                     json!(s.render_queue_state()),
@@ -993,7 +1020,7 @@ mod displayed_result_tests {
                 (
                     s.render_jobs.live.iter().map(|j| j.handle.id()).collect::<Vec<_>>(),
                     s.render_jobs.completed.iter().map(|j| j.handle.id()).collect::<Vec<_>>(),
-                    s.render_jobs.history.iter().map(|j| j.job).collect::<Vec<_>>(),
+                    s.render_jobs.history.iter().map(|entry| entry.status.job).collect::<Vec<_>>(),
                 )
             };
             let before = membership(&s);
