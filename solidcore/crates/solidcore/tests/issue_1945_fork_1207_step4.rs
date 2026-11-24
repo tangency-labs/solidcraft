@@ -33,7 +33,6 @@ const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
 
 fn sc_fixes(k: &mut Kernel) {
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_knife_edge_rounds = true;
@@ -45,7 +44,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_extension_from_base = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.offset_analytic_mate_edges = true;
-    k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.fillet_trace_reaches_rails = true;
 }
 
