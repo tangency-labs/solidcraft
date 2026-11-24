@@ -1972,6 +1972,25 @@ fn trim_within_seam_strip(trim: &Curve, direction: SurfParamType, fixed: [f64; 2
     {
         return false;
     }
+    // The knots must be finite and nondecreasing, the active range [knots[degree],
+    // knots[n]] nonempty, and no knot inside it repeated more than `degree` times: a
+    // knot repeated degree + 1 times breaks the curve, which could then jump across a
+    // seam side between two spans that each lie in the strip.
+    let (Some(&first), Some(&last)) = (knots.get(degree), knots.get(cpts.len())) else {
+        return false;
+    };
+    if !knots.iter().all(|t| t.is_finite())
+        || knots.windows(2).any(|pair| matches!(pair, [a, b] if a > b))
+        || first >= last
+        || knots
+            .windows(degree + 1)
+            .any(|run| match (run.first(), run.last()) {
+                (Some(&a), Some(&b)) => a == b && first < a && a < last,
+                _ => true,
+            })
+    {
+        return false;
+    }
     let axis = usize::from(direction != SurfParamType::U);
     // the exact sign of X - c W, None where it is not computed exactly
     let side = |p: &crate::nurbs::math::CPoint, c: f64| -> Option<i32> {
@@ -1995,12 +2014,13 @@ fn trim_within_seam_strip(trim: &Curve, direction: SurfParamType, fixed: [f64; 2
         inside.push(above > 0 && below < 0);
     }
     // span j = [knots[j], knots[j + 1]) for j in degree..cpts.len(); its control points
-    // are j - degree ..= j
+    // are j - degree ..= j. The knots are nondecreasing, so a span that is not
+    // increasing is empty.
     (degree..cpts.len()).all(|j| match (knots.get(j), knots.get(j + 1)) {
         (Some(a), Some(b)) if a < b => inside
             .get(j - degree..=j)
             .is_some_and(|span| span.iter().any(|&strict| strict)),
-        (Some(_), Some(_)) => true,
+        (Some(a), Some(b)) => a == b,
         _ => false,
     })
 }
@@ -3501,6 +3521,31 @@ mod tests {
             vec![0.0, 0.0, 1.0, 2.0, 2.0],
         );
         assert!(!trim_within_seam_strip(&along, SurfParamType::U, strip));
+        // A knot repeated degree + 1 times breaks the curve: u jumps from 0 to 1 at
+        // t = 0.5 across the seam, although each span lies in the strip.
+        let broken = spline(
+            &[0.5, 0.0, 1.0, 0.5],
+            &[NOW; 4],
+            1,
+            vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0],
+        );
+        assert!(!trim_within_seam_strip(&broken, SurfParamType::U, strip));
+        // The same knot repeated `degree` times is an ordinary joint.
+        let joint = spline(
+            &[0.5, 0.2, 0.5],
+            &[NOW; 3],
+            1,
+            vec![0.0, 0.0, 0.5, 1.0, 1.0],
+        );
+        assert!(trim_within_seam_strip(&joint, SurfParamType::U, strip));
+        // A knot that is not a number leaves no span to check.
+        let malformed = spline(
+            &[0.5, 0.2, 0.5],
+            &[NOW; 3],
+            1,
+            vec![0.0, 0.0, f64::NAN, 1.0, 1.0],
+        );
+        assert!(!trim_within_seam_strip(&malformed, SurfParamType::U, strip));
         // across a V seam the coordinate is v (here 0, 1, 2)
         assert!(trim_within_seam_strip(
             &touching,

@@ -2215,6 +2215,14 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     }
     vertex::refresh_tolerance(b, start_vertex, false)?;
     vertex::refresh_tolerance(b, end_vertex, false)?;
+    // A moved trim's bound raised the edge's tolerance above the one its setters
+    // cascade; each end vertex covers the edge's tolerance too.
+    if trim_moved_by > 0.0 {
+        let edge_tolerance = b.edge(edge_id)?.tolerance;
+        for v in [start_vertex, end_vertex] {
+            vertex::set_tolerance(b, v, edge_tolerance, true, true)?;
+        }
+    }
     // Opt-in (WR-469): each vertex's tolerance grows to twice its gap to the new edge's end.
     if k.fixes.new_edge_vertex_tolerance_covers_gap {
         let record = b.edge(edge_id)?;
