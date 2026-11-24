@@ -464,19 +464,28 @@ fn read_pictures(keys: Vec<String>, tx: &std::sync::mpsc::Sender<Made>) -> Optio
     Some(cold)
 }
 
+/// Send the pictures already there, then `sweep` the old ones ([`clean_old_pictures`]): reading a
+/// picture marks it as in use, so the recent designs' pictures are kept even after a month without
+/// a launch, and only those of designs that went cold are rebuilt. Returns those designs.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_then_sweep(mut keys: Vec<String>, tx: &std::sync::mpsc::Sender<Made>, sweep: impl FnOnce()) -> Option<Vec<String>> {
+    // Prefer local PNGs; even the metadata checks belong off the window thread.
+    keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
+    let cold = read_pictures(keys, tx);
+    sweep();
+    cold
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn start_jobs(h: &mut HomeState) {
     if h.rx.is_some() || h.queued.is_empty() {
         return;
     }
-    let mut keys = std::mem::take(&mut h.queued);
+    let keys = std::mem::take(&mut h.queued);
     let (tx, rx) = std::sync::mpsc::channel();
     let stop = h.stop.clone();
     let spawned = std::thread::Builder::new().name("thumbnails".into()).spawn(move || {
-        clean_old_pictures();
-        // Prefer local PNGs; even the metadata checks belong off the window thread.
-        keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
-        let Some(cold) = read_pictures(keys, &tx) else { return };
+        let Some(cold) = read_then_sweep(keys, &tx, clean_old_pictures) else { return };
         for k in cold {
             if stop.is_cancelled() {
                 return;
@@ -818,6 +827,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // A file waiting for its unit is asked on this page too (#15598): its Escape gives the
         // question up, and does not close the page behind it.
         && app.mesh_units.is_none()
+        && app.import_options.is_none()
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.home.open = false;
@@ -1125,7 +1135,7 @@ fn recent_time(app: &SolveApp, path: &str) -> String {
     recent_time_at(app, *time, now)
 }
 
-fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
+pub(crate) fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
     let seconds = now.saturating_sub(time);
     if seconds < 60 {
         return app.tr("home.opened_just_now").to_string();
@@ -1179,12 +1189,15 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("obj", "OBJ", None, FileAction::Export("obj")),
         ("glb", "GLB", None, FileAction::Export("glb")),
         ("usd", "OpenUSD", None, FileAction::Export("usd")),
+        ("3dm", "Rhino", None, FileAction::Export("3dm")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
         ("sdf", "SDF", None, FileAction::Export("sdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
     let tiles = formats
         .into_iter()
+        // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+        .filter(|(id, ..)| *id != "3dm" || !cfg!(target_arch = "wasm32"))
         .map(|(id, format, hint, chosen)| start_page::Tile {
             id: format!("home:export:{id}").into(),
             icon: start_page::Icon::Kit("export"),
@@ -1667,6 +1680,36 @@ mod tests {
         TEST_PICTURES.with(|d| *d.borrow_mut() = None);
     }
 
+    /// Home reads the recent designs' pictures before it sweeps the old ones: after a month without
+    /// a launch, the pictures it is about to show are still there, not rebuilt from the designs.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_first_pass_reads_the_pictures_before_sweeping_old_ones() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = std::env::temp_dir().join(format!("solidcraft-swept-pictures-{}-{nonce}", std::process::id()));
+        TEST_PICTURES.with(|d| *d.borrow_mut() = Some(own.clone()));
+        let design = std::env::temp_dir().join(format!("solidcraft-swept-thumb-{}-{nonce}.sc", std::process::id()));
+        std::fs::write(&design, b"design").unwrap();
+        let key = design.to_string_lossy().into_owned();
+        let png = cache_path(&key).unwrap();
+        std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+        let rgba = vec![128u8; THUMB[0] * THUMB[1] * 4];
+        std::fs::write(&png, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap()).unwrap();
+        let then = std::time::SystemTime::now() - 2 * KEEP_PICTURES;
+        std::fs::File::options().write(true).open(&png).unwrap().set_modified(then).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sweep = || {
+            solidcraft_engine::slicer_files::sweep(png.parent().unwrap(), std::time::SystemTime::now(), KEEP_PICTURES);
+        };
+        let cold = read_then_sweep(vec![key.clone()], &tx, sweep).unwrap();
+        assert!(cold.is_empty(), "the picture was there: nothing to rebuild");
+        assert!(rx.try_iter().any(|(k, img, _)| k == key && img.is_some()));
+        assert!(png.exists(), "the sweep keeps the picture just read");
+        std::fs::remove_file(design).unwrap();
+        std::fs::remove_dir_all(own).unwrap();
+        TEST_PICTURES.with(|d| *d.borrow_mut() = None);
+    }
+
     /// STEP opens deliberately have no save path, but their source still gets a cache entry.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -1783,6 +1826,33 @@ mod tests {
         }
         assert_eq!(h.app.home.ready_samples(), solidcraft_engine::sample::samples().len());
         assert!(h.app.home.samples.is_empty(), "no sample model was built");
+    }
+
+    #[test]
+    fn opening_a_sample_from_home_restores_the_assistant_contents() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.start("ui.assistant");
+        h.frames(3);
+        assert!(h.app.agent_chat.panel_rect.is_some());
+        h.app.disable_panel_runtime().unwrap();
+        let saved = std::mem::take(&mut h.app.panel_layout_preferences);
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.disable_panel_runtime().unwrap();
+        h.app.panel_layout_preferences = saved;
+        h.app.preferences.ai_features = true;
+        h.app.home.open = true;
+        h.frames(2);
+        assert!(!h.app.agent_chat.open);
+
+        // Deliver a ready sample during Home's paint, after the panel services' frame tick.
+        h.app.home.samples.insert(0, Session::default());
+        h.app.home.wanted = Some(0);
+        h.frames(3);
+        assert!(!h.app.home.open);
+        assert!(h.app.agent_chat.panel_rect.is_some(), "the restored Assistant must draw its contents in the new document");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

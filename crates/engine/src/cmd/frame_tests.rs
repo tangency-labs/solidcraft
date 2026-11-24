@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
+use solidcraft_doc::frame::Anchor;
 use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
@@ -408,6 +410,96 @@ fn anchor_angle_and_mirror_place_the_profile() {
     let m = place(json!({"mirror": true}));
     assert!(near3(m.2, [0.0, 0.0, 0.0]) && near3(m.3, [1000.0, 60.0, 40.0]), "{m:?}");
     assert!(plain.4[1] < 30.0 && m.4[1] > 30.0, "{plain:?} {m:?}");
+}
+
+#[test]
+fn the_section_view_shows_where_the_member_goes_and_its_anchors() {
+    let rail = || {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    let angle = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    let s = rail();
+    let v = super::member_section_view(&s, &json!({"sketch": "Rail", "profile": angle, "anchor": "bottom_left"})).unwrap();
+    let w = |p: Vec2| {
+        let q = v.world(p);
+        [q.x, q.y, q.z]
+    };
+    // The anchored point sits on the line's start; the section's x runs world +Y, its y +Z.
+    assert!(near3(w(v.at), [0.0, 0.0, 0.0]) && near3([v.end.x, v.end.y, v.end.z], [1000.0, 0.0, 0.0]), "{v:?}");
+    let anchors = v.anchors();
+    assert_eq!(anchors.len(), 11);
+    let at = |a: Anchor| anchors.iter().find(|(k, _)| *k == a).map(|(_, p)| *p).unwrap();
+    assert!(near3(w(at(Anchor::TopRight)), [0.0, 60.0, 40.0]), "{anchors:?}");
+    assert!(near3(w(at(Anchor::Top)), [0.0, 30.0, 40.0]), "{anchors:?}");
+    // A world point back to the section point it came from.
+    let p = at(Anchor::Right);
+    let back = v.section_point(v.world(p));
+    assert!((back.x - p.x).abs() < 1e-9 && (back.y - p.y).abs() < 1e-9);
+
+    // Mirrored, a picked section point turned into `locate` is the point the made member puts on
+    // the line: its top right on the line, the member runs to −Y and −Z of it.
+    let mut s = rail();
+    let mirrored = json!({"sketch": "Rail", "profile": angle, "mirror": true});
+    let v = super::member_section_view(&s, &mirrored).unwrap();
+    let top_right = v.anchors().into_iter().find(|(k, _)| *k == Anchor::TopRight).map(|(_, p)| p).unwrap();
+    let mut p = mirrored.clone();
+    p["locate"] = json!(v.locate_of(top_right));
+    let again = super::member_section_view(&s, &p).unwrap();
+    assert!((again.at.x - top_right.x).abs() < 1e-9 && (again.at.y - top_right.y).abs() < 1e-9, "{again:?}");
+    run(&mut s, "frame.member", p);
+    let b = bodies(&mut s).remove(0);
+    assert!(near3(b.2, [0.0, -60.0, -40.0]) && near3(b.3, [1000.0, 0.0, 0.0]), "{b:?}");
+
+    // What the command would refuse shows nothing, with the reason; nothing is added.
+    let s = rail();
+    for bad in [
+        json!({}),
+        json!({"sketch": "Rail"}),
+        json!({"sketch": "Nope", "profile": tube()}),
+        json!({"sketch": "Rail", "profile": {"kind": "angle", "width": -1}}),
+    ] {
+        assert!(super::member_section_view(&s, &bad).is_err(), "{bad}");
+    }
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })));
+}
+
+#[test]
+fn the_section_view_reads_bare_profile_numbers_in_the_design_units() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let v = super::member_section_view(&s, &json!({"sketch": "Rail", "profile": {"kind": "bar", "width": 2, "height": 1}})).unwrap();
+    let anchors = v.anchors();
+    let at = |a: Anchor| v.world(anchors.iter().find(|(k, _)| *k == a).map(|(_, p)| *p).unwrap());
+    // The member made from these values is 2 in across (world Y) and 1 in up (world Z).
+    let (lo, hi) = (at(Anchor::BottomLeft), at(Anchor::TopRight));
+    assert!((hi.y - lo.y - 50.8).abs() < 1e-6 && (hi.z - lo.z - 25.4).abs() < 1e-6, "{anchors:?}");
+}
+
+#[test]
+fn the_section_view_sits_at_the_active_occurrence_with_its_pending_move() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Frame parts"}));
+    let component = c["component"].as_u64().unwrap();
+    let first = c["occurrence"].as_u64().unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [20, 30, 40], "capture": true}));
+    run(&mut s, "component.activate", json!({"component": component, "occurrence": second, "path": [second]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Not captured: shown where it was dragged, not yet stored.
+    run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [5, 0, 0], "capture": false}));
+    let v = super::member_section_view(&s, &json!({"sketch": "Rail", "profile": tube()})).unwrap();
+    // The line as the second occurrence shows it: moved by [20, 30, 40] and then [5, 0, 0].
+    assert!(near3([v.start.x, v.start.y, v.start.z], [25.0, 30.0, 40.0]), "{v:?}");
+    assert!(near3([v.end.x, v.end.y, v.end.z], [1025.0, 30.0, 40.0]), "{v:?}");
 }
 
 #[test]
@@ -7009,4 +7101,592 @@ fn a_flat_feature_split_into_groups_keeps_its_names() {
         let name = name.as_ref().unwrap();
         assert_eq!(after[name], before[name], "the rail {name} stayed put");
     }
+}
+
+/// Make perpendicular finite support faces with room for an 80 × 100 mm plate.
+fn gusset_joint() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"name":"Post feature","body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"name":"Rail feature","body_name":"Rail"}));
+    s
+}
+/// Find a known definition face by its plane and outward normal for an exact command pick.
+fn gusset_pick(s: &Session, body: &str, point: [f64; 3], normal: [f64; 3]) -> Value {
+    let st = s.model.state();
+    let b = st.body(body).unwrap();
+    let at = solidcore_record::Vec3::new(point[0], point[1], point[2]);
+    let n = solidcore_record::Vec3::new(normal[0], normal[1], normal[2]);
+    let i = (0..b.body.face_count())
+        .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().dot(n) > 0.999 && (pl.origin - at).dot(n).abs() < 1e-6))
+        .unwrap();
+    json!({"body":body,"index":i,"face":point})
+}
+/// Pick the post side first and rail top second so the joint direction is predictable.
+fn gusset_args(s: &Session) -> Value {
+    json!({"supports":[gusset_pick(s,"Post",[20.,0.,100.],[1.,0.,0.]),gusset_pick(s,"Rail",[100.,0.,40.],[0.,0.,1.])],"leg1":80,"leg2":100,"thickness":6,"body_name":"Gusset"})
+}
+fn gusset_volume(s: &Session) -> f64 {
+    s.model.state().body("Gusset").unwrap().mesh().measure().volume
+}
+
+#[test]
+/// Compare each outline with the area of a triangle less its clipped tips and weld relief.
+fn gusset_triangle_and_clipped_relief_have_analytic_volumes() {
+    for (r, c) in [(0., 0.), (10., 0.), (0., 10.), (10., 10.)] {
+        let mut s = gusset_joint();
+        let mut p = gusset_args(&s);
+        p["relief"] = json!(r);
+        p["clip"] = json!(c);
+        run(&mut s, "frame.gusset", p);
+        let expected = (80. * 100. / 2. - r * r / 2. - c * c / 2. * 180. / 16400f64.sqrt()) * 6.;
+        assert!(rel(gusset_volume(&s), expected) < 1e-7, "{r} {c}: {} vs {expected}", gusset_volume(&s));
+        assert_eq!(s.model.state().bodies.len(), 3);
+    }
+}
+#[test]
+/// Name an unnamed plate `Gusset`, then `Gusset (2)`, so a cut list of a frame's gussets reads.
+fn gusset_without_a_body_name_is_named_gusset() {
+    let mut s = gusset_joint();
+    for expected in ["Gusset", "Gusset (2)"] {
+        let mut p = gusset_args(&s);
+        p.as_object_mut().unwrap().remove("body_name");
+        let r = run(&mut s, "frame.gusset", p);
+        assert_eq!(r["created_bodies"], json!([expected]), "{r}");
+    }
+}
+#[test]
+/// Check all three placements along the ordered cross product, with a nonzero joint offset.
+fn gusset_thickness_placement_and_offset_have_predictable_bounds() {
+    for (placement, lo, hi) in [("center", -8., -2.), ("positive", -11., -5.), ("negative", -5., 1.)] {
+        let mut s = gusset_joint();
+        let mut p = gusset_args(&s);
+        p["placement"] = json!(placement);
+        p["offset"] = json!(5);
+        run(&mut s, "frame.gusset", p);
+        let b = bodies(&mut s).into_iter().find(|b| b.0 == "Gusset").unwrap();
+        assert!(near3(b.2, [20., lo, 40.]), "{placement}: {b:?}");
+        assert!(near3(b.3, [120., hi, 120.]), "{placement}: {b:?}");
+    }
+}
+#[test]
+/// Keep exact face identity through a support edit, rename, undo and save/reopen.
+fn gusset_follows_support_edits_and_rename_then_undo_reopen() {
+    let mut s = gusset_joint();
+    let p = gusset_args(&s);
+    run(&mut s, "frame.gusset", p);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().body("Gusset").is_none());
+    run(&mut s, "edit.redo", json!({}));
+    assert!((gusset_volume(&s) - 24000.).abs() < 1e-5);
+    run(&mut s, "body.rename", json!({"body":"Post","name":"Column"}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Post feature","command":"solid.box","params":{"corner":[-20,-20,0],"length":60,"width":40,"height":300,"body_name":"Column"}}),
+    );
+    let b = bodies(&mut s).into_iter().find(|b| b.0 == "Gusset").unwrap();
+    assert!(near3(b.2, [40., -3., 40.]));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(rel(gusset_volume(&reopened), 24000.) < 1e-7);
+}
+#[test]
+/// A rejected support or dimension leaves no feature or changed member names behind.
+fn gusset_refuses_bad_geometry_atomically() {
+    let mut s = gusset_joint();
+    let good = gusset_args(&s);
+    for (key, value) in [
+        ("leg1", json!(-1)),
+        ("leg2", json!(400)),
+        ("thickness", json!(41)),
+        ("offset", json!(100)),
+        ("relief", json!(80)),
+        ("clip", json!(80)),
+        ("placement", json!("elsewhere")),
+        ("leg1", json!("1e99 mm")),
+        ("unsupported", json!(true)),
+    ] {
+        let mut p = good.clone();
+        p[key] = value;
+        let before = s.doc.to_json();
+        assert!(s.execute("frame.gusset", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{key}");
+    }
+    let mut p = good;
+    p["supports"] = json!([p["supports"][0], p["supports"][0]]);
+    assert!(s.execute("frame.gusset", &p).is_err());
+}
+#[test]
+/// Contact must cover the whole strip: a cut between valid endpoints still breaks support.
+fn gusset_contact_detects_a_hole_between_its_endpoints() {
+    let mut s = gusset_joint();
+    run(&mut s, "solid.hole", json!({"position":[70,0,40],"direction":[0,0,-1],"diameter":10,"depth":40,"body":"Rail"}));
+    let p = gusset_args(&s);
+    let before = s.doc.to_json();
+    let e = s.execute("frame.gusset", &p).unwrap_err().to_string();
+    assert!(e.contains("contact"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+/// Follow a resized tube while refusing a support whose path-line identity was replaced.
+fn gusset_tracks_frame_member_profile_edits() {
+    let mut s = Session::default();
+    for (name, points) in [("Post", json!([[0, 0, 0], [0, 0, 300]])), ("Rail", json!([[20, 0, 20], [320, 0, 20]]))] {
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":format!("{name} path")}));
+        run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+        run(&mut s, "sketch.line3d", json!({"points":points}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "frame.member",
+            json!({"sketch":format!("{name} path"),"name":format!("{name} member"),"body_name":name,"profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0}}),
+        );
+    }
+    let p = gusset_args(&s);
+    run(&mut s, "frame.gusset", p);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Post member","command":"frame.member","params":{"sketch":"Post path","body_name":"Post","profile":{"kind":"rect_tube","width":60,"height":40,"wall":3,"outer_radius":0}}}),
+    );
+    let b = bodies(&mut s).into_iter().find(|b| b.0 == "Gusset").unwrap();
+    assert!(near3(b.2, [30., -3., 40.]), "{b:?}");
+    assert!(rel(gusset_volume(&s), 24000.) < 1e-7);
+    // A saved support identity must not be silently replaced by another sketch line.
+    let mut broken = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let gusset = broken.features.iter_mut().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameGusset { .. })).unwrap();
+    if let solidcraft_doc::FeatureKind::FrameGusset { supports, .. } = &mut gusset.kind {
+        supports[0].member.as_mut().unwrap().line = "a different line".into();
+    }
+    let broken = Session::new(broken);
+    assert!(broken.model.state().body("Gusset").is_none(), "a lost line must not be adopted by proximity");
+}
+#[test]
+/// The triangular area scales by the sine of the angle between the two support legs.
+fn gusset_nonorthogonal_faces_use_the_actual_included_angle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[-40,-20,-100],"length":40,"width":40,"height":400,"body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[-20,-20,-40],"length":320,"width":40,"height":40,"body_name":"Rail"}));
+    run(&mut s, "solid.move", json!({"bodies":["Rail"],"axis":[0,1,0],"angle":"30 deg"}));
+    let c = 30f64.to_radians().cos();
+    let p = json!({"supports":[gusset_pick(&s,"Post",[0.,0.,100.],[1.,0.,0.]),gusset_pick(&s,"Rail",[100.*c,0.,-50.],[0.5,0.,c])],"leg1":80,"leg2":100,"thickness":6,"body_name":"Gusset"});
+    run(&mut s, "frame.gusset", p);
+    assert!(rel(gusset_volume(&s), 24000. * c) < 1e-7);
+}
+#[test]
+/// Internal anchors move rigidly and remap to the copied part, whose thickness can vary independently.
+fn gusset_component_motion_and_independent_copy_keep_attachments() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part","grounded":false}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"}));
+    let p = gusset_args(&s);
+    let fid = run(&mut s, "frame.gusset", p)["feature"].as_u64().unwrap();
+    let occurrence = s.doc.occurrence_of(part).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[50,20,0],"axis":[0,0,1],"angle":"90 deg","capture":true}));
+    let world = s.world_state().unwrap();
+    let b = world.bodies.iter().find(|b| b.feature == fid).unwrap().mesh().bounds();
+    assert!(near3([b.min.x, b.min.y, b.min.z], [47., 40., 40.]), "{b:?}");
+    let copied = run(&mut s, "component.paste_new", json!({"component":part,"translate":[500,0,0]}))["component"].as_u64().unwrap();
+    let f = s.doc.features.iter().find(|f| f.component == copied && matches!(f.kind, solidcraft_doc::FeatureKind::FrameGusset { .. })).unwrap();
+    let parameter = f.param_names[2].clone();
+    run(&mut s, "parameters.change", json!({"name":parameter,"expression":"8 mm"}));
+    let original = run(&mut s, "component.properties", json!({"component":part}))["total"]["volume_mm3"].as_f64().unwrap();
+    let copy = run(&mut s, "component.properties", json!({"component":copied}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((original - 984000.).abs() < 1e-4, "{original}");
+    assert!((copy - 992000.).abs() < 1e-4, "{copy}");
+}
+
+/// Recorded feature names from timeline.inspect replay with the same support identities.
+#[test]
+fn gusset_recorded_type_name_replays() {
+    let mut source = gusset_joint();
+    let p = gusset_args(&source);
+    let id = run(&mut source, "frame.gusset", p)["feature"].as_u64().unwrap();
+    let inspected = run(&mut source, "timeline.inspect", json!({"feature": id}));
+    assert_eq!(inspected["type_name"], "GussetFeature");
+    let mut script = run(&mut source, "timeline.export_script", json!({}))["script"].clone();
+    let recorded = script["commands"].as_array_mut().unwrap().iter_mut().find(|step| step["params"]["feature"]["id"] == id).unwrap();
+    recorded["params"]["feature"]["type"] = inspected["type_name"].clone();
+
+    let mut replay = Session::default();
+    replay.run_script(&script).unwrap();
+    assert_eq!(replay.doc.feature(id).unwrap().kind, source.doc.feature(id).unwrap().kind);
+    assert!(replay.model.result(id).unwrap().error.is_none());
+    assert!(rel(gusset_volume(&replay), 24000.) < 1e-7);
+}
+
+/// A root gusset follows both independent live occurrences, and cannot survive a lost joint.
+#[test]
+fn gusset_rebuilds_when_either_live_support_moves() {
+    let mut s = Session::default();
+    let post = run(&mut s, "component.create", json!({"name":"Upright","grounded":false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let rail = run(&mut s, "component.create", json!({"name":"Cross member","grounded":false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let p = gusset_args(&s);
+    let fid = run(&mut s, "frame.gusset", p)["feature"].as_u64().unwrap();
+    let origin = |s: &Session| {
+        let min = s.model.state().body("Gusset").unwrap().mesh().bounds().min;
+        [min.x, min.y, min.z]
+    };
+    assert!(near3(origin(&s), [20., -3., 40.]));
+    run(&mut s, "occurrence.move", json!({"occurrence":rail,"translate":[0,0,5],"capture":true}));
+    assert!(near3(origin(&s), [20., -3., 45.]));
+    run(&mut s, "occurrence.move", json!({"occurrence":post,"translate":[10,0,0],"capture":true}));
+    assert!(near3(origin(&s), [30., -3., 45.]));
+    run(&mut s, "occurrence.move", json!({"occurrence":rail,"translate":[0,100,0],"capture":true}));
+    assert!(s.model.result(fid).unwrap().error.as_deref().is_some_and(|e| e.contains("no common joint span")));
+    assert!(s.model.state().body("Gusset").is_none());
+    run(&mut s, "edit.undo", json!({}));
+    assert!(near3(origin(&s), [30., -3., 45.]));
+}
+
+/// A part's captured gusset stays rigid; copying it must disclose its external rail support.
+#[test]
+fn gusset_external_support_is_reported_and_refused_across_designs() {
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"}));
+    let part = run(&mut source, "component.create", json!({"name":"Upright","grounded":false}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut source, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"}));
+    let p = gusset_args(&source);
+    run(&mut source, "frame.gusset", p);
+    run(&mut source, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,100,0],"capture":true}));
+    assert!(rel(gusset_volume(&source), 24000.) < 1e-7);
+
+    let mut target = Session {
+        foreign_copy: Some(std::sync::Arc::new(crate::ForeignCopy::of(&source, Vec::new(), vec![vec![occurrence]]).unwrap())),
+        ..Session::default()
+    };
+    let before = target.doc.to_json();
+    let error = target.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("exact face attachment to Rail"), "{error}");
+    assert_eq!(target.doc.to_json(), before);
+
+    let copied = run(&mut source, "component.paste_new", json!({"component":part["component"]}));
+    assert!(
+        copied["notices"].as_array().unwrap().iter().any(|n| n.as_str().is_some_and(|n| n.contains("external exact face attachment to Rail"))),
+        "{copied}"
+    );
+}
+
+/// An attachment reads the copied member's line without converting its positional names.
+#[test]
+fn gusset_preserves_copied_member_names_and_refuses_a_reused_name() {
+    use solidcraft_doc::{FeatureKind, Model};
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Joint"}))["component"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Posts"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[0,-300]]}));
+    run(&mut s, "sketch.line", json!({"points":[[-80,0],[-80,-300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch":"Posts","body_name":"Post","profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0}}),
+    );
+    run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let copy = run(&mut s, "component.paste_new", json!({"component":part}))["component"].as_u64().unwrap();
+    let member = s.doc.features.iter().find(|f| f.component == copy && matches!(f.kind, FeatureKind::FrameMember { .. })).unwrap().clone();
+    let FeatureKind::FrameMember { path_sketch, .. } = &member.kind else { panic!("not a member") };
+    let sketch = s.doc.feature(path_sketch.as_ref().unwrap().0).unwrap().name.clone();
+    let first_line = line_at_x(&s, &sketch, 0.);
+    let [first, second] = member.body_names.as_slice() else { panic!("copy must have two positional names") };
+    let rail = s.model.state().bodies.iter().find(|b| b.component == copy && b.feature != member.id).unwrap().name.clone();
+
+    // Opening an already evaluated design must retain the same support provenance.
+    let saved = s.model.saved(&s.doc).unwrap();
+    s.model = Model::adopt(&s.doc, &saved).unwrap();
+    run(&mut s, "component.activate", json!({"component":copy}));
+    let p = json!({"supports":[gusset_pick(&s,first,[20.,0.,100.],[1.,0.,0.]),gusset_pick(&s,&rail,[100.,0.,40.],[0.,0.,1.])],"leg1":80,"leg2":100,"thickness":6,"body_name":"Gusset"});
+    let gusset = run(&mut s, "frame.gusset", p)["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.feature(member.id), Some(&member), "attaching a gusset must not edit its support feature");
+    assert!(rel(gusset_volume(&s), 24000.) < 1e-7);
+
+    delete_line(&mut s, &sketch, &first_line);
+    let state = s.model.state();
+    assert!(state.body(second).is_none(), "the copy still assigns names by position");
+    let surviving = state.body(first).unwrap().mesh().bounds();
+    assert!(near3([surviving.min.x, surviving.min.y, surviving.min.z], [-100., -20., 0.]), "{surviving:?}");
+    assert!(state.body("Gusset").is_none());
+    assert!(s.model.result(gusset).unwrap().error.as_deref().is_some_and(|e| e.contains("member identity changed")));
+}
+
+// Mounting and bolted end plates (#7485).
+fn plate_post() -> Session {
+    plate_post_in(Session::default())
+}
+
+fn plate_post_in(mut s: Session) -> Session {
+    run(&mut s, "parameters.add", json!({"name":"PostHeight","expression":"300 mm"}));
+    run(&mut s, "sketch.create", json!({"plane":"XZ","name":"PostPath"}));
+    run(&mut s, "sketch.line", json!({"points":[[200,0],[200,"-PostHeight"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch":"PostPath","profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0},"body_name":"Post","name":"MemberFeature"}),
+    );
+    s
+}
+
+/// A point on the material of the cap, including a hollow cap whose centroid is in its bore.
+fn plate_pick(s: &Session, body: &str, high: bool) -> Value {
+    let state = s.world_state().unwrap();
+    let body = state.body(body).unwrap();
+    let face =
+        body.body.faces(0.001).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z * if high { 1. } else { -1. } > 0.999)).unwrap();
+    let mesh = body.mesh();
+    let (triangle, _) = mesh.triangles.iter().zip(&mesh.tri_face).find(|(_, index)| **index as usize == face.index).unwrap();
+    let [a, b, c] = mesh.tri(triangle).unwrap();
+    json!({"face":(a+b+c)/3.,"body":body.name,"index":face.index})
+}
+
+fn rectangular_plate(s: &Session, high: bool) -> Value {
+    let mut p = plate_pick(s, "Post", high);
+    p["width"] = json!(100);
+    p["height"] = json!(80);
+    p["thickness"] = json!(8);
+    p["body_name"] = json!(if high { "EndPlate" } else { "BasePlate" });
+    p
+}
+
+#[test]
+fn mounting_plates_are_centred_on_hollow_member_ends_and_leave_the_member_alone() {
+    let mut s = plate_post();
+    let before = bodies(&mut s)[0].clone();
+    let mut p = rectangular_plate(&s, true);
+    p["holes"] = json!({"pattern":"rectangle","diameter":10,"pitch_x":70,"pitch_y":50});
+    run(&mut s, "frame.plate", p);
+    let p = rectangular_plate(&s, false);
+    run(&mut s, "frame.plate", p);
+    let bs = bodies(&mut s);
+    let post = bs.iter().find(|b| b.0 == "Post").unwrap();
+    assert_eq!(post, &before, "plate holes never cut the supporting member");
+    let top = bs.iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(top.2, [150., -40., 300.]) && near3(top.3, [250., 40., 308.]), "{top:?}");
+    assert!(rel(top.1, (100. * 80. - 4. * PI * 25.) * 8.) < MEASURED, "{top:?}");
+    let bottom = bs.iter().find(|b| b.0 == "BasePlate").unwrap();
+    assert!(near3(bottom.2, [150., -40., -8.]) && near3(bottom.3, [250., 40., 0.]), "{bottom:?}");
+}
+
+#[test]
+fn round_bolted_end_plate_has_the_analytic_volume() {
+    let mut s = plate_post();
+    let mut p = plate_pick(&s, "Post", true);
+    p.as_object_mut().unwrap().extend(json!({"shape":"round","diameter":120,"thickness":8,"body_name":"Flange","holes":{"pattern":"circle","diameter":10,"pitch_diameter":90,"count":6,"angle":"15 deg"}}).as_object().unwrap().clone());
+    run(&mut s, "frame.plate", p);
+    let flange = bodies(&mut s).into_iter().find(|b| b.0 == "Flange").unwrap();
+    assert!(near3(flange.2, [140., -60., 300.]) && near3(flange.3, [260., 60., 308.]), "{flange:?}");
+    assert!(rel(flange.1, PI * (3600. - 6. * 25.) * 8.) < MEASURED, "{flange:?}");
+}
+
+#[test]
+fn plates_follow_frame_edits_and_renames_and_survive_undo_and_reopen() {
+    let mut s = plate_post();
+    let p = rectangular_plate(&s, true);
+    run(&mut s, "frame.plate", p);
+    run(&mut s, "parameters.change", json!({"name":"PostHeight","expression":"450 mm"}));
+    run(&mut s, "body.rename", json!({"body":"Post","name":"Upright"}));
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(plate.2, [150., -40., 450.]) && near3(plate.3, [250., 40., 458.]), "{plate:?}");
+    let json = s.doc.to_json();
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&json).unwrap());
+    let after = bodies(&mut reopened).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert_eq!(after.0, plate.0);
+    assert!(rel(after.1, plate.1) < 1e-9 && near3(after.2, plate.2) && near3(after.3, plate.3) && near3(after.4, plate.4));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    let old = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!((old.2[2] - 300.).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert!(bodies(&mut s).iter().any(|b| b.0 == "EndPlate" && (b.2[2] - 450.).abs() < 1e-6));
+}
+
+#[test]
+fn plate_offsets_and_rotation_are_in_the_support_face_frame() {
+    let mut s = plate_post();
+    let mut p = rectangular_plate(&s, true);
+    p["offset"] = json!(2);
+    p["x_offset"] = json!(10);
+    p["y_offset"] = json!(20);
+    p["angle"] = json!("90 deg");
+    run(&mut s, "frame.plate", p);
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    // The selected face's canonical frame is X/Y; offsets apply before the plate turns.
+    assert!(near3(plate.2, [170., -30., 302.]) && near3(plate.3, [250., 70., 310.]), "{plate:?}");
+}
+
+#[test]
+fn invalid_plates_and_hole_patterns_leave_the_design_unchanged() {
+    let mut s = plate_post();
+    let valid = rectangular_plate(&s, true);
+    for patch in [
+        json!({"thickness":0}),
+        json!({"width":-1}),
+        json!({"angle":1e20}),
+        json!({"offset":1e20}),
+        json!({"diameter":100}),
+        json!({"shape":"round"}),
+        json!({"index":99999}),
+        json!({"path":[999]}),
+        json!({"holes":{"pattern":"circle","diameter":10,"pitch_diameter":50,"count":129}}),
+        json!({"holes":{"pattern":"circle","diameter":10,"pitch_diameter":50,"count":0}}),
+        json!({"holes":{"pattern":"rectangle","diameter":10,"pitch_x":90,"pitch_y":50}}),
+        json!({"holes":{"pattern":"rectangle","diameter":10,"pitch_x":5,"pitch_y":50}}),
+        json!({"holes":{"pattern":"rectangle","diameter":10,"pitch_x":70,"pitch_y":50,"typo":3}}),
+    ] {
+        let mut p = valid.clone();
+        p.as_object_mut().unwrap().extend(patch.as_object().unwrap().clone());
+        let before = s.doc.to_json();
+        assert!(s.execute("frame.plate", &p).is_err(), "refuse {p}");
+        assert_eq!(s.doc.to_json(), before, "failed plate is atomic: {p}");
+    }
+}
+
+#[test]
+fn losing_the_support_face_never_attaches_a_plate_to_a_nearby_body() {
+    let mut s = plate_post();
+    let p = rectangular_plate(&s, true);
+    let id = run(&mut s, "frame.plate", p)["feature"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner":[180,-20,0],"length":40,"width":40,"height":300,"body_name":"Replacement"}));
+    run(&mut s, "timeline.delete", json!({"features":["MemberFeature"]}));
+    assert!(s.model.result(id).unwrap().error.is_some());
+    assert!(s.model.state().body("EndPlate").is_none());
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.state().body("EndPlate").is_none());
+}
+
+#[test]
+fn plates_in_a_moved_component_keep_their_attachment_and_copy_independently() {
+    let mut s = Session::default();
+    let comp = run(&mut s, "component.create", json!({"name":"Bracket","grounded":false}))["component"].as_u64().unwrap();
+    s = plate_post_in(s);
+    let occurrence = s.doc.occurrence_of(comp).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[100,200,300],"capture":true}));
+    let mut p = plate_pick(&s, "Post", true);
+    p.as_object_mut().unwrap().extend(json!({"width":100,"height":80,"thickness":8,"body_name":"Pad"}).as_object().unwrap().clone());
+    run(&mut s, "frame.plate", p);
+    let pad = bodies(&mut s).into_iter().find(|b| b.0 == "Pad").unwrap();
+    assert!(near3(pad.2, [250., 160., 600.]) && near3(pad.3, [350., 240., 608.]), "{pad:?}");
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let copied = run(&mut s, "component.paste_new", json!({"component":comp,"translate":[500,0,0]}));
+    let state = s.model.state();
+    let copy = state.body("Pad (2)").unwrap();
+    let original = state.body("Pad").unwrap();
+    assert_ne!(copy.feature, original.feature);
+    let feature = s.doc.feature(copy.feature).unwrap();
+    let solidcraft_doc::FeatureKind::FramePlate { plane, member, .. } = &feature.kind else { panic!("copied plate") };
+    let anchor = solidcraft_doc::face_anchor::plane_face_anchor(plane).unwrap();
+    assert_eq!(anchor.target.body, "Post (2)");
+    assert_eq!(anchor.component, copied["component"].as_u64().unwrap());
+    assert_eq!(member.as_ref().unwrap().feature.0, anchor.target.origin_feature);
+    assert!(matches!(s.doc.feature(anchor.target.origin_feature).unwrap().kind, solidcraft_doc::FeatureKind::FrameMember { .. }));
+    let width = s.doc.feature(original.feature).unwrap().param_names[0].clone();
+    run(&mut s, "parameters.change", json!({"name":width,"expression":"140 mm"}));
+    let state = s.model.state();
+    let original = state.body("Pad").unwrap().mesh().bounds();
+    let copied_bounds = state.body("Pad (2)").unwrap().mesh().bounds();
+    assert!((original.max.x - original.min.x - 140.).abs() < 1e-6);
+    assert!((copied_bounds.max.x - copied_bounds.min.x - 100.).abs() < 1e-6);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.state().body("Pad (2)").is_some());
+}
+
+#[test]
+fn a_root_plate_follows_later_rotation_and_translation_of_its_support_occurrence() {
+    let mut s = Session::default();
+    let comp = run(&mut s, "component.create", json!({"name":"PostPart","grounded":false}))["component"].as_u64().unwrap();
+    s = plate_post_in(s);
+    let occurrence = s.doc.occurrence_of(comp).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[100,200,300],"capture":true}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let p = rectangular_plate(&s, true);
+    run(&mut s, "frame.plate", p);
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence":occurrence,"space":"world","axis":[0,0,1],"angle":"90 deg","translate":[10,20,30],"capture":true}),
+    );
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(plate.2, [-230., 270., 630.]) && near3(plate.3, [-150., 370., 638.]), "{plate:?}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let after = bodies(&mut reopened).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(after.2, plate.2) && near3(after.3, plate.3));
+}
+
+#[test]
+fn plate_dimensions_are_parameter_expressions_and_bare_lengths_use_design_units() {
+    let mut s = plate_post();
+    run(&mut s, "parameters.add", json!({"name":"PlateWidth","expression":"100 mm"}));
+    let mut p = rectangular_plate(&s, true);
+    p["width"] = json!("PlateWidth");
+    run(&mut s, "frame.plate", p);
+    run(&mut s, "parameters.change", json!({"name":"PlateWidth","expression":"140 mm"}));
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(plate.2, [130., -40., 300.]) && near3(plate.3, [270., 40., 308.]), "{plate:?}");
+    let mut s = plate_post();
+    s.doc_mut().units = "cm".into();
+    let mut p = rectangular_plate(&s, true);
+    p["width"] = json!(10);
+    p["height"] = json!(8);
+    p["thickness"] = json!(0.8);
+    run(&mut s, "frame.plate", p);
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "EndPlate").unwrap();
+    assert!(near3(plate.2, [150., -40., 300.]) && near3(plate.3, [250., 40., 308.]), "{plate:?}");
+}
+
+#[test]
+fn a_reused_name_in_the_same_frame_feature_does_not_steal_a_plate() {
+    let mut s = plate_post();
+    let source = s.doc.find_feature("MemberFeature").unwrap().id;
+    let old = sketch_lines(&s, "PostPath")[0].0.clone();
+    let p = rectangular_plate(&s, true);
+    let plate = run(&mut s, "frame.plate", p)["feature"].as_u64().unwrap();
+    run(&mut s, "sketch.edit", json!({"sketch":"PostPath"}));
+    run(&mut s, "sketch.line", json!({"points":[[400,0],[400,"-PostHeight"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let new = sketch_lines(&s, "PostPath").into_iter().find(|line| line.0 != old).unwrap().0;
+    let names = serde_json::Map::from_iter([(old, json!("Other")), (new, json!("Post"))]);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":source,"command":"frame.member","params":{"sketch":"PostPath","profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0},"body_name":"Post","names":names}}),
+    );
+    assert!(s.model.result(plate).unwrap().error.is_some(), "the original line lost its body name; do not attach to the other line");
+    assert!(s.model.state().body("EndPlate").is_none());
+}
+
+#[test]
+fn a_plate_can_attach_to_a_member_from_a_line_added_after_the_member_feature() {
+    let mut s = plate_post();
+    run(&mut s, "sketch.edit", json!({"sketch":"PostPath"}));
+    run(&mut s, "sketch.line", json!({"points":[[400,0],[400,"-PostHeight"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut p = plate_pick(&s, "Post (2)", true);
+    p.as_object_mut().unwrap().extend(json!({"width":100,"height":80,"thickness":8,"body_name":"New end plate"}).as_object().unwrap().clone());
+    let id = run(&mut s, "frame.plate", p)["feature"].as_u64().unwrap();
+    let solidcraft_doc::FeatureKind::FramePlate { member: Some(member), .. } = &s.doc.feature(id).unwrap().kind else { panic!("plate member") };
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = &s.doc.feature(member.feature.0).unwrap().kind else { panic!("member") };
+    assert_eq!(names.get(&member.line).unwrap(), "Post (2)");
+    let plate = bodies(&mut s).into_iter().find(|b| b.0 == "New end plate").unwrap();
+    assert!(near3(plate.2, [350., -40., 300.]) && near3(plate.3, [450., 40., 308.]), "{plate:?}");
+}
+
+#[test]
+fn saved_plate_planes_cannot_silently_ignore_a_wrapped_offset() {
+    let mut s = plate_post();
+    let p = rectangular_plate(&s, true);
+    let id = run(&mut s, "frame.plate", p)["feature"].as_u64().unwrap();
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let feature = saved["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"].as_u64() == Some(id)).unwrap();
+    let plane = feature["plane"].take();
+    feature["plane"] = json!({"type":"offset","base":plane,"distance":"10 mm"});
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert!(reopened.model.result(id).unwrap().error.as_deref().unwrap().contains("direct persistent planar face"));
+    assert!(reopened.model.state().body("EndPlate").is_none());
 }

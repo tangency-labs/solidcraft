@@ -85,6 +85,11 @@ pub enum Error {
     WallFolds { largest: Option<f64> },
     /// SMLib cannot build this operation exactly.
     Unsupported,
+    /// A draft refused by the kernel whose drafted face would cut through a face it does not
+    /// meet (solidcore's `drafted_through`): a hole's wall within the draft of the side. `at` is a
+    /// point of that face between the face's plane and its drafted plane, `depth` how far it
+    /// lies past the drafted plane.
+    DraftCutsThrough { at: [f64; 3], depth: f64 },
     /// A face move whose tangent blends cannot follow the moved faces, with solidcore's reason
     /// (`SmOffsetFacesExecutive`'s refusal comment): `exact` false where the blend cannot be taken
     /// off and put back ([`Error::Unsupported`] without a reason), true where following it needs a
@@ -194,6 +199,10 @@ impl std::fmt::Display for Error {
                 }
             }
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
+            Error::DraftCutsThrough { at: [x, y, z], depth } => write!(
+                f,
+                "a drafted face would cut through the face at ({x:.3}, {y:.3}, {z:.3}), which reaches {depth:.3} past it and meets no edge of it"
+            ),
             Error::CornerUnsupported { why, at } => {
                 write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends")?;
                 if let Some([x, y, z]) = at {

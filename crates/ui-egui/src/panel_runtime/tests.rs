@@ -2806,6 +2806,8 @@ struct RawPanelHost {
     time: f64,
     capacity: LogicalRect,
     native_pixels_per_point: Option<f32>,
+    /// The window's screen position, as a desktop backend reports it.
+    inner_origin: Option<egui::Pos2>,
     foreign_cover: Option<egui::Rect>,
     foreign_responses: Vec<egui::Response>,
     foreign_takes_focus: bool,
@@ -2840,6 +2842,7 @@ impl RawPanelHost {
             time: 0.0,
             capacity: capacity(),
             native_pixels_per_point: None,
+            inner_origin: None,
             foreign_cover: None,
             foreign_responses: Vec::new(),
             foreign_takes_focus: false,
@@ -2885,6 +2888,10 @@ impl RawPanelHost {
         };
         if let Some(dpi) = self.native_pixels_per_point {
             input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(dpi);
+        }
+        if let Some(origin) = self.inner_origin {
+            let size = egui::vec2(self.capacity.size.width, self.capacity.size.height);
+            input.viewports.entry(egui::ViewportId::ROOT).or_default().inner_rect = Some(egui::Rect::from_min_size(origin, size));
         }
         // Match SolveApp's native boundary before egui validates pointer and wheel events.
         crate::finite_input(&mut input);
@@ -13563,6 +13570,376 @@ fn production_controller_keys(app: &crate::SolveApp) -> Vec<ControllerKey> {
         .collect()
 }
 
+fn plugin_table_snapshot() -> solidcraft_engine::plugin::PanelSnapshot {
+    use solidcraft_engine::plugin::ui::*;
+    let mut data = PanelData::default();
+    let updates: Vec<_> = (0..1000)
+        .flat_map(|row| {
+            [
+                Datum { path: format!("/tools/{row}/id"), value: UiValue::Text(format!("tool-{row}")) },
+                Datum { path: format!("/tools/{row}/name"), value: UiValue::Text(format!("Cutter {row}")) },
+                Datum { path: format!("/tools/{row}/diameter"), value: UiValue::Number(25.4) },
+            ]
+        })
+        .collect();
+    data.set_data(&updates).unwrap();
+    data.merge_frame();
+    solidcraft_engine::plugin::PanelSnapshot {
+        plugin: "machining".into(),
+        plugin_name: "Machining".into(),
+        approval: "fixture".into(),
+        ui_version: UI_VERSION,
+        units: "in".into(),
+        panel: solidcraft_engine::plugin::ui::PanelSpec {
+            id: "tools".into(),
+            title: "Tool library".into(),
+            zones: vec![DockZone::Bottom],
+            layout: solidcraft_engine::plugin::ui::Layout {
+                root: 0,
+                nodes: vec![Node {
+                    widget: Widget::Table(TableSpec {
+                        bind: "/tools".into(),
+                        row_id: "id".into(),
+                        columns: vec![
+                            Column { key: "name".into(), label: "Tool".into(), unit: None },
+                            Column { key: "diameter".into(), label: "Diameter".into(), unit: Some("length".into()) },
+                        ],
+                        select: SelectionMode::Single,
+                        on_select: Some("choose".into()),
+                        on_edit: Some("edit".into()),
+                    }),
+                }],
+            },
+        },
+        data,
+        visible: true,
+        visibility_revision: 0,
+    }
+}
+
+#[test]
+fn plugin_panels_register_declared_zones_and_draw_virtual_table_actions() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    let spec = super::plugin::registration(&panel).unwrap();
+    assert_eq!(spec.default_zone, Zone::Bottom);
+    assert_eq!(spec.allowed_zones, [Zone::Bottom, Zone::Floating].into_iter().collect());
+    assert_eq!(spec.edge_rule, EdgeRule::None);
+    assert_eq!(spec.side_height_policy, SideHeightPolicy::Content);
+    let mut long = panel.clone();
+    long.plugin = "a".repeat(64);
+    long.panel.id = "b".repeat(64);
+    let long_spec = super::plugin::registration(&long).unwrap();
+    assert!(long_spec.kind.0.len() <= MAX_ID_BYTES, "manifest names fit the shared host without truncation");
+    long.panel.zones = vec![DockZone::Right];
+    assert_ne!(super::plugin::registration(&long).unwrap().kind, long_spec.kind, "a changed zone contract gets a legal new placement");
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    {
+        let mut frame = |events: Vec<egui::Event>| {
+            crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 220.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    super::plugin::draw(ui, &panel, 0, &mut actions, "in", 0);
+                },
+            )
+        };
+        frame(Vec::new());
+        let output = frame(Vec::new());
+        let text: Vec<_> = crate::test_support::text_shapes(&output).map(|shape| shape.galley.job.text.clone()).collect();
+        assert!(text.iter().any(|text| text == "1.000 in"), "table length uses design units: {text:?}");
+        assert!(text.iter().filter(|text| text.starts_with("Cutter")).count() < 20, "table rows must scroll virtually");
+        let at = crate::scenario::rect_of("plugin-panel:machining:tools:row:tool-0").unwrap().center();
+        frame(crate::test_support::pointer(at, true));
+        frame(crate::test_support::pointer(at, false));
+    }
+    assert_eq!(
+        actions,
+        vec![(
+            "choose".into(),
+            UiEvent { panel: "tools".into(), event: EventKind::Select, path: "/tools".into(), row: Some("tool-0".into()), value: None }
+        )]
+    );
+    panel.data.set_data(&[Datum { path: "/tools/0/name".into(), value: UiValue::Text("Posted operation".into()) }]).unwrap();
+    assert_ne!(panel.data.get("/tools/0/name"), Some(&UiValue::Text("Posted operation".into())), "staged updates do not leak before a frame");
+    panel.data.merge_frame();
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+    assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "Posted operation"));
+}
+
+#[test]
+fn plugin_panels_table_rows_support_optional_indent_level() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    let ctx = crate::fonts::test_context();
+
+    // Set row 0 with no indent, row 1 with indent 2, and row 2 with an oversized indent 20 (clamped to MAX_TABLE_ROW_INDENT = 8)
+    panel
+        .data
+        .set_data(&[
+            Datum { path: "/tools/0/name".into(), value: UiValue::Text("Root Setup".into()) },
+            Datum { path: "/tools/1/name".into(), value: UiValue::Text("Pocket Operation".into()) },
+            Datum { path: "/tools/1/indent".into(), value: UiValue::Integer(2) },
+            Datum { path: "/tools/2/name".into(), value: UiValue::Text("Deep Nested Item".into()) },
+            Datum { path: "/tools/2/indent".into(), value: UiValue::Integer(20) },
+        ])
+        .unwrap();
+    panel.data.merge_frame();
+
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+
+    let Some(shape_root) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Root Setup") else {
+        panic!("root setup shape missing")
+    };
+    let Some(shape_indented) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Pocket Operation") else {
+        panic!("indented shape missing")
+    };
+    let Some(shape_clamped) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Deep Nested Item") else {
+        panic!("clamped shape missing")
+    };
+
+    let base_x = shape_root.pos.x;
+    let expected_indent_2 = base_x + 2.0 * super::plugin::TABLE_ROW_INDENT;
+    let expected_clamped_8 = base_x + (MAX_TABLE_ROW_INDENT as f32) * super::plugin::TABLE_ROW_INDENT;
+
+    assert!(
+        (shape_indented.pos.x - expected_indent_2).abs() < 1e-3,
+        "indent level 2 shifts first cell by 28.0 pt: got {}, expected {}",
+        shape_indented.pos.x,
+        expected_indent_2
+    );
+    assert!(
+        (shape_clamped.pos.x - expected_clamped_8).abs() < 1e-3,
+        "indent level 20 clamped to 8 shifts first cell by 112.0 pt: got {}, expected {}",
+        shape_clamped.pos.x,
+        expected_clamped_8
+    );
+}
+
+#[test]
+fn plugin_panels_sync_errors_remain_observable_until_a_successful_frame() {
+    let mut h = plugin_panel_harness();
+    let mut panel = plugin_table_snapshot();
+    panel.panel.zones.clear();
+    install_plugin_panel(&mut h.app, panel);
+    h.frames(1);
+    assert_eq!(h.app.panel_runtime.as_ref().unwrap().last_error().map(|error| error.rule), Some(Rule::Placement));
+    h.app.session.plugin_state.panels.clear();
+    h.frames(1);
+    assert!(h.app.panel_runtime.as_ref().unwrap().last_error().is_none());
+}
+
+#[test]
+fn plugin_panels_visibility_requests_are_scoped_to_the_document() {
+    let mut h = plugin_panel_harness();
+    let panel = plugin_table_snapshot();
+    let instance = InstanceId(super::plugin::registration(&panel).unwrap().kind.0);
+    install_plugin_panel(&mut h.app, panel);
+    h.frames(2);
+    let package = h.app.session.plugin_state.panels.get_mut("machining").unwrap();
+    package.visible.insert("tools".into(), false);
+    package.visibility_revision.insert("tools".into(), 1);
+    h.frames(2);
+    assert!(!h.app.panel_runtime().unwrap().layout().layout().instance(&instance).unwrap().requested_open);
+    h.app.session.document_id = "second-plugin-document".into();
+    let package = h.app.session.plugin_state.panels.get_mut("machining").unwrap();
+    package.visible.insert("tools".into(), true);
+    h.frames(2);
+    assert!(
+        h.app.panel_runtime().unwrap().layout().layout().instance(&instance).unwrap().requested_open,
+        "the second document's first request is independent"
+    );
+    h.app.session.uid = solidcraft_engine::Session::default().uid;
+    h.app.session.plugin_state.panels.get_mut("machining").unwrap().visible.insert("tools".into(), false);
+    h.frames(2);
+    assert!(
+        !h.app.panel_runtime().unwrap().layout().layout().instance(&instance).unwrap().requested_open,
+        "reopening the same document has independent request counters"
+    );
+}
+
+#[test]
+fn plugin_panels_failed_open_does_not_starve_a_later_close() {
+    let mut h = plugin_panel_harness();
+    let closing = plugin_table_snapshot();
+    let closing_id = InstanceId(super::plugin::registration(&closing).unwrap().kind.0);
+    install_plugin_panel(&mut h.app, closing.clone());
+    h.frames(2);
+    h.app
+        .dispatch_panel_layout(transaction(vec![Mutation::Move {
+            instance: closing_id.clone(),
+            destination: Destination::NewSection {
+                section: section("plugin-floating-close"),
+                index: 0,
+                location: SectionLocation::Floating { origin: Point { x: 0.0, y: 0.0 } },
+                size: Size { width: 280.0, height: 200.0 },
+            },
+        }]))
+        .unwrap();
+    h.call("ui.resize", serde_json::json!({"width":350,"height":800}));
+    let mut blocked = closing;
+    blocked.panel.zones = vec![solidcraft_engine::plugin::ui::DockZone::Right];
+    blocked.visibility_revision = 1;
+    let blocked = (0..100)
+        .find_map(|index| {
+            blocked.panel.id = format!("blocked-{index}");
+            (super::plugin::registration(&blocked).unwrap().kind.0 < closing_id.0).then(|| blocked.clone())
+        })
+        .unwrap();
+    let blocked_id = InstanceId(super::plugin::registration(&blocked).unwrap().kind.0);
+    install_plugin_panel(&mut h.app, blocked);
+    let package = h.app.session.plugin_state.panels.get_mut("machining").unwrap();
+    package.visible.insert("tools".into(), false);
+    package.visibility_revision.insert("tools".into(), 1);
+    let failure = super::plugin::sync(&mut h.app).unwrap_err();
+    assert_eq!(failure.rule, Rule::NoSpace);
+    assert!(
+        !h.app.panel_runtime().unwrap().layout().layout().instance(&closing_id).unwrap().requested_open,
+        "a failed earlier open cannot starve this close"
+    );
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":1000}));
+    h.frames(2);
+    assert!(
+        h.app.panel_runtime().unwrap().layout().layout().instance(&blocked_id).unwrap().requested_open,
+        "the unconsumed failed request retries when space becomes available"
+    );
+}
+
+fn plugin_panel_harness() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.frames(3);
+    h.app.plugin_menu.loaded = true;
+    h
+}
+
+fn install_plugin_panel(app: &mut crate::SolveApp, panel: solidcraft_engine::plugin::PanelSnapshot) {
+    use solidcraft_engine::plugin::{PanelPackage, ui::Declarations};
+    let package = app.session.plugin_state.panels.entry(panel.plugin).or_insert_with(|| PanelPackage {
+        name: panel.plugin_name,
+        approval: panel.approval,
+        declarations: Declarations { ui_version: panel.ui_version, panels: Vec::new(), workspaces: Vec::new() },
+        data: Default::default(),
+        visible: Default::default(),
+        visibility_revision: Default::default(),
+    });
+    package.data.insert(panel.panel.id.clone(), panel.data);
+    package.visible.insert(panel.panel.id.clone(), panel.visible);
+    package.visibility_revision.insert(panel.panel.id.clone(), panel.visibility_revision);
+    package.declarations.panels.push(panel.panel);
+}
+
+#[test]
+fn plugin_panels_text_draft_survives_an_older_worker_acknowledgement() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout.nodes = vec![Node {
+        widget: Widget::Form(FormSpec {
+            bind: "/settings".into(),
+            fields: vec![Field {
+                key: "name".into(),
+                label: "Name".into(),
+                kind: FieldKind::Text,
+                choices: Vec::new(),
+                on_change: Some("rename".into()),
+            }],
+        }),
+    }];
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    let mut frame = |panel: &solidcraft_engine::plugin::PanelSnapshot, events| {
+        crate::test_support::frame(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+            super::plugin::draw(ui, panel, 0, &mut actions, "in", 0)
+        })
+    };
+    frame(&panel, Vec::new());
+    let at = crate::scenario::rect_of("dialog:control:Name").unwrap().center();
+    frame(&panel, crate::test_support::pointer(at, true));
+    frame(&panel, crate::test_support::pointer(at, false));
+    frame(&panel, vec![egui::Event::Text("a".into())]);
+    frame(&panel, vec![egui::Event::Text("b".into())]);
+    panel.data.set_data(&[Datum { path: "/settings/name".into(), value: UiValue::Text("a".into()) }]).unwrap();
+    panel.data.merge_frame();
+    let output = frame(&panel, Vec::new());
+    assert!(
+        crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "ab"),
+        "an intermediate acknowledgement must not replace the newer draft"
+    );
+    frame(&panel, vec![egui::Event::Text("c".into())]);
+    panel.data.set_data(&[Datum { path: "/settings/name".into(), value: UiValue::Text("abc".into()) }]).unwrap();
+    panel.data.merge_frame();
+    let output = frame(&panel, Vec::new());
+    assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "abc"));
+    panel.data.set_data(&[Datum { path: "/settings/name".into(), value: UiValue::Text("Updated".into()) }]).unwrap();
+    panel.data.merge_frame();
+    let output = frame(&panel, Vec::new());
+    assert!(
+        crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "Updated"),
+        "a clean field adopts fresh host data after the latest acknowledgement"
+    );
+    assert_eq!(
+        actions.iter().map(|(_, event)| event.value.clone()).collect::<Vec<_>>(),
+        vec![Some(UiValue::Text("a".into())), Some(UiValue::Text("ab".into())), Some(UiValue::Text("abc".into()))]
+    );
+}
+
+#[test]
+fn plugin_panels_text_draft_keeps_deletion_while_an_older_ack_is_pending() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout.nodes = vec![Node {
+        widget: Widget::Form(FormSpec {
+            bind: "/settings".into(),
+            fields: vec![Field {
+                key: "name".into(),
+                label: "Name".into(),
+                kind: FieldKind::Text,
+                choices: Vec::new(),
+                on_change: Some("rename".into()),
+            }],
+        }),
+    }];
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    let mut frame = |panel: &solidcraft_engine::plugin::PanelSnapshot, events| {
+        crate::test_support::frame(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+            super::plugin::draw(ui, panel, 0, &mut actions, "in", 0)
+        })
+    };
+    frame(&panel, Vec::new());
+    let at = crate::scenario::rect_of("dialog:control:Name").unwrap().center();
+    frame(&panel, crate::test_support::pointer(at, true));
+    frame(&panel, crate::test_support::pointer(at, false));
+    frame(&panel, vec![egui::Event::Text("a".into())]);
+    frame(
+        &panel,
+        vec![egui::Event::Key { key: egui::Key::Backspace, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }],
+    );
+    panel.data.set_data(&[Datum { path: "/settings/name".into(), value: UiValue::Text("a".into()) }]).unwrap();
+    panel.data.merge_frame();
+    let output = frame(&panel, Vec::new());
+    assert!(
+        !crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "a"),
+        "an older acknowledgement cannot restore deleted text"
+    );
+    frame(&panel, vec![egui::Event::Text("b".into())]);
+    assert_eq!(actions.last().unwrap().1.value, Some(UiValue::Text("b".into())), "the next edit starts from the newer empty draft");
+}
+
+#[test]
+fn plugin_panels_unknown_widgets_draw_a_newer_host_placeholder() {
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout.nodes = vec![solidcraft_engine::plugin::ui::Node { widget: solidcraft_engine::plugin::ui::Widget::Unknown }];
+    let ctx = crate::fonts::test_context();
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+    assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == solidcraft_ui_text::tr("ui.plugin_panel_newer")));
+}
+
 #[test]
 fn production_browser_and_history_mount_existing_content_once_and_preserve_combined_history() {
     for combined in [false, true] {
@@ -14364,4 +14741,354 @@ fn pop_out_browser_draws_after_the_main_browser_without_replacing_its_rows() {
         assert_eq!(semantic_content::output(ContentOwner::BROWSER).rows, main_rows);
     })
     .drop_without_applying_deltas();
+}
+
+/// Two panels on a native-capable fixture host; `moving` is docked Right.
+fn drag_out_fixture() -> (LayoutService, HostLayout, HostDragOut) {
+    let mut service = fixture_service(true).unwrap();
+    apply_fixture(
+        &mut service,
+        vec![
+            fixture_open("fixture.log", "one", "one", Zone::Left, 0).unwrap(),
+            fixture_open("fixture.log", "moving", "moving", Zone::Right, 1).unwrap(),
+        ],
+    );
+    let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
+    let window = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 930.0 } };
+    (service, host, HostDragOut { window, screen_origin: Point { x: 100.0, y: 50.0 } })
+}
+
+#[test]
+fn drag_out_targets_a_desktop_window_only_outside_the_app_and_opens_it_where_it_was_shown() {
+    let (mut service, host, drag_out) = drag_out_fixture();
+    let scope = fixture_scope(&service);
+    let before = service.inspect();
+    let header = HostPointerTarget::Header { instance: id("moving") };
+    let card = host.sections.iter().find(|card| card.instance == id("moving")).unwrap().outer;
+    let outside = Point { x: 1500.0, y: 400.0 };
+    let release = |interaction: &mut HostInteraction, service: &LayoutService, at| {
+        interaction.update(service, &fixture_scope(service), &host, HostPointerEvent::Release { at })
+    };
+
+    // Without the app window (the web, or a platform that does not report its screen
+    // place): a drag past the edge keeps the panel in the app.
+    let mut interaction = HostInteraction::default();
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    assert!(interaction.update(&service, &scope, &host, HostPointerEvent::Move { at: outside }).preview.is_none());
+    assert!(interaction.window_landing().is_none());
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+
+    // On: the Window target, its corner placed so the grabbed point stays under the pointer.
+    interaction.set_drag_out(Some(drag_out));
+    let start = fixture_press(&service, &host, &mut interaction, header.clone());
+    let preview = fixture_move(&service, &host, &mut interaction, outside);
+    assert_eq!((preview.target.clone(), preview.rejection.clone()), (Some(HostDropTargetId::Window), None));
+    let corner = Point { x: 100.0 + outside.x - (start.x - card.origin.x), y: 50.0 + outside.y - (start.y - card.origin.y) };
+    assert_eq!(preview.window, Some(corner));
+    assert_eq!(interaction.window_landing(), Some((&id("moving"), corner)));
+    assert_eq!(service.inspect(), before, "a preview never changes the layout");
+    // A landing that was never shown is never committed.
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+    assert_eq!(service.inspect(), before);
+
+    // Shown, then left for a dock target inside the app: the shown window is forgotten.
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    fixture_move(&service, &host, &mut interaction, outside);
+    let shown = LogicalRect { origin: corner, size: Size { width: 376.0, height: 488.0 } };
+    interaction.confirm_window_shown(corner, shown);
+    let inside = middle(host.sections.iter().find(|card| card.instance == id("one")).unwrap().outer);
+    assert!(fixture_move(&service, &host, &mut interaction, inside).window.is_none());
+    fixture_move(&service, &host, &mut interaction, outside);
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+
+    // Escape cancels a shown Window target.
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(corner, shown);
+    interaction.update(&service, &scope, &host, HostPointerEvent::Escape);
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+    assert_eq!(service.inspect(), before);
+
+    // A confirmation for another landing is ignored.
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(Point { x: 0.0, y: 0.0 }, shown);
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+    // After a real one, moving on still opens the window where it was shown, not under the release.
+    fixture_press(&service, &host, &mut interaction, header);
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(corner, shown);
+    let further = Point { x: outside.x + 30.0, y: outside.y + 20.0 };
+    assert_ne!(fixture_move(&service, &host, &mut interaction, further).window, Some(corner));
+    // Released back over the app, the Window target does not apply.
+    assert!(release(&mut interaction, &service, Point { x: 700.0, y: 400.0 }).candidate.is_none());
+    // Near a screen edge or on a smaller monitor the window is kept on that monitor,
+    // away from the corner the drag asked for and smaller: it opens as it was shown.
+    fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
+    fixture_move(&service, &host, &mut interaction, outside);
+    let kept = LogicalRect { origin: Point { x: corner.x - 40.0, y: corner.y - 60.0 }, size: Size { width: 300.0, height: 400.0 } };
+    interaction.confirm_window_shown(corner, kept);
+    fixture_move(&service, &host, &mut interaction, further);
+    let candidate = release(&mut interaction, &service, further).candidate.expect("the shown Window target commits");
+    assert_eq!(candidate.window_landing(), Some(&(id("moving"), kept)));
+    fixture_commit(&mut service, &host, candidate);
+    let popped = service.layout().containing(&id("moving")).unwrap();
+    let SectionLocation::Window { return_to, .. } = &popped.location else { panic!("{popped:?}") };
+    assert_eq!(return_to.zone, Zone::Right, "closing the window docks the panel where it was");
+}
+
+#[test]
+fn drag_out_refuses_a_panel_that_cannot_pop_out_and_a_host_without_native_windows() {
+    for case in ["no-popout", "no-native"] {
+        let mut service = if case == "no-popout" {
+            let mut service = allocation_service(|spec| spec.features.popout = false);
+            service = LayoutService::new(
+                service.registry().clone(),
+                service.layout().clone(),
+                HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true },
+            )
+            .unwrap();
+            service
+        } else {
+            fixture_service(false).unwrap()
+        };
+        apply_fixture(&mut service, vec![fixture_open("fixture.log", "moving", "moving", Zone::Right, 0).unwrap()]);
+        let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
+        let window = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 930.0 } };
+        let mut interaction = HostInteraction::default();
+        interaction.set_drag_out(Some(HostDragOut { window, screen_origin: Point { x: 0.0, y: 0.0 } }));
+        fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
+        let preview = fixture_move(&service, &host, &mut interaction, Point { x: 1500.0, y: 400.0 });
+        assert!(preview.rejection.is_some() && preview.window.is_none(), "{case}");
+        assert!(interaction.window_landing().is_none(), "{case}");
+    }
+}
+
+#[test]
+fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
+    use super::native::{DesktopNativeAdapter, NativeMonitor};
+
+    let mut adapter = DesktopNativeAdapter::default();
+    let monitor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2000.0, 1600.0));
+    let monitors = || vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }];
+    let ctx = egui::Context::default();
+    let instance = InstanceId::new("drop-panel").unwrap();
+    let bounds = (Size { width: 200.0, height: 100.0 }, Size { width: 900.0, height: 900.0 });
+    let preferred = Size { width: 360.0, height: 440.0 };
+    // No panel window is open yet: the monitors are read once a drag asks
+    // where its window would land, so the first window out is placed too.
+    adapter.update_monitors(monitors);
+    let unknown = adapter.landing(&ctx, &instance, egui::pos2(900.0, 700.0), preferred, bounds).unwrap();
+    assert_eq!(unknown.min, egui::pos2(900.0, 700.0), "no monitor was read before the drag asked");
+    adapter.update_monitors(monitors);
+    // On the monitor: the landing is the window's outer rectangle at the corner.
+    let shown = adapter.landing(&ctx, &instance, egui::pos2(100.0, 80.0), preferred, bounds).unwrap();
+    assert_eq!(shown.min, egui::pos2(100.0, 80.0));
+    let host = HostId::new("drop-test").unwrap();
+    let create = [HostEffect::CreateNative { host: host.clone(), section: SectionId::new("drop-section").unwrap() }];
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    adapter.place(&ctx, &instance, shown);
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
+    assert_eq!(builder.position, Some(shown.min));
+    assert_eq!(builder.inner_size, Some(egui::vec2(360.0, 440.0)));
+    // Past the monitor's edge: shown and opened at the same kept-on-screen place.
+    let edge = adapter.landing(&ctx, &instance, egui::pos2(900.0, 700.0), preferred, bounds).unwrap();
+    assert!(edge.max.x <= 1000.0 && edge.max.y <= 800.0, "{edge:?}");
+    adapter.place(&ctx, &instance, edge);
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
+    assert_eq!(builder.position, Some(edge.min));
+
+    // The drag shows the window itself at the landing, passed through and above
+    // other windows, and the panel's new host keeps that window when it opens.
+    // The landing is the window with the system's frame and title bar around it.
+    let content = egui::vec2(preferred.width, preferred.height);
+    let frame = shown.size() - content;
+    assert!(frame.y > 0.0, "{frame:?}");
+    // Its content has the size the panel has in the app, not one remembered from before.
+    let docked = Size { width: 250.0, height: 355.0 };
+    assert_eq!(adapter.landing(&ctx, &instance, egui::pos2(100.0, 80.0), docked, bounds).unwrap().size(), egui::vec2(250.0, 355.0) + frame);
+    let other = InstanceId::new("other-panel").unwrap();
+    let landing = adapter.landing(&ctx, &other, egui::pos2(100.0, 80.0), preferred, bounds).unwrap();
+    assert_eq!(landing, egui::Rect::from_min_size(egui::pos2(100.0, 80.0), content + frame));
+    let (dropped, window) = adapter.drop_window(&other, "Other".into(), landing);
+    assert_eq!((window.position, window.inner_size), (Some(landing.min), Some(content)));
+    assert_eq!((window.mouse_passthrough, window.window_level, window.active), (Some(true), Some(egui::WindowLevel::AlwaysOnTop), Some(false)));
+    // It is the window Pop out to window opens: the system's own title bar.
+    assert_eq!((window.decorations, window.fullsize_content_view, window.title_shown), (None, None, None));
+    assert_eq!(adapter.drop_window(&other, "Other".into(), landing).0, dropped, "one window for the whole drag");
+    // It is drawn only once the OS has created it, visible but not activated: shown
+    // later, a hidden window would take the app's focus and cancel the drag.
+    assert!(adapter.drop_ready(&ctx, &window).is_err(), "no OS windows where viewports are embedded");
+    let desktop = egui::Context::default();
+    desktop.set_embed_viewports(false);
+    let mut waiting = false;
+    let mut output = desktop.run_ui(egui::RawInput::default(), |ui| waiting = adapter.drop_ready(ui.ctx(), &window) == Ok(false));
+    output.textures_delta.clear();
+    assert!(waiting);
+    assert_eq!(
+        output.viewport_output.get(&dropped).map(|viewport| (viewport.builder.visible, viewport.builder.active)),
+        Some((Some(true), Some(false)))
+    );
+    let mut created = egui::RawInput::default();
+    created.viewports.entry(dropped).or_default().native_pixels_per_point = Some(2.0);
+    desktop.run_ui(created, |ui| assert_eq!(adapter.drop_ready(ui.ctx(), &window), Ok(true))).textures_delta.clear();
+    assert_eq!(window.visible, Some(true));
+    let opened = HostId::new("drop-opened").unwrap();
+    let create = [HostEffect::CreateNative { host: opened.clone(), section: SectionId::new("opened-section").unwrap() }];
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    assert_eq!(adapter.adopt(&opened, &instance), None, "only the dropped panel's host keeps the window");
+    assert_eq!(adapter.adopt(&opened, &other), Some(dropped));
+    assert_eq!(adapter.viewport_id(&opened), Some(dropped));
+    adapter.place(&ctx, &other, landing);
+    let window = adapter.builder(&ctx, &opened, &other, "Other".into(), preferred, bounds).unwrap();
+    assert_eq!((window.mouse_passthrough, window.window_level), (Some(false), Some(egui::WindowLevel::Normal)));
+    assert_eq!((window.position, window.inner_size), (Some(landing.min), Some(content)));
+    assert_ne!(adapter.drop_window(&other, "Other".into(), landing).0, dropped, "the next drag shows a new window");
+    // The window's content has its card's size, with the window's row of actions
+    // in the header's place: the body keeps its size. A panel from the bottom
+    // strip opens in the shape of a new side column instead.
+    let card = Size { width: 248.0, height: 325.0 };
+    assert_eq!(super::app::drop_window_size(Zone::Left, card, 27.0, 30.0, 250.0, 700.0), Size { width: 248.0, height: 325.0 - 27.0 + 30.0 });
+    assert_eq!(super::app::drop_window_size(Zone::Left, card, 27.0, 0.0, 250.0, 700.0), Size { width: 248.0, height: 325.0 - 27.0 });
+    let strip = Size { width: 1784.0, height: 44.0 };
+    assert_eq!(super::app::drop_window_size(Zone::Bottom, strip, 44.0, 30.0, 250.0, 700.0), Size { width: 250.0, height: 700.0 });
+    // From the bottom strip it stays taller than wide, so its panel keeps a side
+    // card's vertical layout, however short its content.
+    let short = super::app::portrait(Size { width: 266.0, height: 92.0 });
+    assert_eq!(responsive(Zone::Window, short, None).unwrap().0, Flow::Tall, "{short:?}");
+    assert_eq!(super::app::portrait(Size { width: 266.0, height: 500.0 }), Size { width: 266.0, height: 500.0 });
+    // Its height then follows the panel's measured content when the panel sizes to
+    // its content; unmeasured or filling, it does not.
+    let measured = |policy, height| AllocationMetricsFixture {
+        revision: 1,
+        policies: [(id("other"), policy)].into_iter().collect(),
+        width: None,
+        narrow_height: height,
+        wide_height: height,
+    };
+    let sized = measured(SideHeightPolicy::Content, 330.0);
+    assert_eq!(super::app::content_height(Some(&sized), &id("other"), 250.0, 60.0), Some(330.0));
+    assert_eq!(super::app::content_height(Some(&measured(SideHeightPolicy::Fill, 330.0)), &id("other"), 250.0, 60.0), None);
+    assert_eq!(super::app::content_height(Some(&measured(SideHeightPolicy::Content, MAX_LOGICAL)), &id("other"), 250.0, 60.0), None);
+    assert_eq!(super::app::content_height(None, &id("other"), 250.0, 60.0), None);
+}
+
+#[test]
+fn raw_host_paints_a_panel_dragged_out_of_the_bottom_strip_as_a_side_card_for_its_window() {
+    let mut h = PanelMountHarness::new(true).unwrap();
+    // Another panel already fills the left column.
+    h.dispatch(vec![
+        fixture_open("fixture.log", "one", "one", Zone::Left, 0).unwrap(),
+        fixture_open("fixture.editor", "editor", "editor-section", Zone::Bottom, 1).unwrap(),
+    ])
+    .unwrap();
+    let mut raw = RawPanelHost::new(h, 1.0);
+    raw.inner_origin = Some(egui::pos2(200.0, 100.0));
+    raw.host.set_live_drag(true);
+    raw.frame(Vec::new(), false);
+    let strip = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("editor")).unwrap().clone();
+    let one = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("one")).unwrap().clone();
+    assert_eq!(strip.zone, Zone::Bottom);
+    let start = raw.at(HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("editor") }));
+    let outside = egui::pos2(1500.0, 400.0);
+    raw.pointer(start, true, false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    assert!(raw.host.window_landing_preview().is_some(), "past the edge, the Window target is offered");
+    // Its body is laid out once as the side card the app's left edge would dock it
+    // as: a new column of the full height, not the space left under another panel.
+    // Its window's preview shows that paint.
+    let side = raw.host.leaving_side_card().expect("a panel from the bottom strip is painted as a side card").clone();
+    assert!(side.zone.side() && !side.inline && side.body.is_some(), "{side:?}");
+    assert!(side.outer.size.width < strip.outer.size.width, "{side:?}");
+    assert!(
+        side.outer.origin.y <= one.outer.origin.y + 0.5 && side.outer.size.height >= one.outer.size.height - 0.5,
+        "{side:?} is not stacked under {one:?}"
+    );
+    let target = egui::Rect::from_min_size(egui::pos2(8.0, 40.0), egui::vec2(side.outer.size.width, side.outer.size.height));
+    let mut output = egui::Context::default()
+        .run_ui(egui::RawInput::default(), |ui| raw.host.window_card().expect("the side card's paint goes with it").paint(ui, target));
+    output.textures_delta.clear();
+    assert!(output.shapes.iter().any(|shape| matches!(shape.shape, egui::Shape::Text(_))), "{:?}", output.shapes);
+    // Back over the app, it is the strip again.
+    raw.frame(vec![egui::Event::PointerMoved(start)], false);
+    raw.frame(vec![egui::Event::PointerMoved(start)], false);
+    assert!(raw.host.leaving_side_card().is_none());
+    raw.frame(
+        vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }],
+        false,
+    );
+}
+
+#[test]
+fn raw_host_drags_a_panel_out_to_a_desktop_window_keeping_its_editor() {
+    let mut h = PanelMountHarness::new(true).unwrap();
+    open_editor(&mut h);
+    let key = editor_key(&h);
+    h.probe.edit(&key, |state| state.draft = "torn-off draft".into()).unwrap();
+    let mut raw = RawPanelHost::new(h, 1.0);
+    // As in the app by default: live paint hides the panel leaving the app.
+    raw.host.set_live_drag(true);
+    raw.frame(Vec::new(), false);
+    let docked = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.clone();
+    let start = raw.at(HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("editor") }));
+    let card = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("editor")).unwrap().outer;
+    let outside = egui::pos2(1500.0, 400.0);
+
+    // Where the platform does not report the app window's screen place, there is no
+    // Window target: a drag past the edge keeps the panel in the app.
+    raw.pointer(start, true, false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    assert!(raw.host.window_landing_preview().is_none());
+    raw.pointer(outside, false, false);
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location, docked);
+    raw.inner_origin = Some(egui::pos2(200.0, 100.0));
+    raw.frame(Vec::new(), false);
+
+    // Out: the host offers the window's place, opens it only once shown, and hands
+    // the shown rectangle to the desktop adapter.
+    raw.pointer(start, true, false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    let (instance, corner) = raw.host.window_landing_preview().expect("past the edge, the Window target is offered");
+    assert_eq!(instance, id("editor"));
+    // On the screen, the grabbed point of the header stays under the pointer.
+    assert_eq!(corner, Point { x: 200.0 + outside.x - (start.x - card.origin.x), y: 100.0 + outside.y - (start.y - card.origin.y) });
+    // Its preview window shows the panel itself, from this frame's paint, in the window's content.
+    let target = egui::Rect::from_min_size(egui::pos2(8.0, 40.0), egui::vec2(360.0, 440.0));
+    let mut output = egui::Context::default()
+        .run_ui(egui::RawInput::default(), |ui| raw.host.window_card().expect("the panel's paint goes with it").paint(ui, target));
+    output.textures_delta.clear();
+    let painted = output.shapes;
+    assert!(painted.iter().any(|shape| matches!(shape.shape, egui::Shape::Text(_))), "{painted:?}");
+    assert!(painted.iter().all(|shape| target.contains_rect(shape.clip_rect)), "{painted:?}");
+    // The window's title bar shows the title: the copy leaves out the docked header.
+    let title = raw.content.runtime.instance_presentation(&id("editor")).unwrap().title;
+    assert!(!painted.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == title)), "{painted:?}");
+    let shown = LogicalRect { origin: corner, size: Size { width: 376.0, height: 488.0 } };
+    raw.host.confirm_window_shown(corner, shown);
+    raw.frame(
+        vec![egui::Event::PointerButton { pos: outside, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+        false,
+    );
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.zone(), Zone::Window);
+    assert_eq!(raw.host.take_window_landing(), Some((id("editor"), shown)));
+    assert!(raw.host.window_card().is_none(), "the preview ends with the drag");
+    let state = raw.content.probe.state(&key).unwrap();
+    assert_eq!((state.draft.as_str(), state.transaction_live), ("torn-off draft", true));
+    assert_eq!((state.applies, state.cancels), (0, 0));
+
+    // Closing the window docks the panel where it was, as after Pop out to window.
+    let host = match &raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location {
+        SectionLocation::Window { host, .. } => host.clone(),
+        other => panic!("{other:?}"),
+    };
+    raw.content.dispatch(vec![Mutation::NativeClose { host }]).unwrap();
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location, docked);
+    let state = raw.content.probe.state(&key).unwrap();
+    assert_eq!((state.draft.as_str(), state.transaction_live), ("torn-off draft", true));
 }

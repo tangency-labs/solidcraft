@@ -67,6 +67,8 @@ pub enum StopReason {
     Stalled,
     /// The shared frame-work budget was exhausted after evaluating the initial residual.
     WorkBudget,
+    /// The work the solve ran for was cancelled ([`crate::cancel`]).
+    Cancelled,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]

@@ -1,4 +1,7 @@
 //! Each ribbon feature form keeps its parameter builder while sharing the dense layout.
+#[path = "../../../solidcore/crates/solidcore/tests/support/annular_samples.rs"]
+mod annular_samples;
+
 use super::*;
 use crate::scenario::{self, Harness};
 
@@ -227,7 +230,7 @@ fn command_dialog_remembers_values_for_the_same_command_only_in_this_session() {
     let mut h = Harness::new();
     h.app.preferences.remember_dialog_values = true;
     let mut pattern = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
-    if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut pattern.kind {
+    if let Kind::PatternRect { count, spacing, count2, spacing2, .. } = &mut pattern.kind {
         *count = "7".into();
         *spacing = "12 mm".into();
         *count2 = "3".into();
@@ -240,7 +243,7 @@ fn command_dialog_remembers_values_for_the_same_command_only_in_this_session() {
     let recalled = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
     assert!(matches!(
         &recalled.kind,
-        Kind::PatternRect { count, spacing, count2, spacing2 }
+        Kind::PatternRect { count, spacing, count2, spacing2, .. }
             if count == "7" && spacing == "12 mm" && count2 == "3" && spacing2 == "8 mm"
     ));
 
@@ -624,14 +627,17 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
         "Direction" | "pattern.start_point" => return None, // segmented buttons, labelled by each choice
+        "Target" if command == "mesh.reduce" => return None, // segmented target modes
         "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
-        | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
+        | "Nut" | "Cam" | "Follower" | "Anchor" | "Bolt Pattern" => Role::ComboBox,
         "Inset By" => Role::ComboBox,
+        "Thickness Placement" if command == "frame.gusset" => return None, // icon buttons, checked by the gusset interaction test
+        "Outline" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -652,6 +658,7 @@ form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
 form_case!(end_cap, "frame.end_cap", ["Thickness", "Direction", "Offset", "Corner Chamfer"]);
+form_case!(gusset, "frame.gusset", ["Outline", "First Leg", "Second Leg", "Thickness", "Corner Relief", "Joint Offset", "Thickness Placement"]);
 
 /// The Motion Study's and Motion Trace's hints read in the user's language: the dialogs drew them
 /// as they got them, in English.
@@ -799,6 +806,29 @@ form_case!(sweep, "solid.sweep", ["Orientation"]);
 form_case!(offset_plane, "construct.plane.offset", ["Distance"]);
 form_case!(midplane, "construct.plane.midplane", []);
 form_case!(mesh_convert, "mesh.convert", ["Tolerance"]);
+form_case!(mesh_reduce, "mesh.reduce", ["Target", "Retained percentage"]);
+
+#[test]
+fn mesh_reduce_builds_exactly_one_valid_target() {
+    let h = Harness::new();
+    let mut d = Dialog::for_command(&h.app, "mesh.reduce").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Mesh".into() }];
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1, json!({"body":"Mesh","percentage":50.0}));
+    if let Kind::MeshReduce { mode, count, percentage } = &mut d.kind {
+        *percentage = "100".into();
+        *count = "42".into();
+        assert_eq!(*mode, 0);
+    }
+    assert!(apply_commands(&h.app, &d).is_err());
+    if let Kind::MeshReduce { mode, .. } = &mut d.kind {
+        *mode = 1;
+    }
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1, json!({"body":"Mesh","triangle_count":42}));
+    if let Kind::MeshReduce { count, .. } = &mut d.kind {
+        *count = "0".into();
+    }
+    assert!(apply_commands(&h.app, &d).is_err());
+}
 form_case!(axis_two_planes, "construct.axis.two_planes", []);
 form_case!(point_along_path, "construct.point.along_path", ["Position (0 to 1)"]);
 form_case!(angle_plane, "construct.plane.at_angle", ["Angle"]);
@@ -918,6 +948,7 @@ form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
+form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
@@ -946,6 +977,7 @@ form_case!(surface_untrim, "surface.untrim", ["Holes"]);
 form_case!(split_face, "solid.split_face", []);
 form_case!(flange, "sheet.flange", ["Type", "Rule"]);
 form_case!(path_flange, "sheet.path_flange", ["Bend Radius"]);
+form_case!(tab, "sheet.tab", []);
 form_case!(hem, "sheet.hem", ["Type", "Length", "ui.sheet_gap"]);
 form_case!(fold, "sheet.fold", ["Bend Line Position", "Angle", "Bend Radius"]);
 form_case!(unfold, "sheet.unfold", []);
@@ -1041,9 +1073,11 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1400,"height":950}));
             h.app.dialog = Some(representative(&h, command));
-            h.frames(2);
+            // The card settles on its own; its preview (joint.create's is an error row here)
+            // comes from a worker, which a loaded machine can finish a frame later.
+            h.frames_after_preview(2);
             let first = scenario::rect_of("dialog:footer").unwrap();
-            h.frames(1);
+            h.frames_after_preview(1);
             let settled = scenario::rect_of("dialog:footer").unwrap();
             assert_eq!(first, settled, "{command} {mode:?}: footer moved under the first click");
         }
@@ -1428,6 +1462,39 @@ fn offset_face_dialog_moves_the_body_clicked_where_two_bodies_touch_flush() {
     assert!((volume("Big") - 24000.0).abs() < 1e-6, "{}", volume("Big"));
 }
 
+/// Mouse hits on curved faces are triangle points. The dialog keeps their face identity so
+/// neither name capture nor evaluation asks the approximate point to pick another face.
+#[test]
+fn offset_face_dialog_accepts_a_curved_display_triangle_hit() {
+    use solidcraft_engine::doc::naming;
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Cylinder"})).unwrap();
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let body = state.body("Cylinder").unwrap();
+    let index = body.body.face_at_point(Vec3::new(10.0, 0.0, 10.0)).unwrap().unwrap();
+    let name = naming::face_names(body)[index].clone();
+    let mesh = body.mesh();
+    let triangle = mesh.triangles.iter().zip(&mesh.tri_face).find_map(|(t, f)| if *f as usize == index { mesh.tri(t) } else { None }).unwrap();
+    let point = Vec3::from(annular_samples::triangle_centroid(triangle.map(|p| [p.x, p.y, p.z])));
+    assert_eq!(body.body.face_at_point(point).unwrap(), None, "the display hit is beyond modelling tolerance");
+    h.app.session.selection = vec![Sel::Face { body: "Cylinder".into(), index, point }];
+    let mut d = Dialog::for_command(&h.app, "solid.offset_face").unwrap();
+    d.kind = Kind::OffsetFaces { distance: "2".into() };
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(preview_commands(&h.app, &d).unwrap(), commands);
+    let (command, params) = &commands[0];
+    assert_eq!(params["faces"], json!([name]));
+    assert_eq!(params["body"], "Cylinder");
+    h.app.run(command, params.clone()).unwrap();
+    let state = h.app.session.model.state();
+    let body = &state.body("Cylinder").unwrap().body;
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    assert!((0..body.face_count()).any(|f| matches!(
+        solidcraft_engine::kernel::face_surface(body, f),
+        Some(solidcraft_engine::kernel::FaceSurface::Cylinder { radius, .. }) if (radius - 12.0).abs() < 1e-6
+    )));
+}
+
 #[test]
 fn draft_rejects_faces_from_different_bodies() {
     let h = Harness::new();
@@ -1603,6 +1670,57 @@ fn rectangular_pattern_groups_each_direction_in_the_same_order() {
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         h.settle();
     }
+}
+
+/// Each direction's Distance Type (#8523): the dialog shows the rows that type takes and sends
+/// only the values it uses (Quantity and Extent: Quantity and Extent; Spacing and Extent:
+/// Spacing, Extent and Copy at the end), and a pattern made with them opens with them again.
+#[test]
+fn rectangular_pattern_distance_type_sends_what_it_uses_and_reopens() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Block"})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
+    d.extra.insert("distance1".into(), json!("count_extent"));
+    d.extra.insert("distance2".into(), json!("spacing_extent"));
+    d.extra.insert("copy_at_end2".into(), json!(true));
+    if let Kind::PatternRect { count, extent, spacing2, extent2, .. } = &mut d.kind {
+        *count = "5".into();
+        *extent = "80 mm".into();
+        *spacing2 = "15 mm".into();
+        *extent2 = "40 mm".into();
+    }
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (id, p) = &commands[0];
+    assert_eq!(id, "solid.pattern.rectangular");
+    assert_eq!((&p["distance1"], &p["count1"], &p["extent1"]), (&json!("count_extent"), &json!("5"), &json!("80 mm")), "{p}");
+    assert_eq!((&p["distance2"], &p["spacing2"], &p["extent2"]), (&json!("spacing_extent"), &json!("15 mm"), &json!("40 mm")), "{p}");
+    assert_eq!(p["copy_at_end2"], json!(true), "{p}");
+    assert!(p.get("spacing1").is_none() && p.get("count2").is_none(), "only the values each type uses: {p}");
+    h.app.dialog = Some(d);
+    h.settle();
+    for row in ["ui.pattern_distance_type", "ui.pattern_extent", "ui.pattern_distance_type_2", "ui.pattern_extent_2", "ui.pattern_copy_at_end_2"] {
+        assert!(scenario::rect_of(&format!("dialog:row:{row}")).is_some(), "{row} is shown");
+    }
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.settle();
+    // Made and opened again: the same distance types, values and Copy at the end.
+    h.app.run(id, p.clone()).unwrap();
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.call("ui.editFeature", json!({"feature": name}));
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("the pattern opens to edit");
+    assert_eq!(d.extra.get("distance1"), Some(&json!("count_extent")));
+    assert_eq!(d.extra.get("distance2"), Some(&json!("spacing_extent")));
+    assert_eq!(d.extra.get("copy_at_end2"), Some(&json!(true)));
+    assert!(
+        matches!(&d.kind, Kind::PatternRect { count, extent, spacing2, extent2, .. }
+            if count == "5" && extent == "80 mm" && spacing2 == "15 mm" && extent2 == "40 mm"),
+        "{:?}",
+        d.kind
+    );
 }
 
 #[test]
