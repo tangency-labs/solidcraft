@@ -1314,8 +1314,8 @@ mod web {
     /// straight into egui's pass, the view was 1x whatever Graphics said (#11622).
     ///
     /// The sample count follows the desktop's rule (`gpu::scene_samples`): the saved choice where
-    /// the browser's device draws it, else the supported default. WebGL draws 1x, as desktop
-    /// OpenGL does. eframe's web painter has no stencil buffer.
+    /// the browser's device draws it, else the supported default. WebGL draws 1x: the browser
+    /// can't wait for the desktop's startup check. eframe's web painter has no stencil buffer.
     fn install_viewport(app: &mut SolveApp, rs: &eframe::egui_wgpu::RenderState) {
         let backend = rs.adapter.get_info().backend;
         let depth = eframe::egui_wgpu::depth_format_from_bits(DEPTH_BITS, 0);

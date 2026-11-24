@@ -10477,7 +10477,7 @@ mod tests {
         app.msaa_supported = vec![1, 2];
         check_msaa(&mut app, 8);
         assert_eq!(app.preferences.msaa, 2);
-        // Supported, off, or no GPU: nothing changes (OpenGL's 1x policy isn't a reset either).
+        // Supported, off, or no GPU: nothing changes (WebGL's 1x policy isn't a reset either).
         for (supported, requested) in [(vec![1, 2, 4, 8], 8), (vec![1, 4], 1), (vec![], 8), (vec![1, 4], 4)] {
             app.settings_reset.clear();
             app.preferences.msaa = requested;

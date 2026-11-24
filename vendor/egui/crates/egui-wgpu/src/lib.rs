@@ -549,10 +549,8 @@ impl RenderState {
         };
         let target_format = crate::preferred_framebuffer_format(&surface_formats)?;
 
-        // SolidCraft: the OpenGL resolve path can present an entirely black frame with MSAA
-        // (notably Mesa/llvmpipe). Decide after selecting the real surface adapter,
-        // before creating either pipelines or attachments; no second GPU probe.
-        // A sample count the device doesn't support for the target or depth format fails
+        // SolidCraft: decide after selecting the real surface adapter, before creating either
+        // pipelines or attachments. A sample count the device doesn't support for the target or depth format fails
         // pipeline validation (a panic at start): fall back to the largest supported one.
         let msaa_supported =
             supported_msaa_samples(&adapter, &device, target_format, options.depth_stencil_format);
@@ -879,9 +877,16 @@ pub fn parse_vendor_id(vendor_id: u32) -> &'static str {
     }
 }
 
-/// Selected-adapter policy shared by egui pipelines, attachments and host callbacks.
+/// Selected-adapter policy shared by egui pipelines, attachments and host callbacks: the
+/// requested count (at least 1). On native backends, OpenGL included, the viewport's startup
+/// check decides whether multisampling draws and falls back to 1x where it does not. WebGL draws
+/// 1x: a browser can't wait for that check's readback.
 pub fn effective_msaa_samples(backend: wgpu::Backend, requested: u32) -> u32 {
-    if backend == wgpu::Backend::Gl { 1 } else { requested.max(1) }
+    msaa_samples_for(backend, requested, cfg!(target_arch = "wasm32"))
+}
+
+fn msaa_samples_for(backend: wgpu::Backend, requested: u32, web: bool) -> u32 {
+    if web && backend == wgpu::Backend::Gl { 1 } else { requested.max(1) }
 }
 
 /// SolidCraft: the MSAA sample counts `device` can render `target_format` and
@@ -939,10 +944,12 @@ pub fn clamp_msaa_samples(supported: &[u32], requested: u32) -> u32 {
 #[cfg(test)]
 mod msaa_tests {
     #[test]
-    fn gl_saved_multisampling_is_clamped_and_native_backends_keep_it() {
+    fn webgl_draws_1x_and_every_native_backend_keeps_the_saved_count() {
         for requested in [0, 1, 2, 4, 8] {
-            assert_eq!(super::effective_msaa_samples(wgpu::Backend::Gl, requested), 1);
-            for backend in [wgpu::Backend::Vulkan, wgpu::Backend::Dx12, wgpu::Backend::Metal, wgpu::Backend::BrowserWebGpu] {
+            assert_eq!(super::msaa_samples_for(wgpu::Backend::Gl, requested, true), 1);
+            assert_eq!(super::msaa_samples_for(wgpu::Backend::BrowserWebGpu, requested, true), requested.max(1));
+            for backend in [wgpu::Backend::Gl, wgpu::Backend::Vulkan, wgpu::Backend::Dx12, wgpu::Backend::Metal] {
+                assert_eq!(super::msaa_samples_for(backend, requested, false), requested.max(1));
                 assert_eq!(super::effective_msaa_samples(backend, requested), requested.max(1));
             }
         }

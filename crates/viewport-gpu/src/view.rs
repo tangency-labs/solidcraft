@@ -8446,6 +8446,53 @@ mod glass_tests {
         }
     }
 
+    /// Desktop OpenGL draws the scene at the saved anti-aliasing count, and the startup check
+    /// decides on it as on every other backend: it passes where the OpenGL device draws the
+    /// multisampled view and falls back to 1x on a blank resolve. Mesa's llvmpipe OpenGL (CI's
+    /// software adapter) draws 4x. Skipped where no OpenGL adapter qualifies; on Linux with
+    /// `VIEWPORT_TEST_REQUIRE_GPU=1`, as in CI, a missing one fails.
+    #[test]
+    fn opengl_startup_msaa_check_decides_from_what_it_draws() {
+        let mut descriptor = crate::instance_descriptor_from_env();
+        descriptor.backends = wgpu::Backends::GL;
+        // As in `opengl_draws_grid_lines_in_every_direction_and_at_a_point` (#15410).
+        descriptor.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
+        let instance = crate::select::start_instance(descriptor);
+        // Never dropped, as in that test (#10232).
+        std::mem::forget(instance.clone());
+        let policy = crate::test_env::policy();
+        let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {
+            let why = format!("no OpenGL adapter qualifies under {}", policy.name());
+            assert!(!(cfg!(target_os = "linux") && crate::test_env::required()), "{why}");
+            eprintln!("skipped: {why}");
+            return;
+        };
+        assert_eq!(adapter.get_info().backend, wgpu::Backend::Gl);
+        // The window's OpenGL device, as egui-wgpu asks for it.
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: wgpu::Limits { max_texture_dimension_2d: 8192, ..wgpu::Limits::downlevel_webgl2_defaults() }.using_resolution(adapter.limits()),
+            ..Default::default()
+        }))
+        .expect("the OpenGL adapter opens a device");
+        let depth = crate::depth_format(&device, true);
+        let mut checked = 0;
+        for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb] {
+            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
+            if ![format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(4)) {
+                continue;
+            }
+            let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..window }, window, None);
+            assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed, "{} {format:?} draws 4x", adapter.get_info().name);
+            assert_eq!(renderer.target().samples, 4);
+            assert_eq!(renderer.check_msaa_with(&device, &queue, 4).unwrap(), super::MsaaCheck::Fallback, "a blank 4x resolve falls back");
+            assert_eq!(renderer.target().samples, 1);
+            assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed);
+            checked += 1;
+        }
+        eprintln!("OpenGL anti-aliasing check: {:?}, {checked} formats at 4x", adapter.get_info());
+        assert!(checked > 0 || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
+    }
+
     /// Two see-through squares, one at z = 5 (near) and one at z = -5, in `near` and `far`
     /// colours, given near first or far first.
     fn two_layers(near: [u8; 4], far: [u8; 4], near_first: bool) -> GpuScene {

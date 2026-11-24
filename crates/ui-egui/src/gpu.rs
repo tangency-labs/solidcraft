@@ -106,7 +106,7 @@ pub(crate) fn report_gpu_error(e: &wgpu::Error) {
 /// - `supported` lists the counts the device draws the scene's colour and depth formats with;
 ///   empty means unknown, and `chosen` is taken.
 ///
-/// The backend's policy comes first: OpenGL and WebGL draw 1x (`effective_msaa_samples`). A
+/// The backend's policy comes first: WebGL draws 1x (`effective_msaa_samples`). A
 /// count the device can't draw falls back to the largest supported count up to the default (4x),
 /// not to 1x, so an 8x chosen on another device still antialiases here.
 pub fn scene_samples(backend: wgpu::Backend, chosen: u32, supported: &[u32]) -> u32 {
@@ -119,8 +119,8 @@ pub fn scene_samples(backend: wgpu::Backend, chosen: u32, supported: &[u32]) -> 
 }
 
 /// The anti-aliasing choices Graphics offers: the counts in `supported` (as for [`scene_samples`])
-/// that the backend draws as such. A choice the backend would draw at 1x (OpenGL and WebGL) then
-/// shows as unavailable, instead of being offered and doing nothing.
+/// that the backend draws as such. A choice the backend would draw at 1x (WebGL) then shows as
+/// unavailable, instead of being offered and doing nothing.
 pub fn scene_sample_choices(backend: wgpu::Backend, supported: Vec<u32>) -> Vec<u32> {
     supported.into_iter().filter(|&n| egui_wgpu::effective_msaa_samples(backend, n) == n).collect()
 }
@@ -972,7 +972,8 @@ impl OffscreenFrames {
 mod tests {
     /// The web app drew its scene at 1x whatever Graphics said (#11622). It now takes its sample
     /// count by the desktop's rule: the saved choice where the browser's device draws it, else
-    /// the default it supports, and 1x on WebGL, where Graphics offers 1x alone.
+    /// the default it supports. Desktop OpenGL takes the chosen count too: the startup check
+    /// decides whether it draws (WebGL's 1x is `effective_msaa_samples`'s own test).
     #[test]
     fn the_scene_takes_the_chosen_antialiasing_where_the_backend_draws_it() {
         use egui_wgpu::wgpu::Backend;
@@ -980,9 +981,9 @@ mod tests {
         assert_eq!(super::scene_samples(Backend::BrowserWebGpu, 4, &[1, 4]), 4, "the default");
         assert_eq!(super::scene_samples(Backend::BrowserWebGpu, 1, &[1, 4]), 1, "Off");
         assert_eq!(super::scene_samples(Backend::BrowserWebGpu, 8, &[1, 4]), 4, "a desktop choice the browser lacks");
-        assert_eq!(super::scene_samples(Backend::Gl, 4, &[1, 4]), 1, "WebGL");
+        assert_eq!(super::scene_samples(Backend::Gl, 4, &[1, 4]), 4, "desktop OpenGL");
         assert_eq!(super::scene_sample_choices(Backend::BrowserWebGpu, vec![1, 4]), [1, 4]);
-        assert_eq!(super::scene_sample_choices(Backend::Gl, vec![1, 4]), [1]);
+        assert_eq!(super::scene_sample_choices(Backend::Gl, vec![1, 4]), [1, 4]);
         assert_eq!(super::scene_sample_choices(Backend::Vulkan, vec![1, 2, 4, 8]), [1, 2, 4, 8]);
     }
 
