@@ -116,14 +116,32 @@ pub(super) fn on_nappe(q: &Implicit, x: I3) -> bool {
 /// quadric ([`super::line_with_quadric`], [`super::trace_quadric_piece`]): in closed form, a
 /// tangent meeting (a round tangent to a bore) included, which Krawczyk's operator cannot
 /// prove (the two gradients are parallel there). The normal and the height are enclosed
-/// in rounded interval arithmetic, so the plane is the exact one. Not for cones (their
-/// meeting also needs the second's nappe), a radius below zero, or axes that differ in any
-/// bit: [`meet`] decides those.
+/// in rounded interval arithmetic, so the plane is the exact one.
+///
+/// A cone and a cylinder on one axis line (a countersink's cone and the hole or the well
+/// beside it) meet on a plane too, square to the axis. With `v = x − o₁` from the cone's
+/// origin and `z = a·v`, both functions are `v·v − z² − ρ(z)²` (the cone's `ρ = r₁ + t z`,
+/// the cylinder's `ρ = r₂` about `o₂`), and their difference is
+/// `−(r₁ + t z)² + r₂² + 2 v·n − w·n` with `w = o₂ − o₁` and `n = w − a (a·w)`. Where `n` is
+/// zero exactly (the cylinder's origin on the cone's axis line, shown in error-free
+/// arithmetic, [`on_one_line`]), it is
+/// `r₂² − (r₁ + t z)²`, zero on the two planes `r₁ + t z = ±r₂`; the cone's own nappe
+/// (`r₁ + t z ≥ 0`) is on `t a·(x − o₁) = r₂ − r₁` alone, a circle of radius `r₂` on the
+/// cylinder, wherever the cone's apex lies. So the meeting is the cylinder's with that plane
+/// ([`Radical::quadric`]), in closed form; Newton started at the old edge would converge on
+/// the other nappe once the moved cone's apex passed the edge.
+///
+/// Not for two cones, a cone and a cylinder whose axis lines are not certified one, a
+/// cylinder's radius below zero (or a cone's cylinder at radius zero), or axes that differ
+/// in any bit: [`meet`] decides those.
 #[derive(Clone, Copy)]
 pub(super) struct Radical {
     origin: Vec3,
     normal: Dv,
     height: Di,
+    /// The quadric the plane meets where the two do: the first of two cylinders, the
+    /// cylinder of a cone and a cylinder.
+    on: Implicit,
 }
 
 impl Radical {
@@ -146,21 +164,67 @@ impl Radical {
         else {
             return None;
         };
-        // no slope, and the same stored axis line, exactly
-        let cylinders = ta == 0.0 && tb == 0.0 && (ab == aa || ab == -aa);
-        if !(cylinders && ra >= 0.0 && rb >= 0.0) {
+        // the same stored axis line direction, exactly
+        if !(ab == aa || ab == -aa) {
             return None;
         }
         let axis = Dv::constant(aa);
         let w = Dv::constant(ob).sub(Dv::constant(oa));
         let z = w.dot(axis);
         let pw = w.sub(axis.scale(z));
-        let k = Di::constant(2.0) - axis.dot(axis);
-        let (ra, rb) = (Di::constant(ra), Di::constant(rb));
+        match (ta == 0.0, tb == 0.0) {
+            // two cylinders
+            (true, true) => {
+                if !(ra >= 0.0 && rb >= 0.0) {
+                    return None;
+                }
+                let k = Di::constant(2.0) - axis.dot(axis);
+                let (ra, rb) = (Di::constant(ra), Di::constant(rb));
+                Some(Self {
+                    origin: oa,
+                    normal: w.sub(axis.scale(k * z)),
+                    height: (ra * ra - rb * rb + pw.dot(pw)) * Di::constant(0.5),
+                    on: *a,
+                })
+            }
+            // a cone and a cylinder, the cone's origin `o₁` (`n` from the other origin is
+            // its negation: zero the same)
+            (false, true) => {
+                Self::cone_and_cylinder(oa, axis, ra, ta, on_one_line(oa, ob, aa), rb, *b)
+            }
+            // the cone's own axis: the cylinder's may be the opposite sense
+            (true, false) => Self::cone_and_cylinder(
+                ob,
+                Dv::constant(ab),
+                rb,
+                tb,
+                on_one_line(oa, ob, aa),
+                ra,
+                *a,
+            ),
+            (false, false) => None,
+        }
+    }
+
+    /// [`Radical::of`] a cone `(o, a, r1, t)` and the cylinder `cylinder` of radius `r2`,
+    /// `one_line` whether their axis lines are shown one ([`on_one_line`]).
+    fn cone_and_cylinder(
+        o: Vec3,
+        axis: Dv,
+        r1: f64,
+        t: f64,
+        one_line: bool,
+        r2: f64,
+        cylinder: Implicit,
+    ) -> Option<Self> {
+        if !(r2 > 0.0 && one_line) {
+            return None;
+        }
         Some(Self {
-            origin: oa,
-            normal: w.sub(axis.scale(k * z)),
-            height: (ra * ra - rb * rb + pw.dot(pw)) * Di::constant(0.5),
+            origin: o,
+            normal: axis.scale(Di::constant(t)),
+            height: Di::constant(r2) - Di::constant(r1),
+            on: cylinder,
         })
     }
 
@@ -169,6 +233,34 @@ impl Radical {
         let height = self.height - p.sub(Dv::constant(self.origin)).dot(self.normal);
         (self.normal, height)
     }
+
+    /// The quadric whose meeting with the plane is the two quadrics' meeting.
+    pub fn quadric(&self) -> &Implicit {
+        &self.on
+    }
+}
+
+/// Whether `n = w − a (a·w)`, `w = ob − oa`, is zero exactly: computed in error-free
+/// arithmetic, so `false` where it is not, or where a product is out of the range that
+/// arithmetic holds exactly (not shown zero). In rounded intervals the two terms of a
+/// component along the axis are each enclosed apart and their difference never encloses
+/// zero alone, even for origins on one line.
+fn on_one_line(oa: Vec3, ob: Vec3, a: Vec3) -> bool {
+    let w = [
+        exact::sub(&[ob.x], &[oa.x]),
+        exact::sub(&[ob.y], &[oa.y]),
+        exact::sub(&[ob.z], &[oa.z]),
+    ];
+    let axis = [a.x, a.y, a.z];
+    let along = w.iter().zip(axis).try_fold(Vec::new(), |sum, (wi, ai)| {
+        Some(exact::add(&sum, &exact::scale(wi, ai)?))
+    });
+    let Some(along) = along else {
+        return false;
+    };
+    w.iter().zip(axis).all(|(wi, ai)| {
+        exact::scale(&along, ai).is_some_and(|part| exact::is_zero(&exact::sub(wi, &part)))
+    })
 }
 
 /// A plane through a displacement `d`, `normal.d = height`, based at `point`.

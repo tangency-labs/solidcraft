@@ -25,8 +25,8 @@ fn app_with_server(status: Option<u16>) -> (SolveApp, Requests) {
     });
     let services = crate::Services { usage_http: Some(http), ..Default::default() };
     let mut app = SolveApp::new(Session::default(), services);
-    app.usage = UsageStats::default();
-    app.usage.store.notice_shown = true;
+    app.usage = UsageStats { hosted: true, ..UsageStats::default() };
+    app.usage.store.notice_ok = true;
     let _ = solidcraft_engine::usage::take();
     (app, requests)
 }
@@ -131,7 +131,7 @@ fn allowed_by_policy_leaves_the_persons_choice() {
 fn nothing_is_counted_before_the_notice_was_shown() {
     let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (mut app, requests) = app_with_server(Some(200));
-    app.usage.store.notice_shown = false;
+    app.usage.store.notice_ok = false;
     use_app(&mut app, T0, 0.0);
     use_app(&mut app, T0 + DAY, 10_000.0);
     assert!(!app.session.count_usage);
@@ -277,8 +277,8 @@ fn a_tool_applied_is_timed_as_applied() {
     let _ = solidcraft_engine::usage::take();
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
-    h.app.usage = UsageStats::default();
-    h.app.usage.store.notice_shown = true;
+    h.app.usage = UsageStats { hosted: true, ..UsageStats::default() };
+    h.app.usage.store.notice_ok = true;
     h.frames(2);
     h.app.start("solid.box");
     h.frames(3);
@@ -383,7 +383,7 @@ fn show_whats_sent_is_the_next_report() {
 
 #[test]
 fn a_stored_store_comes_back_and_a_hostile_one_is_a_new_one() {
-    let mut store = Store { install_id: new_id().unwrap(), notice_shown: true, days: BTreeMap::new() };
+    let mut store = Store { install_id: new_id().unwrap(), notice_ok: true, ..Store::default() };
     let ui: Counts = [("ui".to_string(), [("solid.box".to_string(), 2)].into())].into();
     store.days.insert("2023-11-14".into(), Day { active_minutes: 5, operations: ui.clone(), tools: ui, ..Day::default() });
     assert_eq!(Store::from_stored(Some(&store.to_stored())), store);
@@ -416,4 +416,308 @@ fn ids_are_random_version_4_uuids() {
     assert!(valid_id(&a) && valid_id(&b));
     assert!(!valid_id("00000000-0000-0000-0000-000000000000"));
     assert!(!valid_id("ABCDEF00-0000-4000-8000-000000000000"));
+}
+
+#[test]
+fn nothing_is_counted_or_sent_before_ok_and_ok_starts_it() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(Some(200));
+    app.usage.store.notice_ok = false;
+    assert!(notice_pending(&app), "the first start shows it");
+    // Days of use, sends due: the counter doesn't run at all, and nothing is queued or sent.
+    for day in 0..3 {
+        use_app(&mut app, T0 + day * DAY, 100.0 + day as f64 * RETRY_HOURS * 3600.0);
+    }
+    assert!(!app.session.count_usage);
+    assert!(app.usage.store.days.is_empty(), "nothing queued before OK");
+    assert!(requests.lock().unwrap().is_empty(), "nothing sent before OK");
+    assert!(solidcraft_engine::usage::take().is_empty());
+    // × hides it for this run only, and still nothing counts.
+    act(&mut app, NoticeAction::Close);
+    assert!(!notice_pending(&app));
+    use_app(&mut app, T0, 0.0);
+    assert!(app.usage.store.days.is_empty(), "closing is no OK");
+    let store = app.usage.store.clone();
+    let (mut again, _) = app_with_server(Some(200));
+    again.usage.store = store;
+    assert!(notice_pending(&again), "shown again at the next start");
+    act(&mut again, NoticeAction::Ok);
+    assert!(!notice_pending(&again));
+    use_app(&mut again, T0, 0.0);
+    assert!(again.session.count_usage && !again.usage.store.days.is_empty(), "OK starts counting");
+}
+
+#[test]
+fn a_0_46_installation_sees_the_new_notice_and_counting_pauses_until_ok() {
+    // 0.46.0 kept `notice_shown`, 0.46.1 also `notice_dismissed`; neither was an OK.
+    for stored in [
+        r#"{"install_id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "notice_shown": true, "days": {"2023-11-14": {"active_minutes": 3}}}"#,
+        r#"{"install_id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "notice_shown": true, "notice_dismissed": true}"#,
+    ] {
+        let mut app = SolveApp::new(Session::default(), crate::Services::default());
+        app.load_usage_stats(Some(stored));
+        assert!(!app.usage.store.notice_ok);
+        assert!(notice_pending(&app), "the new notice shows");
+        assert!(!active(&app), "counting pauses until OK");
+        tick_at(&mut app, T0, 0.0, true);
+        assert!(app.usage.store.days.is_empty(), "and what 0.46 queued isn't sent");
+    }
+    // Someone who turned sharing off stays off, with no notice.
+    let mut off_before = SolveApp::new(Session::default(), crate::Services::default());
+    off_before.preferences.usage_statistics = false;
+    off_before.load_usage_stats(Some(r#"{"notice_shown": true}"#));
+    assert!(!notice_pending(&off_before) && !active(&off_before));
+}
+
+#[test]
+fn no_notice_when_the_organization_or_the_environment_turned_statistics_off() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for policy in [true, false] {
+        let (mut app, _) = app_with_server(Some(200));
+        app.usage.store.notice_ok = false;
+        if policy {
+            app.policy = crate::policy::Policy::from_json(r#"{"UsageStatistics": 0}"#);
+        } else {
+            app.usage.env_off = true;
+        }
+        assert!(!notice_pending(&app));
+        use_app(&mut app, T0, 0.0);
+        assert!(app.usage.store.days.is_empty(), "nothing starts counting");
+    }
+}
+
+#[test]
+fn settings_alone_doesnt_start_counting_and_off_there_ends_the_notice() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(Some(200));
+    app.usage.store.notice_ok = false;
+    act(&mut app, NoticeAction::Settings);
+    assert!(app.prefs_window.shell.open);
+    assert_eq!(app.prefs_window.shell.section, crate::prefs::PAGE_PRIVACY);
+    assert!(notice_pending(&app), "Settings is no OK: the notice stays");
+    use_app(&mut app, T0, 0.0);
+    assert!(app.usage.store.days.is_empty() && !app.session.count_usage, "Settings alone counts nothing");
+    // Off in Preferences ends the notice, with no counting.
+    app.preferences.usage_statistics = false;
+    assert!(!notice_pending(&app));
+    use_app(&mut app, T0 + DAY, 1.0e6);
+    assert!(app.usage.store.days.is_empty());
+    assert!(requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_privacy_page_shows_the_organizations_choice_locked() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.usage.hosted = true;
+    h.app.usage.store.notice_ok = true;
+    h.app.policy = crate::policy::Policy::from_json(r#"{"UsageStatistics": 0}"#);
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_PRIVACY);
+    h.frames(3);
+    assert!(h.widget("Set by your organization").is_some());
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics"}})).unwrap();
+    h.frames(1);
+    assert!(h.app.preferences.usage_statistics, "the person's own choice is kept and can't be changed here");
+    assert_eq!(off(&h.app), Some(Off::Policy));
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics:show"}})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Nothing is sent while usage statistics are off.").is_some());
+}
+
+#[test]
+fn the_privacy_page_turns_statistics_off_and_shows_the_next_report() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.usage.hosted = true;
+    h.app.usage.store.notice_ok = true;
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_PRIVACY);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics:show"}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("prefs:usage_statistics:report").is_some(), "the next report's JSON is shown");
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics"}})).unwrap();
+    h.frames(2);
+    assert!(!h.app.preferences.usage_statistics);
+    assert!(h.app.usage.store.days.is_empty());
+}
+
+#[test]
+fn the_notice_shows_on_a_real_first_start_and_never_in_an_app_that_keeps_nothing() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Tests, scenarios and hosts that keep nothing between runs: no notice, nothing counted.
+    let mut kept_nothing = SolveApp::new(Session::default(), crate::Services::default());
+    assert!(!notice_pending(&kept_nothing));
+    tick_at(&mut kept_nothing, T0, 0.0, true);
+    assert!(!kept_nothing.session.count_usage);
+    assert!(kept_nothing.usage.store.days.is_empty());
+    let mut h = crate::scenario::Harness::new();
+    h.frames(5);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_none(), "the harness never shows it");
+    // The app's first start: the host loads what it kept, which is nothing yet.
+    let mut first = SolveApp::new(Session::default(), crate::Services::default());
+    first.load_usage_stats(None);
+    assert!(notice_pending(&first), "the first start shows the notice");
+    act(&mut first, NoticeAction::Ok);
+    // The next start loads what this one kept: answered, no second notice.
+    let kept = first.usage_stats_for_storage();
+    let mut next = SolveApp::new(Session::default(), crate::Services::default());
+    next.load_usage_stats(Some(&kept));
+    assert!(!notice_pending(&next));
+    // And the real first start shows it as the shared toast.
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    h.frames(5);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_some(), "the toast is drawn on a real first start");
+}
+
+#[test]
+fn delete_my_data_asks_the_server_to_delete_the_old_id_and_uses_a_new_one() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(Some(204));
+    use_app(&mut app, T0, 0.0);
+    let old = app.usage.store.install_id.clone();
+    // With statistics turned off it still goes: what was sent earlier stays until deleted.
+    app.preferences.usage_statistics = false;
+    assert!(delete_my_data(&mut app));
+    assert_ne!(app.usage.store.install_id, old);
+    assert!(app.usage.store.days.is_empty());
+    tick_at(&mut app, T0, 1.0, false);
+    tick_at(&mut app, T0, 2.0, false);
+    let sent = requests.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!((sent[0].method, sent[0].url.as_str()), ("DELETE", format!("{INSTALL_ENDPOINT}{old}").as_str()));
+    assert!(sent[0].body.is_none(), "nothing but the id");
+    assert!(app.usage.store.forget.is_empty(), "done once the server answered");
+    // Nothing more goes, however many frames follow.
+    for frame in 0..100 {
+        tick_at(&mut app, T0, 3.0 + f64::from(frame), false);
+    }
+    assert_eq!(requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_deletion_the_server_didnt_take_waits_an_hour_and_survives_a_restart() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(None);
+    use_app(&mut app, T0, 0.0);
+    let old = app.usage.store.install_id.clone();
+    assert!(delete_my_data(&mut app));
+    for second in 0..600 {
+        tick_at(&mut app, T0, 1.0 + f64::from(second), false);
+    }
+    assert_eq!(requests.lock().unwrap().len(), 1, "one try, no storm");
+    assert_eq!(app.usage.store.forget, std::slice::from_ref(&old));
+    let kept = Store::from_stored(Some(&app.usage.store.to_stored()));
+    assert_eq!(kept.forget, [old], "it waits across starts");
+    tick_at(&mut app, T0, 3700.0, false);
+    assert_eq!(requests.lock().unwrap().len(), 2, "tried again an hour later");
+}
+
+#[test]
+fn no_deletion_goes_when_the_organization_or_the_environment_turned_statistics_off() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for policy in [true, false] {
+        let (mut app, requests) = app_with_server(Some(204));
+        use_app(&mut app, T0, 0.0);
+        if policy {
+            app.policy = crate::policy::Policy::from_json(r#"{"UsageStatistics": 0}"#);
+        } else {
+            app.usage.env_off = true;
+        }
+        assert!(!delete_my_data(&mut app));
+        tick_at(&mut app, T0, 1.0, false);
+        assert!(requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn the_host_reaches_only_the_report_and_delete_addresses() {
+    let id = new_id().unwrap();
+    assert!(allowed_url(ENDPOINT));
+    assert!(allowed_url(&format!("{INSTALL_ENDPOINT}{id}")));
+    for not in [
+        format!("{INSTALL_ENDPOINT}{id}/x"),
+        format!("{INSTALL_ENDPOINT}../report"),
+        INSTALL_ENDPOINT.to_string(),
+        "https://metrics.solidcraft.io/v1/summary".to_string(),
+        "https://example.com/v1/report".to_string(),
+        format!("{ENDPOINT}?x=1"),
+    ] {
+        assert!(!allowed_url(&not), "{not}");
+    }
+}
+
+#[test]
+fn the_toast_stays_until_ok_and_ok_starts_counting() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    // A minute of frames: still there, nothing counted.
+    h.frames(3600);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_some(), "it never goes by itself");
+    assert!(!h.app.session.count_usage);
+    // Its buttons: Settings, then OK (the main one, right-most).
+    let ok = crate::scenario::rect_of("toast:usage_stats:button:1").expect("OK");
+    h.step(&json!({"click": [ok.center().x, ok.center().y]})).unwrap();
+    h.frames(2);
+    assert!(h.app.usage.store.notice_ok);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_none());
+    assert!(h.app.session.count_usage, "OK starts counting");
+}
+
+#[test]
+fn the_x_hides_the_notice_until_the_next_start_and_counts_nothing() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "toast:usage_stats:close"}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_none());
+    assert!(!h.app.usage.store.notice_ok && !h.app.session.count_usage);
+    let kept = h.app.usage_stats_for_storage();
+    let mut next = SolveApp::new(Session::default(), crate::Services::default());
+    next.load_usage_stats(Some(&kept));
+    assert!(notice_pending(&next), "back at the next start");
+}
+
+#[test]
+fn delete_my_data_says_it_was_requested_and_shows_the_new_id() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    agree(&mut h.app);
+    h.app.usage.store.install_id = new_id().unwrap();
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_PRIVACY);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics:delete"}})).unwrap();
+    h.frames(2);
+    let new = h.app.usage.store.install_id.clone();
+    let said = format!("Deletion requested. New installation ID: {new}");
+    assert!(h.widget(&said).is_some(), "said on the page");
+    assert!(h.app.status.as_ref().is_some_and(|(text, _, _)| *text == said), "and as the status");
+}
+
+#[test]
+fn delete_my_data_waits_for_the_one_on_its_way() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    agree(&mut h.app);
+    h.app.usage.store.install_id = new_id().unwrap();
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_PRIVACY);
+    h.frames(3);
+    // No server in the harness: the first deletion stays on its way.
+    for _ in 0..20 {
+        let _ = h.step(&json!({"click":{"handle":"prefs:usage_statistics:delete"}}));
+        h.frames(1);
+    }
+    assert_eq!(h.app.usage.store.forget.len(), 1, "twenty clicks, one deletion: {:?}", h.app.usage.store.forget);
 }

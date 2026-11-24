@@ -164,7 +164,7 @@ pub struct State {
     /// publishes its real input shields. Never stored in document/tab state.
     result_navigation: Option<(egui::Rect, egui::Response, bool)>,
     /// The last actual Render canvas in the current design's tiled layout.
-    tile_canvas: Option<(u64, egui::Rect)>,
+    tile_canvas: Option<(u64, u64, egui::Rect)>,
     revision: u64,
     design_camera: Option<(Camera, bool)>,
     entry_fit: Option<EntryFit>,
@@ -423,6 +423,9 @@ pub struct ViewState {
     live_paused: bool,
     /// Product framing retained across Design/Render visits, never a saved setting.
     pub(crate) render_camera: Option<Camera>,
+    /// The working framing belongs to this view; authored shots and results stay shared.
+    framing_view: Option<u64>,
+    framings: std::collections::BTreeMap<u64, ViewFraming>,
     /// The CPU sampling choice was initialised or explicitly selected in this draft.
     cpu_sampling_initialized: bool,
     clean_setup: Option<RenderSetup>,
@@ -462,6 +465,40 @@ pub struct ViewState {
     /// Panel geometry is deliberately absent: moving chrome never reframes.
     result_domain: Option<(egui::Rect, [u32; 2], f32, ResultScale)>,
     result_job: Option<solidcraft_engine::render::job::JobId>,
+}
+
+/// Navigation is per view, including the flat camera used to inspect a completed image.
+#[derive(Clone, Copy, Debug)]
+struct ViewFraming {
+    product: Option<Camera>,
+    image: Camera,
+    scale: ResultScale,
+    domain: Option<(egui::Rect, [u32; 2], f32, ResultScale)>,
+    job: Option<solidcraft_engine::render::job::JobId>,
+}
+
+impl ViewFraming {
+    fn new(camera: Camera) -> Self {
+        Self {
+            product: Some(camera),
+            image: Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
+            scale: ResultScale::Fit,
+            domain: None,
+            job: None,
+        }
+    }
+
+    fn read(view: &ViewState) -> Self {
+        Self { product: view.render_camera, image: view.result_camera, scale: view.result_scale, domain: view.result_domain, job: view.result_job }
+    }
+
+    fn apply(self, view: &mut ViewState) {
+        view.render_camera = self.product;
+        view.result_camera = self.image;
+        view.result_scale = self.scale;
+        view.result_domain = self.domain;
+        view.result_job = self.job;
+    }
 }
 
 /// The engine retains terminal failures as metadata only. Keep the submitted handle while
@@ -522,6 +559,8 @@ impl Default for ViewState {
             dirty: false,
             live_paused: false,
             render_camera: None,
+            framing_view: None,
+            framings: Default::default(),
             cpu_sampling_initialized: false,
             clean_setup: None,
             clean_persisted: false,
@@ -752,7 +791,6 @@ pub fn active(app: &SolveApp) -> bool {
 /// Whether a Render tile is visible even with the Design ribbon focused.
 pub(crate) fn tiled(app: &SolveApp) -> bool {
     app.docs.views.is_tiled()
-        && app.session.active_sketch.is_none()
         && app
             .docs
             .views
@@ -764,17 +802,107 @@ pub(crate) fn tiled(app: &SolveApp) -> bool {
 /// Borrow the Render workspace for a card without re-entering the workspace or replacing the
 /// window's Model camera. The caller scopes this view's transient navigation state separately.
 pub(crate) fn with_tile_camera<T>(app: &mut SolveApp, draw: impl FnOnce(&mut SolveApp) -> T) -> T {
-    let camera = app.render_workspace.view.render_camera.unwrap_or(app.cam);
-    let tab = std::mem::replace(&mut app.ui.tab, "RENDER".into());
+    let id = app
+        .viewport
+        .compass_view
+        .filter(|id| crate::view_windows::layout_views(app).iter().any(|(_, view)| view.id == *id && view.kind == solidcraft_views::ViewKind::Render))
+        .or_else(|| (app.docs.views.active().kind == solidcraft_views::ViewKind::Render).then_some(app.docs.views.active().id))
+        .or_else(|| {
+            app.render_workspace
+                .tile_canvas
+                .filter(|(uid, id, _)| {
+                    *uid == app.session.uid
+                        && crate::view_windows::layout_views(app)
+                            .iter()
+                            .any(|(_, view)| view.id == *id && view.kind == solidcraft_views::ViewKind::Render)
+                })
+                .map(|(_, id, _)| id)
+        })
+        .or_else(|| app.docs.views.views().iter().find(|view| view.kind == solidcraft_views::ViewKind::Render).map(|view| view.id));
+    let Some(id) = id else { return draw(app) };
+    let outer = (app.render_workspace.view.framing_view, ViewFraming::read(&app.render_workspace.view));
+    let scoped = app.viewport.compass_view == Some(id);
+    let pending_navigation = app.render_workspace.result_navigation.take();
     let saved = (app.cam, app.ui.perspective, app.ui.up_axis);
+    let camera = crate::view_windows::layout_views(app).into_iter().find(|(_, view)| view.id == id).and_then(|(_, view)| view.spec).map_or_else(
+        || {
+            app.render_workspace
+                .view
+                .framings
+                .get(&id)
+                .and_then(|framing| framing.product)
+                .or_else(|| (outer.0 == Some(id)).then_some(outer.1.product).flatten())
+                .unwrap_or(app.cam)
+        },
+        |spec| spec.camera,
+    );
+    focus_view_framing(app, id);
+    let tab = std::mem::replace(&mut app.ui.tab, "RENDER".into());
     app.cam = camera;
-    app.ui.perspective = camera.fov > 0.0;
-    app.ui.up_axis = camera.up;
+    if scoped {
+        // The view's runtime options may have changed since this camera was
+        // saved. Preserve its authored lens unless projection itself changed.
+        if app.ui.perspective != (app.cam.fov > 0.0) {
+            apply_camera_projection(app);
+        }
+        app.cam.up = app.ui.up_axis;
+    } else {
+        app.ui.perspective = camera.fov > 0.0;
+        app.ui.up_axis = camera.up;
+    }
     let result = draw(app);
-    app.render_workspace.view.render_camera = Some(app.cam);
-    (app.cam, app.ui.perspective, app.ui.up_axis) = saved;
+    park_view_framing(app, id);
+    if outer.0 != Some(id) {
+        outer.1.apply(&mut app.render_workspace.view);
+        app.render_workspace.view.framing_view = outer.0;
+    }
+    if !scoped {
+        crate::view_windows::set_view_camera(app, id, app.cam);
+        (app.cam, app.ui.perspective, app.ui.up_axis) = saved;
+    }
+    app.render_workspace.result_navigation = pending_navigation;
     app.ui.tab = tab;
     result
+}
+
+/// A committed view focus selects its retained framing without re-entering a workspace.
+pub(crate) fn focus_view_framing(app: &mut SolveApp, id: u64) {
+    let open: Vec<_> = crate::view_windows::layout_views(app)
+        .into_iter()
+        .filter(|(_, view)| view.kind == solidcraft_views::ViewKind::Render)
+        .map(|(_, view)| view.id)
+        .collect();
+    if !open.contains(&id) {
+        return;
+    }
+    let view = &mut app.render_workspace.view;
+    view.framings.retain(|id, _| open.contains(id));
+    if view.framing_view == Some(id) {
+        return;
+    }
+    if let Some(previous) = view.framing_view.filter(|previous| open.contains(previous)) {
+        view.framings.insert(previous, ViewFraming::read(view));
+    }
+    let framing = view.framings.get(&id).copied().unwrap_or_else(|| {
+        if view.framing_view.is_none() && view.framings.is_empty() {
+            let mut first = ViewFraming::read(view);
+            first.product = first.product.or(Some(app.cam));
+            first
+        } else {
+            ViewFraming::new(app.cam)
+        }
+    });
+    framing.apply(view);
+    view.framing_view = Some(id);
+}
+
+/// Store only navigation; editing a shot or selecting a result remains design-wide.
+pub(crate) fn park_view_framing(app: &mut SolveApp, id: u64) {
+    let view = &mut app.render_workspace.view;
+    if view.framing_view == Some(id) {
+        view.render_camera = Some(app.cam);
+        view.framings.insert(id, ViewFraming::read(view));
+    }
 }
 
 /// Render paints with the authored lens; apply the navigation bar projection to that camera.
@@ -940,10 +1068,17 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub(crate) fn tick_live(app: &mut SolveApp, ctx: &egui::Context) {
-    let canvas = app.render_workspace.tile_canvas.filter(|(uid, _)| *uid == app.session.uid);
+    let canvas = app.render_workspace.tile_canvas.filter(|(uid, id, _)| {
+        *uid == app.session.uid
+            && app.docs.views.get(*id).is_some_and(|view| view.kind == solidcraft_views::ViewKind::Render)
+            && app.docs.views.tiles().is_some_and(|tiles| tiles.contains(*id))
+    });
+    if !app.home.open && tiled(app) && canvas.is_none() {
+        return;
+    }
     if !app.home.open
         && tiled(app)
-        && let Some((_, rect)) = canvas
+        && let Some((_, _, rect)) = canvas
     {
         let previous = app.viewport.rect.replace(rect);
         if active(app) {
@@ -1027,6 +1162,9 @@ pub(crate) fn entry_open(app: &SolveApp) -> bool {
 
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
+        if app.docs.views.active().kind == solidcraft_views::ViewKind::Render {
+            focus_view_framing(app, app.docs.views.active().id);
+        }
         if !entry_open(app) {
             return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
         }
@@ -2803,7 +2941,8 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn preview_signature(app: &mut SolveApp) -> (u64, usize, u64) {
     let mut visibility = std::collections::hash_map::DefaultHasher::new();
     let v = &app.session.visibility;
-    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.active_sketch).hash(&mut visibility);
+    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.sketching_view, crate::sketch_view::active_sketch(app))
+        .hash(&mut visibility);
     let (doc, world) = (app.session.doc.clone(), crate::open_meshing::session_world(&app.session));
     let signature = (Arc::as_ptr(&doc) as usize as u64, Arc::as_ptr(&world) as usize, visibility.finish());
     app.render_workspace.scene_sources = Some((doc, world));
@@ -3568,18 +3707,28 @@ pub(crate) fn tile_background(app: &SolveApp) -> [egui::Color32; 2] {
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
-    app.render_workspace.tile_canvas = app.viewport.tile.map(|_| (app.session.uid, ui.max_rect()));
+    let painted = app.viewport.compass_view.unwrap_or_else(|| app.docs.views.active().id);
+    if app.viewport.tile.is_some() && (app.docs.views.active().kind != solidcraft_views::ViewKind::Render || painted == app.docs.views.active().id) {
+        app.render_workspace.tile_canvas = Some((app.session.uid, painted, ui.max_rect()));
+    }
+    focus_view_framing(app, painted);
     app.render_workspace.result_navigation = None;
     if app.render_workspace.view.compare.is_some() {
         app.render_workspace.view.environment_ring = environment::RingView::default();
         assign::stop(app);
         compare::show(app, ui);
+        if app.viewport.card {
+            finish_result_navigation(app, ui, ui.max_rect());
+        }
         return;
     }
     if app.render_workspace.view.result {
         app.render_workspace.view.environment_ring = environment::RingView::default();
         assign::stop(app);
         show_result(app, ui);
+        if app.viewport.card {
+            finish_result_navigation(app, ui, ui.max_rect());
+        }
         return;
     }
     let viewport = ui.max_rect();
@@ -3656,7 +3805,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let background = preview_background(app);
     solidcraft_viewport_egui::paint_background(ui.painter(), viewport, background.viewport_top, background.viewport_bottom);
-    if live::has_picture(app) {
+    if live::has_picture(app) && (!tiled(app) || live::picking_current(app)) {
         live::paint(app, ui, rect);
         if live::picking_current(app) {
             paint_product_feedback(app, ui, rect, app.cam);
@@ -3786,6 +3935,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             // Product rendering has its own lighting; AO is a Design viewport setting.
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
             sky: [0.0; 4],
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
@@ -3796,6 +3946,8 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             },
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
         };
         match (feedback, app.viewport.scene_slot()) {
             (true, tile) => {

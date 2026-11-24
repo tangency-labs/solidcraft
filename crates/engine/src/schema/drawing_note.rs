@@ -8,7 +8,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use solidcraft_geom::cell::{Content, Part, Source};
+use solidcraft_geom::cell::{Content, HAlign, Part, Source};
 
 use super::drawing_dimension::{CandidateResult, CornerParam, EdgeParam};
 use super::drawing_sheet::sheet_ref;
@@ -68,6 +68,22 @@ impl JsonSchema for ContentParam {
     }
 }
 
+/// A note's alignment as a command takes it: `left`, `centre` (or `center`) or `right`, the title
+/// block's [`HAlign`]. Present when the key is.
+fn align<'de, D: Deserializer<'de>>(d: D) -> Result<Option<HAlign>, D::Error> {
+    match String::deserialize(d)?.as_str() {
+        "left" => Ok(Some(HAlign::Left)),
+        "centre" | "center" => Ok(Some(HAlign::Centre)),
+        "right" => Ok(Some(HAlign::Right)),
+        other => Err(D::Error::unknown_variant(other, &["left", "centre", "right"])),
+    }
+}
+
+/// The schema of an alignment: a word.
+fn align_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["left", "centre", "center", "right"]})
+}
+
 /// What a note belongs to.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -110,6 +126,11 @@ pub struct AddParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "f64")]
     pub cap_mm: Option<f64>,
+    /// Which end of its text sits at its place: `left` (the default: the note starts where it is placed), `centre` or `right`.
+    /// Each line of a note with several stands the same way: starting at the place for `left`, centred on it for `centre`, ending at it for `right`.
+    #[serde(default, deserialize_with = "align", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "align_schema")]
+    pub align: Option<HAlign>,
     /// More leaders, for a note on a view: 16 leaders in all, its anchor's included.
     #[serde(default)]
     pub branches: Vec<BranchParam>,
@@ -148,6 +169,10 @@ pub struct NoteSet {
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<f64>")]
     pub cap_mm: Option<Option<f64>>,
+    /// Which end of its text sits at its place: `left`, `centre` or `right`.
+    #[serde(default, deserialize_with = "align", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "align_schema")]
+    pub align: Option<HAlign>,
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "BranchesSet")]
     pub branches: Option<BranchesSet>,
@@ -178,8 +203,13 @@ pub struct EditResult {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct NoteResult {
     pub note: String,
-    /// The record, as the drawing saves it.
+    /// The record, as the drawing saves it. It has no `align` for a note saved before alignments.
     pub record: Value,
+    /// Which end of its text sits at its place; absent for a note saved before alignments, whose block is centred
+    /// on it with its lines starting at the block's left edge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "align_schema")]
+    pub align: Option<HAlign>,
     /// `ok`, `ambiguous`, `suppressed` or `lost`. A note that points at nothing is always `ok`.
     pub status: String,
     /// Why it is lost.

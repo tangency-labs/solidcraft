@@ -52,6 +52,7 @@ fn strict_keeps_todays_errors() {
     let cases = [
         ("sketch.line", json!({"points": 5})),
         ("sketch.line", json!({"points": [[0, 0]]})),
+        ("sketch.line", json!({"points": vec![[0, 0]; 10_001]})),
         ("sketch.line", json!({"points": [[0, 0], "zz"]})),
         ("sketch.line", json!({"points": [[0, 0], [1]]})),
         ("sketch.line", json!({"points": [[0, 0], [true, "a"]]})),
@@ -389,6 +390,17 @@ fn slot_replies_include_their_construction_middle() {
 
 fn sorted_keys(v: &Value) -> Option<Vec<&str>> {
     v.as_object().map(|m| m.keys().map(String::as_str).collect())
+}
+
+/// A polyline of more points than one line takes is refused saying so and how many were given,
+/// not as one of too few (10 000 points read "a line needs 2 or more points").
+#[test]
+fn a_line_of_too_many_points_says_how_many() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+    let points: Vec<[f64; 2]> = (0..10_001).map(|i| [f64::from(i), 0.0]).collect();
+    let e = s.execute("sketch.line", &json!({"points": points})).unwrap_err().to_string();
+    assert!(e.contains("a line takes at most 10000 points, 10001 were given"), "{e}");
 }
 
 /// #18756: the corners of the 2-Point Rectangle and the centre and corner of the Center Rectangle

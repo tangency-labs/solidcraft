@@ -1,0 +1,35 @@
+[package]
+name = "ui-kit-gallery"
+description = "The UI kit's live component gallery: every public component of solidcraft-ui-kit in its real states, with what it is for, how to call it and its rules, and a theme panel; on the desktop and in the browser (docs.solidcraft.io/kit/)"
+version.workspace = true
+edition.workspace = true
+# It shows SolidCraft's interface: the kit, the look and the theme are under the SolidCraft Brand
+# and Interface Licence (crates/ui-kit/LICENSE).
+license-file = "../../crates/ui-kit/LICENSE"
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ui-kit-gallery"
+path = "src/main.rs"
+
+[dependencies]
+solidcraft-ui-kit = { workspace = true }
+solidcraft-theme = { workspace = true }
+# SolidCraft's look: icons, glyphs, IBM Plex faces and the built-in themes the theme panel lists.
+solidcraft-look = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+egui = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "clipboard"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "Location"] }

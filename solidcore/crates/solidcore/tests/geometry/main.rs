@@ -33,6 +33,8 @@ mod curve_assert_valid;
 mod curve_length_bound;
 #[path = "../curve_length_holds_its_accuracy.rs"]
 mod curve_length_holds_its_accuracy;
+#[path = "../drop_clamped_sliver.rs"]
+mod drop_clamped_sliver;
 #[path = "../extend_short_arc_long_rulings.rs"]
 mod extend_short_arc_long_rulings;
 #[path = "../face_closest_point_live_box.rs"]
@@ -63,6 +65,8 @@ mod fork_cae8618_l_box_corner_patch;
 mod fork_e36feb1_boundary_row_trim_pace;
 #[path = "../heal_edge_tolerance_covers_edge_face_gap.rs"]
 mod heal_edge_tolerance_covers_edge_face_gap;
+#[path = "../intersect_faces_read_only.rs"]
+mod intersect_faces_read_only;
 #[path = "../iso_curve_continuity.rs"]
 mod iso_curve_continuity;
 #[path = "../issue_1054_tight_box_interval_knots.rs"]
@@ -169,6 +173,8 @@ mod public_scale_ownership;
 mod query_normal_definition;
 #[path = "../section_frames.rs"]
 mod section_frames;
+#[path = "../sphere_drop_spans_certified.rs"]
+mod sphere_drop_spans_certified;
 #[path = "../subdivide_face_v_knots.rs"]
 mod subdivide_face_v_knots;
 #[path = "../tangent_edge.rs"]
