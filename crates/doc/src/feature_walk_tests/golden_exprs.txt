@@ -210,7 +210,11 @@ shaft_spline
     Cutter diameter = shaft_spline.cutter_diameter (Length)
     End chamfer = shaft_spline.end_chamfer (Length)
     Entry chamfer = shaft_spline.entry_chamfer (Length)
-  expressions: shaft_spline.teeth, shaft_spline.length, shaft_spline.module, shaft_spline.pressure_angle, shaft_spline.addendum, shaft_spline.dedendum, shaft_spline.root_fillet, shaft_spline.profile_shift, shaft_spline.thinning, shaft_spline.hub_addendum, shaft_spline.tip_clearance, shaft_spline.form_clearance, shaft_spline.major_diameter, shaft_spline.minor_diameter, shaft_spline.tooth_width, shaft_spline.flank_angle, shaft_spline.root_round, shaft_spline.tip_size, shaft_spline.major_clearance, shaft_spline.minor_clearance, shaft_spline.hub_tip_round, shaft_spline.side_clearance, shaft_spline.hub_root_round, shaft_spline.hub_diameter, shaft_spline.master_angle, shaft_spline.cutter_diameter, shaft_spline.end_chamfer, shaft_spline.entry_chamfer
+    End chamfer distance 2 = shaft_spline.end_chamfer_distance2 (Length)
+    End chamfer angle = shaft_spline.end_chamfer_angle (Angle)
+    Entry chamfer distance 2 = shaft_spline.entry_chamfer_distance2 (Length)
+    Entry chamfer angle = shaft_spline.entry_chamfer_angle (Angle)
+  expressions: shaft_spline.teeth, shaft_spline.length, shaft_spline.module, shaft_spline.pressure_angle, shaft_spline.addendum, shaft_spline.dedendum, shaft_spline.root_fillet, shaft_spline.profile_shift, shaft_spline.thinning, shaft_spline.hub_addendum, shaft_spline.tip_clearance, shaft_spline.form_clearance, shaft_spline.major_diameter, shaft_spline.minor_diameter, shaft_spline.tooth_width, shaft_spline.flank_angle, shaft_spline.root_round, shaft_spline.tip_size, shaft_spline.major_clearance, shaft_spline.minor_clearance, shaft_spline.hub_tip_round, shaft_spline.side_clearance, shaft_spline.hub_root_round, shaft_spline.hub_diameter, shaft_spline.master_angle, shaft_spline.cutter_diameter, shaft_spline.end_chamfer, shaft_spline.entry_chamfer, shaft_spline.end_chamfer_distance2, shaft_spline.end_chamfer_angle, shaft_spline.entry_chamfer_distance2, shaft_spline.entry_chamfer_angle
 loft
 sweep
 sweep_options

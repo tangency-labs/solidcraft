@@ -4519,6 +4519,9 @@ pub(crate) fn card_width(d: &Dialog) -> f32 {
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Room for a corner override's type, Flip and bin on one row.
         t.form_card_width + 2.0 * t.space_24
+    } else if matches!(d.kind, Kind::ShaftSpline(_)) {
+        // Room for a chamfer's type ("Distance and Angle") beside the dialog's long labels.
+        t.form_card_width + 2.0 * t.space_24
     } else {
         t.form_card_width
     }
@@ -4688,8 +4691,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         panel.width((card_width(&d) + label_grow).min(max_width)).grow_label(grow_key)
     };
     let reset_scroll = d.reset_scroll;
-    let panel =
-        panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
+    let panel = panel.reset_scroll(
+        reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. }) | Kind::ShaftSpline(_)),
+    );
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");

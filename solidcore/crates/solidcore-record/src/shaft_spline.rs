@@ -3,6 +3,8 @@
 //! the meaning of each number, every check and every outline are the kernel's.
 use serde::{Deserialize, Serialize};
 
+use crate::{Plane, Seg2, Vec2, Vec3};
+
 /// The kind of teeth of a shaft spline.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -123,6 +125,15 @@ pub struct SplineNumbers {
     pub end_chamfer: Option<f64>,
     /// The chamfer where the teeth run out of a hub's bore.
     pub entry_chamfer: Option<f64>,
+    /// How far the end chamfer runs across the end (mm), where that is not `end_chamfer` itself.
+    pub end_chamfer_distance2: Option<f64>,
+    /// The angle of the end chamfer to the round face (degrees), where it is not 45.
+    pub end_chamfer_angle: Option<f64>,
+    /// How far the entry chamfer runs across the end (mm), where that is not `entry_chamfer`
+    /// itself.
+    pub entry_chamfer_distance2: Option<f64>,
+    /// The angle of the entry chamfer to the bore (degrees), where it is not 45.
+    pub entry_chamfer_angle: Option<f64>,
     /// Whether a hub is made or cut.
     pub with_hub: bool,
     /// Whether a shaft is made or cut.
@@ -334,6 +345,161 @@ pub struct SplinePlan {
     /// The angle of the middle of a tooth that stands, in radians counter-clockwise from the x
     /// axis: tooth 0, or with a master spline the tooth opposite it.
     pub tooth_at: f64,
+    /// The chamfer on the ends of a shaft's teeth as made; none where `end_chamfer` is left out
+    /// or 0.
+    pub end_chamfer: Option<ChamferSize>,
+    /// The chamfer at the entry of a hub's bore as made; none where `entry_chamfer` is left out
+    /// or 0.
+    pub entry_chamfer: Option<ChamferSize>,
+}
+
+/// A chamfer as the numbers make it: how far it runs along the round face, and how far across
+/// the end (mm).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ChamferSize {
+    /// How far it runs along the round face.
+    pub axial: f64,
+    /// How far it runs across the end.
+    pub radial: f64,
+}
+
+/// A round face of a part as numbers: a point on its axis, the axis (a unit vector), its radius,
+/// and where the face starts and ends along the axis, measured from the axis point.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RoundFace {
+    /// A point on its axis.
+    pub axis_point: Vec3,
+    /// The axis, a unit vector.
+    pub axis: Vec3,
+    /// Its radius.
+    pub radius: f64,
+    /// Where the face starts along the axis.
+    pub start: f64,
+    /// Where the face ends along the axis.
+    pub end: f64,
+}
+
+/// Where a spline sits on a round face.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SeatFrame {
+    /// The plane square to the axis at the free end: its x is angle 0, its normal (x cross y) the
+    /// axis as the world axes orient it.
+    pub plane: Plane,
+    /// 1.0 when the face runs on from the free end along the plane's normal, -1.0 when against it.
+    pub inward: f64,
+    /// The length of the face along its axis (`end - start`).
+    pub room: f64,
+    /// The pick, brought onto the face's cylinder along its radius.
+    pub at: Vec3,
+}
+
+/// Why a round face gives no seat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeatRefusal {
+    /// The axis has no direction.
+    NoDirection,
+    /// No plane square to the axis can be made.
+    NoPlane,
+    /// The face has no length or no radius.
+    NoSize,
+}
+
+/// How one line or axis lies to another.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AxisGap {
+    /// The length of the cross product of the two directions (0 when parallel).
+    pub lean: f64,
+    /// The distance of the point from the axis line.
+    pub off: f64,
+}
+
+/// A chord against an axis.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ChordGap {
+    /// The chord's length.
+    pub length: f64,
+    /// The length of the cross product of the chord with the axis.
+    pub lean: f64,
+}
+
+/// A piece of an outline as it lies in the whole loop.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LoopPiece {
+    /// An arc about the axis on the outline's largest circle.
+    pub top: bool,
+    /// What the piece is.
+    pub role: ToothRole,
+    /// The angle of its middle, where it is a top (else 0 plus the tooth's turn).
+    pub middle: f64,
+    /// The angle of its start, where its first segment is a free-form curve that starts on the
+    /// largest circle.
+    pub corner: Option<f64>,
+    /// The first of the loop's segments that are its.
+    pub first: usize,
+    /// How many of the loop's segments are its.
+    pub segs: usize,
+}
+
+/// A whole outline as one closed loop of profile segments.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutlineLoop {
+    /// The segments, counter-clockwise.
+    pub segs: Vec<Seg2>,
+    /// Where two segments of one curve meet.
+    pub joints: Vec<Vec2>,
+    /// The pieces of the outline, in the loop's order.
+    pub pieces: Vec<LoopPiece>,
+}
+
+/// The section a cutter takes out of one tooth space where it leaves the shaft.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CutterSection {
+    /// The floor's spans in the floor's order, then three lines: the wall above the tooth before
+    /// the space, the top, the wall above the tooth after it.
+    pub segs: Vec<Seg2>,
+    /// How many of `segs` each piece of the space's floor became, in the floor's order (0 for a
+    /// piece too short to draw).
+    pub spans: Vec<usize>,
+    /// The angle of the space's middle line.
+    pub middle: f64,
+    /// The corner of the tooth before the space, as it lies with the middle line on angle 0.
+    pub from: [f64; 2],
+    /// The corner of the tooth after the space, as it lies with the middle line on angle 0.
+    pub to: [f64; 2],
+    /// Where two spans of one curve meet.
+    pub joints: Vec<Vec2>,
+    /// A point of the cutter's axis in the section's plane.
+    pub axis_at: Vec2,
+    /// The direction of the cutter's axis in the section's plane.
+    pub axis_dir: Vec2,
+}
+
+/// A chamfer at an end of a round face: the corner it takes off lies at `radius`, `past` beyond
+/// the face's own end.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EndChamfer {
+    /// The radius of the round face: the tops of a shaft's teeth, of a hub's.
+    pub radius: f64,
+    /// How far the chamfer runs across the end.
+    pub radial: f64,
+    /// How far the chamfer runs along the face.
+    pub axial: f64,
+    /// How far past the face's end the body's own end lies.
+    pub past: f64,
+    /// At a step: the tool stops at the end, and at this radius where the chamfer would run
+    /// deeper than the step.
+    pub flush: Option<f64>,
+}
+
+/// The section of a chamfer's tool in a plane through the axis, counter-clockwise, and which of
+/// its sides is the slope.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChamferSection {
+    /// The corners of the section.
+    pub points: Vec<Vec2>,
+    /// The side from `points[slope]` to the next corner is the slope.
+    pub slope: usize,
 }
 
 /// One tooth space of a shaft as a region closed above by a circle about the axis: what a cutter

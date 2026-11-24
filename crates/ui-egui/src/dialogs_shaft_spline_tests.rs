@@ -14,12 +14,28 @@ fn values(h: &mut Harness) -> Spline {
     spline(h).clone()
 }
 
-/// Unfolds the Master spline section when it is folded: its check box is then not drawn.
-fn open_master(h: &mut Harness) {
-    if handle_at("dialog:shaft_spline:master").is_none() {
-        h.step(&json!({"click": {"handle": "dialog:section:shaft_spline.master"}})).unwrap();
+/// Unfolds the section titled `title` when it is folded, which `shown` says by what the section draws only while
+/// it is open.
+fn unfold(h: &mut Harness, title: &str, shown: impl Fn() -> bool) {
+    if !shown() {
+        h.step(&json!({"click": {"handle": format!("dialog:section:{title}")}})).unwrap();
         h.frames(2);
     }
+}
+
+/// Unfolds the Master spline section when it is folded: its check box is then not drawn.
+fn open_master(h: &mut Harness) {
+    unfold(h, "shaft_spline.master", || handle_at("dialog:shaft_spline:master").is_some());
+}
+
+/// Unfolds the Tip corners section when it is folded: its Corners row is then not drawn.
+fn open_corners(h: &mut Harness) {
+    unfold(h, "shaft_spline.tip_corners", || rect_of("dialog:row:shaft_spline.corners").is_some());
+}
+
+/// Unfolds the Chamfers section when it is folded: the End chamfer row is then not drawn.
+fn open_chamfers(h: &mut Harness) {
+    unfold(h, "shaft_spline.chamfers", || handle_at("dialog:shaft_spline:end_chamfer").is_some());
 }
 
 fn open() -> Harness {
@@ -86,6 +102,10 @@ fn each_type_shows_its_rows_and_hides_the_others() {
     for kind in 0..3 {
         spline(&mut h).kind = kind;
         h.frames(3);
+        // The Tip corners of straight-sided teeth and serrations start folded.
+        if kind != 0 {
+            open_corners(&mut h);
+        }
         let now = values(&mut h);
         let sent = commands(&h.app, &now).unwrap_or_else(|e| panic!("kind {kind}: {e}"));
         let (_, p) = &sent[0];
@@ -616,5 +636,117 @@ fn the_size_that_fits_a_shaft_is_the_kernels_and_a_diameter_that_is_no_size_make
     assert!(module.is_some_and(|m| (m - 30.0 / 21.0).abs() < 1e-12), "{module:?}");
     for diameter in [0.0, -30.0, f64::NAN, f64::INFINITY] {
         assert_eq!(s.size_fitting(&doc, 0, diameter), None, "{diameter}");
+    }
+}
+
+/// The numbers that size the teeth are on top; the rest of the tooth's form and the chamfers fold away in groups of
+/// their own. The Chamfers group starts folded and holds each chamfer of a part cut or made: its size, its Type,
+/// and the row the type adds.
+#[test]
+fn the_chamfers_fold_in_a_group_of_their_own_with_a_type_and_its_row() {
+    let mut h = open();
+    for key in ["length", "module", "pressure_angle", "addendum", "thinning"] {
+        assert!(handle_at(&format!("dialog:shaft_spline:{key}")).is_some(), "{key}");
+    }
+    // A shaft alone: its End chamfer, folded away until the group is opened.
+    assert!(handle_at("dialog:shaft_spline:end_chamfer").is_none(), "the Chamfers group starts folded");
+    open_chamfers(&mut h);
+    let shown = |key: &str| handle_at(&format!("dialog:shaft_spline:{key}")).is_some();
+    assert!(shown("end_chamfer") && shown("end_chamfer_type"));
+    assert!(!shown("end_chamfer_distance2") && !shown("end_chamfer_angle"), "Equal Distance adds no row");
+    assert!(!shown("entry_chamfer") && !shown("entry_chamfer_type"), "no hub, no entry chamfer");
+    spline(&mut h).end_chamfer_type = 1;
+    h.frames(2);
+    assert!(shown("end_chamfer_distance2") && !shown("end_chamfer_angle"), "Two Distances: a second distance");
+    spline(&mut h).end_chamfer_type = 2;
+    h.frames(2);
+    assert!(!shown("end_chamfer_distance2") && shown("end_chamfer_angle"), "Distance and Angle: an angle");
+    // The shaft and its hub: both chamfers, each with its own Type.
+    spline(&mut h).make = 2;
+    spline(&mut h).entry_chamfer_type = 1;
+    h.frames(2);
+    assert!(shown("end_chamfer_angle") && shown("entry_chamfer") && shown("entry_chamfer_type") && shown("entry_chamfer_distance2"));
+    // The angle starts where the Chamfer tool's does.
+    assert_eq!(spline(&mut h).end_chamfer_angle, "45 deg");
+}
+
+/// Each chamfer sends the row its Type adds, and only with the chamfer itself: a second distance for Two
+/// Distances, an angle for Distance and Angle, nothing more for Equal Distance. A row that is not a value is
+/// refused naming its key while it is sent.
+#[test]
+fn each_chamfer_type_sends_its_own_row_and_only_with_its_chamfer() {
+    let doc = Document::default();
+    let length = |text: &str| json!(crate::length_input::expression(&doc, text, ValueKind::Length));
+    let angle = |text: &str| json!(crate::length_input::expression(&doc, text, ValueKind::Angle));
+    let mut s = Spline::new(&doc);
+    s.kind = 1;
+    s.make = 2;
+    s.end_chamfer = "0.5 mm".into();
+    s.entry_chamfer = "0.4 mm".into();
+    s.end_chamfer_distance2 = "0.4 mm".into();
+    s.end_chamfer_angle = "30 deg".into();
+    s.entry_chamfer_distance2 = "0.3 mm".into();
+    s.entry_chamfer_angle = "40 deg".into();
+    let keys = ["end_chamfer_distance2", "end_chamfer_angle", "entry_chamfer_distance2", "entry_chamfer_angle"];
+    for (kind, sent) in [
+        (0, [None, None, None, None]),
+        (1, [Some(length("0.4 mm")), None, Some(length("0.3 mm")), None]),
+        (2, [None, Some(angle("30 deg")), None, Some(angle("40 deg"))]),
+    ] {
+        s.end_chamfer_type = kind;
+        s.entry_chamfer_type = kind;
+        let p = s.command_params(&doc, Picks::default()).unwrap_or_else(|b| panic!("type {kind}: {b:?}"));
+        for (key, want) in keys.iter().zip(&sent) {
+            assert_eq!(p.get(*key), want.as_ref(), "type {kind}: {key}: {p}");
+        }
+        assert_eq!((p.get("end_chamfer").cloned(), p.get("entry_chamfer").cloned()), (Some(length("0.5 mm")), Some(length("0.4 mm"))), "{p}");
+    }
+    // No chamfer, no row of its type: a plain 0, or a part not made.
+    s.end_chamfer_type = 1;
+    s.entry_chamfer_type = 2;
+    s.end_chamfer = "0".into();
+    s.make = 0;
+    let p = s.command_params(&doc, Picks::default()).unwrap();
+    assert!(keys.iter().all(|k| p.get(*k).is_none()), "{p}");
+    // A row that is not a value is refused with its key, only while it is sent.
+    let key = |r: Result<Value, Bad>| r.err().and_then(|b| b.key);
+    s.end_chamfer = "0.5 mm".into();
+    s.end_chamfer_distance2 = "far".into();
+    assert_eq!(key(s.command_params(&doc, Picks::default())).as_deref(), Some("end_chamfer_distance2"));
+    s.end_chamfer_type = 0;
+    assert!(s.command_params(&doc, Picks::default()).is_ok(), "Equal Distance does not send the second distance");
+    s.make = 2;
+    s.entry_chamfer_angle = String::new();
+    assert_eq!(key(s.command_params(&doc, Picks::default())).as_deref(), Some("entry_chamfer_angle"));
+}
+
+/// A saved spline opens again with each chamfer's Type the one its numbers say, its rows as saved, and sends
+/// the same chamfers again.
+#[test]
+fn a_saved_spline_opens_again_with_each_chamfer_type() {
+    for kind in 0..3 {
+        let mut h = Harness::new();
+        let doc = &h.app.session.doc;
+        let mut s = Spline::new(doc);
+        s.kind = 1;
+        s.make = 2;
+        s.end_chamfer = "0.5 mm".into();
+        s.entry_chamfer = "0.4 mm".into();
+        s.end_chamfer_distance2 = "0.4 mm".into();
+        s.end_chamfer_angle = "30 deg".into();
+        s.entry_chamfer_distance2 = "0.3 mm".into();
+        s.entry_chamfer_angle = "40 deg".into();
+        s.end_chamfer_type = kind;
+        s.entry_chamfer_type = kind;
+        let p = s.command_params(doc, Picks::default()).unwrap_or_else(|b| panic!("type {kind}: {b:?}"));
+        h.app.run(COMMAND, p.clone()).unwrap_or_else(|e| panic!("type {kind}: {p}: {e}"));
+        let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+        let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+        let Kind::ShaftSpline(k) = &reopened.kind else { panic!("not a Shaft Spline dialog: {:?}", reopened.kind) };
+        assert_eq!((k.end_chamfer_type, k.entry_chamfer_type), (kind, kind), "type {kind}");
+        let again = k.command_params(&h.app.session.doc, Picks::default()).unwrap_or_else(|b| panic!("type {kind}: {b:?}"));
+        for key in ["end_chamfer", "entry_chamfer", "end_chamfer_distance2", "end_chamfer_angle", "entry_chamfer_distance2", "entry_chamfer_angle"] {
+            assert_eq!(again.get(key), p.get(key), "type {kind}: {key}: {again} vs {p}");
+        }
     }
 }

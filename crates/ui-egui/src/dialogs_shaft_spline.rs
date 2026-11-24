@@ -1,8 +1,9 @@
 //! Shaft Spline (`shaft_spline.insert`): a spline cut into a picked shaft, a picked bore or both,
 //! or, with nothing picked, a new splined shaft, the hub that fits it, or both, with an optional
 //! master spline. Two optional picks (Shaft, Bore), then the kind of teeth and what to make, the
-//! numbers of that kind, the fit, the tip corners, the master spline, the hub's outside and the
-//! groove ends, each row one parameter of the command. The rows are sent as typed, so the
+//! count, the length and the numbers that size the teeth; under them, in groups that fold, the rest
+//! of the tooth's form, the fit, the tip corners, the chamfers, the groove ends, the master spline
+//! and the hub's outside, each row one parameter of the command. The rows are sent as typed, so the
 //! feature's numbers stay parameters. A drawing at the top shows the outlines the command would
 //! make, worked out by the engine's own preview ([`shaft_spline_preview`]) from the rows' values,
 //! the same function the command runs before it builds, so the dialog refuses what the command
@@ -25,7 +26,7 @@ use solidcraft_theme::Tokens;
 use solidcraft_ui_text::{format, tr};
 
 use crate::SolveApp;
-use crate::dialogs::{Dialog, Kind, face_sel, face_sel_on, form_row, named_refill, shown_expr};
+use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind, face_sel, face_sel_on, form_row, named_refill, shown_expr};
 use crate::selection::{FACES, SelInput, point_value as pt};
 use crate::ui_kit::BackingTooltipExt as _;
 
@@ -289,6 +290,43 @@ const CUTTER: Field = field("shaft_spline.cutter_diameter", "cutter_diameter", U
 const END_CHAMFER: Field = field("shaft_spline.end_chamfer", "end_chamfer", Unit::Length, "shaft_spline.end_chamfer_help");
 const ENTRY_CHAMFER: Field = field("shaft_spline.entry_chamfer", "entry_chamfer", Unit::Length, "shaft_spline.entry_chamfer_help");
 
+/// A chamfer's rows: its size, its Type (the key of the choice's handle) and the row each type past Equal Distance
+/// adds under it.
+#[derive(Clone, Copy, Debug)]
+struct ChamferRows {
+    size: Field,
+    choice: &'static str,
+    distance2: Field,
+    angle: Field,
+}
+
+impl ChamferRows {
+    /// The row a chamfer of type `kind` (an index into [`CHAMFER_TYPES`]) adds under its size: a second distance
+    /// for Two Distances, an angle for Distance and Angle, none for Equal Distance.
+    fn second(&self, kind: usize) -> Option<Field> {
+        match kind {
+            1 => Some(self.distance2),
+            2 => Some(self.angle),
+            _ => None,
+        }
+    }
+}
+
+/// The chamfer on the ends of the shaft's teeth.
+const END_CHAMFERS: ChamferRows = ChamferRows {
+    size: END_CHAMFER,
+    choice: "end_chamfer_type",
+    distance2: field("ui.distance_2", "end_chamfer_distance2", Unit::Length, "shaft_spline.end_chamfer_distance2_help"),
+    angle: field("ui.angle", "end_chamfer_angle", Unit::Angle, "shaft_spline.end_chamfer_angle_help"),
+};
+/// The chamfer at the entries of the hub's bore.
+const ENTRY_CHAMFERS: ChamferRows = ChamferRows {
+    size: ENTRY_CHAMFER,
+    choice: "entry_chamfer_type",
+    distance2: field("ui.distance_2", "entry_chamfer_distance2", Unit::Length, "shaft_spline.entry_chamfer_distance2_help"),
+    angle: field("ui.angle", "entry_chamfer_angle", Unit::Angle, "shaft_spline.entry_chamfer_angle_help"),
+};
+
 /// The label of the Teeth row.
 const TEETH_LABEL: &str = "shaft_spline.teeth";
 
@@ -341,6 +379,17 @@ pub struct Spline {
     pub end_chamfer: String,
     /// The chamfer at the entry of a picked bore, as typed (0: none).
     pub entry_chamfer: String,
+    /// How the end chamfer is set, an index into [`CHAMFER_TYPES`]: as far across the end as along the teeth (45
+    /// degrees), a second distance across the end, or an angle to the round face.
+    pub end_chamfer_type: usize,
+    /// How far the end chamfer reaches across the end, as typed (Two Distances).
+    pub end_chamfer_distance2: String,
+    /// The end chamfer's angle to the round face, as typed (Distance and Angle).
+    pub end_chamfer_angle: String,
+    /// The same three for the entry chamfer.
+    pub entry_chamfer_type: usize,
+    pub entry_chamfer_distance2: String,
+    pub entry_chamfer_angle: String,
     /// Whether the spline keeps a picked shaft's own diameter: the Module (involute teeth) or the
     /// Major diameter (straight-sided teeth, serrations) is then worked out from the shaft and not
     /// sent, so the command takes the shaft's diameter. Off to start with: the size row is then a
@@ -452,6 +501,12 @@ impl Spline {
             cutter_diameter: mm(40.0),
             end_chamfer: mm(0.0),
             entry_chamfer: mm(0.0),
+            end_chamfer_type: 0,
+            end_chamfer_distance2: mm(0.5),
+            end_chamfer_angle: deg(45.0),
+            entry_chamfer_type: 0,
+            entry_chamfer_distance2: mm(0.5),
+            entry_chamfer_angle: deg(45.0),
             fit: false,
             started_size: [Some(mm(1.5)), Some(mm(28.0)), Some(mm(20.0))],
             shaft_radius: None,
@@ -473,6 +528,10 @@ impl Spline {
             "cutter_diameter" => &self.cutter_diameter,
             "end_chamfer" => &self.end_chamfer,
             "entry_chamfer" => &self.entry_chamfer,
+            "end_chamfer_distance2" => &self.end_chamfer_distance2,
+            "end_chamfer_angle" => &self.end_chamfer_angle,
+            "entry_chamfer_distance2" => &self.entry_chamfer_distance2,
+            "entry_chamfer_angle" => &self.entry_chamfer_angle,
             _ => self.values.get(self.kind).and_then(|v| v.get(key)).map_or("", String::as_str),
         }
     }
@@ -485,6 +544,10 @@ impl Spline {
             "cutter_diameter" => self.cutter_diameter = text.to_string(),
             "end_chamfer" => self.end_chamfer = text.to_string(),
             "entry_chamfer" => self.entry_chamfer = text.to_string(),
+            "end_chamfer_distance2" => self.end_chamfer_distance2 = text.to_string(),
+            "end_chamfer_angle" => self.end_chamfer_angle = text.to_string(),
+            "entry_chamfer_distance2" => self.entry_chamfer_distance2 = text.to_string(),
+            "entry_chamfer_angle" => self.entry_chamfer_angle = text.to_string(),
             _ => {
                 if let Some(known) = ALL_KEYS.iter().find(|k| **k == key)
                     && let Some(values) = self.values.get_mut(self.kind)
@@ -504,6 +567,10 @@ impl Spline {
             "cutter_diameter" => &mut self.cutter_diameter,
             "end_chamfer" => &mut self.end_chamfer,
             "entry_chamfer" => &mut self.entry_chamfer,
+            "end_chamfer_distance2" => &mut self.end_chamfer_distance2,
+            "end_chamfer_angle" => &mut self.end_chamfer_angle,
+            "entry_chamfer_distance2" => &mut self.entry_chamfer_distance2,
+            "entry_chamfer_angle" => &mut self.entry_chamfer_angle,
             _ => match self.kind {
                 0 => involute,
                 1 => straight,
@@ -677,15 +744,21 @@ impl Spline {
         // Each chamfer goes with the part it is cut on, unless its row is a plain 0. An expression that works
         // out to 0 today is sent all the same, so the feature keeps it: the rebuild cuts no chamfer of size 0,
         // and one cut later when a parameter it names grows. A negative size is sent, and the command refuses it.
-        for (wanted, f, text) in
-            [(self.has_part(picks, false), END_CHAMFER, &self.end_chamfer), (self.has_part(picks, true), ENTRY_CHAMFER, &self.entry_chamfer)]
-        {
-            if !wanted {
+        // The row its Type adds (a second distance, an angle) goes with the chamfer only; Equal Distance adds none.
+        for (hub, rows, text) in [(false, END_CHAMFERS, &self.end_chamfer), (true, ENTRY_CHAMFERS, &self.entry_chamfer)] {
+            if !self.has_part(picks, hub) {
                 continue;
             }
+            let f = rows.size;
             read(doc, text, f.unit).map_err(|why| bad(f.key, f.label, &why))?;
-            if !plain_zero(text) {
-                p[f.key] = json!(typed(text, f.unit));
+            if plain_zero(text) {
+                continue;
+            }
+            p[f.key] = json!(typed(text, f.unit));
+            if let Some(second) = rows.second(self.chamfer_type(hub)) {
+                let value = self.value(second.key);
+                read(doc, value, second.unit).map_err(|why| bad(second.key, second.label, &why))?;
+                p[second.key] = json!(typed(value, second.unit));
             }
         }
         Ok(p)
@@ -807,6 +880,16 @@ impl Spline {
             // [`MAKES`]: the shaft, the hub, both. A part is made unless Make is the other one alone.
             self.make != usize::from(!hub)
         }
+    }
+
+    /// The Type of the chamfer of a shaft's teeth (`hub`: of a hub's), an index into [`CHAMFER_TYPES`].
+    fn chamfer_type(&self, hub: bool) -> usize {
+        if hub { self.entry_chamfer_type } else { self.end_chamfer_type }
+    }
+
+    /// The same, to change.
+    fn chamfer_type_mut(&mut self, hub: bool) -> &mut usize {
+        if hub { &mut self.entry_chamfer_type } else { &mut self.end_chamfer_type }
     }
 
     /// The refusal of the values as they were last worked out: of the teeth, else of a row that goes to the
@@ -945,6 +1028,10 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         cutter_diameter,
         end_chamfer,
         entry_chamfer,
+        end_chamfer_distance2,
+        end_chamfer_angle,
+        entry_chamfer_distance2,
+        entry_chamfer_angle,
         ..
     } = &feature.kind
     else {
@@ -1031,6 +1118,20 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
     if let Some(e) = entry_chamfer.as_deref() {
         spline.entry_chamfer = text(e, Unit::Length);
     }
+    // Each chamfer's Type follows the number the feature has beside its size: a second distance, an angle, or
+    // neither (Equal Distance). The rows of the other types keep their starting values.
+    spline.end_chamfer_type = chamfer_type_of(end_chamfer_distance2.as_ref(), end_chamfer_angle.as_ref());
+    spline.entry_chamfer_type = chamfer_type_of(entry_chamfer_distance2.as_ref(), entry_chamfer_angle.as_ref());
+    for (key, saved, unit) in [
+        ("end_chamfer_distance2", end_chamfer_distance2, Unit::Length),
+        ("end_chamfer_angle", end_chamfer_angle, Unit::Angle),
+        ("entry_chamfer_distance2", entry_chamfer_distance2, Unit::Length),
+        ("entry_chamfer_angle", entry_chamfer_angle, Unit::Angle),
+    ] {
+        if let Some(e) = saved.as_deref() {
+            spline.set(key, &text(e, unit));
+        }
+    }
     // Face names follow the geometry walk: the shaft's pick and the face its teeth start from, then the
     // bore's two, each when there is one. A round face no name or point finds again is kept as the place
     // saved, to be picked again. A start that no face is found at leaves its row empty (a script may leave
@@ -1079,6 +1180,18 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
     d.kind = Kind::ShaftSpline(Box::new(spline));
 }
 
+/// A saved chamfer's Type, an index into [`CHAMFER_TYPES`]: Two Distances with a second distance, Distance and
+/// Angle with an angle, else Equal Distance.
+fn chamfer_type_of(distance2: Option<&Expr>, angle: Option<&Expr>) -> usize {
+    if distance2.is_some() {
+        1
+    } else if angle.is_some() {
+        2
+    } else {
+        0
+    }
+}
+
 pub fn title() -> &'static str {
     "cmd.shaft_spline_insert"
 }
@@ -1110,6 +1223,14 @@ fn choice(ui: &mut egui::Ui, label: &str, id: &str, selected: &mut usize, option
     let before = *selected;
     crate::ui_kit::choice_row(ui, label, id, selected, options);
     *selected != before
+}
+
+/// A chamfer's Type: the Chamfer tool's types, in its order. The row under it follows the choice.
+fn chamfer_type_row(ui: &mut egui::Ui, selected: &mut usize, rows: &ChamferRows) {
+    let response = crate::ui_kit::choice_row(ui, "shaft_spline.chamfer_type", &format!("ss_{}", rows.choice), selected, &CHAMFER_TYPES);
+    let centre = response.rect.center();
+    response.backing_on_hover_text(tr("shaft_spline.chamfer_type_help"));
+    crate::scenario::publish_handle(&format!("dialog:shaft_spline:{}", rows.choice), centre);
 }
 
 /// The dialog's rows (under the pick inputs, which the dialog shows itself): the drawing, the
@@ -1170,25 +1291,31 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, s: &mut Spline, inputs: &[SelInpu
         1 => &STRAIGHT,
         _ => &SERRATION,
     };
+    // On top, after the Length, the numbers that size the teeth: the Module and the Pressure angle of involute
+    // teeth, the two diameters and the Tooth width or the Flank angle of the others. The rest of the tooth's form
+    // folds away under them.
+    let sizing = if s.kind == 0 { 2 } else { 3 };
+    let no_rows: &[Field] = &[];
+    let (sizes, form) = shaft.split_at_checked(sizing).unwrap_or((shaft, no_rows));
     // Keeping the shaft's diameter, the row it sets shows the number that fits, not to be typed.
     let fitting = s.fit_radius(picks).is_some();
     let fitted = s.fitted(doc, picks);
     let fit_key = s.fit_field().key;
-    // After the Length, the spline's own chamfers: on the ends of the shaft's teeth, at the entries of the hub's
-    // bore, each where that part is cut or made. Then the numbers of the teeth.
-    let mut ends: Vec<&Field> = vec![&LENGTH];
-    if s.has_part(picks, false) {
-        ends.push(&END_CHAMFER);
-    }
-    if s.has_part(picks, true) {
-        ends.push(&ENTRY_CHAMFER);
-    }
-    for f in ends.into_iter().chain(shaft) {
+    for f in std::iter::once(&LENGTH).chain(sizes) {
         if fitting && f.key == fit_key {
             fitted_row(ui, *f, fitted.map(|v| crate::length_input::shown(doc, v)), is(f.key));
             continue;
         }
         enter |= number_row(ui, s, *f, is(f.key));
+    }
+    if let Some(e) = crate::ui_kit::section(ui, "ss_form", "shaft_spline.tooth_form", true, |ui| {
+        let mut enter = false;
+        for f in form {
+            enter |= number_row(ui, s, *f, is(f.key));
+        }
+        enter
+    }) {
+        enter |= e;
     }
     let straight = s.kind != 0;
     let fit: &[Field] = if straight { &FIT_STRAIGHT } else { &FIT_INVOLUTE };
@@ -1202,13 +1329,46 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, s: &mut Spline, inputs: &[SelInpu
         enter |= e;
     }
     if straight
-        && let Some(e) = crate::ui_kit::section(ui, "ss_corners", "shaft_spline.tip_corners", true, |ui| {
+        && let Some(e) = crate::ui_kit::section(ui, "ss_corners", "shaft_spline.tip_corners", false, |ui| {
             let corners: Vec<&str> = CORNERS.iter().map(|c| c.1).collect();
             let kind = s.kind;
             if let Some(corner) = s.corner.get_mut(kind) {
                 choice(ui, "shaft_spline.corners", "ss_corner", corner, &corners);
             }
             if s.corner.get(kind).is_some_and(|c| *c != 0) { number_row(ui, s, TIP_SIZE, is(TIP_SIZE.key)) } else { false }
+        })
+    {
+        enter |= e;
+    }
+    // The spline's own chamfers, each where its part is cut or made: on the ends of the shaft's teeth, at the
+    // entries of the hub's bore. Each has its size, its Type and the row the type adds.
+    let chamfers: Vec<(bool, ChamferRows)> =
+        [(false, END_CHAMFERS), (true, ENTRY_CHAMFERS)].into_iter().filter(|(hub, _)| s.has_part(picks, *hub)).collect();
+    if !chamfers.is_empty()
+        && let Some(e) = crate::ui_kit::section(ui, "ss_chamfers", "shaft_spline.chamfers", false, |ui| {
+            let mut enter = false;
+            for (hub, rows) in chamfers {
+                enter |= number_row(ui, s, rows.size, is(rows.size.key));
+                chamfer_type_row(ui, s.chamfer_type_mut(hub), &rows);
+                if let Some(second) = rows.second(s.chamfer_type(hub)) {
+                    enter |= number_row(ui, s, second, is(second.key));
+                }
+            }
+            enter
+        })
+    {
+        enter |= e;
+    }
+    // On a picked shaft each tooth space can end in the curve the cutter leaves.
+    if picks.shaft.is_some()
+        && let Some(e) = crate::ui_kit::section(ui, "ss_groove", "shaft_spline.groove_end", false, |ui| {
+            form_row(ui, "", |ui| {
+                let r = crate::ui_kit::checkbox(ui, tr("shaft_spline.cutter_round"), &mut s.cutter);
+                let rect = r.rect;
+                r.backing_on_hover_text(tr("shaft_spline.cutter_round_help"));
+                crate::scenario::publish_handle("dialog:shaft_spline:cutter", rect.center());
+            });
+            if s.cutter { number_row(ui, s, CUTTER, is(CUTTER.key)) } else { false }
         })
     {
         enter |= e;
@@ -1238,19 +1398,6 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, s: &mut Spline, inputs: &[SelInpu
         && let Some(e) = crate::ui_kit::section(ui, "ss_hub", "shaft_spline.hub", true, |ui| number_row(ui, s, HUB_DIAMETER, is(HUB_DIAMETER.key)))
     {
         enter |= e;
-    }
-    // On a picked shaft each tooth space can end in the curve the cutter leaves.
-    if picks.shaft.is_some() {
-        crate::ui_kit::section_heading(ui, "shaft_spline.groove_end");
-        form_row(ui, "", |ui| {
-            let r = crate::ui_kit::checkbox(ui, tr("shaft_spline.cutter_round"), &mut s.cutter);
-            let rect = r.rect;
-            r.backing_on_hover_text(tr("shaft_spline.cutter_round_help"));
-            crate::scenario::publish_handle("dialog:shaft_spline:cutter", rect.center());
-        });
-        if s.cutter {
-            enter |= number_row(ui, s, CUTTER, is(CUTTER.key));
-        }
     }
     readouts(ui, doc, s);
     // A changed value is worked out on the next frame, which this asks for.
@@ -1434,8 +1581,8 @@ fn circle_points(place: &Place, r: f64, rect: Rect) -> Vec<Pos2> {
     // Across the view from its centre: the arc that can be seen, with some to spare.
     let seen = (f64::from(rect.width().max(rect.height())) / place.scale).max(0.0);
     let half = if r > 0.0 && !whole { (seen / r).min(std::f64::consts::PI) } else { std::f64::consts::PI };
-    let at = place.centre[1].atan2(place.centre[0]);
-    let at = if whole { 0.0 } else { at };
+    // A close-up is centred on the direction that points up in it.
+    let at = if whole { 0.0 } else { place.up };
     let steps = 160;
     (0..=steps).map(|k| place.at(polar(r, at - half + 2.0 * half * f64::from(k) / f64::from(steps)))).collect()
 }

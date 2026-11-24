@@ -178,18 +178,41 @@ pub struct ShaftSplineParams {
     /// Without it the spaces end square. Only with `shaft_face`, and more than twice the depth of the teeth.
     #[serde(default)]
     pub cutter_diameter: Option<LengthExpr>,
-    /// A chamfer of this size, at 45 degrees, on the ends of the shaft's teeth. On a picked shaft: on the end
-    /// the teeth start from, and on the far end where the teeth run the whole face. On a new shaft: on both
-    /// ends. The spline cuts it itself, so it is made again at the shaft's size and tooth count whenever they
-    /// change. Without it the teeth end square. Only when a shaft is cut or made.
-    #[serde(default)]
-    pub end_chamfer: Option<LengthExpr>,
-    /// A chamfer of this size, at 45 degrees, where the teeth run out of the hub's bore, out from the tops of
-    /// the hub's teeth. In a picked bore: at the entry the teeth start from, and at the far end where the teeth
-    /// run the whole bore. In a new hub: at both ends. Without it the hub's teeth end square. Only when a hub
+    /// A chamfer on the ends of the shaft's teeth, running this far along the shaft. Alone it is at 45 degrees
+    /// and runs as far in from the major diameter; `end_chamfer_distance2` or `end_chamfer_angle` sets how far
+    /// in it runs. On a picked shaft: on the end the teeth start from, and on the far end where the teeth run
+    /// the whole face. On a new shaft: on both ends. The spline cuts it itself, so it is made again at the
+    /// shaft's size and tooth count whenever they change. Without it the teeth end square. Only when a shaft
     /// is cut or made.
     #[serde(default)]
+    pub end_chamfer: Option<LengthExpr>,
+    /// A chamfer where the teeth run out of the hub's bore, running this far into the bore. Alone it is at 45
+    /// degrees and runs as far out from the tops of the hub's teeth; `entry_chamfer_distance2` or
+    /// `entry_chamfer_angle` sets how far out it runs. In a picked bore: at the entry the teeth start from, and
+    /// at the far end where the teeth run the whole bore. In a new hub: at both ends. Without it the hub's
+    /// teeth end square. Only when a hub is cut or made.
+    #[serde(default)]
     pub entry_chamfer: Option<LengthExpr>,
+    /// The End chamfer as two distances: how far in from the major diameter it runs, more than 0 and at most
+    /// 100000 mm (`end_chamfer` is how far along the shaft). Only with `end_chamfer`, and not with
+    /// `end_chamfer_angle`.
+    #[serde(default)]
+    pub end_chamfer_distance2: Option<LengthExpr>,
+    /// The End chamfer as a distance and an angle: its slope to the shaft's surface, above 0 and below 90
+    /// degrees, so it runs `end_chamfer` times the angle's tangent in from the major diameter. Only with
+    /// `end_chamfer`, and not with `end_chamfer_distance2`.
+    #[serde(default)]
+    pub end_chamfer_angle: Option<AngleExpr>,
+    /// The Entry chamfer as two distances: how far out from the tops of the hub's teeth it runs, more than 0
+    /// and at most 100000 mm (`entry_chamfer` is how far into the bore). Only with `entry_chamfer`, and not
+    /// with `entry_chamfer_angle`.
+    #[serde(default)]
+    pub entry_chamfer_distance2: Option<LengthExpr>,
+    /// The Entry chamfer as a distance and an angle: its slope to the bore's surface, above 0 and below 90
+    /// degrees, so it runs `entry_chamfer` times the angle's tangent out from the tops of the hub's teeth.
+    /// Only with `entry_chamfer`, and not with `entry_chamfer_distance2`.
+    #[serde(default)]
+    pub entry_chamfer_angle: Option<AngleExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

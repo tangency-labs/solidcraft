@@ -28,7 +28,7 @@
 //! | [`nurbs::NurbsFailure`], [`nurbs::BSplineFailure`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`): the `NL_*_ERR` numbers, in solidcore's terms |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
-//! | [`teeth::TeethFailure`], [`teeth::Why`], [`teeth::PlanRefusal`] | none: why numbers give no teeth, and the shaft-spline planner's refusals |
+//! | [`teeth::TeethFailure`], [`teeth::Why`], [`teeth::PlanRefusal`], [`teeth::ProfileWhy`] | none: why numbers give no teeth, and the shaft-spline planner's refusals |
 //! | [`curve::CurveFailure`]     | none: why a curve query refuses, and the curve routines' failures |
 //! | [`query::QueryFailure`]     | none: the query routines' failures               |
 //! | [`topology::TopologyFailure`] | none: the topology routines' failures          |

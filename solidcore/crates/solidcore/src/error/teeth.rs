@@ -564,6 +564,64 @@ pub enum PlanRefusal {
         /// The diameter the hub's must be larger than, in mm.
         at_least: f64,
     },
+    /// A second distance or an angle of a chamfer was given, but not the chamfer itself.
+    ChamferShapeWithout {
+        /// The number given, `end_chamfer_distance2` for example.
+        key: &'static str,
+        /// The chamfer it shapes, `end_chamfer` or `entry_chamfer`.
+        chamfer: &'static str,
+    },
+    /// Both a second distance and an angle were given for one chamfer.
+    ChamferBothShapes {
+        /// The chamfer's second distance, `end_chamfer_distance2` or `entry_chamfer_distance2`.
+        distance2: &'static str,
+        /// The chamfer's angle, `end_chamfer_angle` or `entry_chamfer_angle`.
+        angle: &'static str,
+        /// The chamfer, `end_chamfer` or `entry_chamfer`.
+        chamfer: &'static str,
+    },
+    /// A chamfer's second distance is not more than 0, or more than what is taken.
+    ChamferDistanceRange {
+        /// The second distance's key.
+        key: &'static str,
+        /// The largest distance taken, in mm.
+        most: f64,
+        /// What was given.
+        value: f64,
+    },
+    /// A chamfer's angle is not between 0 and 90 degrees.
+    ChamferAngleRange {
+        /// The angle's key.
+        key: &'static str,
+        /// What was given, in degrees.
+        value: f64,
+    },
+    /// A tooth space is too wide for its end to follow the cutter's curve.
+    CutterSpaceTooWide,
+    /// The outline cannot be made into a profile of lines, arcs and Bezier pieces.
+    NotAProfile(ProfileWhy),
+}
+
+/// Why a tooth outline cannot be made into a profile of lines, arcs and Bezier pieces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ProfileWhy {
+    /// A Bezier piece of a spline has more control points than a profile segment holds.
+    DegreeTooHigh,
+    /// A curve of the outline is held as points only, not fitted as a spline.
+    NotFitted,
+    /// A spline of the outline cannot be cut into Bezier pieces: the tooth module's reason.
+    Spline(Why),
+}
+
+impl core::fmt::Display for ProfileWhy {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::DegreeTooHigh => f.write_str("a curve of too high a degree"),
+            Self::NotFitted => f.write_str("a curve of the outline was not fitted"),
+            Self::Spline(why) => f.write_str(why.words()),
+        }
+    }
 }
 
 impl PlanRefusal {
@@ -577,14 +635,21 @@ impl PlanRefusal {
             Self::MasterToothOut | Self::MasterWideTooth => Some("master_spline"),
             Self::NotANumber { key }
             | Self::Required { key, .. }
-            | Self::ChamferRange { key, .. } => Some(*key),
+            | Self::ChamferRange { key, .. }
+            | Self::ChamferShapeWithout { key, .. }
+            | Self::ChamferDistanceRange { key, .. }
+            | Self::ChamferAngleRange { key, .. } => Some(*key),
+            Self::ChamferBothShapes { distance2, .. } => Some(*distance2),
             Self::LengthRange { .. } => Some("length"),
             Self::HubDiameterWithoutHub
             | Self::HubDiameterRequired
             | Self::HubDiameterTooLarge { .. }
             | Self::NoRim { .. } => Some("hub_diameter"),
             Self::MasterAngleWithoutMaster | Self::MasterAngleRange { .. } => Some("master_angle"),
-            Self::CutterNotANumber { .. } | Self::CutterTooSmall { .. } => Some("cutter_diameter"),
+            Self::CutterNotANumber { .. }
+            | Self::CutterTooSmall { .. }
+            | Self::CutterSpaceTooWide => Some("cutter_diameter"),
+            Self::NotAProfile(_) => None,
         }
     }
 }
@@ -715,6 +780,57 @@ impl core::fmt::Display for PlanRefusal {
                 "`hub_diameter` leaves no rim around the hub's teeth: it must be more than {} mm",
                 plain(at_least)
             ),
+            Self::ChamferShapeWithout { key, chamfer } => write!(
+                f,
+                "`{key}` shapes the chamfer `{chamfer}` sets: give it only with `{chamfer}`"
+            ),
+            Self::ChamferBothShapes {
+                distance2,
+                angle,
+                chamfer,
+            } => write!(
+                f,
+                "`{distance2}` and `{angle}` both set how far the chamfer `{chamfer}` reaches \
+                 across the end: give one of them, not both"
+            ),
+            Self::ChamferDistanceRange { key, most, value } => {
+                if value.is_finite() {
+                    write!(
+                        f,
+                        "`{key}` must be more than 0 and at most {} mm, not {}",
+                        plain(most),
+                        plain(value)
+                    )
+                } else {
+                    write!(
+                        f,
+                        "`{key}` must be a number of more than 0 and at most {} mm",
+                        plain(most)
+                    )
+                }
+            }
+            Self::ChamferAngleRange { key, value } => {
+                if value.is_finite() {
+                    write!(
+                        f,
+                        "`{key}` must be more than 0 and less than 90 (degrees), not {}",
+                        plain(value)
+                    )
+                } else {
+                    write!(
+                        f,
+                        "`{key}` must be a number of more than 0 and less than 90 (degrees)"
+                    )
+                }
+            }
+            Self::CutterSpaceTooWide => f.write_str(
+                "a tooth space is too wide to end in the cutter's curve: leave out \
+                 `cutter_diameter` (the spaces then end square) or use more teeth",
+            ),
+            Self::NotAProfile(why) => write!(
+                f,
+                "the spline's outline cannot be made into a profile: {why}"
+            ),
         }
     }
 }
@@ -836,11 +952,14 @@ mod tests {
     use crate::SolidError;
     use std::collections::{BTreeSet, HashSet};
 
-    /// Today's parse of a refusal's key: the first word in backticks, when it is lowercase or `_`
-    /// (copied from the planner's `SplineRefusal::new`).
+    /// Today's parse of a refusal's key: the first word in backticks, when it is lowercase
+    /// letters, digits and `_` (as the app's command reads the parameter out of the words).
     fn old_key(words: &str) -> Option<&str> {
-        let is_key =
-            |k: &&str| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_');
+        let is_key = |k: &&str| {
+            !k.is_empty()
+                && k.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        };
         words.split('`').nth(1).filter(is_key)
     }
 
@@ -1020,7 +1139,83 @@ mod tests {
                 "`hub_diameter` leaves no rim around the hub's teeth: it must be more than 31.25 \
                  mm",
             ),
+            (
+                PlanRefusal::ChamferShapeWithout {
+                    key: "end_chamfer_angle",
+                    chamfer: "end_chamfer",
+                },
+                "`end_chamfer_angle` shapes the chamfer `end_chamfer` sets: give it only with \
+                 `end_chamfer`",
+            ),
+            (
+                PlanRefusal::ChamferBothShapes {
+                    distance2: "entry_chamfer_distance2",
+                    angle: "entry_chamfer_angle",
+                    chamfer: "entry_chamfer",
+                },
+                "`entry_chamfer_distance2` and `entry_chamfer_angle` both set how far the chamfer \
+                 `entry_chamfer` reaches across the end: give one of them, not both",
+            ),
+            (
+                PlanRefusal::ChamferDistanceRange {
+                    key: "end_chamfer_distance2",
+                    most: 1e5,
+                    value: -0.5,
+                },
+                "`end_chamfer_distance2` must be more than 0 and at most 100000 mm, not -0.5",
+            ),
+            (
+                PlanRefusal::ChamferAngleRange {
+                    key: "entry_chamfer_angle",
+                    value: 90.0,
+                },
+                "`entry_chamfer_angle` must be more than 0 and less than 90 (degrees), not 90",
+            ),
+            (
+                PlanRefusal::CutterSpaceTooWide,
+                "a tooth space is too wide to end in the cutter's curve: leave out \
+                 `cutter_diameter` (the spaces then end square) or use more teeth",
+            ),
+            (
+                PlanRefusal::NotAProfile(ProfileWhy::Spline(Why::NotASpline)),
+                "the spline's outline cannot be made into a profile: the knots and control \
+                 points do not describe a spline",
+            ),
         ]
+    }
+
+    /// A tooth outline that cannot be made into a profile says why in the words the rebuild gave,
+    /// and a chamfer's second distance or angle that is not a number says so.
+    #[test]
+    fn the_profile_and_chamfer_words() {
+        let words = |why| PlanRefusal::NotAProfile(why).to_string();
+        assert_eq!(
+            words(ProfileWhy::DegreeTooHigh),
+            "the spline's outline cannot be made into a profile: a curve of too high a degree"
+        );
+        assert_eq!(
+            words(ProfileWhy::NotFitted),
+            "the spline's outline cannot be made into a profile: a curve of the outline was not \
+             fitted"
+        );
+        let distance = PlanRefusal::ChamferDistanceRange {
+            key: "entry_chamfer_distance2",
+            most: 1e5,
+            value: f64::NAN,
+        };
+        assert_eq!(
+            distance.to_string(),
+            "`entry_chamfer_distance2` must be a number of more than 0 and at most 100000 mm"
+        );
+        let angle = PlanRefusal::ChamferAngleRange {
+            key: "end_chamfer_angle",
+            value: f64::INFINITY,
+        };
+        assert_eq!(
+            angle.to_string(),
+            "`end_chamfer_angle` must be a number of more than 0 and less than 90 (degrees)"
+        );
+        assert_eq!(PlanRefusal::NotAProfile(ProfileWhy::NotFitted).key(), None);
     }
 
     #[test]
@@ -1079,12 +1274,12 @@ mod tests {
              reached 3e-6"
         );
         let forms = forms();
-        // Every one of the seventeen forms is written out above.
+        // Every one of the twenty-three forms is written out above.
         let kinds: HashSet<_> = forms
             .iter()
             .map(|(r, _)| std::mem::discriminant(r))
             .collect();
-        assert_eq!(kinds.len(), 17);
+        assert_eq!(kinds.len(), 23);
         for (refusal, words) in &forms {
             assert_eq!(refusal.to_string(), *words, "{refusal:?}");
             assert_eq!(

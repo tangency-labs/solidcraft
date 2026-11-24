@@ -265,9 +265,12 @@ picked part takes a second pick, **Shaft start** or **Bore start**: the face the
 part's end, a shoulder or a chamfer). **Length** is measured along the picked round face from that
 end. **Round the ends** makes each tooth space end in the curve a
 cutter of the given diameter leaves. **End chamfer** (shaft) and **Entry chamfer** (hub) are cut by
-the spline itself, so they follow the size and the tooth count. A **Master spline** (a tooth left
-out, or a wide tooth) lets the hub go on one way only. The **Fit** section sets the clearances, and
-**As made** shows what they come to. Scripts use `shaft_spline.insert`. How the numbers work is in the
+the spline itself, so they follow the size and the tooth count; each takes the Chamfer tool's types
+(Equal Distance at 45 degrees, Two Distances, Distance and Angle). A **Master spline** (a tooth left
+out, or a wide tooth) lets the hub go on one way only. The numbers that size the teeth stay at the
+top of the dialog, and the rest is in groups that open and close: **Tooth form**, **Fit** (the
+clearances), **Tip corners**, **Chamfers**, **Groove end**, **Master spline**, **Hub** and **As
+made** (what the clearances come to). Scripts use `shaft_spline.insert`. How the numbers work is in the
 [shaft spline details](https://github.com/tangency-labs/solidcraft/blob/main/docs/shaft-splines.md).
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of

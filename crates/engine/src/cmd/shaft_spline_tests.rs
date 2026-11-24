@@ -1186,6 +1186,137 @@ fn an_entry_chamfer_is_cut_only_where_the_teeth_run_out_of_the_bore() {
     assert!(notes(&s).is_empty(), "{:?}", notes(&s));
 }
 
+/// The volume of the new parts `p` makes, after checking each has its chamfer face on every tooth at both ends
+/// when `chamfered`, and none otherwise.
+fn chamfered_volumes(p: Value, chamfered: bool) -> Vec<f64> {
+    let mut s = Session::default();
+    let r = run(&mut s, CMD, p);
+    assert!(notes(&s).is_empty(), "{:?}", notes(&s));
+    let bodies: Vec<String> =
+        r["created_bodies"].as_array().map(|b| b.iter().filter_map(|n| n.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    let each = if chamfered { 6 } else { 0 };
+    bodies
+        .iter()
+        .map(|body| {
+            let fs = faces(&mut s, body);
+            assert_eq!((chamfers(&fs, false), chamfers(&fs, true)), (each, each), "{body}: {fs:?}");
+            volume(&mut s, body)
+        })
+        .collect()
+}
+
+/// A chamfer given a second distance, or an angle, runs as far across the end as they say: a second distance equal
+/// to the first and an angle of 45 degrees are the chamfer alone, and an angle is the second distance its tangent
+/// gives. The shaft's End chamfer runs in from the major diameter and the hub's Entry chamfer out from the tops of
+/// its teeth, so a shorter reach across takes less metal off either part.
+#[test]
+fn a_chamfer_runs_across_the_end_as_far_as_its_second_distance_or_its_angle_says() {
+    let both = with(straight(), json!({"make": "both", "hub_diameter": 50}));
+    let made = |sizes: Value| chamfered_volumes(with(both.clone(), sizes), true);
+    let alone = made(json!({"end_chamfer": 1, "entry_chamfer": 1}));
+    let same = [
+        made(json!({"end_chamfer": 1, "end_chamfer_distance2": 1, "entry_chamfer": 1, "entry_chamfer_distance2": 1})),
+        made(json!({"end_chamfer": 1, "end_chamfer_angle": 45, "entry_chamfer": 1, "entry_chamfer_angle": 45})),
+        made(json!({"end_chamfer": "1 mm", "end_chamfer_angle": "45 deg", "entry_chamfer": 1, "entry_chamfer_angle": "90 deg / 2"})),
+    ];
+    for volumes in &same {
+        for ((part, got), want) in ["shaft", "hub"].iter().zip(volumes).zip(&alone) {
+            assert_close(&format!("the {part} at 45 degrees"), *got, *want);
+        }
+    }
+    let half = made(json!({"end_chamfer": 1, "end_chamfer_distance2": 0.5, "entry_chamfer": 1, "entry_chamfer_distance2": 0.5}));
+    let slope = 0.5_f64.atan().to_degrees();
+    let sloped = made(json!({"end_chamfer": 1, "end_chamfer_angle": slope, "entry_chamfer": 1, "entry_chamfer_angle": slope}));
+    for (((part, half), sloped), alone) in ["shaft", "hub"].iter().zip(&half).zip(&sloped).zip(&alone) {
+        assert!(*half > alone + 1e-3, "the {part}: half as far across takes less metal off: {half} against {alone}");
+        assert_close(&format!("the {part} at the angle whose tangent is a half"), *sloped, *half);
+    }
+    // A chamfer of 0 is no chamfer, with a second distance or an angle given or not.
+    let zero = json!({"end_chamfer": 0, "end_chamfer_angle": 30, "entry_chamfer": 0, "entry_chamfer_distance2": 1});
+    let none = chamfered_volumes(with(both.clone(), zero), false);
+    let plain = chamfered_volumes(both, false);
+    for ((part, got), want) in ["shaft", "hub"].iter().zip(&none).zip(&plain) {
+        assert_close(&format!("the {part} with chamfers of 0"), *got, *want);
+    }
+}
+
+/// Which of the four optional chamfer values the design's last Shaft Spline keeps: the End chamfer's second
+/// distance and angle, then the Entry chamfer's.
+fn chamfer_values(s: &Session) -> [bool; 4] {
+    match last_spline(s) {
+        FeatureKind::ShaftSpline { end_chamfer_distance2, end_chamfer_angle, entry_chamfer_distance2, entry_chamfer_angle, .. } => {
+            [end_chamfer_distance2.is_some(), end_chamfer_angle.is_some(), entry_chamfer_distance2.is_some(), entry_chamfer_angle.is_some()]
+        }
+        _ => [false; 4],
+    }
+}
+
+/// The second distance and the angle are kept on the feature as given, and an edit through `timeline.redefine`
+/// changes a chamfer from one type to the other.
+#[test]
+fn a_chamfer_second_distance_or_angle_is_kept_on_the_feature_and_changed_by_an_edit() {
+    let mut s = Session::default();
+    shaft(&mut s, 14.0, 30.0);
+    let p = with(straight(), json!({"shaft_face": [14, 0, 25], "length": 30, "end_chamfer": 1, "end_chamfer_distance2": 0.5}));
+    let f = feature_of(&run(&mut s, CMD, p.clone()));
+    assert_eq!(chamfer_values(&s), [true, false, false, false], "{:?}", last_spline(&s));
+    let fs = faces(&mut s, "Shaft");
+    assert_eq!((chamfers(&fs, false), chamfers(&fs, true)), (6, 6), "{fs:?}");
+    let two_distances = volume(&mut s, "Shaft");
+    // The same chamfer as a distance and an angle: the angle whose tangent is a half.
+    let edited = with(without(p, "end_chamfer_distance2"), json!({"end_chamfer_angle": 0.5_f64.atan().to_degrees()}));
+    redefine(&mut s, f, edited);
+    assert_eq!(chamfer_values(&s), [false, true, false, false], "{:?}", last_spline(&s));
+    let fs = faces(&mut s, "Shaft");
+    assert_eq!((chamfers(&fs, false), chamfers(&fs, true)), (6, 6), "{fs:?}");
+    assert_close("the same chamfer by its angle", volume(&mut s, "Shaft"), two_distances);
+    assert!(notes(&s).is_empty(), "{:?}", notes(&s));
+}
+
+/// A second distance or an angle without its chamfer, both for one chamfer, or a value out of its range is refused
+/// by the plan before anything is added, naming a parameter to change; the dialog's drawing says the same.
+#[test]
+fn a_chamfer_second_distance_or_angle_is_refused_without_its_chamfer_together_or_out_of_range() {
+    let both = with(straight(), json!({"make": "both", "hub_diameter": 50}));
+    let end = ["end_chamfer", "end_chamfer_distance2", "end_chamfer_angle"];
+    let entry = ["entry_chamfer", "entry_chamfer_distance2", "entry_chamfer_angle"];
+    for (changes, names) in [
+        (json!({"end_chamfer_distance2": 0.5}), &end),
+        (json!({"end_chamfer_angle": 30}), &end),
+        (json!({"end_chamfer": 1, "end_chamfer_distance2": 0.5, "end_chamfer_angle": 30}), &end),
+        (json!({"end_chamfer": 1, "end_chamfer_angle": 90}), &end),
+        (json!({"end_chamfer": 1, "end_chamfer_angle": 0}), &end),
+        (json!({"end_chamfer": 1, "end_chamfer_angle": -30}), &end),
+        (json!({"end_chamfer": 1, "end_chamfer_angle": 120}), &end),
+        (json!({"end_chamfer": 1, "end_chamfer_distance2": 0}), &end),
+        (json!({"end_chamfer": 1, "end_chamfer_distance2": -1}), &end),
+        (json!({"end_chamfer": 1, "end_chamfer_distance2": 1e6}), &end),
+        (json!({"entry_chamfer_distance2": 0.5}), &entry),
+        (json!({"entry_chamfer_angle": 30}), &entry),
+        (json!({"entry_chamfer": 1, "entry_chamfer_distance2": 0.5, "entry_chamfer_angle": 30}), &entry),
+        (json!({"entry_chamfer": 1, "entry_chamfer_angle": 90}), &entry),
+        (json!({"entry_chamfer": 1, "entry_chamfer_distance2": -1}), &entry),
+    ] {
+        let p = with(both.clone(), changes);
+        let words = refusal(p.clone());
+        let drawn = shaft_spline_preview(&p).expect_err("the preview refuses it");
+        assert_eq!(drawn.words, words, "{p}");
+        let key = drawn.key.as_deref().unwrap_or_else(|| panic!("{p}: the refusal names no parameter: {words}"));
+        assert!(names.contains(&key), "{p}: {words}");
+        assert!(words.contains(&format!("`{key}`")), "{p}: {words}");
+    }
+    // The second distance or the angle that is the one to change is named, not only its chamfer.
+    for (changes, key) in [
+        (json!({"end_chamfer": 1, "end_chamfer_angle": 90}), "end_chamfer_angle"),
+        (json!({"end_chamfer": 1, "end_chamfer_distance2": -1}), "end_chamfer_distance2"),
+        (json!({"entry_chamfer": 1, "entry_chamfer_angle": 0}), "entry_chamfer_angle"),
+        (json!({"entry_chamfer": 1, "entry_chamfer_distance2": 0}), "entry_chamfer_distance2"),
+    ] {
+        let p = with(both.clone(), changes);
+        assert_eq!(shaft_spline_preview(&p).expect_err("the preview refuses it").key.as_deref(), Some(key), "{p}");
+    }
+}
+
 /// A stepped shaft as one body called Shaft: 30 mm across up to z = 40, then a neck 20 mm across up to z = 55.
 fn stepped(s: &mut Session) {
     shaft(s, 15.0, 40.0);
@@ -1403,7 +1534,10 @@ fn a_saved_design_opens_again_to_the_same_spline() {
     shaft(&mut s, 14.0, 60.0);
     let p = with(
         straight(),
-        json!({"shaft_face": [14, 0, 55], "master_spline": "tooth_out", "master_angle": 0, "cutter_diameter": 40, "end_chamfer": 0.5}),
+        json!({
+            "shaft_face": [14, 0, 55], "master_spline": "tooth_out", "master_angle": 0, "cutter_diameter": 40, "end_chamfer": 0.5,
+            "end_chamfer_angle": 30
+        }),
     );
     run(&mut s, CMD, p);
     assert!(notes(&s).is_empty(), "{:?}", notes(&s));
@@ -1416,11 +1550,16 @@ fn a_saved_design_opens_again_to_the_same_spline() {
     assert_eq!(reopened.doc.features.iter().filter(|x| matches!(x.kind, FeatureKind::ShaftSpline { .. })).count(), 1);
     let again = last_spline(&reopened);
     assert_eq!(again, &kind, "the feature keeps its values");
-    let FeatureKind::ShaftSpline { shaft: picked, master, master_angle, cutter_diameter, end_chamfer, .. } = again else {
+    let FeatureKind::ShaftSpline { shaft: picked, master, master_angle, cutter_diameter, end_chamfer, end_chamfer_angle, .. } = again else {
         panic!("not a Shaft Spline")
     };
     assert!(
-        picked.is_some() && *master == SplineMaster::ToothOut && master_angle.is_some() && cutter_diameter.is_some() && end_chamfer.is_some(),
+        picked.is_some()
+            && *master == SplineMaster::ToothOut
+            && master_angle.is_some()
+            && cutter_diameter.is_some()
+            && end_chamfer.is_some()
+            && end_chamfer_angle.is_some(),
         "{again:?}"
     );
     assert!(notes(&reopened).is_empty(), "{:?}", notes(&reopened));
@@ -1586,11 +1725,22 @@ fn a_cutter_or_a_chamfer_for_a_part_not_cut_or_made_is_refused() {
     let cutter = "`cutter_diameter` is the cutter that ends the tooth spaces cut into a picked shaft: give it only with `shaft_face`";
     let end = "`end_chamfer` is the chamfer on the ends of the shaft's teeth: give it only when a shaft is cut or made";
     let entry = "`entry_chamfer` is the chamfer where the teeth run out of the hub's bore: give it only when a hub is cut or made";
+    let end_distance2 = "`end_chamfer_distance2` is the distance in from the major diameter of the chamfer on the ends of the shaft's teeth: \
+                         give it only when a shaft is cut or made";
+    let end_angle = "`end_chamfer_angle` is the angle of the chamfer on the ends of the shaft's teeth: give it only when a shaft is cut or made";
+    let entry_distance2 = "`entry_chamfer_distance2` is the distance out from the tops of the hub's teeth of the chamfer where the teeth run \
+                           out of the hub's bore: give it only when a hub is cut or made";
+    let entry_angle =
+        "`entry_chamfer_angle` is the angle of the chamfer where the teeth run out of the hub's bore: give it only when a hub is cut or made";
     for (p, words) in [
         (json!({"cutter_diameter": 40}), cutter),
         (json!({"make": "both", "hub_diameter": 40, "cutter_diameter": 40}), cutter),
         (json!({"make": "hub", "hub_diameter": 40, "end_chamfer": 1}), end),
         (json!({"entry_chamfer": 1}), entry),
+        (json!({"make": "hub", "hub_diameter": 40, "end_chamfer_distance2": 0.5}), end_distance2),
+        (json!({"make": "hub", "hub_diameter": 40, "end_chamfer_angle": 30}), end_angle),
+        (json!({"entry_chamfer_distance2": 0.5}), entry_distance2),
+        (json!({"entry_chamfer_angle": 30}), entry_angle),
     ] {
         assert_eq!(refusal(with(straight(), p.clone())), words, "{p}");
     }
@@ -1640,6 +1790,8 @@ fn the_preview_refuses_what_the_command_refuses_in_the_same_words() {
         (with(straight(), json!({"minor_diameter": 30})), "minor_diameter"),
         (with(straight(), json!({"teeth": 1})), "teeth"),
         (with(straight(), json!({"end_chamfer": -1})), "end_chamfer"),
+        (with(straight(), json!({"make": "hub", "hub_diameter": 40, "end_chamfer_angle": 30})), "end_chamfer_angle"),
+        (with(straight(), json!({"entry_chamfer_distance2": 0.5})), "entry_chamfer_distance2"),
         (with(straight(), json!({"make": "both"})), "hub_diameter"),
         (with(straight(), json!({"module": 2})), "module"),
     ] {
@@ -1746,6 +1898,10 @@ fn hostile_parameters_never_panic_and_absurd_values_are_refused() {
         "cutter_diameter",
         "end_chamfer",
         "entry_chamfer",
+        "end_chamfer_distance2",
+        "end_chamfer_angle",
+        "entry_chamfer_distance2",
+        "entry_chamfer_angle",
         "name",
         "body_name",
         "body_names",
@@ -1815,6 +1971,14 @@ fn hostile_parameters_never_panic_and_absurd_values_are_refused() {
         ("side_clearance", json!(-1)),
         ("end_chamfer", json!(-1)),
         ("end_chamfer", json!(1e12)),
+        ("end_chamfer_distance2", json!(0)),
+        ("end_chamfer_distance2", json!(-1)),
+        ("end_chamfer_distance2", json!(1e12)),
+        ("end_chamfer_angle", json!(0)),
+        ("end_chamfer_angle", json!(90)),
+        ("end_chamfer_angle", json!(-45)),
+        ("end_chamfer_angle", json!("inf")),
+        ("entry_chamfer_angle", json!(30)),
         ("cutter_diameter", json!(1e12)),
         ("shaft_face", json!([0, 0, 0])),
         ("shaft_face", json!([14, 0])),

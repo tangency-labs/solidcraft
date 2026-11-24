@@ -84,6 +84,25 @@ const PUBLIC: &[&str] = &[
     "pair::Pair::gap_at",
     "pair::Pair::through",
     "pair::Pair::through_a_cycle",
+    "seat::normal",
+    "seat::frame_through",
+    "seat::angle_zero",
+    "seat::off_cylinder",
+    "seat::nearer_start",
+    "seat::seat_frame",
+    "seat::start_candidates",
+    "seat::moved_out",
+    "seat::into_frame",
+    "seat::axis_gap",
+    "seat::chord_gap",
+    "seat::centre_angle",
+    "seat::angles_apart",
+    "seat::reach_along",
+    "seat::points_apart",
+    "section::outline_loop",
+    "section::cutter_section",
+    "section::chamfer_section",
+    "section::chamfer_plane",
     "shaft_spline::module_for_major_radius",
     "shaft_spline::same_size",
     "shaft_spline::fit_to_shaft_within",
@@ -994,6 +1013,7 @@ fn hostile_numbers_through_every_public_function_never_panic_or_hang() {
     sweep_outline_mesh_pair(&mut s, &mut dice);
     sweep_master_spline(&mut s, &mut dice);
     sweep_shaft_spline(&mut s, &mut dice);
+    sweep_seat_and_section(&mut s);
     let not_called: Vec<&str> = PUBLIC
         .iter()
         .copied()
@@ -1018,6 +1038,155 @@ fn hostile_numbers_through_every_public_function_never_panic_or_hang() {
         s.not_finite.len(),
         s.not_finite
     );
+}
+
+/// The round face a spline sits on and the sections of its tools: hostile points, directions,
+/// sizes, angles and counts through every function, on a plain face and frame and on ones made of
+/// the hostile numbers themselves. They hand back plain numbers, frames and profiles, so the sweep
+/// asks only that no call panics and that a refusal is the function's own.
+fn sweep_seat_and_section(s: &mut Sweep) {
+    use crate::eval::Frame;
+    use crate::teeth::seat::{self, RoundFace};
+    use crate::teeth::section::{self, EndChamfer};
+    use crate::Vec3;
+
+    let v = |k: usize| Vec3::new(arg(k), arg(k + 1), arg(k + 2));
+    let plain_frame = Frame {
+        origin: [0.0, 0.0, 0.0],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    let plain_face = RoundFace {
+        axis_point: Vec3::ZERO,
+        axis: Vec3::Z,
+        radius: 10.0,
+        start: 0.0,
+        end: 30.0,
+    };
+    let tooth = [
+        Piece::Arc {
+            centre: [0.0, 0.0],
+            radius: 10.0,
+            start: -0.2,
+            sweep: 0.4,
+            role: Role::Tip,
+        },
+        Piece::Line {
+            from: [10.0 * 0.2_f64.cos(), 10.0 * 0.2_f64.sin()],
+            to: [8.0 * 0.3_f64.cos(), 8.0 * 0.3_f64.sin()],
+            role: Role::Flank,
+        },
+    ];
+    for k in 0..HOSTILE.len() {
+        let hostile_frame = Frame {
+            origin: v(k).to_array(),
+            x_axis: v(k + 3).to_array(),
+            y_axis: v(k + 5).to_array(),
+        };
+        let hostile_face = RoundFace {
+            axis_point: v(k),
+            axis: v(k + 1),
+            radius: arg(k + 2),
+            start: arg(k + 3),
+            end: arg(k + 4),
+        };
+        for plane in [&plain_frame, &hostile_frame] {
+            let _ = s.call("seat::normal", || seat::normal(plane));
+            let _ = s.call("seat::moved_out", || {
+                seat::moved_out(plane, v(k), arg(k + 1))
+            });
+            let _ = s.call("seat::into_frame", || seat::into_frame(plane));
+            let _ = s.call("seat::centre_angle", || {
+                seat::centre_angle(plane, v(k), v(k + 2))
+            });
+            let _ = s.call("section::chamfer_plane", || {
+                section::chamfer_plane(plane, arg(k), arg(k + 1))
+            });
+        }
+        let _ = s.call("seat::frame_through", || {
+            seat::frame_through(v(k), v(k + 1), v(k + 2))
+        });
+        let _ = s.call("seat::angle_zero", || seat::angle_zero(v(k)));
+        for face in [&plain_face, &hostile_face] {
+            let _ = s.call("seat::off_cylinder", || seat::off_cylinder(face, v(k)));
+            let _ = s.call("seat::nearer_start", || seat::nearer_start(face, v(k)));
+            let _ = s.call("seat::seat_frame", || {
+                seat::seat_frame(face, v(k), Some(v(k + 1)))
+            });
+            let _ = s.call("seat::seat_frame", || seat::seat_frame(face, v(k), None));
+            let _ = s.call("seat::start_candidates", || {
+                seat::start_candidates(face, v(k), k % 2 == 0)
+            });
+        }
+        let _ = s.call("seat::axis_gap", || {
+            seat::axis_gap(v(k), v(k + 1), v(k + 2), v(k + 3))
+        });
+        let _ = s.call("seat::chord_gap", || {
+            seat::chord_gap(v(k), v(k + 1), v(k + 2))
+        });
+        let _ = s.call("seat::angles_apart", || {
+            seat::angles_apart(arg(k), arg(k + 1))
+        });
+        let _ = s.call("seat::reach_along", || {
+            seat::reach_along(v(k), v(k + 1), v(k + 2), v(k + 3))
+        });
+        let _ = s.call("seat::points_apart", || {
+            seat::points_apart([arg(k), arg(k + 1)], [arg(k + 2), 1.0])
+        });
+        // The loop of an outline: a hostile pitch, largest radius and turn on a real tooth, then
+        // hostile counts of teeth.
+        let _ = s.checked("section::outline_loop", || {
+            section::outline_loop(6, arg(k), &tooth, arg(k + 1), arg(k + 2))
+        });
+        let teeth = HOSTILE_COUNTS[k % HOSTILE_COUNTS.len()];
+        let _ = s.checked("section::outline_loop", || {
+            section::outline_loop(teeth.min(2001), 0.1, &tooth, 10.0, arg(k))
+        });
+        let _ = s.checked("section::cutter_section", || {
+            section::cutter_section(
+                &tooth,
+                [arg(k), 1.0],
+                [1.0, arg(k + 1)],
+                arg(k + 2),
+                arg(k + 3),
+                arg(k + 4),
+                v(k),
+            )
+        });
+        let _ = s.checked("section::cutter_section", || {
+            section::cutter_section(
+                &tooth,
+                [10.0, 1.0],
+                [10.0, -1.0],
+                9.0,
+                arg(k),
+                arg(k + 1),
+                Vec3::ZERO,
+            )
+        });
+        for outside in [true, false] {
+            let chamfer = EndChamfer {
+                radius: arg(k),
+                radial: arg(k + 1),
+                axial: arg(k + 2),
+                past: arg(k + 3),
+                flush: Some(arg(k + 4)),
+            };
+            let _ = s.call("section::chamfer_section", || {
+                section::chamfer_section(&chamfer, arg(k + 5), outside)
+            });
+            let plain = EndChamfer {
+                radius: 10.0,
+                radial: 1.0,
+                axial: 1.0,
+                past: 0.0,
+                flush: None,
+            };
+            let _ = s.call("section::chamfer_section", || {
+                section::chamfer_section(&plain, arg(k), outside)
+            });
+        }
+    }
 }
 
 /// The master spline: hostile angles, teeth and turns through every function, on straight-sided
@@ -1979,6 +2148,78 @@ fn the_planner_gives_todays_keys_and_words() {
         ),
         (
             SplineNumbers {
+                end_chamfer_distance2: Some(0.5),
+                ..straight_base.clone()
+            },
+            "end_chamfer_distance2",
+            "`end_chamfer_distance2` shapes the chamfer `end_chamfer` sets: give it only with \
+             `end_chamfer`"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                entry_chamfer_angle: Some(30.0),
+                ..straight_base.clone()
+            },
+            "entry_chamfer_angle",
+            "`entry_chamfer_angle` shapes the chamfer `entry_chamfer` sets: give it only with \
+             `entry_chamfer`"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                end_chamfer: Some(0.5),
+                end_chamfer_distance2: Some(0.5),
+                end_chamfer_angle: Some(30.0),
+                ..straight_base.clone()
+            },
+            "end_chamfer_distance2",
+            "`end_chamfer_distance2` and `end_chamfer_angle` both set how far the chamfer \
+             `end_chamfer` reaches across the end: give one of them, not both"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                entry_chamfer: Some(0.5),
+                entry_chamfer_distance2: Some(0.0),
+                ..straight_base.clone()
+            },
+            "entry_chamfer_distance2",
+            "`entry_chamfer_distance2` must be more than 0 and at most 100000 mm, not 0"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                end_chamfer: Some(0.5),
+                end_chamfer_distance2: Some(f64::NAN),
+                ..straight_base.clone()
+            },
+            "end_chamfer_distance2",
+            "`end_chamfer_distance2` must be a number of more than 0 and at most 100000 mm"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                end_chamfer: Some(0.5),
+                end_chamfer_angle: Some(90.0),
+                ..straight_base.clone()
+            },
+            "end_chamfer_angle",
+            "`end_chamfer_angle` must be more than 0 and less than 90 (degrees), not 90"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                entry_chamfer: Some(0.5),
+                entry_chamfer_angle: Some(f64::NEG_INFINITY),
+                ..straight_base.clone()
+            },
+            "entry_chamfer_angle",
+            "`entry_chamfer_angle` must be a number of more than 0 and less than 90 (degrees)"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
                 cutter_diameter: Some(2e5),
                 ..straight_base.clone()
             },
@@ -2044,5 +2285,75 @@ fn the_planner_gives_todays_keys_and_words() {
             Some(ErrorKind::InvalidInput),
             "{words}"
         );
+    }
+}
+
+/// Each chamfer as its numbers make it: one size both ways (45 degrees), a second distance across
+/// the end, or the size along the face at an angle; none for a chamfer left out or of 0, whatever
+/// else is given with a 0.
+#[test]
+fn the_plan_makes_each_chamfer_as_its_numbers_say() {
+    let [base, _, _] = plan_bases();
+    let made = |n: SplineNumbers| shaft_spline::plan(&n).expect("the chamfered spline");
+    let plain = made(SplineNumbers {
+        end_chamfer: Some(0.5),
+        ..base.clone()
+    });
+    assert_eq!(
+        plain.end_chamfer,
+        Some(shaft_spline::ChamferSize {
+            axial: 0.5,
+            radial: 0.5
+        })
+    );
+    assert_eq!(plain.entry_chamfer, None);
+    let two = made(SplineNumbers {
+        entry_chamfer: Some(0.4),
+        entry_chamfer_distance2: Some(0.2),
+        ..base.clone()
+    });
+    assert_eq!(
+        two.entry_chamfer,
+        Some(shaft_spline::ChamferSize {
+            axial: 0.4,
+            radial: 0.2
+        })
+    );
+    let angled = made(SplineNumbers {
+        end_chamfer: Some(0.5),
+        end_chamfer_angle: Some(60.0),
+        ..base.clone()
+    });
+    let end = angled.end_chamfer.expect("the angled chamfer");
+    assert_eq!(end.axial, 0.5);
+    assert!((end.radial - 0.5 * 3f64.sqrt()).abs() < 1e-12, "{end:?}");
+    let none = made(SplineNumbers {
+        end_chamfer: Some(0.0),
+        end_chamfer_angle: Some(30.0),
+        ..base.clone()
+    });
+    assert_eq!(none.end_chamfer, None);
+    // Hostile second distances and angles: refused naming the number, never a panic.
+    for &h in &HOSTILE {
+        for n in [
+            SplineNumbers {
+                end_chamfer: Some(0.5),
+                end_chamfer_distance2: Some(h),
+                ..base.clone()
+            },
+            SplineNumbers {
+                entry_chamfer: Some(0.5),
+                entry_chamfer_angle: Some(h),
+                ..base.clone()
+            },
+        ] {
+            if let Err(e) = shaft_spline::plan(&n) {
+                let key = e.teeth_failure().and_then(TeethFailure::key);
+                assert!(
+                    matches!(key, Some("end_chamfer_distance2" | "entry_chamfer_angle")),
+                    "{h}: {e}"
+                );
+            }
+        }
     }
 }

@@ -33,6 +33,10 @@
 //!   holds as one edge.
 //! - [`shaft_spline`]: a spline on a shaft and in its hub planned from one set of numbers, with
 //!   every refusal naming the number to change.
+//! - [`seat`]: where a spline sits on a round face of a part (the frame at its free end, angle 0
+//!   from the world axes) and the measures a caller that cuts it takes of the face and the tools.
+//! - [`section`]: an outline as one closed loop of profile segments, the section a cutter takes
+//!   out of one tooth space, and the section of a chamfer's tool and the plane it is drawn in.
 //!
 //! A shaft and its hub end in a [`Pair`]: two outlines, their axes, the side each has its material
 //! on, and how the second part moves when the first turns. [`Pair::through_a_cycle`] turns the pair
@@ -105,13 +109,15 @@ pub mod master_spline;
 pub mod mesh;
 pub mod outline;
 pub mod pair;
+pub mod seat;
+pub mod section;
 pub mod shaft_spline;
 pub mod straight;
 
 #[cfg(test)]
 mod tests;
 
-pub use crate::error::teeth::{PlanRefusal, TeethFailure, Why};
+pub use crate::error::teeth::{PlanRefusal, ProfileWhy, TeethFailure, Why};
 pub use mesh::Material;
 pub use outline::{Outline, Piece, Point, Role};
 pub use pair::{Gaps, Motion, Pair, Part};

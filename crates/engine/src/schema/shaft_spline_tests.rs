@@ -20,7 +20,11 @@ fn schemas_and_the_key_check_agree() {
             "cutter_diameter",
             "dedendum",
             "end_chamfer",
+            "end_chamfer_angle",
+            "end_chamfer_distance2",
             "entry_chamfer",
+            "entry_chamfer_angle",
+            "entry_chamfer_distance2",
             "flank_angle",
             "form_clearance",
             "hub_addendum",
@@ -78,6 +82,10 @@ fn strict_keeps_todays_errors() {
         ("shaft_spline.insert", with(straight(), json!({"make": "both"}))),
         ("shaft_spline.insert", with(straight(), json!({"module": 2}))),
         ("shaft_spline.insert", with(straight(), json!({"end_chamfer": -1}))),
+        ("shaft_spline.insert", with(straight(), json!({"end_chamfer_angle": 30}))),
+        ("shaft_spline.insert", with(straight(), json!({"end_chamfer": 1, "end_chamfer_distance2": 0.5, "end_chamfer_angle": 30}))),
+        ("shaft_spline.insert", with(straight(), json!({"end_chamfer": 1, "end_chamfer_angle": 90}))),
+        ("shaft_spline.insert", with(straight(), json!({"entry_chamfer_distance2": 0.5}))),
         ("shaft_spline.insert", with(straight(), json!({"bore_face": [11, 0, 25], "hub_diameter": 40}))),
     ]);
 }
@@ -92,6 +100,11 @@ fn the_contract_refuses_what_the_handler_refuses() {
         json!({"shaft_face": [14, 0, 55], "bore_face": [11, 0, 25], "cutter_diameter": 40, "end_chamfer": 1, "entry_chamfer": "0.5 mm"}),
     );
     assert!(conforms(root, root, &picked), "{picked}");
+    // A chamfer's second distance and its angle are a length and an angle, numbers or expressions.
+    let chamfers = json!({"end_chamfer": 1, "end_chamfer_distance2": "0.5 mm", "entry_chamfer": 1, "entry_chamfer_angle": 30});
+    let set = with(with(straight(), json!({"make": "both", "hub_diameter": 40})), chamfers);
+    assert!(conforms(root, root, &set), "{set}");
+    assert!(serde_json::from_value::<ShaftSplineParams>(set).is_ok());
     for bad in [json!({"teeth": 6, "length": 20, "side_clearance": 0.05}), with(straight(), json!({"extra": 1}))] {
         assert!(!conforms(root, root, &bad), "{bad}");
     }

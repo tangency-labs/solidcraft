@@ -1855,21 +1855,44 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Cutter diameter")]
         cutter_diameter: Option<Expr>,
-        /// The chamfer on the ends of the shaft's teeth: how far it runs down the shaft, and as far in from the
-        /// major diameter (45 degrees). On a picked shaft it goes on the end the teeth start from, and on the far
-        /// end where the teeth run the whole face; on a new shaft, on both ends. Cut by the spline itself, so it
-        /// is made again at the shaft's size and tooth count whenever they change. Without it the teeth end
-        /// square.
+        /// The chamfer on the ends of the shaft's teeth: how far it runs down the shaft, and, with nothing else
+        /// given, as far in from the major diameter (45 degrees; `end_chamfer_distance2` or `end_chamfer_angle`
+        /// set how far in). On a picked shaft it goes on the end the teeth start from, and on the far end where
+        /// the teeth run the whole face; on a new shaft, on both ends. Cut by the spline itself, so it is made
+        /// again at the shaft's size and tooth count whenever they change. Without it the teeth end square.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "End chamfer")]
         end_chamfer: Option<Expr>,
-        /// The chamfer where the teeth run out of the hub's bore: how far it runs into the bore, and as far out
-        /// from the tops of the hub's teeth (45 degrees). In a picked bore it goes at the entry the teeth start
-        /// from, and at the far end where the teeth run the whole bore; in a new hub, at both ends. Without it
-        /// the hub's teeth end square.
+        /// The chamfer where the teeth run out of the hub's bore: how far it runs into the bore, and, with
+        /// nothing else given, as far out from the tops of the hub's teeth (45 degrees;
+        /// `entry_chamfer_distance2` or `entry_chamfer_angle` set how far out). In a picked bore it goes at the
+        /// entry the teeth start from, and at the far end where the teeth run the whole bore; in a new hub, at
+        /// both ends. Without it the hub's teeth end square.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Entry chamfer")]
         entry_chamfer: Option<Expr>,
+        /// How far the end chamfer runs across the end, in from the major diameter, where that is not its size
+        /// along the shaft (a chamfer of two distances). Only with `end_chamfer`, and not with
+        /// `end_chamfer_angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End chamfer distance 2")]
+        end_chamfer_distance2: Option<Expr>,
+        /// The end chamfer's angle to the shaft's surface: it runs `end_chamfer` along the shaft and as far
+        /// across the end as that angle takes it. Only with `end_chamfer`, and not with `end_chamfer_distance2`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "End chamfer angle")]
+        end_chamfer_angle: Option<Expr>,
+        /// How far the entry chamfer runs across the bore's end, out from the tops of the hub's teeth, where that
+        /// is not its size along the bore (a chamfer of two distances). Only with `entry_chamfer`, and not with
+        /// `entry_chamfer_angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Entry chamfer distance 2")]
+        entry_chamfer_distance2: Option<Expr>,
+        /// The entry chamfer's angle to the bore: it runs `entry_chamfer` into the bore and as far across the end
+        /// as that angle takes it. Only with `entry_chamfer`, and not with `entry_chamfer_distance2`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Entry chamfer angle")]
+        entry_chamfer_angle: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).

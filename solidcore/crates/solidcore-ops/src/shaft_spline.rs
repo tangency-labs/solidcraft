@@ -9,9 +9,12 @@
 use solidcore::teeth as kernel;
 use solidcore::teeth::shaft_spline as planner;
 use solidcore_convert::shaft_spline as convert;
+use solidcore_convert::{plane as to_frame, record_plane, record_vec3, vec3};
 use solidcore_record::shaft_spline::{
-    SpaceSection, SplineNumbers, SplinePlan, SplineRefusal, ToothOutline,
+    AxisGap, ChamferSection, ChordGap, CutterSection, EndChamfer, OutlineLoop, RoundFace,
+    SeatFrame, SeatRefusal, SpaceSection, SplineNumbers, SplinePlan, SplineRefusal, ToothOutline,
 };
+use solidcore_record::{Plane, Vec3};
 
 pub use solidcore::teeth::shaft_spline::LEAST_LENGTH;
 pub use solidcore::teeth::MAX_LENGTH;
@@ -130,6 +133,176 @@ pub fn bezier_pieces(
     control: &[[f64; 2]],
 ) -> Result<Vec<Vec<[f64; 2]>>, String> {
     kernel::fit::bezier_pieces(degree, knots, control).map_err(|e| convert::refusal_words(&e))
+}
+
+/// How far `p` is from the cylinder of the round face: the distance of `p` from the axis line,
+/// less the radius, as an absolute value (not the distance past the face's ends).
+#[must_use]
+pub fn off_cylinder(face: &RoundFace, p: Vec3) -> f64 {
+    kernel::seat::off_cylinder(&convert::round_face(face), vec3(p))
+}
+
+/// Whether `p` lies nearer along the axis to the face's `start` end than to its `end` (a tie is
+/// the start's).
+#[must_use]
+pub fn nearer_start(face: &RoundFace, p: Vec3) -> bool {
+    kernel::seat::nearer_start(&convert::round_face(face), vec3(p))
+}
+
+/// The seat of a spline on `face`: the free end is the end nearest along the axis to `start`, or
+/// with none the end nearest `pick`; the plane square to the axis there, angle 0 from the world
+/// axes; and the pick brought onto the face's cylinder.
+///
+/// # Errors
+///
+/// [`SeatRefusal`]: the axis has no direction, no plane square to it can be made, or the face has
+/// no length or no radius.
+pub fn seat_frame(
+    face: &RoundFace,
+    pick: Vec3,
+    start: Option<Vec3>,
+) -> Result<SeatFrame, SeatRefusal> {
+    kernel::seat::seat_frame(&convert::round_face(face), vec3(pick), start.map(vec3))
+        .map(|seat| convert::record_seat_frame(&seat))
+        .map_err(convert::record_seat_refusal)
+}
+
+/// The points a spline's start is looked for at: in the plane of the end of the face nearest
+/// `pick`, along angle 0, half, a quarter and a tenth of the radius off the rim (inside the rim of
+/// a shaft, outside the rim of a `bore`), then the point on the axis. None where the axis has no
+/// angle 0.
+#[must_use]
+pub fn start_candidates(face: &RoundFace, pick: Vec3, bore: bool) -> Option<[Vec3; 4]> {
+    kernel::seat::start_candidates(&convert::round_face(face), vec3(pick), bore)
+        .map(|points| points.map(record_vec3))
+}
+
+/// `at` moved `by` straight out from the axis (the line through the plane's origin along its
+/// normal); `at` itself where it lies on the axis.
+#[must_use]
+pub fn moved_out(plane: &Plane, at: Vec3, by: f64) -> Vec3 {
+    record_vec3(kernel::seat::moved_out(&to_frame(plane), vec3(at), by))
+}
+
+/// The matrix that takes world coordinates into the plane's frame (x, y, normal; the origin to
+/// zero), column by column.
+#[must_use]
+pub fn into_frame(plane: &Plane) -> [[f64; 4]; 4] {
+    kernel::seat::into_frame(&to_frame(plane))
+}
+
+/// How the line through `point` along `dir` lies to the axis through `axis_point` along `axis`
+/// (unit vectors).
+#[must_use]
+pub fn axis_gap(axis_point: Vec3, axis: Vec3, point: Vec3, dir: Vec3) -> AxisGap {
+    convert::record_axis_gap(kernel::seat::axis_gap(
+        vec3(axis_point),
+        vec3(axis),
+        vec3(point),
+        vec3(dir),
+    ))
+}
+
+/// The chord from `a` to `b` against the direction `axis` (a unit vector).
+#[must_use]
+pub fn chord_gap(axis: Vec3, a: Vec3, b: Vec3) -> ChordGap {
+    convert::record_chord_gap(kernel::seat::chord_gap(vec3(axis), vec3(a), vec3(b)))
+}
+
+/// The angle about the plane's normal, from its x towards its y, of the middle of the box
+/// `min`..`max`.
+#[must_use]
+pub fn centre_angle(plane: &Plane, min: Vec3, max: Vec3) -> f64 {
+    kernel::seat::centre_angle(&to_frame(plane), vec3(min), vec3(max))
+}
+
+/// How far the angle `a` is from the angle `b`, the short way round (0 to pi).
+#[must_use]
+pub fn angles_apart(a: f64, b: f64) -> f64 {
+    kernel::seat::angles_apart(a, b)
+}
+
+/// The least and the most the box `min`..`max` reaches along `dir` from `origin`, over its eight
+/// corners.
+#[must_use]
+pub fn reach_along(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> (f64, f64) {
+    kernel::seat::reach_along(vec3(origin), vec3(dir), vec3(min), vec3(max))
+}
+
+/// The distance between two points of an outline.
+#[must_use]
+pub fn points_apart(a: [f64; 2], b: [f64; 2]) -> f64 {
+    kernel::seat::points_apart(a, b)
+}
+
+/// The whole `outline` as one closed loop of profile segments, every tooth turned to its place
+/// and the whole turned by `turn` (radians), with where two segments of one curve meet and each
+/// piece as it lies in the loop.
+///
+/// # Errors
+///
+/// The kernel's words: "the spline's outline cannot be made into a profile: ..." for a curve
+/// that is not fitted, not a spline or of too high a degree.
+pub fn outline_loop(outline: &ToothOutline, turn: f64) -> Result<OutlineLoop, String> {
+    kernel::section::outline_loop(
+        outline.teeth,
+        outline.pitch_angle,
+        &convert::tooth(&outline.tooth),
+        outline.most_radius,
+        turn,
+    )
+    .map(|made| convert::record_outline_loop(&made))
+    .map_err(|e| convert::refusal_words(&e))
+}
+
+/// The section a cutter of radius `cutter_radius` takes out of the tooth space `space` where it
+/// leaves the shaft, out to `out_to` from the axis, on a plane whose origin is `plane_origin`;
+/// with the corners as they lie with the space's middle line on angle 0 and the cutter's axis at
+/// the root radius `root` plus the cutter's radius.
+///
+/// # Errors
+///
+/// The kernel's words: the space is too wide to end in the cutter's curve (naming
+/// `cutter_diameter`), or its floor cannot be made into a profile.
+pub fn cutter_section(
+    space: &SpaceSection,
+    root: f64,
+    cutter_radius: f64,
+    out_to: f64,
+    plane_origin: Vec3,
+) -> Result<CutterSection, String> {
+    kernel::section::cutter_section(
+        &convert::tooth(&space.floor),
+        space.start,
+        space.end,
+        root,
+        cutter_radius,
+        out_to,
+        vec3(plane_origin),
+    )
+    .map(|made| convert::record_cutter_section(&made))
+    .map_err(|e| convert::refusal_words(&e))
+}
+
+/// The section of a chamfer's tool in a plane through the axis, counter-clockwise, and which of
+/// its sides is the slope; it reaches `margin` past the end and the face. None where no such
+/// section lies clear of the axis.
+#[must_use]
+pub fn chamfer_section(chamfer: &EndChamfer, margin: f64, outside: bool) -> Option<ChamferSection> {
+    kernel::section::chamfer_section(&convert::end_chamfer(chamfer), margin, outside)
+        .map(|section| convert::record_chamfer_section(&section))
+}
+
+/// The plane through the axis a chamfer's section is drawn in: the origin of `plane`, x across
+/// the shaft at the angle `seam`, y along the axis into the face (the plane's normal times
+/// `inward`).
+#[must_use]
+pub fn chamfer_plane(plane: &Plane, inward: f64, seam: f64) -> Plane {
+    record_plane(&kernel::section::chamfer_plane(
+        &to_frame(plane),
+        inward,
+        seam,
+    ))
 }
 
 #[cfg(test)]
@@ -324,6 +497,163 @@ mod tests {
         };
         fit_to_shaft_within(&mut numbers, 15.0);
         assert_eq!(numbers.module.map(f64::to_bits), Some(module.to_bits()));
+    }
+
+    /// A round face along +Z: radius 10, from z = 0 to z = 30.
+    fn face_along_z() -> RoundFace {
+        RoundFace {
+            axis_point: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::new(0.0, 0.0, 1.0),
+            radius: 10.0,
+            start: 0.0,
+            end: 30.0,
+        }
+    }
+
+    #[test]
+    fn a_round_face_gives_its_seat_and_its_measures() {
+        let face = face_along_z();
+        assert_eq!(off_cylinder(&face, Vec3::new(12.0, 0.0, 5.0)), 2.0);
+        assert!(nearer_start(&face, Vec3::new(10.0, 0.0, 3.0)));
+        assert!(!nearer_start(&face, Vec3::new(10.0, 0.0, 27.0)));
+        // Picked near the top: the free end is the top, the face runs on against +Z.
+        let seat = seat_frame(&face, Vec3::new(0.0, 11.0, 28.0), None).unwrap();
+        assert_eq!(seat.plane.origin, Vec3::new(0.0, 0.0, 30.0));
+        assert_eq!(seat.plane.x, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(seat.inward, -1.0);
+        assert_eq!(seat.room, 30.0);
+        let close = |a: Vec3, b: Vec3| {
+            (a.x - b.x).abs() < 1e-12 && (a.y - b.y).abs() < 1e-12 && (a.z - b.z).abs() < 1e-12
+        };
+        assert!(close(seat.at, Vec3::new(0.0, 10.0, 28.0)), "{:?}", seat.at);
+        // A start given decides the free end.
+        let from_start = seat_frame(&face, Vec3::new(0.0, 11.0, 28.0), Some(Vec3::ZERO)).unwrap();
+        assert_eq!(from_start.inward, 1.0);
+        let flat = RoundFace { end: 0.0, ..face };
+        assert_eq!(
+            seat_frame(&flat, Vec3::ZERO, None),
+            Err(SeatRefusal::NoSize)
+        );
+        let lost = RoundFace {
+            axis: Vec3::new(f64::NAN, 0.0, 1.0),
+            ..face
+        };
+        assert_eq!(
+            seat_frame(&lost, Vec3::ZERO, None),
+            Err(SeatRefusal::NoDirection)
+        );
+        let none = RoundFace {
+            axis: Vec3::ZERO,
+            ..face
+        };
+        assert_eq!(
+            seat_frame(&none, Vec3::ZERO, None),
+            Err(SeatRefusal::NoPlane)
+        );
+        let starts = start_candidates(&face, Vec3::new(10.0, 0.0, 2.0), false).unwrap();
+        assert_eq!(starts[0], Vec3::new(5.0, 0.0, 0.0));
+        assert_eq!(starts[3], Vec3::ZERO);
+        let bore = start_candidates(&face, Vec3::new(10.0, 0.0, 2.0), true).unwrap();
+        assert_eq!(bore[0], Vec3::new(15.0, 0.0, 0.0));
+        assert!(close(
+            moved_out(&seat.plane, Vec3::new(0.0, 10.0, 28.0), 2.0),
+            Vec3::new(0.0, 12.0, 28.0)
+        ));
+        let m = into_frame(&seat.plane);
+        assert_eq!(m[3], [0.0, 0.0, -30.0, 1.0]);
+    }
+
+    #[test]
+    fn lines_chords_boxes_and_angles_are_measured() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let gap = axis_gap(Vec3::ZERO, z, Vec3::new(3.0, 4.0, 7.0), z);
+        assert_eq!((gap.lean, gap.off), (0.0, 5.0));
+        let chord = chord_gap(z, Vec3::ZERO, Vec3::new(0.0, 0.0, 2.0));
+        assert_eq!((chord.length, chord.lean), (2.0, 0.0));
+        let angle = centre_angle(
+            &Plane::XY,
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(1.0, 3.0, 0.0),
+        );
+        assert!((angle - std::f64::consts::FRAC_PI_2).abs() < 1e-15);
+        assert!((angles_apart(0.1, std::f64::consts::TAU - 0.1) - 0.2).abs() < 1e-12);
+        assert_eq!(
+            reach_along(
+                Vec3::ZERO,
+                z,
+                Vec3::new(-1.0, -1.0, -2.0),
+                Vec3::new(1.0, 1.0, 5.0)
+            ),
+            (-2.0, 5.0)
+        );
+        assert_eq!(points_apart([0.0, 0.0], [3.0, 4.0]), 5.0);
+    }
+
+    #[test]
+    fn an_outline_is_one_loop_and_a_space_a_cutter_section() {
+        let made = plan(&straight()).unwrap();
+        let whole = outline_loop(&made.shaft, 0.0).unwrap();
+        // Six teeth, each its pieces; the pieces cover the loop's segments in order.
+        assert_eq!(whole.pieces.len() % 6, 0);
+        let covered: usize = whole.pieces.iter().map(|p| p.segs).sum();
+        assert_eq!(covered, whole.segs.len());
+        let tops = whole.pieces.iter().filter(|p| p.top).count();
+        assert!(tops >= 6 && tops % 6 == 0, "{tops}");
+        let space = space_section(&made.shaft, 0.0, 14.5).unwrap();
+        let cut = cutter_section(&space, 11.5, 5.0, 14.5, Vec3::ZERO).unwrap();
+        assert_eq!(cut.spans.len(), space.floor.len());
+        let floor: usize = cut.spans.iter().sum();
+        assert_eq!(floor + 3, cut.segs.len());
+        // The cutter's axis lies on the space's middle line, 16.5 from the shaft's axis.
+        let squared = cut.axis_at.x * cut.axis_at.x + cut.axis_at.y * cut.axis_at.y;
+        assert!((squared - 272.25).abs() < 1e-9, "{squared}");
+    }
+
+    #[test]
+    fn a_chamfer_section_and_its_plane() {
+        let chamfer = EndChamfer {
+            radius: 10.0,
+            radial: 1.0,
+            axial: 1.0,
+            past: 0.0,
+            flush: None,
+        };
+        let section = chamfer_section(&chamfer, 0.1, true).unwrap();
+        assert_eq!((section.points.len(), section.slope), (3, 2));
+        let none = EndChamfer {
+            radial: f64::NAN,
+            ..chamfer
+        };
+        assert!(chamfer_section(&none, 0.1, true).is_none());
+        let through = chamfer_plane(&Plane::XY, -1.0, 0.0);
+        assert_eq!(through.x, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(through.y, Vec3::new(0.0, 0.0, -1.0));
+    }
+
+    #[test]
+    fn the_plan_carries_the_chamfers_as_made() {
+        let plain = plan(&SplineNumbers {
+            end_chamfer: Some(0.5),
+            ..straight()
+        })
+        .unwrap();
+        let end = plain.end_chamfer.unwrap();
+        assert_eq!((end.axial, end.radial), (0.5, 0.5));
+        assert!(plain.entry_chamfer.is_none());
+        let two = plan(&SplineNumbers {
+            entry_chamfer: Some(0.5),
+            entry_chamfer_distance2: Some(0.25),
+            ..straight()
+        })
+        .unwrap();
+        let entry = two.entry_chamfer.unwrap();
+        assert_eq!((entry.axial, entry.radial), (0.5, 0.25));
+        let refused = plan(&SplineNumbers {
+            end_chamfer_angle: Some(30.0),
+            ..straight()
+        })
+        .unwrap_err();
+        assert_eq!(refused.key.as_deref(), Some("end_chamfer_angle"));
     }
 
     #[test]

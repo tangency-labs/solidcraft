@@ -61,12 +61,15 @@ pub static COMMANDS: &[CommandSpec] =
          hub_tip_round? (default 0); master_spline?: none|tooth_out|wide_tooth (default none) with master_angle? (deg \
          from angle 0, -360..360, default 0, refused without a master spline; the whole spline turns to put the master \
          spline exactly there); cutter_diameter?: each tooth space cut into a picked shaft ends in the cutter's curve \
-         (without it the spaces end square); end_chamfer?: a 45 degree chamfer of this size on the ends of the \
-         shaft's teeth, entry_chamfer?: the same where the teeth run out of the hub's bore (on a picked face: on the \
-         end the teeth start from, and on the far end where the teeth run the whole face; on a new part: on both \
-         ends; each cut by the spline, so it is made again when the size or the teeth change; default none); \
-         name? → the feature, the bodies, the \
-         diameters, clearances, turning play (deg) and positions",
+         (without it the spaces end square); end_chamfer?: a chamfer on the ends of the shaft's teeth, this far \
+         along the shaft (alone: at 45 degrees, as far in from the major diameter), with end_chamfer_distance2? \
+         (how far in from the major diameter) or end_chamfer_angle? (deg to the shaft's surface, above 0 and below \
+         90), not both; entry_chamfer?, entry_chamfer_distance2?, entry_chamfer_angle?: the same where the teeth run \
+         out of the hub's bore, out from the tops of the hub's teeth (on a picked face: on the end the teeth start \
+         from, and on the far end where the teeth run the whole face; on a new part: on both ends; each cut by the \
+         spline, so it is made again when the size or the teeth change; default none; a second distance or an \
+         angle only with its chamfer); name? → the feature, the bodies, the diameters, clearances, turning play \
+         (deg) and positions",
         )];
 
 /// The keys only involute teeth read, and those only straight-sided and serrated teeth read.
@@ -238,8 +241,8 @@ fn asked(p: &Value, shaft: bool, bore: bool, read: &mut dyn FnMut(&str, Kind) ->
     if new_hub && hub_diameter.is_none() {
         return Err(bad(CMD, "`hub_diameter` is required to make the hub (mm, its outside diameter)"));
     }
-    // The cutter and the two chamfers belong to a part: a key for a part that is neither cut nor made would be
-    // ignored, so it is refused.
+    // The cutter and the two chamfers, each with its second distance or angle, belong to a part: a key for a part
+    // that is neither cut nor made would be ignored, so it is refused.
     let (with_shaft, with_hub) = if picked { (shaft, bore) } else { (make != SplineMakeParam::Hub, make != SplineMakeParam::Shaft) };
     if !shaft && given(p, "shaft_start") {
         return Err(bad(CMD, "`shaft_start` is the face the teeth of a picked shaft start from: give it only with `shaft_face`"));
@@ -255,6 +258,22 @@ fn asked(p: &Value, shaft: bool, bore: bool, read: &mut dyn FnMut(&str, Kind) ->
     }
     if !with_hub && given(p, "entry_chamfer") {
         return Err(bad(CMD, "`entry_chamfer` is the chamfer where the teeth run out of the hub's bore: give it only when a hub is cut or made"));
+    }
+    for (key, what) in [("end_chamfer_distance2", "the distance in from the major diameter"), ("end_chamfer_angle", "the angle")] {
+        if !with_shaft && given(p, key) {
+            return Err(bad(
+                CMD,
+                format!("`{key}` is {what} of the chamfer on the ends of the shaft's teeth: give it only when a shaft is cut or made"),
+            ));
+        }
+    }
+    for (key, what) in [("entry_chamfer_distance2", "the distance out from the tops of the hub's teeth"), ("entry_chamfer_angle", "the angle")] {
+        if !with_hub && given(p, key) {
+            return Err(bad(
+                CMD,
+                format!("`{key}` is {what} of the chamfer where the teeth run out of the hub's bore: give it only when a hub is cut or made"),
+            ));
+        }
     }
     let master = keyword::<MasterSplineParam>(p, "master_spline", "none, tooth_out or wide_tooth")?.unwrap_or(MasterSplineParam::None);
     if master == MasterSplineParam::None && given(p, "master_angle") {
@@ -303,6 +322,10 @@ fn asked(p: &Value, shaft: bool, bore: bool, read: &mut dyn FnMut(&str, Kind) ->
         cutter_diameter: read("cutter_diameter", Kind::Length)?,
         end_chamfer: read("end_chamfer", Kind::Length)?,
         entry_chamfer: read("entry_chamfer", Kind::Length)?,
+        end_chamfer_distance2: read("end_chamfer_distance2", Kind::Length)?,
+        end_chamfer_angle: read("end_chamfer_angle", Kind::Angle)?,
+        entry_chamfer_distance2: read("entry_chamfer_distance2", Kind::Length)?,
+        entry_chamfer_angle: read("entry_chamfer_angle", Kind::Angle)?,
         with_hub,
         with_shaft,
     };
@@ -442,6 +465,10 @@ fn add_spline(s: &mut Session, p: &Value) -> Result<Value> {
         cutter_diameter: take("cutter_diameter"),
         end_chamfer: take("end_chamfer"),
         entry_chamfer: take("entry_chamfer"),
+        end_chamfer_distance2: take("end_chamfer_distance2"),
+        end_chamfer_angle: take("end_chamfer_angle"),
+        entry_chamfer_distance2: take("entry_chamfer_distance2"),
+        entry_chamfer_angle: take("entry_chamfer_angle"),
     };
     let mut reply = add_feature(s, p, kind)?;
     if let Some(planned) = &planned {
@@ -528,7 +555,9 @@ fn refusal(e: EngineError) -> SplineRefusal {
         EngineError::BadParams { msg, .. } => msg,
         other => other.to_string(),
     };
-    let key = words.split('`').nth(1).filter(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_')).map(str::to_string);
+    // A parameter's name is lowercase letters, digits and `_` (`end_chamfer_distance2`).
+    let is_name = |k: &&str| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    let key = words.split('`').nth(1).filter(is_name).map(str::to_string);
     SplineRefusal { key, words }
 }
 

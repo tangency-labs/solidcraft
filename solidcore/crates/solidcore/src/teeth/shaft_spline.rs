@@ -140,6 +140,25 @@ pub struct SplineNumbers {
     /// The chamfer where the teeth run out of a bore that is there (mm into the bore and out from
     /// the tops of the hub's teeth).
     pub entry_chamfer: Option<f64>,
+    /// How far the end chamfer runs across the end, in from the major diameter, where that is not
+    /// `end_chamfer` itself.
+    pub end_chamfer_distance2: Option<f64>,
+    /// The angle of the end chamfer to the round face, where it is not 45 degrees.
+    pub end_chamfer_angle: Option<f64>,
+    /// How far the entry chamfer runs across the end, out from the tops of the hub's teeth, where
+    /// that is not `entry_chamfer` itself.
+    pub entry_chamfer_distance2: Option<f64>,
+    /// The angle of the entry chamfer to the bore, where it is not 45 degrees.
+    pub entry_chamfer_angle: Option<f64>,
+}
+
+/// A chamfer as the numbers make it, in millimetres.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ChamferSize {
+    /// How far it runs along the round face.
+    pub axial: f64,
+    /// How far it runs across the end.
+    pub radial: f64,
 }
 
 /// What the numbers make, before any body is touched.
@@ -162,6 +181,12 @@ pub struct SplinePlan {
     /// With a master spline: the arc that stands in the hub's outline for what was changed,
     /// turned by the hub's start so that it lies over the shaft.
     pub hub_arc_on_shaft: Option<master_spline::Span>,
+    /// The chamfer on the ends of a shaft's teeth as made; none where `end_chamfer` is left out
+    /// or 0.
+    pub end_chamfer: Option<ChamferSize>,
+    /// The chamfer at the entry of a hub's bore as made; none where `entry_chamfer` is left out
+    /// or 0.
+    pub entry_chamfer: Option<ChamferSize>,
 }
 
 /// The numbers a shaft spline comes to. Diameters and gaps in millimetres.
@@ -716,6 +741,73 @@ pub(crate) fn cutter_radius_typed(
     Ok(diameter / 2.0)
 }
 
+/// The keys of one chamfer's numbers: the chamfer, its second distance and its angle.
+struct ChamferKeys {
+    chamfer: &'static str,
+    distance2: &'static str,
+    angle: &'static str,
+}
+
+/// The chamfer that `size` (mm along the round face), with `distance2` (mm across the end) or
+/// `angle` (degrees to the round face), makes: `size` both ways (45 degrees) when neither is
+/// given. None for no chamfer (`size` left out or 0). Refused: a second distance or an angle
+/// given without the chamfer, both given, a second distance that is not more than 0 or more than
+/// the largest length taken, and an angle not between 0 and 90 degrees. `size` itself was
+/// checked before.
+fn chamfer_size(
+    size: Option<f64>,
+    distance2: Option<f64>,
+    angle: Option<f64>,
+    keys: &ChamferKeys,
+) -> Result<Option<ChamferSize>, TeethFailure> {
+    if size.is_none() {
+        for (given, key) in [(distance2, keys.distance2), (angle, keys.angle)] {
+            if given.is_some() {
+                return Err(TeethFailure::Refused(PlanRefusal::ChamferShapeWithout {
+                    key,
+                    chamfer: keys.chamfer,
+                }));
+            }
+        }
+    }
+    if distance2.is_some() && angle.is_some() {
+        return Err(TeethFailure::Refused(PlanRefusal::ChamferBothShapes {
+            distance2: keys.distance2,
+            angle: keys.angle,
+            chamfer: keys.chamfer,
+        }));
+    }
+    if let Some(value) = distance2 {
+        if !(value.is_finite() && value > 0.0 && value <= MOST_MM) {
+            return Err(TeethFailure::Refused(PlanRefusal::ChamferDistanceRange {
+                key: keys.distance2,
+                most: MOST_MM,
+                value,
+            }));
+        }
+    }
+    if let Some(value) = angle {
+        if !(value.is_finite() && value > 0.0 && value < 90.0) {
+            return Err(TeethFailure::Refused(PlanRefusal::ChamferAngleRange {
+                key: keys.angle,
+                value,
+            }));
+        }
+    }
+    let Some(size) = size.filter(|size| *size > 0.0) else {
+        return Ok(None);
+    };
+    let radial = match (distance2, angle) {
+        (Some(across), _) => across,
+        (None, Some(degrees)) => size * degrees.to_radians().tan(),
+        (None, None) => size,
+    };
+    Ok(Some(ChamferSize {
+        axial: size,
+        radial,
+    }))
+}
+
 /// What the numbers make, or why they make nothing: the checks of the values and the tooth modules'
 /// work. A number that does not apply to the chosen kind of teeth is not read.
 pub fn plan(n: &SplineNumbers) -> crate::Result<SplinePlan> {
@@ -769,6 +861,26 @@ pub(crate) fn plan_typed(n: &SplineNumbers) -> Result<SplinePlan, TeethFailure> 
             }
         }
     }
+    let end_chamfer = chamfer_size(
+        n.end_chamfer,
+        n.end_chamfer_distance2,
+        n.end_chamfer_angle,
+        &ChamferKeys {
+            chamfer: "end_chamfer",
+            distance2: "end_chamfer_distance2",
+            angle: "end_chamfer_angle",
+        },
+    )?;
+    let entry_chamfer = chamfer_size(
+        n.entry_chamfer,
+        n.entry_chamfer_distance2,
+        n.entry_chamfer_angle,
+        &ChamferKeys {
+            chamfer: "entry_chamfer",
+            distance2: "entry_chamfer_distance2",
+            angle: "entry_chamfer_angle",
+        },
+    )?;
 
     let Made { mut pair, mut made } = match n.form {
         SplineForm::Involute => involute_pair(n)?,
@@ -834,5 +946,7 @@ pub(crate) fn plan_typed(n: &SplineNumbers) -> Result<SplinePlan, TeethFailure> 
         tooth_pitch,
         tooth_at,
         hub_arc_on_shaft,
+        end_chamfer,
+        entry_chamfer,
     })
 }

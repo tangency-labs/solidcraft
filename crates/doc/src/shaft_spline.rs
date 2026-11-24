@@ -6,10 +6,14 @@
 //! The kinds of teeth, what a new part is, the finish of a straight-sided tooth's tip corners and the master
 //! spline are the enums of the feature ([`SplineForm`], [`SplineMake`], [`SplineCorner`], [`SplineMaster`]): the
 //! kernel's own, as data. This file computes no geometry: the tooth outlines, the checks of the numbers and the
-//! numbers they come to are the kernel's.
+//! numbers they come to are the kernel's, and so is every point, direction, length and angle the rebuild works with
+//! (the seat on a round face, the outlines as profiles, the sections of the tools).
 
+pub(crate) use solidcore_ops::shaft_spline::{
+    angles_apart, axis_gap, centre_angle, chamfer_plane, chamfer_section, chord_gap, cutter_radius, cutter_section, into_frame, moved_out,
+    off_cylinder, outline_loop, points_apart, reach_along, seat_frame, start_candidates, tool_margin,
+};
 pub use solidcore_ops::shaft_spline::{bezier_pieces, fit_to_shaft_within, module_for_major_radius, outline_points, same_size, space_section};
-pub(crate) use solidcore_ops::shaft_spline::{cutter_radius, tool_margin};
 pub use solidcore_record::shaft_spline::{
     MasterArc, MasterPlaced, OutlinePiece, SpaceSection, SplineCorner, SplineForm, SplineMade, SplineMake, SplineMaster, SplineNumbers, SplinePlan,
     SplineRefusal, ToothOutline, ToothRole,

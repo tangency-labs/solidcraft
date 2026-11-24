@@ -6,12 +6,18 @@ use solidcore::error::teeth::TeethFailure;
 use solidcore::teeth as k;
 use solidcore::teeth::master_spline::Span;
 use solidcore::teeth::outline::SpaceSection as KernelSection;
+use solidcore::teeth::seat as kseat;
+use solidcore::teeth::section as ksection;
 use solidcore::teeth::shaft_spline as ks;
 use solidcore::SolidError;
 use solidcore_record::shaft_spline::{
-    MasterArc, MasterPlaced, OutlinePiece, SpaceSection, SplineCorner, SplineForm, SplineMade,
-    SplineMake, SplineMaster, SplineNumbers, SplinePlan, SplineRefusal, ToothOutline, ToothRole,
+    AxisGap, ChamferSection, ChamferSize, ChordGap, CutterSection, EndChamfer, LoopPiece,
+    MasterArc, MasterPlaced, OutlineLoop, OutlinePiece, RoundFace, SeatFrame, SeatRefusal,
+    SpaceSection, SplineCorner, SplineForm, SplineMade, SplineMake, SplineMaster, SplineNumbers,
+    SplinePlan, SplineRefusal, ToothOutline, ToothRole,
 };
+
+use crate::{record_plane, record_seg2, record_vec2, record_vec3, vec3};
 
 /// A record kind of teeth as the kernel's.
 #[must_use]
@@ -90,6 +96,10 @@ pub fn numbers(n: &SplineNumbers) -> ks::SplineNumbers {
         cutter_diameter: n.cutter_diameter,
         end_chamfer: n.end_chamfer,
         entry_chamfer: n.entry_chamfer,
+        end_chamfer_distance2: n.end_chamfer_distance2,
+        end_chamfer_angle: n.end_chamfer_angle,
+        entry_chamfer_distance2: n.entry_chamfer_distance2,
+        entry_chamfer_angle: n.entry_chamfer_angle,
     }
 }
 
@@ -293,6 +303,127 @@ pub fn record_plan(p: &ks::SplinePlan) -> SplinePlan {
             }),
         tooth_pitch: p.tooth_pitch,
         tooth_at: p.tooth_at,
+        end_chamfer: p.end_chamfer.as_ref().map(record_chamfer_size),
+        entry_chamfer: p.entry_chamfer.as_ref().map(record_chamfer_size),
+    }
+}
+
+/// A kernel chamfer as made as the record's.
+#[must_use]
+pub fn record_chamfer_size(c: &ks::ChamferSize) -> ChamferSize {
+    ChamferSize {
+        axial: c.axial,
+        radial: c.radial,
+    }
+}
+
+/// A record round face as the kernel's.
+#[must_use]
+pub fn round_face(f: &RoundFace) -> kseat::RoundFace {
+    kseat::RoundFace {
+        axis_point: vec3(f.axis_point),
+        axis: vec3(f.axis),
+        radius: f.radius,
+        start: f.start,
+        end: f.end,
+    }
+}
+
+/// A kernel seat as the record's.
+#[must_use]
+pub fn record_seat_frame(s: &kseat::SeatFrame) -> SeatFrame {
+    SeatFrame {
+        plane: record_plane(&s.plane),
+        inward: s.inward,
+        room: s.room,
+        at: record_vec3(s.at),
+    }
+}
+
+/// A kernel refusal of a seat as the record's.
+#[must_use]
+pub fn record_seat_refusal(r: kseat::SeatRefusal) -> SeatRefusal {
+    match r {
+        kseat::SeatRefusal::NoDirection => SeatRefusal::NoDirection,
+        kseat::SeatRefusal::NoPlane => SeatRefusal::NoPlane,
+        kseat::SeatRefusal::NoSize => SeatRefusal::NoSize,
+    }
+}
+
+/// A kernel axis gap as the record's.
+#[must_use]
+pub fn record_axis_gap(g: kseat::AxisGap) -> AxisGap {
+    AxisGap {
+        lean: g.lean,
+        off: g.off,
+    }
+}
+
+/// A kernel chord gap as the record's.
+#[must_use]
+pub fn record_chord_gap(g: kseat::ChordGap) -> ChordGap {
+    ChordGap {
+        length: g.length,
+        lean: g.lean,
+    }
+}
+
+/// A kernel piece of a whole outline's loop as the record's.
+#[must_use]
+pub fn record_loop_piece(p: &ksection::LoopPiece) -> LoopPiece {
+    LoopPiece {
+        top: p.top,
+        role: record_role(p.role),
+        middle: p.middle,
+        corner: p.corner,
+        first: p.first,
+        segs: p.segs,
+    }
+}
+
+/// A kernel outline's loop as the record's.
+#[must_use]
+pub fn record_outline_loop(l: &ksection::OutlineLoop) -> OutlineLoop {
+    OutlineLoop {
+        segs: l.segs.iter().map(record_seg2).collect(),
+        joints: l.joints.iter().copied().map(record_vec2).collect(),
+        pieces: l.pieces.iter().map(record_loop_piece).collect(),
+    }
+}
+
+/// A kernel cutter's section as the record's.
+#[must_use]
+pub fn record_cutter_section(s: &ksection::CutterSection) -> CutterSection {
+    CutterSection {
+        segs: s.segs.iter().map(record_seg2).collect(),
+        spans: s.spans.clone(),
+        middle: s.middle,
+        from: s.from,
+        to: s.to,
+        joints: s.joints.iter().copied().map(record_vec2).collect(),
+        axis_at: record_vec2(s.axis_at),
+        axis_dir: record_vec2(s.axis_dir),
+    }
+}
+
+/// A record chamfer at the end of a round face as the kernel's.
+#[must_use]
+pub fn end_chamfer(c: &EndChamfer) -> ksection::EndChamfer {
+    ksection::EndChamfer {
+        radius: c.radius,
+        radial: c.radial,
+        axial: c.axial,
+        past: c.past,
+        flush: c.flush,
+    }
+}
+
+/// A kernel chamfer's section as the record's.
+#[must_use]
+pub fn record_chamfer_section(s: &ksection::ChamferSection) -> ChamferSection {
+    ChamferSection {
+        points: s.points.iter().copied().map(record_vec2).collect(),
+        slope: s.slope,
     }
 }
 

@@ -13,7 +13,8 @@ is `crates/doc/src/shaft_spline.rs` (the checks and the plan), `crates/doc/src/e
 2. **Choose the teeth**: the **Type** (Involute, Straight-sided or Serration), the **Teeth** count
    and the **Length**. The drawing at the top of the dialog follows every change, and the line under
    it says in words when the numbers make no spline.
-3. **Set the fit**, and a master spline if the hub must go on one way only.
+3. **Set the fit**, the chamfers, and a master spline if the hub must go on one way only. These are
+   in groups of the dialog that open and close (see [The dialog](#the-dialog)).
 4. **Accept.** The History gets one Shaft Spline feature.
 
 ```json
@@ -96,11 +97,42 @@ of the face run right through, with no rounded end.
 
 ## End chamfer and entry chamfer
 
-`end_chamfer` is a 45° chamfer on the ends of a shaft's teeth, measured from the major diameter.
-`entry_chamfer` is a 45° chamfer where the teeth run out of a hub's bore, measured out from the tops
-of the hub's teeth. Both are cut by the spline itself, so they follow the size and the tooth count
-when these change. On a picked face each is cut on the end the teeth start from, and on the far end
-too where the teeth run the whole face; on a new part, on both ends. A part that was chamfered or
-rounded first with Chamfer or Fillet is cut through, and the teeth run out through that chamfer or
-round. 0 means none. `end_chamfer` is refused when no shaft is cut or made, `entry_chamfer` when
-no hub is.
+`end_chamfer` is a chamfer on the ends of a shaft's teeth: it runs `end_chamfer` along the shaft and
+in from the major diameter. `entry_chamfer` is a chamfer where the teeth run out of a hub's bore: it
+runs `entry_chamfer` into the bore and out from the tops of the hub's teeth. Each takes the Chamfer
+tool's three types, which set how far it runs across the end:
+
+| Type in the dialog | Parameters | Across the end |
+|---|---|---|
+| Equal Distance | `end_chamfer` alone | as far as along: 45° |
+| Two Distances | `end_chamfer` with `end_chamfer_distance2` | `end_chamfer_distance2` |
+| Distance and Angle | `end_chamfer` with `end_chamfer_angle` | `end_chamfer` × tan(`end_chamfer_angle`) |
+
+The same for the hub with `entry_chamfer_distance2` and `entry_chamfer_angle`. The angle is measured
+from the round face, in degrees, above 0 and below 90; the second distance is more than 0. A second
+distance or an angle is refused without its chamfer, and the two are refused together for one
+chamfer. A chamfer of 0 is none, whatever else is given.
+
+```json
+{"command": "shaft_spline.insert", "params": {"type": "straight", "make": "both", "teeth": 6, "length": 20, "major_diameter": 28, "minor_diameter": 23, "tooth_width": 6, "side_clearance": 0.05, "major_clearance": 0.3, "minor_clearance": 0.2, "hub_diameter": 40, "end_chamfer": 1, "end_chamfer_angle": 30, "entry_chamfer": 1, "entry_chamfer_distance2": 0.5}}
+```
+
+Both chamfers are cut by the spline itself, so they follow the size and the tooth count when these
+change. On a picked face each is cut on the end the teeth start from, and on the far end too where
+the teeth run the whole face; on a new part, on both ends. A part that was chamfered or rounded first
+with Chamfer or Fillet is cut through, and the teeth run out through that chamfer or round. 0 means
+none. `end_chamfer` and its second distance and angle are refused when no shaft is cut or made,
+`entry_chamfer` and its own when no hub is.
+
+## The dialog
+
+The numbers that size the teeth stay at the top: the fit check box (a picked shaft), the drawing,
+**Type**, **Make** (nothing picked), **Teeth**, **Length**, then **Module** and **Pressure angle**
+(involute), or **Major diameter**, **Minor diameter** and **Tooth width** or **Flank angle**. The rest
+is in groups that open and close by their titles, in this order: **Tooth form** (the involute's
+addendum, dedendum, root fillet, profile shift and thinning, or the root round; open), **Fit**
+(open), **Tip corners** (straight-sided teeth and serrations; closed), **Chamfers** (when a shaft or
+a hub is cut or made; closed): each chamfer's size, its **Type** and the **Distance 2** or **Angle**
+its type needs, **Groove end** (a picked shaft; closed), **Master spline** (closed), **Hub** and
+**As made**. The dialog sends a chamfer's second distance or angle only with the chamfer, and only
+for the type that uses it.

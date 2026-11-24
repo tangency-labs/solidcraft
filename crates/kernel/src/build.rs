@@ -165,7 +165,7 @@ pub fn canonical_revolve_axis(plane: &Plane, region: &Region2, axis_origin: Vec2
 /// This legacy API preserves its historical sweep sign behavior.
 pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve");
-    revolved(plane, regions, axis_origin, axis_dir, angle)
+    revolved(plane, regions, axis_origin, axis_dir, angle, None)
 }
 
 /// [`revolve`] for bodies that are final (new bodies, not a boolean's tools), with each planar
@@ -173,7 +173,7 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
 /// cap, so this is [`revolve`].
 pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole");
-    revolved(plane, regions, axis_origin, axis_dir, angle)
+    revolved(plane, regions, axis_origin, axis_dir, angle, None)
 }
 
 /// [`revolve`] with each run of free-form segments (conics, Béziers) that `one_curve` says are pieces of one curve
@@ -188,7 +188,7 @@ pub fn revolve_whole_sides(
     one_curve: &dyn Fn(&Seg2, &Seg2) -> bool,
 ) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole_sides");
-    revolved_with(plane, regions, axis_origin, axis_dir, angle, Some(one_curve))
+    revolved(plane, regions, axis_origin, axis_dir, angle, Some(one_curve))
 }
 
 /// How near the axis (mm) a profile corner between two lines goes onto it when revolved. A sketch
@@ -197,13 +197,9 @@ pub fn revolve_whole_sides(
 /// ten-thousandth of a millimetre is far below any shape someone draws on purpose.
 const AXIS_SNAP: f64 = 1e-4;
 
-/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
-fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
-    revolved_with(plane, regions, axis_origin, axis_dir, angle, None)
-}
-
-/// [`revolved`], with the runs of segments `one_curve` says are one curve turned as one curve each.
-fn revolved_with(
+/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]), with the runs of segments `one_curve`
+/// says are one curve turned as one curve each (none: each segment on its own).
+fn revolved(
     plane: &Plane,
     regions: &[Region2],
     axis_origin: Vec2,
