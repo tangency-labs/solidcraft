@@ -2571,6 +2571,12 @@ fn own_corner_members(corners: &mut [solidcraft_doc::frame::CornerOverride], own
 /// The name a frame member feature gives the member on `line` (its group's `body_name`); none:
 /// named after the profile.
 fn member_group_name(kind: &FeatureKind, line: &str) -> Option<String> {
+    // A continuous tube is one physical member; `$path` is not one of its sketch curves.
+    if let FeatureKind::FrameMember { continuous: true, body_name, .. } = kind
+        && line == "$path"
+    {
+        return body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+    }
     let groups = solidcraft_doc::frame::member_groups(kind);
     let group = groups.iter().find(|g| g.lines.is_empty() || g.lines.iter().any(|l| l == line))?;
     group.body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
@@ -2624,6 +2630,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.rotate_member"
                 | "frame.gusset"
                 | "frame.member"
+                | "frame.trim"
                 | "frame.plate"
         );
     if !constructor {
@@ -2801,6 +2808,19 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
+    if let FeatureKind::Pattern { components, occurrences, .. } = &old.kind
+        && !occurrences.is_empty()
+    {
+        let removed = match &mut new.kind {
+            FeatureKind::Pattern { components: after, occurrences: copies, .. } if after == components => {
+                // The constructor built a temporary pattern. Rebuild the edited feature with
+                // its original placements so a spacing or count edit keeps its surviving ids.
+                std::mem::replace(copies, occurrences.clone())
+            }
+            _ => occurrences.clone(),
+        };
+        trial.doc_mut().remove_occurrences(&removed.into_iter().collect());
+    }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body
         && before.path == after.path

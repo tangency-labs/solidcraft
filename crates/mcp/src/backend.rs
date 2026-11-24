@@ -15,6 +15,10 @@ use solidcraft_viewport::StandardView;
 /// `{pending: what | null, done?, reply?, lost?, running_s?}`).
 pub trait Backend {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
+    /// When this backend can switch between sessions, select one for the entire batch.
+    fn batch_backend(&mut self) -> Option<&mut dyn Backend> {
+        None
+    }
     /// Whether this session supports `plugin.tools`. A remote backend asks the app's
     /// capabilities before sending this optional command; an older app gets no lookup.
     fn supports_plugin_tools(&mut self) -> bool {

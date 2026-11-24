@@ -994,12 +994,17 @@ pub(in crate::error) fn assert_pinned(
 /// `crates/` (`pins/phrase/solidcore/src/blend/hcr.rs.pin` pins
 /// `solidcore/src/blend/hcr.rs`), holding its count as a decimal number. One file per pin,
 /// so changes that lower different files' counts touch different files and merge cleanly.
+/// A missing `pins/<kind>/` folder means no pins (git drops the folder with its last pin).
 /// Panics on any other file in the folder, or a pin that is not a number above 0.
 pub(in crate::error) fn pins(kind: &str) -> Vec<(String, usize)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src/error/pins")
         .join(kind);
     let mut pins = Vec::new();
+    // git keeps no empty folder: a kind whose last pin went has no folder, and no sites
+    if !root.exists() {
+        return pins;
+    }
     let mut dirs = vec![root.clone()];
     while let Some(dir) = dirs.pop() {
         for entry in std::fs::read_dir(&dir).expect("read pins dir") {

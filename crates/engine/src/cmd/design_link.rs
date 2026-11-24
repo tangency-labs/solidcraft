@@ -116,6 +116,14 @@ pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     }
 }
 
+/// Whether `file` is in the folder of the design saved at `design`, or below it, with directory
+/// aliases resolved as a link's path is kept ([`link_target`]). An unsaved design has no folder.
+pub(super) fn inside_design_folder(design: Option<&str>, file: &Path) -> bool {
+    base_dir(design)
+        .and_then(|base| relative(&base, &link_target(file)))
+        .is_some_and(|rel| !rel.as_os_str().is_empty() && rel.components().all(|c| matches!(c, PathPart::Normal(_))))
+}
+
 /// One link's path, kept for a design saved at `from`, as a design saved at `to` keeps it: the
 /// one Save As rule every kind of link follows.
 pub(super) fn rebase(link: &str, from: Option<&str>, to: &str) -> String {
