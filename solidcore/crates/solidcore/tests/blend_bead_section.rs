@@ -2224,6 +2224,56 @@ fn the_feet_series_round_a_rod_hold_their_closed_forms() {
     }
 }
 
+/// The chord's section face is certified (step 3 of the foot blend's certificate): in a
+/// square corner and round a rod on a plate its net has a proved bound within the weld's fit
+/// tolerance, and at 41 parameters along the joint the net's two sides and its middle lie
+/// within that bound of the true feet and the chord's midpoint there.
+#[test]
+fn the_chord_s_section_face_is_within_its_proved_bound() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    use solidcore::primitive::api_primitives::create_box;
+    let mut k = kernel();
+    let (mut corner_part, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &corner_part, at);
+    let in_corner = FootBlend::of_edge(&k, &mut corner_part, edge, None).unwrap();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 40.0).unwrap();
+    let mut rod_part = boolean_union(&mut k, plate, rod).unwrap();
+    let joint = pick(&k, &rod_part, [65.0, 50.0, 10.0]);
+    let round_rod = FootBlend::of_edge(&k, &mut rod_part, joint, None).unwrap();
+    for (what, blend, legs) in [
+        ("corner", &in_corner, [SETBACK, 3.0]),
+        ("rod", &round_rod, [6.0, 6.0]),
+    ] {
+        let started = std::time::Instant::now();
+        let bound = blend
+            .section_bound(&k, legs, 0.0, WELD_FIT_TOLERANCE)
+            .unwrap()
+            .expect("the chord's net is certified");
+        println!("{what}: bound {bound:.3e}, {:?}", started.elapsed());
+        assert!(bound <= WELD_FIT_TOLERANCE, "{what}: {bound}");
+        let face = blend
+            .section_face(&k, legs, 0.0, WELD_FIT_TOLERANCE)
+            .unwrap();
+        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        for j in 0..=40 {
+            let t = lo + (hi - lo) * f64::from(j) / 40.0;
+            let s = blend.station(&k, t, legs, None).unwrap();
+            let [a, b] = s.feet;
+            for (v, want) in [(0.0, a), (0.5, a + (b - a) * 0.5), (1.0, b)] {
+                let got = face
+                    .evaluate_point(&k, solidcore::math::Point2::new(t, v))
+                    .unwrap();
+                assert!(
+                    got.distance(want) <= bound,
+                    "{what} at {t}, v {v}: {} past {bound}",
+                    got.distance(want)
+                );
+            }
+        }
+    }
+}
+
 /// The proof is not empty: stations whose last foot was moved onto the other branch (across
 /// the edge, on the plane's continuation) are not proved, a typed failure, not a pass.
 #[test]

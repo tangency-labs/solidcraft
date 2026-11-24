@@ -984,8 +984,11 @@ impl FootBlend {
     /// to foot 2 (1). The arcs are interpolated in homogeneous form (cubic in `u`) at stations
     /// on each of the leader's knots (at least four), doubled between them until, at the
     /// midpoint between each two stations, the net holds the feet, the section's middle and
-    /// the root within `tol`. Exact at its stations; between them that is a **sampled** check
-    /// at one point per interval, not a bound: nothing is certified yet.
+    /// the root within `tol`. The chord's net is instead the cubic Hermite net through its
+    /// feet and their rates, **certified** within `tol` of the true section
+    /// ([`FootBlend::chord_net`]; the root still sampled); an arc's, and a chord's whose feet's
+    /// series are not enclosed, is exact at its stations and between them **sampled** at one
+    /// point per interval, not bounded.
     ///
     /// # Errors
     ///
@@ -1025,6 +1028,24 @@ impl FootBlend {
     ) -> Result<FeetProof> {
         let (lo, hi) = (self.interval.min(), self.interval.max());
         Ok(self.segment(k, legs, sagitta, tol, lo, hi)?.proof)
+    }
+
+    /// The proved distance of [`Self::section_face`]'s net (with the same arguments) from the
+    /// true section: `Some` where the net is certified ([`FootBlend::chord_net`]: the chord,
+    /// its feet's series enclosed), `None` where it is sampled.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::section_face`].
+    pub fn section_bound(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        sagitta: f64,
+        tol: f64,
+    ) -> Result<Option<f64>> {
+        let (lo, hi) = (self.interval.min(), self.interval.max());
+        Ok(self.segment(k, legs, sagitta, tol, lo, hi)?.bound)
     }
 
     /// [`Self::section_face`] over the leader's parameters `a..b` inside its interval, with
@@ -1081,11 +1102,29 @@ impl FootBlend {
                     Err(miss) => return Err(self.refusal(k, miss, &stations, legs, sagitta)?),
                 }
             }
-            let (face, feet) = net_through_rows(&stations, &rows, sagitta)?;
+            // the chord's net certified where its feet's series are enclosed; else (and an arc's,
+            // for now) the net through the rows, sampled
+            let certified = if sagitta == 0.0 {
+                self.chord_net(k, legs, &solved, tol)?
+            } else {
+                Chord::NotEnclosed
+            };
+            let (face, feet, bound) = match certified {
+                Chord::Net(face, feet, bound) => (face, feet, Some(bound)),
+                Chord::Over(bound) => {
+                    worst = bound;
+                    count *= 2;
+                    continue;
+                }
+                Chord::NotEnclosed => {
+                    let (face, feet) = net_through_rows(&stations, &rows, sagitta)?;
+                    (face, feet, None)
+                }
+            };
             let root = through_at(&roots, &stations)?;
-            // sampled, not proved: at the midpoint between each two stations, the feet, the
-            // section's middle and the root
-            worst = 0.0_f64;
+            // sampled, not proved: at the midpoint between each two stations, the root, and
+            // where the net is not certified the feet and the section's middle
+            worst = bound.unwrap_or(0.0);
             for (j, pair) in stations.windows(2).enumerate() {
                 let &[lo, hi] = pair else { continue };
                 let t = 0.5 * (lo + hi);
@@ -1099,9 +1138,11 @@ impl FootBlend {
                     continue;
                 };
                 let middle = section_middle(&row.0, sagitta);
-                for (v, want) in [(0.0, first), (0.5, middle), (1.0, last)] {
-                    let got = face.evaluate_point(Point2::new(t, v))?;
-                    worst = worst.max(got.distance(want));
+                if bound.is_none() {
+                    for (v, want) in [(0.0, first), (0.5, middle), (1.0, last)] {
+                        let got = face.evaluate_point(Point2::new(t, v))?;
+                        worst = worst.max(got.distance(want));
+                    }
                 }
                 worst = worst.max(root.evaluate_point(t)?.distance(s.root));
             }
@@ -1116,6 +1157,7 @@ impl FootBlend {
                     root,
                     start_uv,
                     proof,
+                    bound,
                 });
             }
             count *= 2;
@@ -1233,6 +1275,9 @@ struct Segment {
     start_uv: [Point2; 2],
     /// The feet's proof between its stations.
     proof: FeetProof,
+    /// The section face's proved distance from the true section ([`FootBlend::chord_net`]),
+    /// where it is certified.
+    bound: Option<f64>,
 }
 
 /// The cubic through `points` at the parameters `stations`.
@@ -2731,6 +2776,181 @@ impl FootBlend {
             [Some(f1), Some(f2)] => Some([f1, f2]),
             _ => None,
         })
+    }
+}
+
+/// The share of a span [`FootBlend::chord_net`] reads each end's rate over (one-sided: a
+/// station on a knot of the leader ends two spans whose rates differ).
+const RATE_PIECE: f64 = 1e-6;
+
+/// The rounding [`FootBlend::chord_net`] adds to its bound, relative to `1 +` the net's
+/// largest coordinate: the control points' few operations and the net's evaluation, far
+/// below it (definitions-and-certificates.md §4.4's floors are about `1e-10` at part scale).
+const NET_ROUNDING: f64 = 1e-10;
+
+/// `|v|` over an enclosure: the root of the sum of its components' largest squares.
+fn ivl_norm(v: crate::blend::fillet_section::series::V3<Ivl>) -> f64 {
+    let m = [v.x.mag(), v.y.mag(), v.z.mag()];
+    (m.iter().map(|c| c * c).sum::<f64>()).sqrt() * (1.0 + 4.0 * f64::EPSILON)
+}
+
+/// The middle of an enclosure, and its largest distance from it.
+fn ivl_mid(v: crate::blend::fillet_section::series::V3<Ivl>) -> (Vec3, f64) {
+    let mid = Vec3::new(v.x.mid(), v.y.mid(), v.z.mid());
+    let r = [v.x, v.y, v.z]
+        .iter()
+        .zip([mid.x, mid.y, mid.z])
+        .map(|(c, m)| (c.hi - m).max(m - c.lo))
+        .map(|d| d * d)
+        .sum::<f64>()
+        .sqrt();
+    (mid, r * (1.0 + 4.0 * f64::EPSILON))
+}
+
+/// The largest distance of a point from `p` in an enclosure.
+fn ivl_off(v: crate::blend::fillet_section::series::V3<Ivl>, p: Point3) -> f64 {
+    [(v.x, p.x), (v.y, p.y), (v.z, p.z)]
+        .iter()
+        .map(|(c, x)| (c.hi - x).abs().max((x - c.lo).abs()))
+        .map(|d| d * d)
+        .sum::<f64>()
+        .sqrt()
+        * (1.0 + 4.0 * f64::EPSILON)
+}
+
+/// What [`FootBlend::chord_net`] made: the net, its sides and its bound; or the bound of the
+/// first span past the tolerance (the net is not made); or nothing, a span's series not
+/// enclosed.
+#[allow(clippy::large_enum_variant)] // one made per round of stations, never stored
+enum Chord {
+    Net(BSplineSurface, [BSplineCurve; 2], f64),
+    Over(f64),
+    NotEnclosed,
+}
+
+impl FootBlend {
+    /// The chord's section face certified over the stations `solved` (in order along the
+    /// leader, legs `legs`): on each span `[t_i, t_(i+1)]`, length `h`, each side of the net is
+    /// the cubic Hermite through the stations' feet with each end's rate, the middle of its
+    /// foot's first coefficient over a sliver of the span at that end
+    /// ([`FootBlend::feet_series`] over [`RATE_PIECE`] of it); the net is linear across between
+    /// its sides, as the chord is between its feet, so it is within the larger side's bound of
+    /// the true section. A side's bound on the span is the Hermite remainder `h⁴/384 · max
+    /// |a⁗| = h⁴/16 · max |a_4|` (the foot's series over the span) plus the net's distance from
+    /// the Hermite of the true feet and rates (at each end the foot's distance from its series'
+    /// enclosure plus `h/3` times the rate's distance from its own: the control points move by
+    /// those, and the Bernstein basis sums to 1) plus [`NET_ROUNDING`]. The stations sit at
+    /// the leader's knots, so no span runs across one. The net (u the leader's parameter,
+    /// cubic, each station a knot of multiplicity 3: C1 within a span of the leader, C0 at
+    /// its knots; v from foot 1 to foot 2, linear), its two sides, and the bound: the largest
+    /// of the spans' ([`Chord::Net`]); the first span's bound past `tol` ([`Chord::Over`]: the
+    /// rest are not enclosed); [`Chord::NotEnclosed`] where a span's series are not.
+    ///
+    /// # Errors
+    ///
+    /// Those of the series and of the net's construction.
+    fn chord_net(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        solved: &[FootStation],
+        tol: f64,
+    ) -> Result<Chord> {
+        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+        let mut sides: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
+        let mut knots = Vec::new();
+        let mut mults = Vec::new();
+        let mut bound = 0.0_f64;
+        let mut size = 0.0_f64;
+        for pair in solved.windows(2) {
+            let &[a, b] = pair else { continue };
+            let h = b.t - a.t;
+            let sliver = RATE_PIECE * h;
+            let (Some(whole), Some(start), Some(end)) = (
+                self.feet_series(k, legs, a.t, b.t)?,
+                self.feet_series(k, legs, a.t, a.t + sliver)?,
+                self.feet_series(k, legs, b.t - sliver, b.t)?,
+            ) else {
+                return Ok(Chord::NotEnclosed);
+            };
+            if knots.is_empty() {
+                knots.push(a.t);
+                mults.push(4);
+            } else if let Some(m) = mults.last_mut() {
+                *m = 3;
+            }
+            knots.push(b.t);
+            mults.push(4);
+            for (i, side) in sides.iter_mut().enumerate() {
+                let (Some(w), Some(s0), Some(s1), Some(&fa), Some(&fb)) = (
+                    whole.get(i),
+                    start.get(i),
+                    end.get(i),
+                    a.feet.get(i),
+                    b.feet.get(i),
+                ) else {
+                    return Err(defect("a station or a series lacked the foot of a support, though both are made for the two"));
+                };
+                let (Some(&a4), Some(&p0), Some(&r0), Some(&p1), Some(&r1)) =
+                    (w.get(4), s0.first(), s0.get(1), s1.first(), s1.get(1))
+                else {
+                    return Err(defect("a foot's series lacked an order it is made to"));
+                };
+                let (rate_a, da) = ivl_mid(r0);
+                let (rate_b, db) = ivl_mid(r1);
+                let ends = (ivl_off(p0, fa) + h / 3.0 * da).max(ivl_off(p1, fb) + h / 3.0 * db);
+                let hermite = h.powi(4) / 16.0 * ivl_norm(a4);
+                bound = bound.max(hermite + ends);
+                if bound > tol {
+                    return Ok(Chord::Over(bound));
+                }
+                if side.is_empty() {
+                    side.push(fa);
+                }
+                side.push(fa + rate_a * (h / 3.0));
+                side.push(fb - rate_b * (h / 3.0));
+                side.push(fb);
+                size = size.max(fa.max_dimension()).max(fb.max_dimension());
+            }
+        }
+        let [s1, s2] = &sides;
+        if s1.len() < 4 || s1.len() != s2.len() {
+            return Ok(Chord::NotEnclosed);
+        }
+        let bound = bound + NET_ROUNDING * (1.0 + size);
+        let curve = |points: &[Point3]| {
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: points,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &mults,
+                knots: &knots,
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+        };
+        let mut points = Vec::new();
+        for (p, q) in s1.iter().zip(s2) {
+            points.push(*p);
+            points.push(*q);
+        }
+        let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &mults,
+            v_multiplicities: &[2, 2],
+            u_knots: &knots,
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })?;
+        Ok(Chord::Net(net, [curve(s1)?, curve(s2)?], bound))
     }
 }
 
