@@ -102,6 +102,11 @@ pub(crate) fn with_mains_lines(unit_id: &str, text: &str) -> String {
             .and_then(|v| v["case"].as_str().map(str::to_string));
         match case {
             Some(c) if moved(unit_id, &c) => out.push_str(&main_line(unit_id, &c).to_string()),
+            // (a row only the carry gate moved: its line before the gate, which is main's
+            // since the retirement did not move it)
+            Some(c) if carry_gated(unit_id, &c) => {
+                out.push_str(&ungated_line(unit_id, &c).to_string());
+            }
             _ => out.push_str(line),
         }
         out.push('\n');
@@ -207,18 +212,21 @@ pub(crate) const REPLAY_ONLY: &[(&str, &str)] = &[
     ("topology.brep_p10", "subdivide_cylinder_face0_cinf"),
 ];
 
-/// Runs `f` with main's choices at both WR-450 seams when `case` of `unit_id` is a row of
-/// [`DATA`], [`BELOW_COMPARATOR`] or [`REPLAY_ONLY`] (a row this retirement moved, or whose
-/// replayed run it moved), else as is: for the other
-/// replays that rebuild main's run of a row (main's row hash), which since this retirement
-/// differs from this branch's through these two choices as well (the WR-493 retirement's
-/// `wr493_rows::without_classified_trims` precedent). [`replay_unit`] and
-/// [`below_comparator_rows_are_mains_with_mains_choices`] prove those rows move only through
-/// these choices.
+/// Runs `f` with main's choices at the WR-450 seams (the two choices and the carry gate,
+/// which main did not have) when `case` of `unit_id` is a row of [`DATA`],
+/// [`BELOW_COMPARATOR`], [`REPLAY_ONLY`] or [`UNGATED_LINES`] (a row this retirement moved,
+/// or whose replayed run it moved), else as is: for the other replays that rebuild main's
+/// run of a row (main's row hash), which since this retirement differs from this branch's
+/// through these choices as well (the WR-493 retirement's
+/// `wr493_rows::without_classified_trims` precedent). [`replay_unit`],
+/// [`below_comparator_rows_are_mains_with_mains_choices`] and
+/// [`carry_gate_rows_move_only_through_the_gate`] prove those rows move only through these
+/// choices.
 pub(crate) fn with_mains_choices_for<R>(unit_id: &str, case: &str, f: impl FnOnce() -> R) -> R {
     if !moved(unit_id, case)
         && !below_comparator(unit_id, case)
         && !REPLAY_ONLY.contains(&(unit_id, case))
+        && !carry_gated(unit_id, case)
     {
         return f();
     }
@@ -331,8 +339,31 @@ replay_tests! {
 /// The lines of the rows the carry gate moved ([`Seam::CarryGate`],
 /// `copy_uv_trim_curves_of_other_face` turning away the other operand's trim of a copied
 /// edge whose same-parameter gap is not proved within the edge's tolerance), as committed
-/// before the gate (`{"unit": .., "line": ..}`, the branch's lines at 9301c9f45e).
+/// before the gate (`{"unit": .., "line": ..}`, the branch's lines at 498fdc76fb).
 const UNGATED_LINES: &str = include_str!("wr450_rows/ungated.jsonl");
+
+/// The line before the carry gate of `case` of `unit_id`, a row of [`UNGATED_LINES`].
+fn ungated_line(unit_id: &str, case: &str) -> Value {
+    UNGATED_LINES
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .find(|v| v["unit"] == unit_id && v["line"]["case"] == case)
+        .map_or_else(
+            || panic!("{unit_id}: no line before the gate of {case}"),
+            |v| v["line"].clone(),
+        )
+}
+
+/// Whether `case` of `unit_id` is a row the carry gate moved ([`UNGATED_LINES`]): the other
+/// replays rebuild main's run of it with the gate put back too
+/// ([`with_mains_choices_for`]), and rebuild main's file with its line before the gate where
+/// the retirement did not move it ([`with_mains_lines`]).
+pub(crate) fn carry_gated(unit_id: &str, case: &str) -> bool {
+    UNGATED_LINES.lines().any(|l| {
+        let v: Value = serde_json::from_str(l).unwrap();
+        v["unit"] == unit_id && v["line"]["case"] == case
+    })
+}
 
 /// Each row the carry gate moved: run with only the gate's choice put back (every trim
 /// carried, as before the gate), it is its line before the gate under the goldens' rule
