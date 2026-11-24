@@ -278,12 +278,15 @@ pub(super) fn validate_and_update(
     rep: &mut Rep<'_>,
     validate_only: bool,
 ) -> Result<(i32, ToleranceGaps)> {
-    // Don't change the brep if we are just validating
-    let saved = b.validate_only();
-    b.set_validate_only(if validate_only { true } else { saved });
-    let result = validate_and_update_body(k, b, rep, validate_only);
-    b.set_validate_only(saved);
-    result
+    // Don't change the brep if we are just validating. Not upstream (#21105): upstream sets
+    // `m_bValidateOnly` on the B-rep for the pass and restores it after, so that a UV trim
+    // built during the pass raises no tolerance; here the pass's argument holds the raise on
+    // the kernel for the pass instead, and the B-rep it checks is not written.
+    if validate_only {
+        k.with_held_trim_raise(|k| validate_and_update_body(k, b, rep, true))
+    } else {
+        validate_and_update_body(k, b, rep, false)
+    }
 }
 
 use super::super::pointers::{edge_tube_reaches, vertex_ball_reaches, GROWTH_PAST_RATIO};

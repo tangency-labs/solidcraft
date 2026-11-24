@@ -876,12 +876,16 @@ fn check_edges(
             b.tolerance() * 0.99,
             tol,
         )?;
-        let good = match check_edge_geometry(k, b, e, cache, keys) {
-            Ok(()) => true,
+        let (good, turned_back) = match check_edge_geometry(k, b, e, cache, keys) {
+            Ok(turned_back) => (true, turned_back),
             Err(err) if err.is_unported_or_cancelled() => return Err(err),
-            Err(_) => false,
+            Err(_) => (false, false),
         };
         r.check(b, 61, good, EntityRef::Edge(e))?;
+        // Not upstream (#21105): an end that turns back is reported, not repaired
+        if turned_back {
+            r.warning(b, 147, EntityRef::Edge(e))?;
+        }
         let uses = b.edge(e)?.edgeuses.clone();
         r.check(b, 62, uses.len() % 2 == 0, EntityRef::Edge(e))?;
         let mut last = b.edgeuse(required(uses.last().copied())?)?.orientation;
@@ -2001,36 +2005,10 @@ fn first_fundamental_form(
 /// fork's `PassesReverseDirectionCheckOn`): a trim whose end the surface cannot
 /// evaluate is left unfixed, and a 3D curve takes the plain test.
 fn fix_reversed_on(k: &Kernel, c: &mut Curve, surface: Option<&Surface>) -> Result<()> {
-    use crate::curve::curve::CurveKind;
     let owner = c.owner();
     let edge_zone_tol_3d = c.owner_zone_tol_3d();
-    let base = match c.kind_mut() {
-        CurveKind::BSpline(base) => base,
-        CurveKind::Line(line) => {
-            if line.base().gw_nurb().is_none() {
-                line.make_nurb()?;
-            }
-            line.base_mut()
-        }
-        CurveKind::Ellipse(ellipse) => {
-            if ellipse.base().gw_nurb().is_none() {
-                ellipse.make_nurb_owned_with_edge_tol(k, owner, edge_zone_tol_3d)?;
-            }
-            ellipse.base_mut()
-        }
-        CurveKind::Hyperbola(h) => {
-            if h.base().gw_nurb().is_none() {
-                h.make_nurb(owner)?;
-            }
-            h.base_mut()
-        }
-        CurveKind::Parabola(p) => {
-            if p.base().gw_nurb().is_none() {
-                p.make_nurb(owner)?;
-            }
-            p.base_mut()
-        }
-        _ => return Ok(()),
+    let Some(base) = nurb_base(k, c, owner, edge_zone_tol_3d)? else {
+        return Ok(());
     };
     let surface = surface.filter(|_| base.dim == 2);
     let points = base.get_or_create_gw_nurb()?.cpts_mut();
@@ -2064,6 +2042,72 @@ fn fix_reversed_on(k: &Kernel, c: &mut Curve, surface: Option<&Surface>) -> Resu
         }
     }
     Ok(())
+}
+
+/// The curve base [`fix_reversed_on`] straightens, with its NURB made first where it has
+/// none (a line's, or a conic's for its owner `owner` and the owner's zone tolerance
+/// `edge_zone_tol_3d`); `None` for a curve kind it leaves as it is.
+fn nurb_base<'c>(
+    k: &Kernel,
+    c: &'c mut Curve,
+    owner: Option<crate::geom::object::ObjectRef>,
+    edge_zone_tol_3d: Option<f64>,
+) -> Result<Option<&'c mut crate::nurbs::b_spline_curve::p1::BSplineCurve>> {
+    use crate::curve::curve::CurveKind;
+    Ok(Some(match c.kind_mut() {
+        CurveKind::BSpline(base) => base,
+        CurveKind::Line(line) => {
+            if line.base().gw_nurb().is_none() {
+                line.make_nurb()?;
+            }
+            line.base_mut()
+        }
+        CurveKind::Ellipse(ellipse) => {
+            if ellipse.base().gw_nurb().is_none() {
+                ellipse.make_nurb_owned_with_edge_tol(k, owner, edge_zone_tol_3d)?;
+            }
+            ellipse.base_mut()
+        }
+        CurveKind::Hyperbola(h) => {
+            if h.base().gw_nurb().is_none() {
+                h.make_nurb(owner)?;
+            }
+            h.base_mut()
+        }
+        CurveKind::Parabola(p) => {
+            if p.base().gw_nurb().is_none() {
+                p.make_nurb(owner)?;
+            }
+            p.base_mut()
+        }
+        _ => return Ok(None),
+    }))
+}
+
+/// Not upstream (#21105): whether [`fix_reversed_on`] would straighten an end of `c`,
+/// judged without writing to it. A check reports a turned-back end instead of repairing
+/// it: the curve's own NURB is read, and a curve without one is judged on a copy given
+/// the NURB the repair would make (from `c`'s owner, which the copy does not keep).
+fn ends_turned_back(k: &Kernel, c: &Curve, surface: Option<&Surface>) -> Result<bool> {
+    use crate::curve::curve::CurveKind;
+    let base = match c.kind() {
+        CurveKind::BSpline(base) => base,
+        CurveKind::Line(line) => line.base(),
+        CurveKind::Ellipse(ellipse) => ellipse.base(),
+        CurveKind::Hyperbola(h) => h.base(),
+        CurveKind::Parabola(p) => p.base(),
+        _ => return Ok(false),
+    };
+    let surface = surface.filter(|_| base.dim == 2);
+    if let Some(nurb) = base.gw_nurb() {
+        return Ok(turned_ends(k, nurb.cpts(), surface)?.is_some_and(|t| t.contains(&true)));
+    }
+    let mut copy = c.clone();
+    let Some(base) = nurb_base(k, &mut copy, c.owner(), c.owner_zone_tol_3d())? else {
+        return Ok(false);
+    };
+    let points = base.get_or_create_gw_nurb()?.cpts();
+    Ok(turned_ends(k, points, surface)?.is_some_and(|t| t.contains(&true)))
 }
 
 /// Which ends (`[start, end]`) of the control polygon `points` turn back, as
@@ -2159,7 +2203,7 @@ fn check_edge_geometry(
     e: EdgeId,
     cache: &Lists,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
-) -> Result<()> {
+) -> Result<bool> {
     let primary = required(b.edge(e)?.edgeuses.first().copied())?;
     let eu = if b.edgeuse(primary)?.orientation == OrientType::Same {
         primary
@@ -2190,7 +2234,7 @@ pub(crate) fn validate_geometry(
     } else {
         required(eu1::mate(b, primary)?)?
     };
-    edge_geometry(k, b, e, eu, fix_tolerances, keys)
+    edge_geometry(k, b, e, eu, fix_tolerances, keys).map(|_| ())
 }
 
 /// The body of `SmEdge::ValidateGeometry(bFixTolerances)` from the edge use `eu` the
@@ -2198,6 +2242,12 @@ pub(crate) fn validate_geometry(
 /// tolerances allow, but closer than 100 vertex tolerances, grows the vertex tolerance
 /// to twice the gap instead of failing, and a UV trim curve whose interval differs from
 /// the edge's is reparameterized to it.
+///
+/// Not upstream (#21105): a curve end that turns back on itself (`N_CrvIsNotReversed`,
+/// which upstream calls with `Fixit = TRUE`) is straightened only with `fix_tolerances`,
+/// the explicit fix path; a check (`fix_tolerances` false) leaves the curve as it is and
+/// returns whether the edge curve or a UV trim has such an end, for the check to report
+/// as a warning (upstream logs `SM_ERR_WARNING` and returns success either way).
 fn edge_geometry(
     k: &Kernel,
     b: &mut Brep,
@@ -2205,11 +2255,14 @@ fn edge_geometry(
     eu: EdgeuseId,
     fix_tolerances: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
-) -> Result<()> {
+) -> Result<bool> {
     let vu = required(b.edgeuse(eu)?.vertexuse)?;
     let start = required(b.vertexuse(vu)?.vertex)?;
     let end = required(edge::other_vertex(b, e, Some(start))?)?;
-    if reversed_needs_fix(k, required(b.edge(e)?.curve.as_ref())?, None)? {
+    let mut turned_back = false;
+    if !fix_tolerances {
+        turned_back |= ends_turned_back(k, required(b.edge(e)?.curve.as_ref())?, None)?;
+    } else if reversed_needs_fix(k, required(b.edge(e)?.curve.as_ref())?, None)? {
         fix_reversed(k, required(b.edge_mut(e)?.curve.as_mut())?)?;
     }
     let curve = required(b.edge(e)?.curve.as_ref())?;
@@ -2281,7 +2334,9 @@ fn edge_geometry(
             }
             // not upstream (WR-406, #891): the turn judged on the face's surface
             let surface = required(b.face(f)?.surface.as_ref())?.clone_for_evaluation()?;
-            if reversed_needs_fix(k, trim, Some(&surface))? {
+            if !fix_tolerances {
+                turned_back |= ends_turned_back(k, trim, Some(&surface))?;
+            } else if reversed_needs_fix(k, trim, Some(&surface))? {
                 fix_reversed_on(
                     k,
                     required(b.edgeuse_mut(eu)?.uv_trim_curve.as_mut())?,
@@ -2290,7 +2345,7 @@ fn edge_geometry(
             }
         }
     }
-    Ok(())
+    Ok(turned_back)
 }
 
 #[cfg(test)]

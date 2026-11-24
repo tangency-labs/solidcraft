@@ -254,7 +254,7 @@ impl BrepCheck {
     /// (`None` for a synthetic line).
     fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
         let mut out = Vec::new();
-        let pointer_failures = self.pointer_reports.reports().iter().any(|r| !r.ok);
+        let pointer_failures = self.pointer_reports.reports().iter().any(is_failure);
         if self.pointers_status != SUCCESS && self.pointer_reports.is_empty() {
             out.push((FailureClass::PointersStatus(self.pointers_status), None));
         }
@@ -475,7 +475,7 @@ fn check_with_keys_counted(
         && pointer_reports.is_empty()
         && b.write_stamps() == before);
     let mut reports = AssertArray::new();
-    let assert_valid = if pointer_reports.reports().iter().any(|r| !r.ok) {
+    let assert_valid = if pointer_reports.reports().iter().any(is_failure) {
         None
     } else {
         Some(assert_valid_with(
@@ -994,6 +994,25 @@ mod tests {
         assert_eq!(printed(&skipped), printed(&full));
     }
 
+    /// A check writes nothing to a body it has checked before (#21105): the gaps it stores
+    /// are stored already, the tolerance pass takes `bValidateOnly` as its argument instead
+    /// of setting and restoring it on the body, and no curve is taken to be repaired.
+    #[test]
+    fn a_repeated_check_writes_nothing_to_the_body() {
+        for memoize in [true, false] {
+            let (mut k, mut b) = checked_box(memoize);
+            check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+            let before = b.write_stamps();
+            let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+            assert!(check.is_valid(), "{:?}", check.lines());
+            assert_eq!(
+                b.write_stamps(),
+                before,
+                "a repeated check wrote to the body (memoize {memoize})"
+            );
+        }
+    }
+
     /// What attaching a UV trim writes, entity by entity: each edge use's own trim slot and
     /// drop record, and the edge and vertex tolerances an attached trim raises. Not the gaps
     /// ([`written_fields`]): #21105 keeps a check's stored gaps as derived values.
@@ -1112,33 +1131,40 @@ mod tests {
         base.gw_nurb().unwrap().cpts()[1].to_euclid()
     }
 
-    /// A first pass that repairs the body (here a reversed curve end) leaves a body the
-    /// second pass has not seen, so the second pass still runs, and the check and the
-    /// repaired body are those of the full check.
+    /// A reversed curve end is reported, not repaired (#21105 step 2): the check leaves the
+    /// edge curve as it is, says so in one warning (test 147, which does not fail the check),
+    /// says the same with and without the memoized pass, and the explicit fix path
+    /// (`ValidateGeometry(bFixTolerances = TRUE)`) still straightens the end.
     #[test]
-    fn a_pointer_pass_that_repairs_the_body_is_run_again() {
+    fn a_reversed_end_is_reported_not_repaired() {
         let (mut k, mut b) = checked_box(true);
         let e = bend_first_edge(&k, &mut b);
         let bent = second_control_point(&b, e);
-        let (repaired, passes) = check_counting(&mut k, &mut b);
-        assert!(repaired.assert_valid.is_some(), "{:?}", repaired.lines());
-        assert_ne!(
+        let (reported, _) = check_counting(&mut k, &mut b);
+        assert!(reported.is_valid(), "{:?}", reported.lines());
+        assert_eq!(
             second_control_point(&b, e),
             bent,
-            "the check left the end reversed"
+            "the check repaired the reversed end"
         );
-        assert_eq!(
-            passes, 1,
-            "the second pointer pass was skipped after a repair"
-        );
+        let warnings: Vec<_> = reported.warnings().map(|r| r.test_index).collect();
+        assert_eq!(warnings, [147], "{reported:?}");
 
         let (mut k, mut full_b) = checked_box(false);
         let e = bend_first_edge(&k, &mut full_b);
         let (full, _) = check_counting(&mut k, &mut full_b);
-        assert_eq!(printed(&repaired), printed(&full));
-        assert_eq!(
+        assert_eq!(printed(&reported), printed(&full));
+        assert_eq!(second_control_point(&full_b, e), bent);
+
+        let naming = b.naming();
+        let recorded = b.geometry_owner_keys().clone();
+        let keys =
+            |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+        super::super::validate_geometry(&k, &mut b, e, true, &keys).unwrap();
+        assert_ne!(
             second_control_point(&b, e),
-            second_control_point(&full_b, e)
+            bent,
+            "the fix path left the end reversed"
         );
     }
 

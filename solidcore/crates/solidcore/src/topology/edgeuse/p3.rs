@@ -1783,7 +1783,15 @@ pub fn get_or_create_uv_trim_curve(
     // Not upstream (#18162): the edge tolerance follows the trim's proved distance from the
     // edge curve, not only the drop's reported error, whose fit part is the fit tolerance (the
     // edge's own tolerance) and would raise the edge from its own tolerance on every refit.
-    let raise_by = trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?;
+    //
+    // Not upstream (#21105): in a validate-only pass (`Kernel::with_held_trim_raise`, the
+    // pass's `bValidateOnly`) the trim raises nothing, as `SetUVTrimCurve` raises nothing on
+    // a B-rep marked validate-only; the raise distance is then not wanted, and not proved.
+    let raise_by = if k.caches.hold_trim_raise || b.validate_only() {
+        0.0
+    } else {
+        trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?
+    };
     set_uv_trim_curve(
         b,
         eu,
