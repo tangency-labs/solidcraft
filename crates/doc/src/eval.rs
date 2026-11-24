@@ -12557,8 +12557,13 @@ fn eval_feature_kind(
     refuse_ambiguous_targets(doc, st, f, &f.participants)?;
     match &f.kind {
         FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
-        // The surface solver (PR 4) evaluates these; until then the feature reports why.
-        FeatureKind::SurfaceSketch { .. } => Err(DocError::Invalid("surface sketches are not solved yet".into())),
+        // The surface solver (solidcraft_sketch::surface) is ready; wiring it here needs the
+        // live face resolved to an ops chart, which the attachment pass (a later PR) lands.
+        // Until then, refuse with the first unsupported constraint, or a clear "not wired" error.
+        FeatureKind::SurfaceSketch { sketch, .. } => match solidcraft_sketch::surface::first_refusal(sketch) {
+            Some(refusal) => Err(DocError::Invalid(refusal.message())),
+            None => Err(DocError::Invalid("surface sketches are not solved yet".into())),
+        },
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
             crate::body_transfer::evaluate(doc, st, &crate::plain(bodies), *from, *to, *transform)
         }

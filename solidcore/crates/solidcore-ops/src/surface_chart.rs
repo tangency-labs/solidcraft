@@ -182,6 +182,13 @@ impl<'a> SurfaceChart<'a> {
         }
     }
 
+    /// A geodesic solver over this chart's surface, at the chart's tolerance: the shortest path
+    /// between two chart points, its length, and the intrinsic quantities a sketch needs.
+    #[must_use]
+    pub fn geodesic(&self) -> GeodesicSolver<'_> {
+        GeodesicSolver::new(&self.surface, self.tolerance)
+    }
+
     /// The shortest path's length between two chart points, in millimetres: the surface's own
     /// distance, measured by the kernel's geodesic solver.
     ///

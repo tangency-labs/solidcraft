@@ -183,6 +183,8 @@ pub use offset::offset_surface;
 pub use offset::shell;
 pub use offset::thicken;
 pub use order::Order;
+pub use solidcore::eval::geodesic::{GeodesicError, GeodesicSolver, DEFAULT_TOLERANCE};
+pub use solidcore::eval::surface::Metric;
 pub use step_assembly::placed_bodies;
 pub use step_assembly::PlacedBody;
 
