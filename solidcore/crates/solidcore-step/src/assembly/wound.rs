@@ -469,6 +469,10 @@ fn lift_bound(ax: &Axis, source: &Source, [p, q]: [End; 2]) -> R<Verdict> {
     }
     let first = (range.lo / FRAC_PI_2).floor();
     let last = (range.hi / FRAC_PI_2).ceil();
+    // Past 2^53 an f64 counter stops moving, and so wide a range proves nothing anyway.
+    if !(first.abs() < 1e15 && last.abs() < 1e15) {
+        return Ok(Verdict::Unbounded);
+    }
     let mut k = first;
     while k <= last {
         let boundary = k * FRAC_PI_2;
