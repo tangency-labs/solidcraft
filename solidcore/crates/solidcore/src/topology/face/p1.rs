@@ -453,7 +453,7 @@ fn merge_intervals<O: LoopObject>(
             _ => {
                 return Err(null(
                     "MergeIntervals made an edge the caller cannot resolve",
-                ))
+                ));
             }
         }
     }
@@ -463,7 +463,7 @@ fn merge_intervals<O: LoopObject>(
             _ => {
                 return Err(null(
                     "MergeIntervals made a vertex the caller cannot resolve",
-                ))
+                ));
             }
         }
     }
@@ -1222,7 +1222,7 @@ pub fn trim_boundary_rectangle(
         Err(e) => {
             return Err(Failure::new(OP, TopologyFailure::TrimBoundaryNotBuilt)
                 .caused_by(e)
-                .into_error())
+                .into_error());
         }
     };
 
@@ -2932,7 +2932,7 @@ fn complete_face_seams_edit(
         }
         #[cfg(test)]
         let inserted =
-            inserted && !(seam_faults::FAULTS.get().first_inserts_nothing && !redundant.is_empty());
+            inserted && (!seam_faults::FAULTS.get().first_inserts_nothing || redundant.is_empty());
         if !redundant.is_empty() && !inserted {
             // Nothing replaces the deleted seams: the caller undoes this edit.
             return Ok(Some((faces, false)));
