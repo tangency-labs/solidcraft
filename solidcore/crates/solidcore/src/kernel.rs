@@ -190,6 +190,7 @@ pub struct WorkCounters {
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
+    mass_closure_evaluations: Cell<u64>,
     coincident_curves_classified: Cell<u64>,
     containment_edge_drops: Cell<u64>,
     loop_walks: Cell<u64>,
@@ -302,6 +303,14 @@ impl WorkCounters {
     #[must_use]
     pub fn mass_iso_evaluations(&self) -> u64 {
         self.mass_iso_evaluations.get()
+    }
+
+    /// Integrand evaluations of the ruled strips the precise mass properties close a face
+    /// onto its edges' curves with (`gap_closure`): each point of a strip's trim the
+    /// strip's integration samples. Not the fork's.
+    #[must_use]
+    pub fn mass_closure_evaluations(&self) -> u64 {
+        self.mass_closure_evaluations.get()
     }
 
     /// Edge curves of two coincident faces that `FaceIntersect` classifies on both: those
@@ -431,6 +440,7 @@ impl WorkCounters {
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
+        self.mass_closure_evaluations.set(0);
         self.coincident_curves_classified.set(0);
         self.containment_edge_drops.set(0);
         self.loop_walks.set(0);
@@ -526,6 +536,12 @@ impl WorkCounters {
     pub(crate) fn add_mass_iso_evaluation(&self) {
         self.mass_iso_evaluations
             .set(self.mass_iso_evaluations.get().saturating_add(1));
+    }
+
+    /// Counts one evaluation of a mass-property closure strip's integrand.
+    pub(crate) fn add_mass_closure_evaluation(&self) {
+        self.mass_closure_evaluations
+            .set(self.mass_closure_evaluations.get().saturating_add(1));
     }
 
     /// Counts `n` series coefficients a feet Taylor model computed.
@@ -963,6 +979,11 @@ pub struct Kernel {
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
+    /// Not upstream, test only (feature `wr469-replay`): the seam of the goldens' WR-469
+    /// substitution replay ([`crate::topology::brep::p9::replay`]). No hook by default,
+    /// and then it changes nothing. Shared with the kernel copies an operation makes.
+    #[cfg(feature = "wr469-replay")]
+    pub wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1038,6 +1059,8 @@ impl Kernel {
             strip_probe: Arc::default(),
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
+            #[cfg(feature = "wr469-replay")]
+            wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam::default(),
         }
     }
 

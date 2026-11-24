@@ -94,7 +94,9 @@ pub use rational::NodalArc;
 pub use rational::SectionShape;
 pub use rational::WeightStep;
 pub use removal::removal_class;
+pub use removal::RemovalInput;
 pub use removal::RemovalRefusal;
+pub use removal::RemovalStop;
 pub use rib::RibPoint;
 pub use section::SectionDegeneracy;
 pub use section::SectionInput;
@@ -374,13 +376,13 @@ pub enum BlendFailure {
         /// The query point's z coordinate.
         z: f64,
     },
-    /// A curve the step needs as a B-spline curve, the curve of fillet edge `edge` (`None`
-    /// where the step names no edge), is of kind `kind` (its type string), which is not of
+    /// A curve the step needs as a B-spline curve, a curve of edge `edge` (its 3D curve, or
+    /// a UV trim curve of one of its uses; `None` where the step names no edge), is of kind `kind` (its type string), which is not of
     /// a B-spline class. An unsupported kind ([`ErrorKind::Unsupported`]); status `SM_ERR`
     /// unless its site says otherwise (`SM_ERR_NULL_POINTER` where upstream dereferences
     /// the failed cast).
     CurveWithoutNet {
-        /// The fillet edge whose curve it is, where the step names one.
+        /// The edge whose curve (or edge use's UV trim curve) it is, where the step names one.
         edge: Option<crate::topology::EdgeId>,
         /// The curve's kind, as its type string.
         kind: &'static str,
@@ -956,10 +958,23 @@ pub enum BlendFailure {
         /// according to `step`.
         limit: f64,
     },
+    /// A thing of the body a fillet removal reads lacks the topology link named
+    /// ([`RemovalInput`]). The removal reads the caller's body and the topology its own
+    /// edits leave alike, so the cause names what is missing and leaves the blame open, as
+    /// [`BlendFailure::EaseInputMissing`] does: status `SM_ERR_NULL_POINTER` (upstream
+    /// `NER`) and the kind of that status ([`ErrorKind::Missing`]), neither a defect nor a
+    /// refusal.
+    RemovalInputMissing(RemovalInput),
     /// A fillet removal refuses the face it is asked to remove, for the reason named
     /// (classes 130 and 131; [`removal_class`]). A refusal that no size decides.
     /// Status `SM_ERR`.
     RemovalRefused(RemovalRefusal),
+    /// A fillet removal stops where a search or a drop finds nothing or stops, where the
+    /// geometry it reads gives it nothing to build on, or where an argument of its edits
+    /// does not hold ([`RemovalStop`] says which, with its kind and status: `SM_ERR`, or
+    /// `SM_ERR_NULL_POINTER` where upstream's `NER` returns it). A failed call it made is
+    /// kept as the cause.
+    RemovalStopped(RemovalStop),
     /// A tangent end rib on a face the certificate does not enclose still has a span whose
     /// midpoint is off the exact rib by more than the tolerance with `stations` stations,
     /// after `halvings` spans halved, when its station cap (1024 spans) ran out. Not within
@@ -1451,7 +1466,9 @@ impl BlendFailure {
             Self::RailNotBlending { .. } => SM_ERR,
             Self::RationalRoundOutOfTolerance { .. } => SM_ERR,
             Self::RationalWeightsUnavailable { .. } => SM_ERR,
+            Self::RemovalInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::RemovalRefused(_) => SM_ERR,
+            Self::RemovalStopped(stop) => stop.status(),
             Self::RibFitCap { .. } => SM_ERR,
             Self::RibPointNotDropped { .. } => SM_ERR,
             Self::RibStationNotSolved { .. } => SM_ERR,
@@ -1620,7 +1637,9 @@ impl BlendFailure {
             Self::RailNotBlending { .. } => ErrorKind::InvalidInput,
             Self::RationalRoundOutOfTolerance { .. } => ErrorKind::NotWithinTolerance,
             Self::RationalWeightsUnavailable { .. } => ErrorKind::Unsupported,
+            Self::RemovalInputMissing(_) => ErrorKind::Missing,
             Self::RemovalRefused(reason) => removal_class(*reason),
+            Self::RemovalStopped(stop) => stop.class(),
             Self::RibFitCap { .. } => ErrorKind::NotWithinTolerance,
             Self::RibPointNotDropped { .. } => ErrorKind::StageFailed,
             Self::RibStationNotSolved { .. } => ErrorKind::StageFailed,
@@ -1802,7 +1821,9 @@ impl BlendFailure {
             Self::RailNotBlending { .. } => true,
             Self::RationalRoundOutOfTolerance { .. } => true,
             Self::RationalWeightsUnavailable { .. } => true,
+            Self::RemovalInputMissing(_) => true,
             Self::RemovalRefused(_) => true,
+            Self::RemovalStopped(_) => true,
             Self::RibFitCap { .. } => true,
             Self::RibPointNotDropped { .. } => true,
             Self::RibStationNotSolved { .. } => true,
@@ -2361,7 +2382,9 @@ impl core::fmt::Display for BlendFailure {
                 f,
                 "the rational weights cannot be formed at {step:?}: observed {observed}, limit {limit}"
             ),
+            Self::RemovalInputMissing(input) => write!(f, "{}: {}", self.class(), input.what()),
             Self::RemovalRefused(reason) => write!(f, "{}: {reason:?}", self.class()),
+            Self::RemovalStopped(stop) => write!(f, "{}: {}", self.class(), stop.what()),
             Self::RibFitCap { stations, halvings } => write!(
                 f,
                 "{}: the tangent end rib is still off the exact rib by more than the tolerance with {stations} stations after {halvings} spans halved",
@@ -4827,6 +4850,191 @@ mod tests {
             BlendFailure::EaseNotBuilt(EaseStop::EasePastEdgeEnd).to_string(),
             "outside_domain: the setback plus the ease runs past the end of the filleted edge"
         );
+    }
+
+    /// #19826: each cause the fillet removal names is no phrase, replaces the status it
+    /// keeps, has its class (a missing link of the topology it walks is `Missing`; a stop
+    /// has its stop's kind), is neither a defect nor a refusal, and is worded with its
+    /// class.
+    #[test]
+    fn the_removal_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for input in [
+            RemovalInput::EdgeUseFace,
+            RemovalInput::EdgeUseLoopUse,
+            RemovalInput::EdgeUseMate,
+            RemovalInput::EdgeUseNeighbour,
+            RemovalInput::EdgeUseOnFace,
+            RemovalInput::EdgeUseRadial,
+            RemovalInput::EdgeUseVertexUse,
+            RemovalInput::FaceToDelete,
+            RemovalInput::PrimaryEdgeUse,
+            RemovalInput::ShellRegion,
+            RemovalInput::SideEdge,
+            RemovalInput::VertexUseOnFace,
+        ] {
+            rows.push((
+                BlendFailure::RemovalInputMissing(input),
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ));
+        }
+        for (stop, class, status) in [
+            (RemovalStop::CornerNotSolved, ErrorKind::NotFound, SM_ERR),
+            (
+                RemovalStop::CornerSurfacesApart,
+                ErrorKind::NotWithinTolerance,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::CurveNotExtended,
+                ErrorKind::Degenerate,
+                SM_ERR_NULL_POINTER,
+            ),
+            (RemovalStop::EdgeNotOnFace, ErrorKind::InvalidInput, SM_ERR),
+            (
+                RemovalStop::EdgeToDeleteNotLamina,
+                ErrorKind::InvalidInput,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::ExtendedSupportNotRecognised,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::ExtensionDeviates,
+                ErrorKind::NotWithinTolerance,
+                SM_ERR,
+            ),
+            (RemovalStop::FarVertexDropFailed, ErrorKind::Failed, SM_ERR),
+            (
+                RemovalStop::FarVertexDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::FarVertexOffSideEdge,
+                ErrorKind::NotWithinTolerance,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::GrownSurfaceNotBSpline,
+                ErrorKind::Unsupported,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::NoCertifiedBox,
+                ErrorKind::Unsupported,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                RemovalStop::NoSameUseOnFace,
+                ErrorKind::InvalidInput,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::RailDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (RemovalStop::RunOnDropFailed, ErrorKind::Failed, SM_ERR),
+            (
+                RemovalStop::RunOnDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::RunOnEndHasNoSpeed,
+                ErrorKind::Degenerate,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SeamContinuationNotFound,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SeamCrossingNotFound,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SeamDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SeamParameterNotFinite,
+                ErrorKind::Degenerate,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SharpCurveNotDecided,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SharpDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (RemovalStop::SideEdgeDropFailed, ErrorKind::Failed, SM_ERR),
+            (
+                RemovalStop::SideEdgeDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SideExtensionNotFound,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::TangentIntersectionNotFound,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::UvTrimNotMade,
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                RemovalStop::VertexNotGiven,
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                RemovalStop::VertexNotOnEdge,
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+        ] {
+            assert_eq!(stop.class(), class, "{stop:?}");
+            assert_eq!(stop.status(), status, "{stop:?}");
+            rows.push((BlendFailure::RemovalStopped(stop), class, status));
+        }
+        for (cause, class, status) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), status, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert!(!error.is_defect(), "{error:?}");
+            assert!(!error.is_refusal(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::RemovalStopped(RemovalStop::CornerNotSolved).to_string(),
+            "not_found: the end and tangent surfaces' intersection finds no new corner"
+        );
+        let refusal = BlendFailure::RemovalRefused(RemovalRefusal::EndEdgeMissesTangentEdges);
+        assert_eq!(refusal.class(), ErrorKind::NotARemovableFillet);
+        assert_eq!(refusal.comparison_status(), SM_ERR);
     }
 
     /// #19825: each cause the overflows name is no phrase, replaces the status it
