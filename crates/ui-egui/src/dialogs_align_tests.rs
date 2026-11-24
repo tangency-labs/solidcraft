@@ -175,3 +175,61 @@ fn auto_takes_the_kind_of_pick_from_what_is_under_the_cursor() {
     let (_, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
     assert!(p["from_face"].is_array() && p["to_face"].is_array(), "{p}");
 }
+
+/// Whether the dialog's Flip is drawn disabled.
+fn flip_disabled(h: &Harness) -> bool {
+    let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+    let flip = tree.nodes.iter().find(|(_, n)| n.label() == Some("Flip"));
+    flip.expect("a Flip option").1.is_disabled()
+}
+
+fn flip_why(h: &Harness) -> Option<&'static str> {
+    crate::dialogs_align::flip_blocked(&h.app, h.app.dialog.as_ref().unwrap())
+}
+
+/// Flip never silently does nothing, and is never off where the command would take it: as the
+/// command decides, it is off, saying why, only where neither side faces a way (two points). One
+/// side that does (a face, a face or circle centre, a circle, a plane) is enough.
+#[test]
+fn flip_is_disabled_with_the_reason_only_where_neither_side_faces_a_way() {
+    let mut h = plate_and_peg();
+    h.frames(2);
+    assert!(!flip_disabled(&h), "nothing picked yet: nothing to say");
+    let peg_rim = Sel::Vertex { body: "Peg".into(), point: Vec3::new(104.0, 20.0, 0.0) };
+    let plate_corner = Sel::Vertex { body: "Plate".into(), point: Vec3::new(0.0, 0.0, 10.0) };
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[1].items = vec![peg_rim.clone()];
+    d.inputs[2].items = vec![plate_corner.clone()];
+    let why = flip_why(&h);
+    assert!(why.is_some_and(|id| solidcraft_ui_text::tr(id).contains("two points")), "two vertices face no way: {why:?}");
+    h.frames(2);
+    assert!(flip_disabled(&h), "drawn disabled");
+    pick_edge(&mut h, 2, Vec3::new(30.0, 0.0, 10.0));
+    assert!(flip_why(&h).is_some(), "an edge's middle faces no way either");
+    // One side facing a way is enough, whichever side it is.
+    for to in [Vec3::new(5.0, 5.0, 10.0), Vec3::new(49.0, 20.0, 10.0)] {
+        if to.x > 40.0 {
+            pick_edge(&mut h, 2, to);
+        } else {
+            pick_face(&mut h, 2, to);
+        }
+        assert_eq!(flip_why(&h), None, "To at {to:?}");
+        h.frames(2);
+        assert!(!flip_disabled(&h), "To at {to:?}");
+    }
+    pick_face(&mut h, 1, Vec3::new(101.0, 21.0, 0.0));
+    h.app.dialog.as_mut().unwrap().inputs[2].items = vec![plate_corner];
+    assert_eq!(flip_why(&h), None, "a face From against a vertex To");
+    // A face's or a circle's centre faces a way as the command takes it.
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[1].items = vec![peg_rim];
+    for (snap, at) in [("center", Vec3::new(5.0, 5.0, 10.0)), ("circle", Vec3::new(49.0, 20.0, 10.0))] {
+        h.app.dialog.as_mut().unwrap().extra.insert("to_snap".into(), json!(snap));
+        if snap == "center" {
+            pick_face(&mut h, 2, at);
+        } else {
+            pick_edge(&mut h, 2, at);
+        }
+        assert_eq!(flip_why(&h), None, "a {snap} To");
+    }
+}
