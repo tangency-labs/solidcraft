@@ -8,9 +8,10 @@ The owner's brief (2026-11-24):
 > solidcore/ops is the solidcore one... then we have one in SOLIDCRAFT NOT SOLIDCORE that is where
 > the kernel can be selected, then we make things that can adapt kernels to that abstraction.
 
-Later the same day the owner added two more requirements:
+Later the same day the owner added these requirements:
 
-- the kernel must be selectable at run time in the future, not only at build time;
+- the kernel is chosen at compile time: build features decide which backends are compiled in,
+  and a launch-time switch picks among them, with no hot swap in v1;
 - SolidCraft must use `solidcore-ops` fully, and only through the solidcore adapter.
 
 What follows from that:
@@ -27,14 +28,28 @@ What follows from that:
 - **The solidcore adapter is the only SolidCraft code that depends on solidcore crates.** The one
   exception is the record's data types, which are the body format itself (§10). `cargo xtask
   layers` enforces this, as it once kept truck inside `crates/kernel`.
-- **Selection has two layers.**
-  - A backend is compiled in by a build feature.
-  - Among the compiled backends, the choice is made at run time: an environment variable now, and
-    later a per-design or Preferences choice. Each operation can go to whichever backend
-    measurement shows wins.
+- **Kernels are chosen at compile time.**
+  - Build features decide which backends are compiled in. solidcore is always in, and every other
+    backend is off by default.
+  - At launch, a switch picks among the compiled-in backends only, for the whole session or per
+    operation. Each operation can go to whichever backend measurement shows wins.
+  - Swapping kernels while the app runs (hot swap) is not in v1.
 - **solidcore stays the default,** and the default path stays byte-identical to today.
 
+## Decisions
+
+Decisions the owner has made. The rest of this document follows them; the open questions are in
+§13.
+
+| Date | Decision |
+|---|---|
+| 2026-11-24 | **The abstraction is SolidCraft's, not solidcore's.** `solidcore-ops` stays solidcore's own app-agnostic API, and the trait and the router live in SolidCraft (§1). |
+| 2026-11-24 | **SolidCraft uses `solidcore-ops` fully, and only through the solidcore adapter.** In the end state the adapter is the only SolidCraft code that depends on solidcore crates, and `cargo xtask layers` enforces it (§10). |
+| 2026-11-24 | **Kernels are chosen at compile time, by build features.** Features decide which backends are compiled in. solidcore is always compiled in; every other backend is off by default. The launch-time switch (`SOLIDCRAFT_KERNEL`, `SOLIDCRAFT_KERNEL_ROUTE`, `--kernel`) picks only among the backends compiled in (§8). **Hot swap is not in v1:** changing kernels takes a restart (§11). |
+| 2026-11-24 | **solidcore is the default backend,** and the default path stays byte-identical (§4). |
+
 Contents:
+0. [Decisions](#decisions)
 1. [Where the abstraction lives](#1-where-the-abstraction-lives)
 2. [The trait surface](#2-the-trait-surface)
 3. [The body exchange format](#3-the-body-exchange-format)
@@ -639,7 +654,10 @@ waited would show. This design fits that unchanged:
 
 These hold at every level:
 
-- **The route is read once,** into a `OnceLock<Route>`. Switching takes a restart in v1 (§11).
+- **Compile time decides what can be chosen.** A launch-time switch picks only among the backends
+  this build compiled in (owner decision, see Decisions).
+- **The route is read once,** into a `OnceLock<Route>`. Switching takes a restart in v1, with no
+  hot swap (§11).
 - **A bad name never crashes the app.** An unknown backend, or one this build doesn't have, is
   logged once and ignored.
 - **Every compiled backend is selectable without a rebuild.** A build with several backends
@@ -963,7 +981,7 @@ Results don't change, because they are the same functions.
 
 | | v1 | Future |
 |---|---|---|
-| How | change `SOLIDCRAFT_KERNEL`/`SOLIDCRAFT_KERNEL_ROUTE`, or the CLI flag, and **restart** | a Preferences or per-design choice, applied without restarting |
+| How | change `SOLIDCRAFT_KERNEL`/`SOLIDCRAFT_KERNEL_ROUTE`, or the CLI flag, and **restart** (owner decision: no hot swap in v1) | a Preferences or per-design choice, applied without restarting (hot swap, not v1) |
 | What's required | nothing beyond §5: on reopening, the design replays under the new route and shows the kernel differences report | the route becomes a session value instead of a `OnceLock`; the evaluation cache is dropped (its key changes); a **full replay** from the first feature runs under the new route; names are compared and the report is shown; selection is re-resolved by name, as after any rebuild |
 | Undo | not involved | the switch is a session setting, not a document change. It adds no undo step and doesn't mark the design modified. Saving records the new route (§5). |
 | Bodies in memory | discarded by the restart | discarded. A body's cached forms are per backend, so nothing needs invalidating beyond the evaluation cache; the replay makes new bodies |
