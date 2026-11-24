@@ -197,7 +197,11 @@ fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
 ///   tolerance moves its estimate): the new value is within [`MASS_ACCURACY`] of its scale of
 ///   every point of a certified enclosure of the exact property of the body
 ///   (`mass::enclosure::enclose_mass_properties`), so of the exact value, the accuracy the
-///   runner asks ([`MassBands`]); EQUAL at the case's own accuracy, PROVEN;
+///   runner asks ([`MassBands`]); EQUAL at the case's own accuracy, PROVEN
+///   (`stubs4-delete-edge-bottle-e8-r0.1`'s centroid x, `Izz` and products zx and xy also
+///   carry, by at most 1e-15, the move of the integration's origin, the middle of the body's
+///   exact box, 1.53e-5 in x once the round's exact box divides at its net's knots and no
+///   longer counts a point outside the face: checked the same way);
 /// - `padding`: a box coordinate padded by an edge's tolerance (`query.brep`'s tight box
 ///   expanded by its entities' tolerances): it moved inward by exactly a moved edge's
 ///   `o - n` (to four units in the last place), that edge certified as every other;
@@ -1771,6 +1775,7 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         "ROWS units with no expected file: {missing:?}"
     );
     let mut left_out: Vec<(String, String)> = Vec::new();
+    let mut moved = Vec::new();
     for (unit, want) in &main {
         let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl")))
             .unwrap_or_else(|e| panic!("{unit}: {e}"));
@@ -1806,8 +1811,11 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
-        assert_eq!(got, *want, "{unit}: {got:016x}, main {want:016x}");
+        if got != *want {
+            moved.push(format!("{unit}: {got:016x}, main {want:016x}"));
+        }
     }
+    assert!(moved.is_empty(), "{}", moved.join("\n"));
     let pinned: Vec<(String, String)> = LEDGER_KNOWN_FAILING
         .iter()
         .map(|&(u, c)| (u.to_string(), c.to_string()))
