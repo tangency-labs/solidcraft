@@ -359,7 +359,10 @@ fn form_import_refuses_missing_or_unsupported_capabilities() {
     assert!(matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::PermissionDenied { .. })));
     m.capabilities.push("forms@0.2".into());
     assert!(matches!(craft_plugin::check_capabilities(&m.capabilities, "Test host"), Err(HostError::UnsupportedCapability { .. })));
-    assert!(run(&mut app, &m, &bytes, "make", &json!({})).is_err(), "an unsupported forms version is refused");
+    assert!(
+        matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::UnsupportedCapability { .. })),
+        "an unsupported forms version is refused"
+    );
     assert!(app.forms.is_empty(), "refused capabilities cannot open forms");
 }
 
