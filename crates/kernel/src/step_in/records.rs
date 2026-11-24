@@ -170,7 +170,25 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
         // The record body whose part this is: itself, or the one it is a copy of.
         let source = r.copy_of.unwrap_or(k);
         let part = match r.copy_of {
-            None => part_of(r),
+            None => {
+                // Faces and edges whose axes were well off square are squared to open; say so.
+                let mut squared = Vec::new();
+                let part = part_of(r, &mut squared);
+                for what in squared {
+                    let detail = format!("{label}: {what}");
+                    report.issues.push(ImportIssue {
+                        kind: IssueKind::Repaired,
+                        item: Some(k as u64),
+                        part: r.name.clone(),
+                        paths: paths_of(r),
+                        faces: 0,
+                        times: 1,
+                        detail: detail.clone(),
+                    });
+                    warnings.push(detail);
+                }
+                part
+            }
             Some(j) => copy_part(records, &originals, k, j),
         };
         // An original's part is kept for its copies whatever its own placement: a copy placed
@@ -379,11 +397,32 @@ fn unit(x: f32) -> f32 {
 }
 
 /// The body SMLib makes of one record, checked first: a record from a file is hostile input.
-fn part_of(r: &RecordBody) -> std::result::Result<Part, String> {
+/// Frames and planes a little off square (a record written before the writer squared them) are
+/// squared first, so the body opens ([`solidcore_ops::record_check::square_axes`]); those further
+/// off square than its tolerance are worded into `squared`, to warn of.
+fn part_of(r: &RecordBody, squared: &mut Vec<String>) -> std::result::Result<Part, String> {
     if let (None, Some(mesh)) = (&r.brep, &r.mesh) {
         return mesh_part(mesh);
     }
     let brep = r.brep.as_ref().ok_or("no record")?;
+    let square;
+    let brep = if solidcore_ops::record_check::needs_squaring(brep) {
+        let mut copy = brep.clone();
+        for s in solidcore_ops::record_check::square_axes(&mut copy).iter().filter(|s| s.worth_a_warning()) {
+            squared.push(match s.at {
+                solidcore_ops::record_check::SquaredAt::Face(f) => {
+                    format!("face {}'s axes were {:.1e} off square; squared to open", f + 1, s.deviation)
+                }
+                solidcore_ops::record_check::SquaredAt::Edge(e) => {
+                    format!("edge {}'s axes were {:.1e} off square; squared to open", e + 1, s.deviation)
+                }
+            });
+        }
+        square = copy;
+        &square
+    } else {
+        brep
+    };
     if r.face_origin.len() != brep.faces.len() {
         return Err(format!("{} face origins for {} faces", r.face_origin.len(), brep.faces.len()));
     }

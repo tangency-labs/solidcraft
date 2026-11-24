@@ -34,6 +34,7 @@ pub mod query;
 pub mod ruling;
 pub mod sphere;
 pub mod spline;
+pub mod square;
 pub mod surface;
 pub mod uv;
 pub mod vec;

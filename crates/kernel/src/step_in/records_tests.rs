@@ -134,6 +134,41 @@ fn a_broken_record_is_left_out_with_the_reason_and_the_others_still_come_in() {
     assert!(records_import(&r).unwrap_err().to_string().contains("more than"));
 }
 
+/// A record saved with plane and frame axes a little off square comes in, as the same solid: its
+/// axes are squared as it is read. Axes off by rounding (1e-12) come in without a word; axes well
+/// off (1e-6) come in too, with a warning naming the body and the face.
+#[test]
+fn a_record_with_axes_off_square_comes_in_squared() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let good = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    let volume = |r: &ImportRecords| {
+        let imp = records_import(r).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        (measure(&imp.bodies[0].body).unwrap().volume, imp.warnings.join("; "))
+    };
+    let (v0, w0) = volume(&good);
+    assert!(!w0.contains("off square"), "{w0}");
+    for eps in [1e-12, 1e-6] {
+        let mut r = good.clone();
+        let mut touched = 0;
+        for f in &mut r.bodies[0].brep.as_mut().unwrap().faces {
+            let (a, b) = match &mut f.surface {
+                brep::Surface::Plane { u_axis, v_axis, .. } => (*u_axis, v_axis),
+                brep::Surface::Cylinder { frame, .. } => (frame.x_axis, &mut frame.y_axis),
+                _ => continue,
+            };
+            for i in 0..3 {
+                b[i] += eps * a[i];
+            }
+            touched += 1;
+        }
+        assert!(touched > 0);
+        let (v, w) = volume(&r);
+        assert!((v - v0).abs() <= 1e-8 * v0.abs(), "{eps}: {v} vs {v0}");
+        assert_eq!(w.contains("off square; squared to open"), eps > 1e-9, "{eps}: {w}");
+    }
+}
+
 /// A record body's colour is its body's, and each face is known by its record body and its face
 /// in the file, as a STEP import's faces are known by their entities (from 1).
 #[test]

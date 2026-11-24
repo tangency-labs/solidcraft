@@ -2,8 +2,12 @@
 //! ([`Brep::validate`], [`Brep::validate_built`]) and then the kernel's checks of every edge's
 //! and face's geometric records ([`solidcore::eval::check`]: frames orthonormal, planes that span
 //! two directions, placed revolutions about a unit axis under a non-singular placement).
+//! A record whose frames or planes are a little off square is squared first ([`square_axes`]):
+//! [`crate::Body::from_record`] does so itself; a reader that checks a record before it builds
+//! one squares it first, and warns for what [`Squared::worth_a_warning`].
 
 use solidcore::eval::check as k;
+pub use solidcore_convert::brep::square::{needs_squaring, square_axes, Squared, SquaredAt};
 use solidcore_record::brep::{Brep, Curve, Frame, Invalid, Result, Surface};
 
 /// [`Brep::validate`] (a record from outside the kernel), then [`geometry`].

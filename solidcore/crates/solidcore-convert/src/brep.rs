@@ -262,6 +262,17 @@ fn build(
     record
         .validate_built()
         .map_err(|e| Unsupported::Invalid(e.0))?;
+    // A record written with axes a little off square opens on square ones ([`square`]); every
+    // other record is read as it is.
+    let squared;
+    let record = if square::needs_squaring(record) {
+        let mut copy = record.clone();
+        square::square_axes(&mut copy);
+        squared = copy;
+        &squared
+    } else {
+        record
+    };
     if !bare.is_sorted() {
         return Err(Unsupported::Invalid("bare uses not sorted"));
     }
@@ -829,4 +840,5 @@ pub fn recognised(
 }
 
 mod record;
+pub mod square;
 pub use record::to_record;

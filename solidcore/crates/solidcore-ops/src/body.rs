@@ -1061,4 +1061,104 @@ mod tests {
             assert_eq!(proved(&mut k, &mut b), (0, 0), "{name}: the repeat proof");
         }
     }
+
+    /// The record of `body` with every plane's v axis and every frame's y axis turned towards
+    /// the first axis by `eps` (and so `eps` off square, and a frame's y off unit by about
+    /// `eps^2`), as records written before planes were saved square hold them, a little.
+    fn skewed(body: &Body, eps: f64) -> (Record, usize) {
+        use solidcore_record::brep::{Curve as C, Surface as S};
+        let (mut record, _) = body.to_record().unwrap();
+        let tilt = |a: [f64; 3], b: &mut [f64; 3]| {
+            for i in 0..3 {
+                b[i] += eps * a[i];
+            }
+        };
+        let mut touched = 0;
+        for f in &mut record.faces {
+            match &mut f.surface {
+                S::Plane { u_axis, v_axis, .. } => tilt(*u_axis, v_axis),
+                S::Cylinder { frame, .. } => tilt(frame.x_axis, &mut frame.y_axis),
+                _ => continue,
+            }
+            touched += 1;
+        }
+        for e in &mut record.edges {
+            if let C::Circle { frame, .. } = &mut e.curve {
+                tilt(frame.x_axis, &mut frame.y_axis);
+            }
+        }
+        (record, touched)
+    }
+
+    /// A body saved with plane and frame axes off square (1e-12, as the writer left them before
+    /// #21509; 1e-6, well past any rounding) opens: the axes are squared as the record is read,
+    /// the body is the same solid (its volume to the integrator's accuracy, every face, edge and
+    /// vertex where the record has it, in the same order, so names hold), and saved again it
+    /// is square. Only the larger skew is past the tolerance worth a warning.
+    #[test]
+    fn a_body_saved_with_axes_off_square_opens_square() {
+        use crate::record_check::{agreement, needs_squaring, square_axes, SquaredAt};
+        use solidcore::eval::square::{frame_is_square, plane_is_square};
+        use solidcore_record::brep::{Curve as C, Surface as S};
+        let bodies = [
+            ("box", make_box([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]).unwrap()),
+            ("cylinder", make_cylinder([5.0, -4.0, 2.0], 7.5, 12.0).unwrap()),
+        ];
+        for (name, body) in &bodies {
+            let (square, _) = body.to_record().unwrap();
+            assert!(!needs_squaring(&square), "{name}: the writer's record is square");
+            let volume = body.volume(1e-9).unwrap();
+            for eps in [1e-12, 1e-6] {
+                let (record, touched) = skewed(body, eps);
+                assert!(touched > 0, "{name}");
+                assert!(needs_squaring(&record), "{name} {eps}");
+                // squared, the record still agrees with itself: pcurves on their edges, vertices
+                // on their faces
+                let mut copy = record.clone();
+                let squared = square_axes(&mut copy);
+                assert!(!needs_squaring(&copy), "{name} {eps}");
+                agreement(&copy).unwrap();
+                let faces = squared.iter().filter(|s| matches!(s.at, SquaredAt::Face(_)));
+                assert_eq!(faces.count(), touched, "{name} {eps}");
+                assert!(
+                    squared.iter().all(|s| s.worth_a_warning() == (eps > 1e-9)),
+                    "{name} {eps}: {squared:?}"
+                );
+                // it opens, as the same solid
+                let (opened, order) = Body::from_record(&record, true)
+                    .unwrap_or_else(|e| panic!("{name} {eps}: {e:?}"));
+                assert_eq!(
+                    (order.faces.len(), order.edges.len(), order.vertices.len()),
+                    (record.faces.len(), record.edges.len(), record.vertices.len()),
+                    "{name} {eps}"
+                );
+                let v = opened.volume(1e-9).unwrap();
+                assert!((v - volume).abs() <= 1e-8 * volume, "{name} {eps}: {v} vs {volume}");
+                // saved again, it is square, with its vertices where they were
+                let (again, _) = opened.to_record().unwrap();
+                assert!(!needs_squaring(&again), "{name} {eps}");
+                for f in &again.faces {
+                    match &f.surface {
+                        S::Plane { u_axis, v_axis, .. } => {
+                            assert!(plane_is_square(*u_axis, *v_axis), "{name} {eps}")
+                        }
+                        S::Cylinder { frame, .. } => {
+                            assert!(frame_is_square(frame.x_axis, frame.y_axis), "{name} {eps}")
+                        }
+                        _ => {}
+                    }
+                }
+                for e in &again.edges {
+                    if let C::Circle { frame, .. } = &e.curve {
+                        assert!(frame_is_square(frame.x_axis, frame.y_axis), "{name} {eps}");
+                    }
+                }
+                assert_eq!(again.vertices.len(), square.vertices.len(), "{name} {eps}");
+                for (a, b) in again.vertices.iter().zip(&square.vertices) {
+                    let d = (0..3).map(|i| (a.point[i] - b.point[i]).abs()).fold(0.0, f64::max);
+                    assert!(d <= 1e-9, "{name} {eps}: a vertex moved {d}");
+                }
+            }
+        }
+    }
 }
