@@ -79,8 +79,8 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, curve_tolerance, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_to_point, path_curve,
-    project_onto_face, rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
+    body_from_record, curve, curve_tolerance, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_to_point,
+    loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -357,8 +357,9 @@ mod imp {
         segs.iter().map(|s| curve(plane, s)).collect()
     }
 
-    /// The kernel body of an SMLib result SMLib's own check finds valid (checked here unless the
-    /// evaluation's validation mode leaves it to the feature's end, `crate::validation`).
+    /// The kernel body of an SMLib result: checked here when the evaluation's validation mode
+    /// checks each step, left with the body for the feature's end when it checks each feature,
+    /// and not checked otherwise (`crate::validation`).
     fn body_of(brep: Brep, what: &str) -> Result<Body> {
         use crate::validation::{Checked, Step};
         let step = crate::validation::step();
@@ -2276,19 +2277,16 @@ mod imp {
                 crate::loft_rails::Section::of(pl, &segs, ps.iter().map(|x| x.numbers.clone()).collect())
             })
             .collect::<Result<Vec<_>>>()?;
-        let all: Vec<Vec<Curve>> = crate::loft_rails::railed(&matched, true, rails, fit)?
-            .iter()
-            .map(|section| {
-                section
-                    .iter()
-                    .map(|c| {
-                        let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
-                        Curve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }
-                    })
-                    .collect()
-            })
-            .collect();
+        let all: Vec<Vec<Curve>> =
+            crate::loft_rails::railed(&matched, true, rails, fit)?.iter().map(|section| section.iter().map(rows_curve).collect()).collect();
         Ok(all)
+    }
+
+    /// A railed loft's row curve (homogeneous control points `[x w, y w, z w, w]`) as SMLib takes
+    /// it: each point's coordinates with its weight, the degree and knots as they are.
+    fn rows_curve(c: &solidcraft_geom::bspline::CurveN<4>) -> Curve {
+        let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
+        Curve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }
     }
 
     /// The railed loft through `sections` (as [`loft`] takes them) skinned through `all`
@@ -2302,6 +2300,23 @@ mod imp {
     pub(crate) fn loft_to_point(plane: &Plane, pieces: &[Piece], apex: Vec3) -> Result<Body> {
         let c = curves(plane, pieces)?;
         let brep = Brep::loft_to_point(&c, p(apex)).map_err(|e| failed("loft to a point", e))?;
+        let body = body_of(brep, "loft to a point")?;
+        let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], false)?;
+        with_history(body, &roles, pieces)
+    }
+
+    /// [`loft_to_point`] following one or two guide `rails` (polylines from the section to the
+    /// apex), `fit` saying how they reshape the section on the way: the base is the start cap, each
+    /// wall comes from the segment it stands on.
+    pub(crate) fn loft_to_point_with_rails(plane: &Plane, pieces: &[Piece], apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+        if rails.is_empty() || rails.len() > 2 {
+            return Err(KernelError::Invalid("a loft takes one or two guide rails".into()));
+        }
+        let segs: Vec<Seg2> = pieces.iter().map(|x| x.seg).collect();
+        let base = crate::loft_rails::Section::of(plane, &segs, pieces.iter().map(|x| x.numbers.clone()).collect())?;
+        let (rows, along) = crate::loft_rails::railed_to_point(&base, apex, rails, fit)?;
+        let sections: Vec<Vec<Curve>> = rows.iter().map(|section| section.iter().map(rows_curve).collect()).collect();
+        let brep = Brep::loft_to_point_through(&sections, p(apex), &along).map_err(|e| failed("loft to a point", e))?;
         let body = body_of(brep, "loft to a point")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], false)?;
         with_history(body, &roles, pieces)

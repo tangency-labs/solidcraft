@@ -94,16 +94,16 @@ impl State {
 
 pub(crate) fn observe(app: &mut SolveApp) {
     let token = app.session.design_token();
-    if app.plugin_events.observed_uid != Some(app.session.uid) {
+    if app.plugins.events.observed_uid != Some(app.session.uid) {
         app.session.plugin_state.listener_data = Default::default();
-        app.plugin_events.observed_uid = Some(app.session.uid);
-        app.plugin_events.pending = None;
-        app.plugin_events.observed_links = Default::default();
-        app.plugin_events.invalidate(Some(token), app.now);
+        app.plugins.events.observed_uid = Some(app.session.uid);
+        app.plugins.events.pending = None;
+        app.plugins.events.observed_links = Default::default();
+        app.plugins.events.invalidate(Some(token), app.now);
     } else {
-        app.plugin_events.observe(Some(token), app.now);
+        app.plugins.events.observe(Some(token), app.now);
     }
-    app.plugin_events.observe_links(app.session.plugin_state.link_changes.clone(), app.now);
+    app.plugins.events.observe_links(app.session.plugin_state.link_changes.clone(), app.now);
 }
 
 pub(crate) fn command_completed(app: &mut SolveApp, id: &str, succeeded: bool) {
@@ -111,7 +111,7 @@ pub(crate) fn command_completed(app: &mut SolveApp, id: &str, succeeded: bool) {
     // Undo and redo also restore display-only history. Those successful host actions
     // invalidate listeners even when they restore the same modelling token.
     if succeeded && solidcraft_engine::find_command(id).is_some_and(|spec| matches!(spec.id, "edit.undo" | "edit.redo")) {
-        app.plugin_events.invalidate(Some(app.session.design_token()), app.now);
+        app.plugins.events.invalidate(Some(app.session.design_token()), app.now);
     }
 }
 
@@ -131,13 +131,13 @@ fn completed(app: &mut SolveApp, job: Job, mut state: AppState) {
         observe(app);
         let mut notification = job.notification;
         notification.token = token;
-        app.plugin_events.retry(notification, app.now);
+        app.plugins.events.retry(notification, app.now);
         return;
     }
     // A disk check can supersede the worker without changing the modelling token. Preserve
     // any whole-design invalidation too, so rejecting this output cannot lose its delivery.
     if job.link_snapshot != app.session.plugin_state.link_changes {
-        app.plugin_events.retry(job.notification, app.now);
+        app.plugins.events.retry(job.notification, app.now);
         return;
     }
     let ids: std::collections::BTreeSet<_> =
@@ -172,7 +172,7 @@ fn completed(app: &mut SolveApp, job: Job, mut state: AppState) {
 
 #[cfg(test)]
 pub(crate) fn drain(app: &mut SolveApp) -> Result<(), String> {
-    if let Some(job) = app.plugin_events.job.take() {
+    if let Some(job) = app.plugins.events.job.take() {
         let state = job.done.recv().map_err(|error| error.to_string())?;
         completed(app, job, state);
     }
@@ -212,14 +212,14 @@ fn tick_with_spawner(
     {
         crate::plugins::sync_policy(app);
     }
-    if let Some(job) = app.plugin_events.job.take() {
+    if let Some(job) = app.plugins.events.job.take() {
         match job.done.try_recv() {
             Ok(state) => completed(app, job, state),
-            Err(mpsc::TryRecvError::Empty) => app.plugin_events.job = Some(job),
+            Err(mpsc::TryRecvError::Empty) => app.plugins.events.job = Some(job),
             Err(mpsc::TryRecvError::Disconnected) => {
                 log::error!("design-changed command worker disconnected");
                 if job.uid == app.session.uid {
-                    app.plugin_events.retry(job.notification, app.now);
+                    app.plugins.events.retry(job.notification, app.now);
                 }
             }
         }
@@ -228,22 +228,22 @@ fn tick_with_spawner(
     // are not committed changes; their latest invalidation waits for the finished action.
     if app.applying.is_none() && app.deferred.is_none() && app.control_job.is_none() && !app.file_load.busy() {
         observe(app);
-        if app.plugin_events.job.is_none()
-            && let Some(notification) = app.plugin_events.take_notification(app.now)
+        if app.plugins.events.job.is_none()
+            && let Some(notification) = app.plugins.events.take_notification(app.now)
         {
             // The worker replaces outputs only for invoked listeners and prunes caches of
             // packages without current approval. Other event subscriptions keep their data.
             let scratch = app.session.scratch();
             let retry = notification.clone();
             if let Some(done) = spawn(scratch, notification) {
-                app.plugin_events.job =
+                app.plugins.events.job =
                     Some(Job { uid: app.session.uid, notification: retry, link_snapshot: app.session.plugin_state.link_changes.clone(), done });
             } else {
-                app.plugin_events.retry(retry, app.now);
+                app.plugins.events.retry(retry, app.now);
             }
         }
     }
-    if app.plugin_events.pending.is_some() || app.plugin_events.job.is_some() {
+    if app.plugins.events.pending.is_some() || app.plugins.events.job.is_some() {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
 }

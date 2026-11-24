@@ -346,6 +346,33 @@ now and is never saved: if the thing is lost, the note stays and has no leader.
 - **Elsewhere:** leader, leader line.
 - **For translators:** a drawn line; not a person who leads.
 
+### library entry
+
+One material or one appearance kept in a *material library*, known by an id that stays the same
+when the entry is edited.
+
+Each edit gives the entry a new revision. A library folder holds one file per entry; the file's
+name is only a label.
+
+- **In SolidCraft:** `solidcraft_io::library::Listed` and the catalog's `Entry` (`id`, `revision`,
+  `provenance`, `definition`); the `materials/` and `appearances/` folders of a library folder.
+- **Don't use:** item, record, preset (a starter appearance's own word).
+- **Elsewhere:** library material, library appearance, asset.
+- **For translators:** one thing kept in a library; not a line of a list or a table.
+
+### library place
+
+Where SolidCraft reads material libraries from: the built-in library, one library folder, or a
+folder of library folders.
+
+A place that can't be read stays listed, with the reason. Where a library's data came from is
+its provenance, not its place.
+
+- **In SolidCraft:** `solidcraft_io::library::Place` (`built_in`, `library`, `folder`).
+- **Don't use:** source (that is where the data came from), location, path.
+- **Elsewhere:** library location, library path.
+- **For translators:** a place on a disk or a drive; not a place in a design.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -358,6 +385,22 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Don't use:** material for a render or visual material.
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
+
+### material library
+
+A named collection of *materials* and *appearances* kept outside any design, which designs copy
+from.
+
+A design keeps its own copy of what it uses, so a change to a library never changes a design by
+itself. A library folder is marked by its `<Library name>.sclibrary.json` file; the built-in
+library can't be changed.
+
+- **In SolidCraft:** `solidcraft_io::library::Library` and `Set`; `library.inspect`, `library.export`
+  and `library.apply`; the `solidcraft-library/2` file and the `solidcraft-library-folder/1`
+  manifest.
+- **Don't use:** catalogue for the library itself (the single-file format is the catalog), pack.
+- **Elsewhere:** material library, material database, appearance library.
+- **For translators:** a collection of materials; not a code library or a book library.
 
 ### moment of inertia
 
@@ -452,6 +495,17 @@ The maximum number of shaded surfaces in a rendering path, starting with the fir
 
 - **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
 - **For translators:** a count, not a geometric depth in millimetres or timeline depth.
+
+### pattern extent
+
+The distance from the first pattern instance to the last along one direction of a rectangular
+pattern. With Quantity and Extent the spacing is worked out from it; with Spacing and Extent
+the quantity is.
+
+- **In SolidCraft:** `solid.pattern.rectangular`'s `extent1` and `extent2`, chosen by the
+  direction's Distance Type (`distance1`, `distance2`).
+- **Don't use:** span, length (for the setting); total length is fine in a sentence.
+- **For translators:** a length along the row, not an extrude's Extent (how far it reaches).
 
 ### pattern instance
 
@@ -718,6 +772,8 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
+| Tab | flat material a sheet metal Tab adds to a panel | tab (sheet metal) | `sheet.tab`, `cmd.sheet_tab` |
+| | a page of the ribbon or of a document strip | tab (ribbon, document) | the ribbon tabs, the document tabs |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |
 | | a fillet | *fillet* | `solid.fillet` |
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |
