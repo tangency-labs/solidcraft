@@ -678,6 +678,29 @@ fn a_range_block_goes_by_the_shown_size() {
     assert_eq!(block.effective(&angle, &shown("deg", 1)).unwrap(), None);
 }
 
+/// A range block reads its ends in its own unit: in an inch block, up to 4 in ±0.254, then ±0.5,
+/// 3.00 in takes 0.254, 4.00 in is at the end and takes 0.254 too, and 5.00 in takes 0.5. The same
+/// lengths shown in millimetres take the same rows.
+#[test]
+fn a_range_block_reads_its_ends_in_its_unit() {
+    let inch = range_block("in", &[(Some(4.0), 0.254), (None, 0.5)], None);
+    for (inches, deviation) in [(3.0, 0.254), (4.0, 0.254), (5.0, 0.5)] {
+        assert_eq!(general(&inch, inches * 25.4, "in", 2), Some(deviation), "{inches} in");
+        assert_eq!(general(&inch, inches * 25.4, "mm", 1), Some(deviation), "{inches} in shown in mm");
+    }
+}
+
+/// A block its check refuses is refused when it judges a dimension too, so a block read from a file
+/// unchecked never gives a negative or endless ±.
+#[test]
+fn an_unchecked_block_is_refused_by_effective() {
+    let negative = decimals_block("mm", &[(0, -5.0)], None);
+    refused(negative.effective(&value(25.0, Tolerance::None), &shown("mm", 0)), "deviations");
+    let endless = range_block("mm", &[(None, 1.0)], Some(f64::INFINITY));
+    let angle = DimensionValue { kind: Kind::Angle, ..value(0.5, Tolerance::None) };
+    refused(endless.effective(&angle, &shown("deg", 0)), "angle");
+}
+
 /// No general tolerance for a dimension with its own tolerance or fit code, or an auxiliary or
 /// exact one (ISO 129-1 4.1.4, 4.1.5), and none from a block of `None`.
 #[test]
@@ -738,8 +761,9 @@ fn a_general_tolerance_out_of_its_limits_is_refused() {
 /// Blocks and dimensions, three in four tidy (valid blocks, lengths in the block's unit with a
 /// point and trailing zeros) and the rest hostile (any unit, no rows or 65, non-finite, zero and
 /// negative numbers, ends out of order, decimals over 8, no trailing zeros), 20,000 seeded cases:
-/// checking and judging never panic and give the same answer twice, and a block that passes its
-/// check gives only its own values, to plain dimensions only.
+/// checking and judging never panic and give the same answer twice, a block that fails its check
+/// is refused when it judges, and a block that passes it gives only its own values, to plain
+/// dimensions only.
 #[test]
 fn general_tolerance_seeded_never_panics_and_is_deterministic() {
     let mut seed = 0x4896_e09e_5eed_7a11;
@@ -796,6 +820,7 @@ fn general_tolerance_seeded_never_panics_and_is_deterministic() {
         // The same answer twice, compared by bits: a block that fails `validate` may hold NaN, which `==` never equals.
         let bits = |r: &Result<Option<f64>>| r.as_ref().map(|d| d.map(f64::to_bits)).map_err(ToString::to_string);
         assert_eq!(bits(&first), bits(&block.effective(&v, &style)), "case {case}");
+        assert!(valid || first.is_err(), "case {case}: {block:?} fails its check but judged {first:?}");
         checked += usize::from(valid);
         if let (true, Ok(Some(d))) = (valid, &first) {
             judged += 1;

@@ -35,7 +35,7 @@ pub struct DraftingProfile {
     /// The ± a dimension with no tolerance of its own takes: none in the built-ins (ISO 2768-1's
     /// values wait for a reviewed table); a template gives its own. A copy saved before this
     /// field existed reads with none.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "GeneralTolerance::is_none")]
     pub general_tolerance: GeneralTolerance,
 }
 
@@ -107,9 +107,11 @@ impl DraftingProfile {
     }
 
     /// The built-in this copy came from, when it isn't the same any more: this copy's version
-    /// and the library's. Reported (the drawing check), never applied.
+    /// and the library's. Reported (the drawing check), never applied. A general tolerance is the
+    /// template's, not the built-in's, so the copy's own is no change.
     pub fn differs_from_library(&self) -> Option<(u32, u32)> {
-        let current = DraftingProfile::library().into_iter().find(|p| p.id == self.id)?;
+        let built_in = DraftingProfile::library().into_iter().find(|p| p.id == self.id)?;
+        let current = DraftingProfile { general_tolerance: self.general_tolerance.clone(), ..built_in };
         (current != *self).then_some((self.version, current.version))
     }
 }

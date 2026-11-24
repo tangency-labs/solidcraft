@@ -196,7 +196,7 @@ fn hostile_profiles_never_panic() {
 /// A profile's general tolerance is checked with it: a decimal-places block needs the trailing
 /// zeros the ASME built-in leaves off (a range block doesn't), and a bad block is refused; each
 /// block is saved and read back the same, a field this version doesn't know refused; the
-/// built-ins have none.
+/// built-ins have none. A built-in's copy given a block still matches the built-in.
 #[test]
 fn a_profiles_general_tolerance_is_checked_and_saved_with_it() {
     assert!(DraftingProfile::library().iter().all(|p| p.general_tolerance == GeneralTolerance::None));
@@ -215,6 +215,9 @@ fn a_profiles_general_tolerance_is_checked_and_saved_with_it() {
     refused(&DraftingProfile { general_tolerance: parts, ..profile("asme_y14_5") }, "trailing zeros");
     let asme_fabrication = DraftingProfile { general_tolerance: fabrication, ..profile("asme_y14_5") };
     asme_fabrication.validate().unwrap();
+    // A template's own general tolerance is no change to the built-in it copies; a changed version still is.
+    assert_eq!(asme_fabrication.differs_from_library(), None);
+    assert_eq!(DraftingProfile { version: 0, ..asme_fabrication.clone() }.differs_from_library(), Some((0, 1)));
     let bad = GeneralTolerance::ByRange { unit: "deg".into(), ranges: vec![RangeRow { up_to: None, deviation: 1.0 }], angle: None };
     refused(&DraftingProfile { general_tolerance: bad, ..DraftingProfile::default() }, "length unit");
     for p in [house, asme_fabrication] {
@@ -233,6 +236,7 @@ fn a_profiles_general_tolerance_is_checked_and_saved_with_it() {
 fn a_profile_saved_before_general_tolerances_reads_with_none() {
     for p in DraftingProfile::library() {
         let mut saved = serde_json::to_value(&p).unwrap();
+        assert!(saved.get("general_tolerance").is_none(), "{} saves as before, with no general tolerance", p.id);
         saved.as_object_mut().unwrap().remove("general_tolerance");
         let read = serde_json::from_value::<DraftingProfile>(saved).unwrap();
         assert_eq!(read.general_tolerance, GeneralTolerance::None);

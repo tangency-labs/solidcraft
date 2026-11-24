@@ -403,7 +403,7 @@ pub enum GeneralTolerance {
     /// By the decimals a length is shown with (`25` ±0.5, `25.0` ±0.1), for lengths shown in
     /// `unit`; angles take `angle`.
     ByDecimals { unit: String, linear: Vec<DecimalsRow>, angle: Option<f64> },
-    /// By the size a length is shown with, rows going up; angles take `angle`.
+    /// By the size a length is shown with, rows going up, their ends in `unit`; angles take `angle`.
     ByRange { unit: String, ranges: Vec<RangeRow>, angle: Option<f64> },
 }
 
@@ -415,8 +415,9 @@ pub struct DecimalsRow {
     pub deviation: f64,
 }
 
-/// A length shown over the row before's end (from 0 for the first row) and up to `up_to` (mm)
-/// takes ±`deviation`. Only the last row may have no end, for every size above the one before.
+/// A length shown over the row before's end (from 0 for the first row) and up to `up_to`, in the
+/// block's `unit`, takes ±`deviation` (mm). Only the last row may have no end, for every size
+/// above the one before.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RangeRow {
@@ -425,6 +426,11 @@ pub struct RangeRow {
 }
 
 impl GeneralTolerance {
+    /// Whether there is no block: a profile with none saves without one.
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
+
     /// What a block may hold, in a profile that writes numbers in `number`.
     pub(crate) fn validate(&self, number: &NumberFormat) -> Result<()> {
         let (unit, rows, angle) = match self {
@@ -484,11 +490,12 @@ impl GeneralTolerance {
     /// `style` shows it, the number the drawing states. None for a dimension with a tolerance of
     /// its own (a fit code too) or an auxiliary or exact one (ISO 129-1 4.1.4, 4.1.5), and none
     /// where no row covers it: it is then untoleranced. A decimal-places block holds for lengths
-    /// shown in its own unit only. A shown size within 1e-9 mm of a range's end is at it, so a
-    /// unit's conversion never moves it into the next row.
+    /// shown in its own unit only; a range's ends are read in the block's unit. A shown size within
+    /// 1e-9 mm of a range's end is at it, so a unit's conversion never moves it into the next row.
+    /// A block its check refuses is refused here too.
     pub fn effective(&self, value: &DimensionValue, style: &DimensionStyle) -> Result<Option<f64>> {
         let (Self::ByDecimals { unit, angle, .. } | Self::ByRange { unit, angle, .. }) = self else { return Ok(None) };
-        self.readable(&style.number)?;
+        self.validate(&style.number)?;
         if value.role != Role::Normal || value.tolerance != Tolerance::None {
             return Ok(None);
         }
@@ -502,8 +509,11 @@ impl GeneralTolerance {
             Self::ByDecimals { linear, .. } if scale(unit) == scale(&style.unit) => {
                 linear.iter().find(|row| row.decimals == style.decimals).map(|row| row.deviation)
             }
-            Self::ByRange { ranges, .. } => size_mm
-                .and_then(|size| ranges.iter().find(|row| row.up_to.is_none_or(|up| size <= up + solidcraft_geom::EPS)).map(|row| row.deviation)),
+            Self::ByRange { ranges, .. } => {
+                let end_mm = scale(unit);
+                let within = |size: f64, up: f64| end_mm.is_some_and(|scale| size <= up * scale + solidcraft_geom::EPS);
+                size_mm.and_then(|size| ranges.iter().find(|row| row.up_to.is_none_or(|up| within(size, up))).map(|row| row.deviation))
+            }
             _ => None,
         })
     }
