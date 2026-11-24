@@ -43,6 +43,12 @@ pub struct Limits {
     pub cancelled: Option<fn() -> bool>,
 }
 
+impl Limits {
+    fn exceeds_expanded(&self, name: &str, size: u64, total: u64) -> bool {
+        size > (self.part_limit)(name) as u64 || total > (self.max_expanded)() as u64
+    }
+}
+
 fn invalid(message: impl std::fmt::Display) -> FormatError {
     FormatError::Invalid(message.to_string())
 }
@@ -106,13 +112,28 @@ pub struct Writer {
     expanded: usize,
     resolved: usize,
     limits: Limits,
+    open_expanded_limit: fn() -> usize,
     /// Which written parts to record for a signature, and the records so far.
     tracked: Option<(fn(&str) -> bool, Vec<PartDigest>)>,
 }
 
 impl Writer {
     pub fn new(limits: Limits) -> Writer {
-        Writer { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0, limits, tracked: None }
+        Writer {
+            zip: zip::ZipWriter::new(Cursor::new(Vec::new())),
+            names: BTreeSet::new(),
+            expanded: 0,
+            resolved: 0,
+            open_expanded_limit: limits.max_expanded,
+            limits,
+            tracked: None,
+        }
+    }
+
+    /// Save required data even when reopening it will need a higher size limit.
+    /// Optional parts still share the reader's expanded budget through `space` and `room`.
+    pub fn for_save(save_limits: Limits, open_expanded_limit: fn() -> usize) -> Writer {
+        Writer { open_expanded_limit, ..Self::new(save_limits) }
     }
 
     /// Record the parts written from now on whose name `include` accepts, with their SHA-256, for
@@ -188,7 +209,7 @@ impl Writer {
         // The bytes written so far, plus what the open compressed part may still hold back.
         let written = self.zip.get_ref().map_or(usize::MAX, |c| c.get_ref().len()).saturating_add(1 << 20);
         let directory = self.names.len().saturating_add(entries).saturating_mul(256).saturating_add(65_536);
-        budget.saturating_sub(written.saturating_add(directory)).min((self.limits.max_expanded)().saturating_sub(self.expanded))
+        budget.saturating_sub(written.saturating_add(directory)).min((self.open_expanded_limit)().saturating_sub(self.expanded))
     }
 
     /// Add a payload as a blob, `blobs/<sha256>.<extension>`, and say its name, for the JSON that
@@ -214,11 +235,19 @@ pub struct Reader<R: Read + Seek> {
     /// The bytes of payloads resolved so far, repeats counted: bounded by the expanded budget.
     pub hydrated: usize,
     document: Option<Arc<[u8]>>,
+    /// Whether an entry or the total exceeds the optional opening budgets supplied at construction.
+    pub exceeds_expanded_open_limit: bool,
     limits: Limits,
 }
 
 impl<R: Read + Seek> Reader<R> {
-    pub fn new(mut source: R, limits: Limits) -> Result<Self, FormatError> {
+    pub fn new(source: R, limits: Limits) -> Result<Self, FormatError> {
+        Self::with_open_limits(source, limits, None)
+    }
+
+    /// Enforce `limits`. When inspecting a save, also record whether its expanded contents exceed
+    /// the limits for opening a file. Both checks use the same directory entries.
+    pub fn with_open_limits(mut source: R, limits: Limits, open_limits: Option<Limits>) -> Result<Self, FormatError> {
         let length = source.seek(SeekFrom::End(0)).map_err(invalid)?;
         (limits.check_size)(length).map_err(invalid)?;
         let tail_length = length.min(65_557) as usize;
@@ -258,6 +287,7 @@ impl<R: Read + Seek> Reader<R> {
         }
         let mut names = BTreeSet::new();
         let mut total = 0u64;
+        let mut exceeds_expanded_open_limit = false;
         for i in 0..zip.len() {
             let part = zip.by_index_raw(i).map_err(invalid)?;
             let name = part.name().map_err(invalid)?.into_owned();
@@ -269,12 +299,12 @@ impl<R: Read + Seek> Reader<R> {
                 return Err(invalid("duplicate or invalid archive entry"));
             }
             total = total.checked_add(part.size()).ok_or_else(|| invalid("expanded size overflow"))?;
-            let limit = (limits.part_limit)(&name);
-            if part.size() > limit as u64 || total > (limits.max_expanded)() as u64 {
+            if limits.exceeds_expanded(&name, part.size(), total) {
                 return Err(invalid("expanded package too large"));
             }
+            exceeds_expanded_open_limit |= open_limits.is_some_and(|open| open.exceeds_expanded(&name, part.size(), total));
         }
-        Ok(Self { zip, blobs: BTreeMap::new(), hydrated: 0, document: None, limits })
+        Ok(Self { zip, blobs: BTreeMap::new(), hydrated: 0, document: None, exceeds_expanded_open_limit, limits })
     }
 
     /// The file's own part, `document.json`, read once and kept: provisional caches and the

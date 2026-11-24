@@ -16,9 +16,11 @@ pub(crate) mod open_steps;
 #[path = "file_send.rs"]
 mod send;
 
+use std::io::Cursor;
+
 use serde_json::{Value, json};
 use solidcraft_doc::Document;
-use solidcraft_io::Format;
+use solidcraft_io::{DesignContainerReader, Format};
 
 use super::CommandSpec;
 use super::print_face;
@@ -79,6 +81,17 @@ pub static COMMANDS: &[CommandSpec] = &[
             "linked_bodies?: all|folder (a design saved without the bodies of its linked designs, file.save's `linked_bodies: false`: which linked design files are read for them as it opens; default all; folder: only files in the design's own folder or below it, and the other links have no bodies until component.update_links reads them; warnings name each link not read); ",
             "verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); ",
             "newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving",
+        )),
+    CommandSpec::new("file.revert_saved", "Revert to Saved", crate::checked!("file.revert_saved", revert_saved))
+        .any_part()
+        .icon("open")
+        .noundo()
+        .contract(&REVERT_SAVED_CONTRACT)
+        .output(output_schema_for::<OpenResult>)
+        .params(concat!(
+            "→ reads the active design again from the file it was opened or saved as, as File > Revert to Saved does, and answers as doc.open does. ",
+            "It never asks: unsaved changes are lost, and the history with them. ",
+            "A design with no file yet, and a file that is gone or unreadable, are refused and leave the design as it is",
         )),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step)).begins_edit()
         .at("SOLID", "INSERT")
@@ -361,6 +374,16 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
     let reply = NewDesignResult { name: name.to_string(), document_id: None, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
+}
+
+const REVERT_SAVED_CONTRACT: TypedContract<crate::schema::file::RevertSavedParams> = TypedContract::new();
+
+/// File > Revert to Saved without the question (#16629): the design's file is read again through
+/// [`open`], so a file only an importer plugin reads, a bad path and a missing file answer as
+/// `doc.open` answers, and the design stays as it was when the file cannot be read.
+fn revert_saved(s: &mut Session, _p: &Value) -> Result<Value> {
+    let path = s.path.clone().ok_or_else(|| bad("file.revert_saved", "the design has no file to go back to yet; save it first"))?;
+    open(s, &json!({"path": path}))
 }
 
 const OPEN_CONTRACT: TypedContract<crate::schema::file::OpenParams> = TypedContract::new();
@@ -2126,12 +2149,8 @@ fn write_file(
 /// import's check of its parts was still running when the save began, so the save left the
 /// cache out without waiting for it ([`saved_geometry`], #20133); taken then, as the check may
 /// have ended since.
-fn missing_save_cache(s: &Session, format: &str, cache: bool, checking: bool, bytes: &[u8]) -> Option<String> {
-    if !cache || format != "container" || s.doc.features.is_empty() {
-        return None;
-    }
-    let present = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).ok()?.has_model_cache();
-    if present {
+fn missing_save_cache(s: &Session, cache: bool, checking: bool, reader: Option<&DesignContainerReader<Cursor<&[u8]>>>) -> Option<String> {
+    if !cache || s.doc.features.is_empty() || reader?.has_model_cache() {
         return None;
     }
     let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
@@ -2149,6 +2168,19 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, checking: bool, by
         "the cache could not fit or be encoded within the design file budget".into()
     };
     Some(format!("Model cache not saved: {reason}; opening this design will rebuild its model."))
+}
+
+/// A successful save can exceed the opening limit on disk or when its contents are unpacked.
+fn save_limit_warning(bytes: usize, over_expanded_limit: bool) -> Option<String> {
+    let limit = solidcraft_io::limits::max_design_bytes();
+    let reason = if bytes > limit {
+        format!("Saved, but the design is {} MB, over the {} MB \"Largest file to open\" limit:", bytes >> 20, limit >> 20)
+    } else if over_expanded_limit {
+        "Design saved. Reopening it requires a higher file-size limit for its unpacked contents.".to_owned()
+    } else {
+        return None;
+    };
+    Some(format!("{reason} {}", solidcraft_io::limits::how_to_raise()))
 }
 
 fn write_bytes(
@@ -2212,9 +2244,8 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
-    // Left out with the linked bodies ([`Session::container_bytes`]): not a cache that went missing.
+    // The linked bodies were deliberately left out with their cache.
     let cache = cache && (s.linked_bodies || s.doc.links.is_empty());
-    let cache_not_saved = missing_save_cache(s, format, cache, checking, &bytes);
     if !s.linked_bodies {
         notes.extend(super::component_link::kept_linked_bodies(s));
     }
@@ -2228,15 +2259,16 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
-    // The bytes just written, read back without the open-size limit: a save over it keeps its
-    // history for the next save (#18686).
-    s.provenance_chain = solidcraft_io::written_design_provenance_chain(&bytes);
+    // Inspect the directory once. A save over the opening limit keeps its history for the next save.
+    let reader = if format == "container" { DesignContainerReader::from_written_bytes(&bytes).ok() } else { None };
+    let limit_warning = save_limit_warning(bytes.len(), reader.as_ref().is_some_and(DesignContainerReader::exceeds_expanded_open_limit));
+    let cache_not_saved = missing_save_cache(s, cache, checking, reader.as_ref());
+    s.provenance_chain = reader.and_then(|mut r| r.provenance_chain());
     s.provenance = None;
     s.mark_saved();
-    let bytes_len = bytes.len();
     let mut out = SaveResult {
         path: path.to_string(),
-        bytes: bytes_len,
+        bytes: bytes.len(),
         name: s.doc.name.clone(),
         kept_format: None,
         warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
@@ -2245,14 +2277,6 @@ fn write_bytes(
         param_warnings: Vec::new(),
         signature,
     };
-    if bytes_len > solidcraft_io::limits::max_design_bytes() {
-        notes.push(format!(
-            "Saved, but the design is {} MB, over the {} MB \"Largest file to open\" limit: {}",
-            bytes_len >> 20,
-            solidcraft_io::limits::max_design_bytes() >> 20,
-            solidcraft_io::limits::how_to_raise()
-        ));
-    }
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
     if s.doc.newer_file.is_some() {
@@ -2268,6 +2292,10 @@ fn write_bytes(
     }
     if !notes.is_empty() {
         out.warnings.get_or_insert_with(Vec::new).extend(notes);
+    }
+    // The desktop shows the first warning in its status line.
+    if let Some(warning) = limit_warning {
+        out.warnings.get_or_insert_with(Vec::new).insert(0, warning);
     }
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
 }
@@ -3877,6 +3905,33 @@ mod tests {
         assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
     }
 
+    /// File > Revert to Saved without a dialog (#16629): the design is read again from its file,
+    /// changes since the last save are gone, and a design with no file or a file that is gone is
+    /// refused with the design left as it was.
+    #[test]
+    fn revert_saved_reads_the_design_again_from_its_file() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-revert-saved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        let refused = s.execute("file.revert_saved", &json!({})).unwrap_err().to_string();
+        assert!(refused.contains("no file"), "{refused}");
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        let saved = s.doc.features.len();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        assert!(s.doc.features.len() > saved && s.is_dirty());
+        s.execute("file.revert_saved", &json!({})).unwrap();
+        assert_eq!((s.doc.features.len(), s.is_dirty(), s.path.as_deref()), (saved, false, Some(path.as_str())), "the unsaved box is gone");
+        // The file goes away: refused, and the design keeps what it has.
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let before = s.doc.features.len();
+        std::fs::remove_file(&path).unwrap();
+        assert!(s.execute("file.revert_saved", &json!({})).is_err());
+        assert_eq!(s.doc.features.len(), before, "a failed revert keeps the design");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.
     #[test]
     fn a_three_digit_colour_expands_each_digit() {
@@ -5043,15 +5098,30 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
         let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
-        let notice = missing_save_cache(&s, "container", true, false, &omitted).unwrap();
+        let omitted = DesignContainerReader::new(Cursor::new(omitted.as_slice())).unwrap();
+        let notice = missing_save_cache(&s, true, false, Some(&omitted)).unwrap();
         assert!(notice.contains("design file budget"), "{notice}");
         // Left out while an import's parts were being checked (#20133): that is the reason given.
-        let checking = missing_save_cache(&s, "container", true, true, &omitted).unwrap();
+        let checking = missing_save_cache(&s, true, true, Some(&omitted)).unwrap();
         assert!(checking.contains("still being checked") && !checking.contains("budget"), "{checking}");
-        assert!(missing_save_cache(&s, "container", false, false, &omitted).is_none());
-        assert!(missing_save_cache(&s, "json", true, false, &omitted).is_none());
+        assert!(missing_save_cache(&s, false, false, Some(&omitted)).is_none());
+        assert!(missing_save_cache(&s, true, false, None).is_none());
         let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
-        assert!(missing_save_cache(&s, "container", true, false, &included).is_none());
+        let included = DesignContainerReader::new(Cursor::new(included.as_slice())).unwrap();
+        assert!(missing_save_cache(&s, true, false, Some(&included)).is_none());
+    }
+
+    #[test]
+    fn save_limit_warning_covers_disk_and_expanded_limits() {
+        let limit = solidcraft_io::limits::max_design_bytes();
+        assert!(save_limit_warning(limit, false).is_none());
+        let expanded = save_limit_warning(1024, true).unwrap();
+        assert!(
+            expanded.contains("Reopening") && expanded.contains("unpacked") && expanded.contains(solidcraft_io::limits::how_to_raise()),
+            "{expanded}"
+        );
+        let on_disk = save_limit_warning(limit + 1, false).unwrap();
+        assert!(on_disk.contains("Largest file to open") && on_disk.contains(solidcraft_io::limits::how_to_raise()), "{on_disk}");
     }
 
     #[test]
