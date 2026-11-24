@@ -13726,6 +13726,11 @@ fn plugin_panels_failed_open_does_not_starve_a_later_close() {
         }]))
         .unwrap();
     h.call("ui.resize", serde_json::json!({"width":350,"height":800}));
+    // The window's size hides the Browser. Its button shows it again, and then the Browser takes
+    // the room the blocked panel would need.
+    h.frames(2);
+    h.step(&serde_json::json!({"click":{"handle":"small_window:browser"}})).unwrap();
+    h.frames(2);
     let mut blocked = closing;
     blocked.panel.zones = vec![solidcraft_engine::plugin::ui::DockZone::Right];
     blocked.visibility_revision = 1;
