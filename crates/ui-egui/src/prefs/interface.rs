@@ -334,6 +334,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
             layout_check(
                 ui,
+                app.tr("prefs.show_window_controls"),
+                app.tr("prefs.show_window_controls_help"),
+                &mut app.preferences.show_window_controls,
+                "show_window_controls",
+            );
+            layout_check(
+                ui,
                 app.tr("window_ribbon.ribbon"),
                 app.tr("window_ribbon.preference_help"),
                 &mut app.preferences.pop_out_window_defaults.ribbon,

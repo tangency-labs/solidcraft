@@ -144,7 +144,7 @@ macro_rules! layout_preferences {
             /// Minimize, Maximize and Close at the right end of SolidCraft's own title bar (Windows, and
             /// Linux without the system's title bar). Off for a tiling window manager, which handles the
             /// window itself (#20385); the bar still moves the window. On by default, as before.
-            show_window_controls: bool = true, PAGE_LAYOUT => check_id_help("prefs.show_window_controls", "prefs.show_window_controls_help");
+            show_window_controls: bool = true, PAGE_LAYOUT;
             /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
             /// tools then start a sketch first (#7904).
             sketch_tab_always: bool = false, PAGE_LAYOUT;
