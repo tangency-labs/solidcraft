@@ -60,6 +60,7 @@ Query replies contain no new host effects.
 | `panel.reset_pair` | `{first,second,expected_revision?}`. Resets adjacent sections to the registered default ratio within intersected bounds. |
 | `panel.native_close` | `{target:{type:"native_host",id:HostId},expected_revision?}`. Native window close redocks its whole section; it does not explicitly close/cancel content. |
 | `layout.save` | `{name,overwrite?:false,expected_revision?}` → `{name,overwritten,state}`. Saves the complete current envelope in the injected catalogue. |
+| `layout.delete` | `{name,expected_revision?}` → `{name,state}`. Deletes a user layout from the injected catalogue. Built-ins return a capability error, unknown names a missing-target error. The panels stay where they are, even when they match the deleted layout. |
 | `layout.apply` | `{name,expected_revision?}`. Applies a named preset to the **current** workspace, rebinding its known layout workspace ID. |
 | `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
 | `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
@@ -202,7 +203,7 @@ trailing data, invalid envelope identities and all existing aggregate/node/depth
 limits before a candidate can be published. This seam performs no disk storage.
 
 With application panel preferences enabled, the existing Layout preferences page
-uses these commands for workspace selection, named layout save/apply and reset.
+uses these commands for workspace selection, named layout save/apply/delete and reset.
 Reset changes only the current workspace and keeps the named layout library.
 Preferences Cancel restores the layout and catalogue through runtime admission;
 if restoration is refused, the dialog and its saved baseline stay open. Periodic
@@ -555,7 +556,11 @@ run, so nothing is queued to apply unseen behind it. `control.pending` belongs t
 connection: a new connection has nothing pending. The bridged MCP server does this itself
 ([mcp.md](mcp.md#long-running-requests)).
 
-`control.pending` answers only for its own connection. `control.running` answers for the whole
+`control.pending` answers only for its own connection, but both it and `control.running` add a
+`background` list while the app runs work no connection owns that holds others out: a plugin package
+job (`plugin.install`, `plugin.remove`) with its `command`, `subject` (the archive or plugin),
+`running_s` and `ends_by_itself_in_s`. Such a job is abandoned after five minutes and the next
+install or removal then runs. `control.running` answers for the whole
 app, the same on every connection, at once (it never waits behind a running request, and a
 connection may ask it while it is `busy`): every request the app has been sent and has not
 answered yet, oldest first, from any connection, including a timed-out one whose connection has
@@ -662,7 +667,7 @@ a menu (neither describes the open one).
 |---|---|---|
 | `engine.execute` | `command`: command id, `params`: JSON object | the command's result |
 | `engine.script` | `commands`: `[{command, params}, …]` | results. Each step runs as `engine.execute` runs it, so the window follows it as it does a batch step. The first error stops the script, and the steps before it stay |
-| `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: `true` only when a rollback was asked for and the design is where the batch started, `false` when `rollback: false` or when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `rolled_back` as after a rollback that went back (`true`, or `false` when `rollback: false`: the design is where the batch started), `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
+| `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: `true` only when a rollback was asked for and the design is where the batch started, `false` when `rollback: false` or when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, `document.activate`, and `file.new` or `doc.open` with `new_tab: true`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `rolled_back` as after a rollback that went back (`true`, or `false` when `rollback: false`: the design is where the batch started), `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
 | `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
@@ -675,6 +680,41 @@ a menu (neither describes the open one).
 The selection alone is the engine command `selection.get` (run it with `engine.execute`; read-only, no undo step, headless too): `{count, items}`, each item as `select.set` takes it (`type`, `body`, `index`, `point`, `id`, `sketch`, `path`…) with `kind` and, unless `detail: false`, what it resolves to: a face's persistent `name`, `surface` (`plane` with `normal`, `cylinder` with `origin`, `axis` and `radius`, `cone`, `sphere`, `torus`, or `other`) and `area_mm2`; an edge's persistent `name`, `curve` (`line`, `circle`, `arc`, `other`), `length_mm`, `start`, `end` and, when round, `center`, `axis` and `radius`; a body's `volume_mm3`, `feature` and `visible`; a body item's `component` and `occurrence_path` in an assembly; a sketch item's `sketch` (its id, so the item can go back to `select.set`), `sketch_name` and `entity` (a line's `sketch_midpoint` gives `midpoint` and its `position`). `ui.selection` (below) reports the window's view of it with the open dialog's inputs and the hovered item.
 
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
+
+### Design tabs and the active design
+
+The desktop window can hold several designs, one in each design tab, but only one is **active**:
+the one the window shows. Every `engine.execute`, `engine.script` and `engine.batch` call acts on
+the active design alone, whatever it runs (`plugin.run`, `file.save_as`, `solid.box`…). A command
+never names a design, so a client that works on several designs makes the one it wants active
+first, then sends the commands, then moves on:
+
+| Command | Parameters | Result |
+| --- | --- | --- |
+| `file.new` | `name?`, `new_tab?`: bool (default false) | `{name}`. With `new_tab: true` the design opens in a tab of its own, after the active one, and becomes active; the design that was open stays open as it was. The reply adds `document_id`, the new design's id. It always opens a tab, even where the active design is blank. Without `new_tab` the active design is replaced, as before |
+| `doc.open` | `path`, `new_tab?`: bool (default false), and its other parameters | The file opens in a tab of its own and becomes active, even where the active design is blank, which an ordinary open replaces. A file that is already open in a tab is shown instead, as for any open. Ask for the new design's id with `document.revision` once the reply has come. When the person at the window is in the middle of something (a dialog, a tool, a save prompt), the tab opens behind the active one and the active design does not change: `document.list` says which it is. A failed open opens no tab |
+| `document.list` | `{}` | `{documents: [{document_id, name, path, active, dirty}], active_document_id}`: the open designs in tab order, `path` null until the design is saved. Only reads |
+| `document.activate` | `document_id` (from `document.list`, `document.revision` or `file.new`) | `{document_id, name, path}`: shows that design's tab, so every later command acts on it. An id that no open design has is an error and changes nothing |
+
+`document_id` is the id `document.revision` gives: it belongs to an open design, stays through saves
+and renames, and is new for every design started or opened. `file.new` without `new_tab` and
+`doc.open` into a blank tab replace the design in the active tab, so they give it a new id.
+
+`new_tab` and `document.activate` change which design is active, so `engine.batch` and
+`engine.script` refuse them, as they refuse `component.edit_in_place` and `view.next_tab` (send
+them one by one): a rollback or a later step would otherwise land in the wrong design. The command
+line and the headless MCP server hold one design and have no tabs: `document.list` answers with that
+design, `document.activate` accepts its id, and `new_tab: true` is refused with an error saying so.
+
+Plugin approvals (`plugin.install`'s `approve`, the Plugins page of Preferences) belong to the
+plugin, not to a design: they are kept in the preferences and the plugins folder's grant store,
+and every design tab runs the plugin with them. Opening a design in a new tab asks for no
+approval again.
+
+A program that puts one sheet in each tab runs, for each sheet: `file.new {"name": "Sheet 1",
+"new_tab": true}`, then the plugin and `file.save_as`, which both act on the new design. A first
+design that is still blank when the program starts (a freshly launched window has one) keeps its
+tab; `document.close` closes it when it is not wanted.
 
 ### View windows
 

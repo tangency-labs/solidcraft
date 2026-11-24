@@ -108,8 +108,7 @@ crates/solidcore/src/blend/blend_corner/chamfer.rs	facet_plane	int-rem	1	proven	
 crates/solidcore/src/blend/blend_corner/chamfer.rs	mitre_tests	int-rem	1	proven	(i + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/blend_corner/chamfer.rs	newell	int-rem	1	proven	(i + 1) % n	inside xs.iter().enumerate(), so n = xs.len() > 0
 crates/solidcore/src/blend/blend_corner/chamfer.rs	ring_faces	int-rem	1	proven	(i + n - 1) % n	inside for i in 0..n, so n > 0 (n = all_eus.len())
-crates/solidcore/src/blend/blend_corner/end.rs	fit_of_end_past_side_edges	int-rem	1	proven	(fil + total - 1) % total	returns early when total < 3
-crates/solidcore/src/blend/blend_corner/end.rs	fit_of_end_past_side_edges	int-rem	2	proven	(fil + 1) % total	total >= 3: the function returns above when not
+crates/solidcore/src/blend/blend_corner/end.rs	fit_of_end_past_side_edges	rotate	1	proven	rotate_left(fil)	fil is position() in all_eus and ring is a clone of all_eus
 crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	boehm	Vec::insert	1	open	insert(k + 1, t)	
 crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	srf_to_bspline	int-div	1	proven	ii / srf.du	srf.du > 0: the function returns above when it is 0
 crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	srf_to_bspline	int-div	2	proven	jj / srf.dv	srf.dv > 0: the function returns above when it is 0
@@ -117,19 +116,16 @@ crates/solidcore/src/blend/blend_corner/mixed/algebra.rs	tensor_u	split_at	1	ope
 crates/solidcore/src/blend/blend_corner/setback.rs	build_setback_fill	int-rem	1	open	(m + ee) % n	
 crates/solidcore/src/blend/blend_corner/setback.rs	build_setback_fill	with_capacity	1	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_planes	int-rem	1	open	(i + n - 1) % n	
-crates/solidcore/src/blend/blend_corner/setback.rs	corner_planes	int-rem	2	open	(i + n - 1) % n	
-crates/solidcore/src/blend/blend_corner/setback.rs	corner_planes	int-rem	3	open	(i + 1) % n	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_planes	with_capacity	1	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_planes	with_capacity	2	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_planes	with_capacity	3	open	Vec::with_capacity(n)	
-crates/solidcore/src/blend/blend_corner/setback.rs	corner_planes	with_capacity	4	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_quadrics	int-rem	1	open	(i + n - 1) % n	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_quadrics	int-rem	2	open	(i + n - 1) % n	
-crates/solidcore/src/blend/blend_corner/setback.rs	corner_quadrics	int-rem	3	open	(i + 1) % n	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_quadrics	with_capacity	1	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_quadrics	with_capacity	2	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_corner/setback.rs	corner_quadrics	with_capacity	3	open	Vec::with_capacity(n)	
-crates/solidcore/src/blend/blend_corner/setback.rs	corner_quadrics	with_capacity	4	open	Vec::with_capacity(n)	
+crates/solidcore/src/blend/blend_corner/setback.rs	corner_springs	int-rem	1	proven	(f + n - 1) % n	n = planes.planes.len(), and the loop over the planes runs only when n >= 1
+crates/solidcore/src/blend/blend_corner/setback.rs	corner_springs	int-rem	2	proven	(f + 1) % n	n = planes.planes.len(), and the loop over the planes runs only when n >= 1
 crates/solidcore/src/blend/blend_corner/setback.rs	create_setback_patches	with_capacity	1	open	Vec::with_capacity(sides.len())	
 crates/solidcore/src/blend/blend_corner/setback.rs	create_setback_patches	with_capacity	2	open	Vec::with_capacity(sides.len())	
 crates/solidcore/src/blend/blend_corner/setback.rs	create_setback_patches	with_capacity	3	open	Vec::with_capacity(sides.len())	
@@ -142,10 +138,13 @@ crates/solidcore/src/blend/blend_corner/setback.rs	make_setback_topology	int-rem
 crates/solidcore/src/blend/blend_corner/setback.rs	make_setback_topology	with_capacity	1	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_corner/setback.rs	make_setback_topology	with_capacity	2	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_corner/setback.rs	open_setback_springs	int-rem	1	open	(f + n - 1) % n	
-crates/solidcore/src/blend/blend_setback.rs	affine_solutions	swap	1	open	swap(pi * n + j, r * n + j)	
+crates/solidcore/src/blend/blend_corner/setback.rs	pieces_hold	int-rem	1	proven	(f + n - 1) % n	n = planes.faces.len(), and the loop over the faces runs only when n >= 1
+crates/solidcore/src/blend/blend_corner/setback.rs	ring_edges	int-rem	1	open	(i + 1) % n	
+crates/solidcore/src/blend/blend_corner/setback.rs	ring_edges	with_capacity	1	open	Vec::with_capacity(n)	
+crates/solidcore/src/blend/blend_setback.rs	affine_solutions	swap	1	proven	swap(pi * n + j, r * n + j)	the scaling loop read every a[i * n + j] for i < m, j < n through el, which fails past the end, and pi, r < m, j < n
 crates/solidcore/src/blend/blend_setback.rs	affine_solutions	swap	2	open	swap(pi, r)	
-crates/solidcore/src/blend/blend_setback.rs	affine_solutions	swap	3	open	swap(i * n + pj, i * n + r)	
-crates/solidcore/src/blend/blend_setback.rs	affine_solutions	swap	4	open	swap(pj, r)	
+crates/solidcore/src/blend/blend_setback.rs	affine_solutions	swap	3	proven	swap(i * n + pj, i * n + r)	the scaling loop read every a[i * n + j] for i < m, j < n through el, which fails past the end, and i < m, pj, r < n
+crates/solidcore/src/blend/blend_setback.rs	affine_solutions	swap	4	proven	swap(pj, r)	col = (0..n).collect() has n entries, and pj, r < n
 crates/solidcore/src/blend/blend_setback.rs	basis	with_capacity	1	open	Vec::with_capacity(p + 1)	
 crates/solidcore/src/blend/blend_setback.rs	distances	with_capacity	1	open	Vec::with_capacity(le)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	int-rem	1	open	m % n	
@@ -163,15 +162,15 @@ crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	5	open	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	6	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	7	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	8	open	Vec::with_capacity(n)	
+crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	9	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	10	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	11	open	Vec::with_capacity(n)	
-crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	12	open	Vec::with_capacity(n)	
-crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	13	open	Vec::with_capacity(mc)	
-crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	14	open	Vec::with_capacity(2 * n)	
-crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	15	open	Vec::with_capacity(row.len())	
-crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	16	open	Vec::with_capacity(2 * n)	
+crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	12	open	Vec::with_capacity(mc)	
+crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	13	open	Vec::with_capacity(2 * n)	
+crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	14	open	Vec::with_capacity(row.len())	
+crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	15	open	Vec::with_capacity(2 * n)	
+crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	16	open	Vec::with_capacity(net.pts.len())	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	17	open	Vec::with_capacity(net.pts.len())	
-crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	18	open	Vec::with_capacity(net.pts.len())	
 crates/solidcore/src/blend/blend_setback.rs	round_jets	int-div	1	open	pts.len() / (lq + 1)	
 crates/solidcore/src/blend/blend_setback.rs	round_jets	int-rem	1	proven	(d - l) % 2	constant non-zero divisor
 crates/solidcore/src/blend/blend_setback/certify.rs	fundamentals	int-rem	1	proven	(3 + c) % 2	constant non-zero divisor
@@ -337,10 +336,10 @@ crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curv
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	windows	2	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	with_capacity	1	open	Vec::with_capacity(st.len())	
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	with_capacity	2	open	Vec::with_capacity(st.len() + off.len())	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	1	open	insert(at, 0.5 * (t0 + t1))	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	2	open	insert(at, alpha)	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	3	open	insert(at, uv)	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	4	open	insert(at, exact)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib_with	Vec::insert	1	open	insert(at, 0.5 * (t0 + t1))	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib_with	Vec::insert	2	open	insert(at, alpha)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib_with	Vec::insert	3	open	insert(at, uv)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib_with	Vec::insert	4	open	insert(at, exact)	
 crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	int-rem	1	proven	order % 2	constant non-zero divisor
 crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	1	proven	insert(j + 1, split_knot)	j + 1 < knots.len() by the loop condition
 crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	2	proven	insert(j + 1, mid_pnt)	pnts.get(j + 1) succeeded just above, so j + 1 < pnts.len()

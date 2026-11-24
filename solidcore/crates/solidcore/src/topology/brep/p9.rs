@@ -38,12 +38,13 @@
 //! [`OrientSheetNote::into_error`] (status 1). Mutation success paths
 //! remain uncertified while part 2 and face notification dependencies defer;
 //! passing refusal/projection comparisons do not certify those paths.
-//! Opt-in ([`UpstreamFixes::new_edge_vertex_tolerance_covers_gap`](crate::kernel::UpstreamFixes::new_edge_vertex_tolerance_covers_gap),
-//! WR-469): `MakeEdgeInFaceWithVU` follows the SolidCraft fork's fix: after
-//! `RefreshTolerance`, which keeps a vertex's tolerance as it was, each end vertex's
-//! tolerance grows to twice its gap to the new edge's end (only if larger), as
-//! `UpdateVertexEdgeIntervals` sets it. By default it leaves gaps up to the full
-//! tolerance, as the pinned C++ does, which `AssertValid` refuses above half of it.
+//! Not upstream (WR-469, tangency-labs/solidcraft#17985): after `RefreshTolerance`, which
+//! keeps a vertex's tolerance as it was, `MakeEdgeInFaceWithVU` grows each end vertex's
+//! tolerance to twice the farthest edge end at it (the new edge's end and every other
+//! edge's end at the vertex; doubling is exact, so every such end lies within half of it;
+//! only if larger), as
+//! `UpdateVertexEdgeIntervals` sets it. The pinned C++ leaves gaps up to the full
+//! tolerance, which `AssertValid` refuses above half of it.
 //! See `plan/upstream-issues/WR-469--make-edge-in-face-vertex-tolerance-gap.md`.
 //! Not upstream (WR-527, #1527): on two planes, `MakeEdgeInFaceWithVU` leaves an inner loop whose
 //! test point lies outside the new face's outer loop box (at the retry tolerance)
@@ -76,6 +77,9 @@ use crate::topology::{
     Vertexuse, VertexuseId, VertexuseOwner,
 };
 use crate::EntityRef;
+
+#[cfg(feature = "wr469-replay")]
+pub mod replay;
 
 const OP: &str = "topology::brep::p9";
 
@@ -2223,18 +2227,49 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             vertex::set_tolerance(b, v, edge_tolerance, true, true)?;
         }
     }
-    // Opt-in (WR-469): each vertex's tolerance grows to twice its gap to the new edge's end.
-    if k.fixes.new_edge_vertex_tolerance_covers_gap {
+    // Not upstream (WR-469): each vertex's tolerance grows to twice the farthest edge end
+    // at it (the new edge's and every other edge's), so each end lies within half of it
+    // (`AssertValid`).
+    {
         let record = b.edge(edge_id)?;
         let curve = required(record.curve.as_ref(), "new edge without curve")?;
         let (curve_start, curve_end) = (
             curve.evaluate_point(k, t_start)?,
             curve.evaluate_point(k, t_end)?,
         );
-        let start_gap = curve_start.distance(vertex::point(b, start_vertex)?);
-        let end_gap = curve_end.distance(vertex::point(b, end_vertex)?);
-        vertex::set_tolerance(b, start_vertex, 2.0 * start_gap, true, true)?;
-        vertex::set_tolerance(b, end_vertex, 2.0 * end_gap, true, true)?;
+        // the farthest end at the vertex, of the new edge and of every other edge there,
+        // so that every end at the vertex lies within half the grown tolerance
+        let start_gap = curve_start
+            .distance(vertex::point(b, start_vertex)?)
+            .max(farthest_end_gap(k, b, start_vertex)?);
+        let end_gap = curve_end
+            .distance(vertex::point(b, end_vertex)?)
+            .max(farthest_end_gap(k, b, end_vertex)?);
+        let start_tol = 2.0 * start_gap;
+        // (test-only seam of the WR-469 substitution replay, feature `wr469-replay`)
+        #[cfg(feature = "wr469-replay")]
+        let start_tol = replay::step(
+            k,
+            replay::VertexStep {
+                vertex: start_vertex,
+                before: vertex::tolerance(b, start_vertex)?,
+                gap: start_gap,
+                own: start_tol,
+            },
+        );
+        vertex::set_tolerance(b, start_vertex, start_tol, true, true)?;
+        let end_tol = 2.0 * end_gap;
+        #[cfg(feature = "wr469-replay")]
+        let end_tol = replay::step(
+            k,
+            replay::VertexStep {
+                vertex: end_vertex,
+                before: vertex::tolerance(b, end_vertex)?,
+                gap: end_gap,
+                own: end_tol,
+            },
+        );
+        vertex::set_tolerance(b, end_vertex, end_tol, true, true)?;
     }
     // These skeleton caches are derived from the authoritative use lists.
     sync_face_cache(b, face)?;
@@ -2243,6 +2278,39 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     }
     sync_edge_cache(b, edge_id)?;
     Ok(output)
+}
+
+/// The farthest any edge's curve end at `v` lies from `v`'s point (0 with none): per
+/// edge at `v`, its curve at its interval's start when `v` is its start vertex and at its
+/// interval's end when `v` is its end vertex (both for a closed edge). An edge without a
+/// curve or without a resolvable start and end vertex has no end to measure.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling `v`; those of evaluating a curve. An edge at
+/// `v` whose start and end vertices cannot be resolved is skipped, not an error.
+fn farthest_end_gap(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
+    let p = vertex::point(b, v)?;
+    let mut worst: f64 = 0.0;
+    for e in vertex::edges(b, v, None)? {
+        let Ok((start, end)) = edge::start_end_vertices(b, e) else {
+            continue;
+        };
+        let record = b.edge(e)?;
+        let Some(curve) = record.curve.as_ref() else {
+            continue;
+        };
+        let interval = edge::interval(b, e)?;
+        for (at_v, t) in [(start, interval.min()), (end, interval.max())] {
+            if at_v == Some(v) {
+                let gap = curve.evaluate_point(k, t)?.distance(p);
+                if gap > worst {
+                    worst = gap;
+                }
+            }
+        }
+    }
+    Ok(worst)
 }
 
 #[derive(Clone, Copy)]
@@ -4034,14 +4102,12 @@ mod tests {
     }
 
     /// WR-469: a box face's diagonal, given with its UV trim, overshooting its far corner
-    /// by 0.7 of that corner's tolerance along the face, made with
-    /// `new_edge_vertex_tolerance_covers_gap` set to `fix`. Returns the far corner's
+    /// by 0.7 of that corner's tolerance along the face. Returns the far corner's
     /// tolerance before and after and the end gap, or `None` when a dependency the
     /// success path needs is still unported.
-    fn diagonal_overshooting_its_corner(fix: bool) -> Option<(f64, f64, f64)> {
+    fn diagonal_overshooting_its_corner() -> Option<(f64, f64, f64)> {
         use crate::topology::edgeuse::p1 as eu1;
         let k = &mut Kernel::default();
-        k.fixes.new_edge_vertex_tolerance_covers_gap = fix;
         let mut b = crate::primitive::api_primitives::create_box(k, Point3::ZERO, 10.0, 10.0, 10.0)
             .unwrap();
         b.set_editing_enabled(true);
@@ -4125,28 +4191,23 @@ mod tests {
         ))
     }
 
-    /// WR-469, opt-in: a new edge that ends `gap` from its vertex, above half the
-    /// vertex's tolerance (steel-026: 5.44e-6 against 5.42e-6), leaves the vertex a
-    /// tolerance of at least twice the gap.
+    /// WR-469: a new edge that ends `gap` from its vertex, above half the vertex's
+    /// tolerance (steel-026: 5.44e-6 against 5.42e-6), leaves the vertex a tolerance of
+    /// at least twice the gap. The tolerance it had (which `RefreshTolerance(FALSE)` keeps,
+    /// as the pinned C++ leaves it) is under twice the gap: 0.7 of it doubled is 1.4 of it.
     #[test]
     fn new_edge_grows_its_vertices_tolerance_to_twice_the_end_gap() {
-        let Some((_, grown, gap)) = diagonal_overshooting_its_corner(true) else {
+        let Some((before, grown, gap)) = diagonal_overshooting_its_corner() else {
             return;
         };
+        assert!(
+            before < 2.0 * gap,
+            "tolerance {before} before, end gap {gap}"
+        );
         assert!(
             grown >= 2.0 * gap * (1.0 - 1e-12),
             "tolerance {grown} for an end gap {gap}"
         );
-    }
-
-    /// WR-469, default: the vertex keeps its tolerance, as the pinned C++ does.
-    #[test]
-    fn new_edge_keeps_its_vertices_tolerance_by_default() {
-        let Some((before, after, gap)) = diagonal_overshooting_its_corner(false) else {
-            return;
-        };
-        assert_eq!(after, before, "end gap {gap}");
-        assert!(after < 2.0 * gap);
     }
 
     #[test]

@@ -1220,6 +1220,32 @@ fn a_ball_with_its_poles_on_a_rolls_face_and_its_seam_turned_slightly_off_is_cut
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// The same cuts with the coincidence crossing found as the section curve
+/// (`simple_coincidence_crossing_is_point` off; WR-647, #21306 part C). The section's
+/// meridian on the ball's seam runs into its pole, where the drop's pole adjustment once
+/// moved its start across the seam (u 1 to u 1.8e-9), out of the ball face's domain
+/// (Test #70, frame 2); it now keeps the seam side the drop point is on. Same V.
+#[test]
+fn a_seam_meridian_crossing_into_the_balls_pole_cuts_with_the_crossing_as_a_curve() {
+    session::set_thread_fixes(
+        solidcore::kernel::UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|n| *n != "simple_coincidence_crossing_is_point"),
+    )
+    .unwrap();
+    let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
+    let mut failed = Vec::new();
+    for turn in [1e-8, 1e-10, -1e-8] {
+        for frame in [2, 5, 8, 14] {
+            let what = format!("turned {turn:e}, frame {frame}");
+            let b = ball([0.0, 50.0, 20.0], turn);
+            failed.extend(cut_is_valid_solid(half_roll(frame), b, want, &what));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// The ball's poles on a cylinder's seam and on a face's boundary edge, its own seam on the
 /// line's meridian there or square to it. A solid cylinder r 50, z 0..40, extruded from a whole
 /// circle starting at +x (its seam on +x), less the ball about (50, 0, 20): its poles are on
