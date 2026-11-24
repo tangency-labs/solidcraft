@@ -504,7 +504,7 @@ pub(crate) fn show_mode(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 Handle::Ring(i) => {
                     let q = on_plane(proj, from, c, t.frame[i])? - c;
                     let (e1, e2) = t.basis(i);
-                    s.last = q.dot(e2).atan2(q.dot(e1));
+                    s.last = solidcore_ops::forms_view_queries::ring_angle(q, e1, e2);
                 }
                 _ => s.grab = on_plane(proj, from, c, plane_normal(h))?,
             }
@@ -532,7 +532,7 @@ pub(crate) fn show_mode(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let change = match st.handle {
         Handle::Axis(i) => {
             let v = match st.head_on {
-                Some((from, dir, scale)) => f64::from((p - from).dot(dir)) * scale,
+                Some((from, dir, scale)) => f64::from(solidcore_ops::forms_view_queries::pixel_component((p - from).into(), dir.into())) * scale,
                 None => along(proj, p, st.center, t.frame[i]).map(|v| v - st.t0).unwrap_or(0.0),
             };
             Change::Translate(t.frame[i] * snap(v, step, free))
@@ -540,7 +540,7 @@ pub(crate) fn show_mode(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         Handle::Ring(i) => {
             if let Some(q) = on_plane(proj, p, st.center, t.frame[i]).map(|q| q - st.center) {
                 let (e1, e2) = t.basis(i);
-                let th = q.dot(e2).atan2(q.dot(e1));
+                let th = solidcore_ops::forms_view_queries::ring_angle(q, e1, e2);
                 let mut d = th - st.last;
                 while d > std::f64::consts::PI {
                     d -= std::f64::consts::TAU;

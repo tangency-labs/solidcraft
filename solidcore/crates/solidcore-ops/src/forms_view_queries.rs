@@ -6,6 +6,37 @@ use solidcore_record::Vec3;
 
 pub use kernel::{Projection, MAX_CURVES};
 
+pub use kernel::{pixel_component, pixel_distance, pixel_segment_distance};
+
+/// Angle around an oriented manipulation ring.
+pub fn ring_angle(delta: Vec3, x: Vec3, y: Vec3) -> f64 {
+    kernel::ring_angle(vec3(delta), vec3(x), vec3(y))
+}
+
+/// Precomputed ray for watertight triangle picking on a display mesh.
+pub struct RayFrame(kernel::RayFrame);
+impl RayFrame {
+    /// Prepare a ray with a finite nonzero dominant direction.
+    pub fn new(origin: Vec3, direction: Vec3) -> Option<Self> {
+        kernel::RayFrame::new(vec3(origin), vec3(direction)).map(Self)
+    }
+    /// The foremost hit in buffer order, ignoring absent triangles. The first wins a tie.
+    pub fn nearest(
+        &self,
+        triangles: impl Iterator<Item = Option<[Vec3; 3]>>,
+    ) -> Option<(f64, usize)> {
+        triangles
+            .enumerate()
+            .filter_map(|(i, triangle)| Some((self.hit(triangle?)?, i)))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// Nearest positive parameter where the ray crosses this triangle.
+    pub fn hit(&self, points: [Vec3; 3]) -> Option<f64> {
+        self.0.hit(points.map(vec3))
+    }
+}
+
 /// Curve bounds, in source order, for a projected pick query.
 pub struct BoundsIndex(kernel::BoundsIndex);
 

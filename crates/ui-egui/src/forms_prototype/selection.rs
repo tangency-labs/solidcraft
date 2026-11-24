@@ -339,9 +339,9 @@ impl RegionDrag {
             return;
         }
         let pos = pos.clamp(self.projection.rect.min, self.projection.rect.max);
-        self.moved |= self.start.distance(pos) >= REGION_DRAG_PIXELS;
+        self.moved |= self.start.distance_sq(pos) >= REGION_DRAG_PIXELS * REGION_DRAG_PIXELS;
         if self.key.lasso {
-            if self.shape.lasso.last().is_some_and(|last| last.distance(pos) < 2.0) {
+            if self.shape.lasso.last().is_some_and(|last| last.distance_sq(pos) < 4.0) {
                 return;
             }
             if self.shape.lasso.len() >= MAX_REGION_POINTS {

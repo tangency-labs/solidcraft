@@ -141,7 +141,7 @@ fn build(session: Session, other: Option<u64>, tolerance: f64, matching: bool) -
                 return Err("context preview source budget exceeded".into());
             }
             live_cad::validate_display_mesh(&mesh)?;
-            triangles = triangles.saturating_add(mesh.triangles.len());
+            triangles = triangles.saturating_add(mesh.triangle_count());
             edge_points = mesh
                 .edges
                 .iter()
@@ -240,7 +240,7 @@ fn context_mesh(body: &doc::ModelBody) -> Result<Arc<Mesh>, String> {
 fn browser_mesh_fits(mesh: &Mesh, triangles: usize, edge_points: usize) -> bool {
     const TRIANGLES: usize = 16_384;
     const EDGE_POINTS: usize = 32_768;
-    triangles.saturating_add(mesh.triangles.len()) <= TRIANGLES
+    triangles.saturating_add(mesh.triangle_count()) <= TRIANGLES
         && mesh.positions.len() <= 3 * TRIANGLES
         && mesh.normals.len() <= 3 * TRIANGLES
         && mesh.edges.len() <= EDGE_POINTS
@@ -348,7 +348,7 @@ pub(super) fn render_entries(app: &SolveApp) -> impl Iterator<Item = &Entry> {
 /// handles retain their existing overlay semantics, rather than guessing triangle ownership.
 pub(super) fn occludes(app: &SolveApp, origin: Vec3, direction: Vec3, depth: f64) -> bool {
     retained_entries(app).any(|entry| {
-        let Some((hit, _)) = entry.index.as_ref().and_then(|index| index.raycast(&entry.mesh, origin, direction)) else { return false };
+        let Some((hit, _)) = entry.index.as_ref().and_then(|index| index.face_hit(&entry.mesh, origin, direction)) else { return false };
         // Only arithmetic roundoff at a coincident hit is allowed, independent of fit
         // tolerance, camera pixel size or a world-space geometry/display lift.
         solidcore_ops::forms_view_queries::occludes(origin, depth, hit)
@@ -360,7 +360,7 @@ pub(super) fn append(app: &SolveApp, scene: &mut GpuScene) {
     let edge = scene.color(tokens.body_edge.to_array());
     for entry in render_entries(app) {
         let color = scene.color(entry.display_color(&tokens).to_array());
-        for triangle in &entry.mesh.triangles {
+        for triangle in entry.mesh.triangle_indices() {
             for &id in triangle {
                 if let (Some(p), Some(n)) = (entry.mesh.positions.get(id as usize), entry.mesh.normals.get(id as usize)) {
                     scene.tri(p.to_f32(), n.to_f32(), color);

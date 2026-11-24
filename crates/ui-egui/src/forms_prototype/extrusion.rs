@@ -484,14 +484,15 @@ pub(super) fn scene_submitted(app: &mut SolveApp, proj: &Proj) {
         return;
     }
     let face = gesture.parameters.get("faces").and_then(|faces| faces.get(0)).and_then(serde_json::Value::as_u64);
-    let triangle =
-        face.and_then(|face| ghost.mesh.tri_face.iter().position(|&owner| u64::from(owner) == face)).and_then(|id| ghost.mesh.triangles.get(id));
+    let triangle = face
+        .and_then(|face| ghost.mesh.tri_face.iter().position(|&owner| u64::from(owner) == face))
+        .and_then(|id| ghost.mesh.triangle_indices().get(id));
     let witness = triangle.and_then(|triangle| {
         let [Some(a), Some(b), Some(c)] = triangle.map(|id| ghost.mesh.positions.get(id as usize).copied()) else { return None };
         let points = [a, b, c];
         let screen = points.map(|point| proj.to_screen(point).map(|point| [point.x, point.y]));
         Some(json!({"face":face,"world":points.map(|point|[point.x,point.y,point.z]),"screen":screen,
-            "mesh_positions":ghost.mesh.positions.len(),"triangles":ghost.mesh.triangles.len()}))
+            "mesh_positions":ghost.mesh.positions.len(),"triangles":ghost.mesh.triangle_count()}))
     });
     if let Some(sample) = app.forms_prototype.extrusion.timing.samples.back_mut().filter(|sample| sample.sequence == sequence) {
         sample.scene_submitted_s = Some(app.now);

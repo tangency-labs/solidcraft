@@ -381,7 +381,7 @@ fn solve(grid: &Grid, rows: &[Row], cell: f64) -> SplineResult<Vec<f64>> {
     }
     let lambda = FAIRNESS * fitted as f64 / n as f64 * grid.cell(0) * grid.cell(1);
     grid.add_energy(&mut band, lambda);
-    band.solve(rhs)
+    band.solve(rhs).map_err(Into::into)
 }
 
 /// What a fitted grid achieves at the rows: the deviation from the loop, the normal's angle to

@@ -934,8 +934,8 @@ pub(super) fn pointer(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, input: &cr
                 .filter_map(|(i, entry)| {
                     let body = entry.name.as_ref()?;
                     let source = state.supports.iter().position(|(name, _)| name == body)?;
-                    let (distance, triangle) = entry.index.as_ref()?.raycast(&entry.mesh, origin, direction)?;
-                    let face = *entry.mesh.tri_face.get(triangle)? as usize;
+                    let (distance, Some(face)) = entry.index.as_ref()?.face_hit(&entry.mesh, origin, direction)? else { return None };
+                    let face = face as usize;
                     Some((distance, i, source, face))
                 })
                 .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -952,9 +952,7 @@ pub(super) fn pointer(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, input: &cr
                                     .filter_map(|p| {
                                         let a = proj.to_screen(p[0])?;
                                         let b = proj.to_screen(p[1])?;
-                                        let ab = b - a;
-                                        let t = ((pos - a).dot(ab) / ab.length_sq().max(1e-6)).clamp(0.0, 1.0);
-                                        Some(pos.distance(a + ab * t))
+                                        Some(solidcore_ops::forms_view_queries::pixel_segment_distance(pos.into(), a.into(), b.into()))
                                     })
                                     .min_by(f32::total_cmp)?;
                                 (distance < 10.0).then_some((distance, index))

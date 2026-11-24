@@ -101,6 +101,36 @@ impl Mesh {
                 .all(|faces| faces.len() <= 2 && faces.iter().copied().all(valid_face))
     }
 
+    /// Indexed corners in drawing order.
+    #[must_use]
+    pub fn triangle_indices(&self) -> &[[u32; 3]] {
+        &self.triangles
+    }
+
+    /// Append one display triangle together with its source face label.
+    pub fn push_triangle(&mut self, corners: [u32; 3], face: u32) {
+        self.triangles.push(corners);
+        self.tri_face.push(face);
+    }
+
+    /// Keep and relabel triangles by source face. On error both buffers stay intact.
+    pub fn remap_faces<E>(
+        &mut self,
+        mut map: impl FnMut(u32) -> Result<Option<u32>, E>,
+    ) -> Result<(), E> {
+        let mut triangles = Vec::new();
+        let mut faces = Vec::new();
+        for (&triangle, &source) in self.triangles.iter().zip(&self.tri_face) {
+            if let Some(face) = map(source)? {
+                triangles.push(triangle);
+                faces.push(face);
+            }
+        }
+        self.triangles = triangles;
+        self.tri_face = faces;
+        Ok(())
+    }
+
     /// The number of triangles stored in the mesh.
     #[must_use]
     pub fn triangle_count(&self) -> usize {

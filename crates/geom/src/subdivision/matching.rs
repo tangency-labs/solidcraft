@@ -26,7 +26,7 @@ pub fn preview(cage: &Cage, order: usize, levels: usize) -> Result<super::Surfac
     surface.boundaries.retain(|(e, _)| edges.contains(&key(e[0], e[1])));
     let mut mesh = crate::Mesh::default();
     let mut remap = vec![None; surface.mesh.positions.len()];
-    for (triangle, &face) in surface.mesh.triangles.iter().zip(&surface.mesh.tri_face) {
+    for (triangle, &face) in surface.mesh.triangle_indices().iter().zip(&surface.mesh.tri_face) {
         if face as usize >= cage.faces.len() {
             continue;
         }
@@ -44,8 +44,7 @@ pub fn preview(cage: &Cage, order: usize, levels: usize) -> Result<super::Surfac
                 }
             };
         }
-        mesh.triangles.push(indices);
-        mesh.tri_face.push(face);
+        mesh.push_triangle(indices, face);
     }
     surface.mesh = mesh;
     surface.index = crate::MeshIndex::new(&surface.mesh);

@@ -6,6 +6,50 @@ use solidcore_record::{Plane, Vec3};
 
 pub use kernel::RimPhase;
 
+/// Unit direction of a regular authored segment.
+pub fn segment_direction(vector: Vec3) -> Option<Vec3> {
+    kernel::segment_direction(vec3(vector)).map(record_vec3)
+}
+
+/// Signed component along a direction, or alignment of two unit directions.
+pub fn component_along(vector: Vec3, direction: Vec3) -> f64 {
+    kernel::component_along(vec3(vector), vec3(direction))
+}
+
+/// Sine of the angle between regular chart directions.
+pub fn transverse_sine(a: Vec3, b: Vec3) -> Option<f64> {
+    kernel::transverse_sine(vec3(a), vec3(b))
+}
+
+/// Carry an offset between the original and reattached guide frames.
+pub fn transport_detail(origin: Vec3, delta: Vec3, before: [Vec3; 3], after: [Vec3; 3]) -> Vec3 {
+    record_vec3(kernel::transport_detail(
+        vec3(origin),
+        vec3(delta),
+        before.map(vec3),
+        after.map(vec3),
+    ))
+}
+
+/// Material frame of a guide grid.
+pub fn guide_frame(tangent: Vec3, across: Vec3) -> Option<[Vec3; 3]> {
+    kernel::guide_frame(vec3(tangent), vec3(across)).map(|axes| axes.map(record_vec3))
+}
+
+/// Orient the normal of a certified boundary plane to its stations.
+pub fn winding_normal(origin: Vec3, normal: Vec3, stations: impl Iterator<Item = Vec3>) -> Vec3 {
+    record_vec3(kernel::winding_normal(
+        vec3(origin),
+        vec3(normal),
+        stations.map(vec3),
+    ))
+}
+
+/// Fraction and distance of a point's closest station on a boundary segment.
+pub fn segment_proximity(point: Vec3, start: Vec3, end: Vec3) -> Option<(f64, f64)> {
+    kernel::segment_proximity(vec3(point), vec3(start), vec3(end))
+}
+
 /// Normalize a finite editing direction without an absolute length threshold.
 pub fn selection_unit(vector: Vec3) -> Option<Vec3> {
     kernel::selection_unit(vec3(vector)).map(record_vec3)

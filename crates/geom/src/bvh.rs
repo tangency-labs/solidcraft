@@ -297,7 +297,7 @@ fn farthest_along(o: Vec3, d: Vec3, b: &Aabb3) -> f64 {
 /// a ray, and the edge segments near one. Built from one mesh and answers only for it.
 #[derive(Clone, Debug, Default)]
 pub struct MeshIndex {
-    triangles: Bvh,
+    triangle_tree: Bvh,
     triangle_count: usize,
     position_count: usize,
     edge_lengths: Vec<usize>,
@@ -315,7 +315,8 @@ const MAX_WIRE_DEPTH: usize = 64;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshIndexWire {
-    triangles: BvhWire,
+    #[serde(rename = "triangles")]
+    triangle_tree: BvhWire,
     triangle_count: usize,
     position_count: usize,
     #[serde(deserialize_with = "wire_items")]
@@ -479,7 +480,12 @@ impl MeshIndex {
                 if bounds.is_empty() { bounds } else { pad_pick_bounds(bounds) }
             })
             .collect();
-        MeshIndex { triangles: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), position_count: mesh.positions.len(), ..Default::default() }
+        MeshIndex {
+            triangle_tree: Bvh::new(&boxes),
+            triangle_count: mesh.triangles.len(),
+            position_count: mesh.positions.len(),
+            ..Default::default()
+        }
     }
 
     /// Index the edge polylines separately when a tool can pick display outlines.
@@ -504,7 +510,7 @@ impl MeshIndex {
     /// Copy the prepared flat index for transfer to another runtime.
     pub fn to_wire(&self) -> MeshIndexWire {
         MeshIndexWire {
-            triangles: BvhWire::of(&self.triangles),
+            triangle_tree: BvhWire::of(&self.triangle_tree),
             triangle_count: self.triangle_count,
             position_count: self.position_count,
             edge_lengths: self.edge_lengths.clone(),
@@ -517,7 +523,7 @@ impl MeshIndex {
     /// stored item must occur exactly once, its mesh coordinates must lie in its
     /// leaf, and child boxes must lie in their parents. No hierarchy is built.
     pub fn from_wire(wire: MeshIndexWire, mesh: &Mesh) -> Option<Self> {
-        if wire.triangle_count != mesh.triangles.len()
+        if wire.triangle_count != mesh.triangle_count()
             || wire.position_count != mesh.positions.len()
             || wire.triangle_count > MAX_WIRE_ITEMS
             || wire.position_count > MAX_WIRE_ITEMS * 3
@@ -545,8 +551,8 @@ impl MeshIndex {
         if wire.segment_of.len() != segments {
             return None;
         }
-        let triangles = wire.triangles.hydrate(mesh.triangles.len(), |item, bounds| {
-            mesh.triangles
+        let triangles = wire.triangle_tree.hydrate(mesh.triangle_count(), |item, bounds| {
+            mesh.triangle_indices()
                 .get(item as usize)
                 .and_then(|triangle| mesh.tri(triangle))
                 .is_some_and(|points| points.into_iter().all(|point| in_box(bounds, point)))
@@ -559,7 +565,7 @@ impl MeshIndex {
             in_box(bounds, a) && in_box(bounds, b)
         })?;
         Some(Self {
-            triangles,
+            triangle_tree: triangles,
             triangle_count: wire.triangle_count,
             position_count: wire.position_count,
             edge_lengths: wire.edge_lengths,
@@ -571,13 +577,23 @@ impl MeshIndex {
     /// [`Mesh::raycast`] through the index: the same answer, including which triangle wins a tie.
     /// For a mesh other than the one indexed, the plain scan answers.
     pub fn raycast(&self, mesh: &Mesh, o: Vec3, dir: Vec3) -> Option<(f64, usize)> {
-        if mesh.triangles.len() != self.triangle_count {
-            return mesh.raycast(o, dir);
-        }
+        self.first_triangle(mesh, o, dir)
+    }
+
+    fn first_triangle(&self, mesh: &Mesh, o: Vec3, dir: Vec3) -> Option<(f64, usize)> {
         let frame = crate::mesh::RayFrame::new(o, dir)?;
-        self.triangles
-            .nearest(o, dir, |i| mesh.triangles.get(i as usize).and_then(|t| mesh.tri(t)).and_then(|p| frame.hit(p)))
+        if mesh.triangle_count() != self.triangle_count {
+            return frame.nearest(mesh.triangle_indices().iter().map(|t| mesh.tri(t)));
+        }
+        self.triangle_tree
+            .nearest(o, dir, |i| mesh.triangle_indices().get(i as usize).and_then(|t| mesh.tri(t)).and_then(|p| frame.hit(p)))
             .map(|(t, i)| (t, i as usize))
+    }
+
+    /// Depth and optional source face under a viewport ray.
+    pub fn face_hit(&self, mesh: &Mesh, origin: Vec3, direction: Vec3) -> Option<(f64, Option<u32>)> {
+        let (depth, triangle) = self.first_triangle(mesh, origin, direction)?;
+        Some((depth, mesh.tri_face.get(triangle).copied()))
     }
 
     /// [`Self::raycast`] with one unit charged per examined BVH box and triangle test.
@@ -589,9 +605,9 @@ impl MeshIndex {
             return Ok(None);
         }
         let Some(frame) = crate::mesh::RayFrame::new(o, dir) else { return Ok(None) };
-        if mesh.triangles.len() != self.triangle_count {
+        if mesh.triangle_count() != self.triangle_count {
             let mut best: Option<(f64, usize)> = None;
-            for (index, triangle) in mesh.triangles.iter().enumerate() {
+            for (index, triangle) in mesh.triangle_indices().iter().enumerate() {
                 ray_work(remaining)?;
                 if let Some(distance) = mesh.tri(triangle).and_then(|points| frame.hit(points))
                     && best.is_none_or(|(best, _)| distance < best)
@@ -601,9 +617,9 @@ impl MeshIndex {
             }
             return Ok(best);
         }
-        self.triangles
+        self.triangle_tree
             .nearest_bounded(o, dir, remaining, |index| {
-                mesh.triangles.get(index as usize).and_then(|triangle| mesh.tri(triangle)).and_then(|points| frame.hit(points))
+                mesh.triangle_indices().get(index as usize).and_then(|triangle| mesh.tri(triangle)).and_then(|points| frame.hit(points))
             })
             .map(|hit| hit.map(|(distance, index)| (distance, index as usize)))
     }

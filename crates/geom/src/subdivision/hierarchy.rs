@@ -716,20 +716,11 @@ impl Hierarchy {
     }
     pub fn layout_surface(&self, cage: &Cage, mut surface: SurfacePreview) -> Result<(SurfacePreview, Cage)> {
         let layout = self.layout()?;
-        let mut triangles = Vec::with_capacity(surface.mesh.triangles.len());
-        let mut faces = Vec::with_capacity(surface.mesh.tri_face.len());
-        for (triangle, &id) in surface.mesh.triangles.iter().zip(&surface.mesh.tri_face) {
-            if let Some(owner) = *layout.owners.get(id as usize).ok_or_else(|| bad("missing leaf owner"))?
-                && layout.collapse.is_none_or(|site| site.face != owner)
-            {
-                // The retained rectangular evaluator does not delimit the
-                // triangle. Only the fitted trim renders this face.
-                triangles.push(*triangle);
-                faces.push(owner as u32);
-            }
-        }
-        surface.mesh.triangles = triangles;
-        surface.mesh.tri_face = faces;
+        surface.mesh.remap_faces(|id| -> Result<Option<u32>> {
+            let owner = layout.owners.get(id as usize).ok_or_else(|| bad("missing leaf owner"))?;
+            // The fitted trim renders a collapsed leaf.
+            Ok(owner.filter(|&face| layout.collapse.is_none_or(|site| site.face != face)).map(|face| face as u32))
+        })?;
         let curves: BTreeMap<_, _> = surface.boundaries.into_iter().map(|(edge, path)| (key(edge[0], edge[1]), (edge, path))).collect();
         surface.boundaries = layout
             .paths

@@ -228,15 +228,15 @@ fn mesh_index_wire_rejects_malformed_graphs_coverage_bounds_and_dimensions() {
     for defect in 0..9 {
         let mut altered = wire.clone();
         match defect {
-            0 => altered.triangles.nodes[0].bounds.min.x = f64::NAN,
-            1 => altered.triangles.nodes[0].first = u32::MAX,
-            2 => altered.triangles.nodes[0].first = 0,
-            3 => altered.triangles.nodes.push(altered.triangles.nodes[0]),
-            4 => altered.triangles.order[0] = altered.triangles.order[1],
-            5 => altered.triangles.nodes[0].count = u32::MAX,
+            0 => altered.triangle_tree.nodes[0].bounds.min.x = f64::NAN,
+            1 => altered.triangle_tree.nodes[0].first = u32::MAX,
+            2 => altered.triangle_tree.nodes[0].first = 0,
+            3 => altered.triangle_tree.nodes.push(altered.triangle_tree.nodes[0]),
+            4 => altered.triangle_tree.order[0] = altered.triangle_tree.order[1],
+            5 => altered.triangle_tree.nodes[0].count = u32::MAX,
             6 => altered.segment_of[0] = (u32::MAX, 0),
             7 => altered.edge_lengths[0] += 1,
-            _ => altered.triangles.nodes[0].bounds.max = altered.triangles.nodes[0].bounds.min,
+            _ => altered.triangle_tree.nodes[0].bounds.max = altered.triangle_tree.nodes[0].bounds.min,
         }
         assert!(MeshIndex::from_wire(altered, &mesh).is_none(), "defect {defect}");
     }

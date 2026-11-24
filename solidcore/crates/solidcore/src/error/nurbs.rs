@@ -844,7 +844,7 @@ impl NurbsFailure {
     /// `None` for a B-spline method's failure, which stores none.
     pub(crate) const fn nlib_number(&self) -> Option<i32> {
         Some(match self {
-            Self::BSpline(_) => return None,
+            Self::BSpline(_) | Self::LinearSolve(_) => return None,
             Self::CallFailed => 13,
             Self::CurveDefinition => 1,
             Self::Degree | Self::DegreeTooHigh { .. } => 3,
@@ -853,7 +853,6 @@ impl NurbsFailure {
             Self::Index | Self::IndexOutOfRange { .. } => 7,
             Self::Input => 14,
             Self::Knots | Self::KnotsDecrease { .. } => 4,
-            Self::LinearSolve(_) => return None,
             Self::Memory => 15,
             Self::NotConverged => 12,
             Self::Numerical => 11,

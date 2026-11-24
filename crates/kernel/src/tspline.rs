@@ -51,7 +51,6 @@ pub fn fitted_nurbs_region_sheet(surface: &NurbsSurface, boundaries: &[Vec<[f64;
 }
 
 fn recharted(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>], tolerance: f64, body: Body) -> Result<(Body, f64)> {
-    use solidcraft_geom::prelude::*;
     if !tolerance.is_finite() || !(0.0..=1.0).contains(&tolerance) {
         return Err(KernelError::Invalid("the subdivision chart error budget must be finite and 0..1 mm".into()));
     }
@@ -64,7 +63,7 @@ fn recharted(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>], tolerance: f6
     let singular = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].into_iter().any(|[u, v]| {
         surface
             .derivs([u, v])
-            .and_then(|(_, a, c)| Some(a.normalized()?.cross(c.normalized()?).len()))
+            .and_then(|(_, a, c)| solidcore_ops::form_curves::transverse_sine(a, c))
             .is_none_or(|angle| angle < 0.5_f64.to_radians().sin())
     });
     if singular { crate::fill::rechart_tensor(&body, surface, boundaries, tolerance) } else { Ok((body, 0.0)) }

@@ -104,7 +104,6 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/engine/src/cmd/component_link.rs:session_bodies", "mesh bodies: copies a linked mesh body's data"),
     ("crates/engine/src/cmd/file.rs:mesh_data", "mesh bodies: copies a linked mesh body's data"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
-    ("crates/engine/src/cmd/forms_prototype/blend.rs:export", "triangle counts in the Blender surface export summary"),
     ("crates/engine/src/cmd/forms_prototype/blend/surface.rs:bodies", "Blender surface export's triangle meshes of evaluated CAD bodies"),
     ("crates/engine/src/cmd/plugin.rs:mesh", "a plugin's model.mesh export: a bounded copy of a body's display tessellation"),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
@@ -135,6 +134,7 @@ fn site_uses(call: &Call, model_body: bool) -> Option<&'static str> {
         (Call::Function { .. }, "body_box") => Some("body_box()"),
         (Call::Function { .. }, "reference_mesh") => Some("reference_mesh()"),
         (Call::Function { .. }, "closest_on_triangle") => Some("closest_on_triangle()"),
+        (Call::Method { args: 0, .. }, "triangle_indices") => Some(".triangle_indices()"),
         (Call::Field { .. }, "triangles") => Some(".triangles"),
         _ => None,
     }

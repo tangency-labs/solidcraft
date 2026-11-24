@@ -192,7 +192,7 @@ impl LogicalSelection {
 /// Bound every buffer from which MeshIndex allocates, including long display
 /// edge polylines. This runs before indexing, on the producer worker.
 pub(super) fn validate_display_mesh(mesh: &Mesh) -> Result<(), String> {
-    if mesh.triangles.len() > MAX_DISPLAY_TRIANGLES
+    if mesh.triangle_count() > MAX_DISPLAY_TRIANGLES
         || mesh.tri_face.len() > MAX_DISPLAY_TRIANGLES
         || mesh.positions.len() > MAX_DISPLAY_TRIANGLES * 3
         || mesh.normals.len() > MAX_DISPLAY_TRIANGLES * 3
@@ -411,7 +411,7 @@ pub(super) fn compute_context_body(
 fn compute_with_body(definition: solidcraft_engine::doc::forms::Definition, tolerance: f64) -> WorkerOutcome {
     let (body, report, guides, frames) = solidcraft_engine::doc::forms::convert_with_selection(&definition, tolerance).map_err(|e| e.to_string())?;
     let mut mesh = body.mesh(&solidcraft_engine::doc::kernel::MeshTolerance::chord(tolerance.min(0.05))).map_err(|e| e.to_string())?;
-    if mesh.triangles.is_empty() || mesh.tri_face.len() != mesh.triangles.len() {
+    if mesh.triangle_count() == 0 || mesh.tri_face.len() != mesh.triangle_count() {
         return Err("the CAD preview has no usable face tessellation".into());
     }
     for face in &mut mesh.tri_face {
@@ -599,18 +599,8 @@ pub(super) fn restore_fixed_profile_handles(app: &mut SolveApp) {
         // Profile.preview has one mesh vertex per logical control. Restore the
         // same derived geometry for rendering and ray tests, not just markers.
         let mesh = &mut surface.mesh;
-        mesh.normals = vec![Vec3::ZERO; mesh.positions.len()];
-        for triangle in &mesh.triangles {
-            let Some([a, b, c]) = mesh.tri(triangle) else { continue };
-            let normal = (b - a).cross(c - a);
-            for &id in triangle {
-                if let Some(target) = mesh.normals.get_mut(id as usize) {
-                    *target += normal;
-                }
-            }
-        }
-        for normal in &mut mesh.normals {
-            *normal = normal.normalized().unwrap_or(Vec3::Z);
+        if let Ok(normals) = solidcore_ops::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices()) {
+            mesh.normals = normals;
         }
         surface.index = solidcraft_engine::geom::MeshIndex::new(mesh);
         app.forms_prototype.uploaded = 0;

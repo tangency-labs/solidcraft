@@ -1,7 +1,6 @@
 use super::dna::{File, View, text};
 use super::{Import, Object, Result, bad};
 use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
 use solidcraft_geom::subdivision::{Cage, EdgeCrease, MAX_FACES, MAX_POINTS, VertexCrease};
 use std::collections::{BTreeMap, BTreeSet};
 mod mirror;
@@ -259,7 +258,7 @@ fn axis_angle(axis: &[f64], angle: f64) -> Result<Matrix> {
     if !axis.is_finite() {
         return Err(bad("non-finite rotation axis"));
     }
-    let Some(axis) = axis.normalized() else { return Ok(identity()) };
+    let Some(axis) = solidcore_ops::form_curves::segment_direction(axis) else { return Ok(identity()) };
     let (sin, cos) = (angle * 0.5).sin_cos();
     quaternion(&[cos, axis.x * sin, axis.y * sin, axis.z * sin])
 }

@@ -182,7 +182,7 @@ mod jobs {
                 if input.primary_down && !self.motion.moved {
                     self.motion.shift |= sample.mods.shift;
                 }
-                self.motion.moved |= sample.position.distance(press.position) >= 2.0;
+                self.motion.moved |= sample.position.distance_sq(press.position) >= 4.0;
                 self.motion.latest = sample;
                 if let Some(region) = &mut self.region {
                     region.extend(sample.position);

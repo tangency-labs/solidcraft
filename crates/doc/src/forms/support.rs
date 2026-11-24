@@ -154,17 +154,19 @@ impl BoundarySupport {
             return Err(invalid("Match support wire has no length"));
         }
         let origin = samples.first().map(|p| p.point).ok_or_else(|| invalid("empty support samples"))?;
-        let area = samples.windows(2).fold(Vec3::ZERO, |a, p| a + (p[0].point - origin).cross(p[1].point - origin));
         // Samples orient an already certified plane to the wire winding.
         let plane = plane.and_then(|plane| {
             let normal = plane.normal();
-            Plane::from_normal(plane.origin, if area.dot(normal) < 0.0 { -normal } else { normal })
+            Plane::from_normal(plane.origin, solidcore_ops::form_curves::winding_normal(origin, normal, samples.iter().map(|s| s.point)))
         });
         let mut corners = Vec::new();
         for (i, (curve, next)) in curves.iter().zip(curves.iter().cycle().skip(1)).enumerate() {
             let (point, a) = curve.at(1.0).ok_or_else(|| invalid("invalid boundary corner"))?;
             let (_, b) = next.at(0.0).ok_or_else(|| invalid("invalid next boundary tangent"))?;
-            if a.normalized().zip(b.normalized()).is_none_or(|(a, b)| a.dot(b) < 0.999999) {
+            if solidcore_ops::form_curves::segment_direction(a)
+                .zip(solidcore_ops::form_curves::segment_direction(b))
+                .is_none_or(|(a, b)| solidcore_ops::form_curves::component_along(a, b) < 0.999999)
+            {
                 let arc = samples.get(i * 33 + 32).ok_or_else(|| invalid("missing corner coordinate"))?.arc;
                 corners.push(((arc / length).rem_euclid(1.0), point));
             }
@@ -322,12 +324,7 @@ impl BoundarySupport {
         self.samples
             .windows(2)
             .filter_map(|p| {
-                let delta = p[1].point - p[0].point;
-                if delta.len2() < 1e-20 {
-                    return None;
-                }
-                let t = ((point - p[0].point).dot(delta) / delta.len2()).clamp(0.0, 1.0);
-                let distance = (p[0].point + delta * t).dist(point);
+                let (t, distance) = solidcore_ops::form_curves::segment_proximity(point, p[0].point, p[1].point)?;
                 Some((distance, (p[0].arc + (p[1].arc - p[0].arc) * t) / self.length))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -584,7 +581,7 @@ impl BoundarySupport {
         })
         .map_err(|e| invalid(e.to_string()))
     }
-    pub fn solve(&self, definition: &Definition, config: &Config, tolerance: f64) -> Result<Solution> {
+    pub fn match_opening(&self, definition: &Definition, config: &Config, tolerance: f64) -> Result<Solution> {
         definition.placement.validate()?;
         let layout = domain_layout(definition.hierarchy.as_ref())?;
         let owners = layout.as_ref().map(|l| l.owners.as_slice());
@@ -627,9 +624,11 @@ fn corner_vertices(cage: &Cage, ring: &[usize]) -> Option<Vec<usize>> {
         let point = cage.point(v).ok()?;
         let previous = cage.point(*ring.get((i + ring.len() - 1) % ring.len())?).ok()?;
         let next = cage.point(*ring.get((i + 1) % ring.len())?).ok()?;
-        let incoming = (point - previous).normalized()?;
-        let outgoing = (next - point).normalized()?;
-        if incoming.dot(outgoing) < 0.95 || cage.vertex_creases.iter().any(|c| c.vertex == v && c.sharpness >= 10.0) {
+        let incoming = solidcore_ops::form_curves::segment_direction(point - previous)?;
+        let outgoing = solidcore_ops::form_curves::segment_direction(next - point)?;
+        if solidcore_ops::form_curves::component_along(incoming, outgoing) < 0.95
+            || cage.vertex_creases.iter().any(|c| c.vertex == v && c.sharpness >= 10.0)
+        {
             corners.push(v);
         }
     }

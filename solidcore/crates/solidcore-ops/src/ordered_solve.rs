@@ -57,7 +57,7 @@ impl Band {
     pub fn add(&mut self, r: usize, s: usize, v: f64) {
         self.0.add(r, s, v);
     }
-    /// Left-looking factorization and substitution.
+    /// Row-wise factorization and substitution.
     pub fn solve(self, b: Vec<f64>) -> Result<Vec<f64>, Failure> {
         self.0.solve(b).map_err(|error| classify(&error))
     }

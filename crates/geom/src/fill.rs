@@ -687,7 +687,7 @@ impl Grid {
         // one-direction Gram matrices of the basis functions' derivatives.
         let lambda = SMOOTHNESS * fitted as f64 / n as f64 * self.cell(0) * self.cell(1);
         self.add_energy(&mut band, lambda);
-        band.solve(rhs)
+        band.solve(rhs).map_err(Into::into)
     }
 
     /// Add `lambda` times the thin-plate energy `∫∫ h_uu² + 2·h_uv² + h_vv²` over the grid's box

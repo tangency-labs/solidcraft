@@ -455,14 +455,14 @@ impl Snapshot {
     pub(super) fn capture(app: &SolveApp, proj: &Proj) -> Result<Self, String> {
         let chart = Chart::new(proj)?;
         let (mesh, index) = live_cad::occlusion_snapshot(app).ok_or("wait for the current CAD occlusion preview")?;
-        if mesh.triangles.len() > MAX_TRIANGLES || app.forms_prototype.context.entries.len() > MAX_SOURCES {
+        if mesh.triangle_count() > MAX_TRIANGLES || app.forms_prototype.context.entries.len() > MAX_SOURCES {
             return Err("Form occlusion snapshot exceeds its geometry budget".into());
         }
         let mut sources = vec![Source { mesh, index, own: true }];
-        let mut triangles = sources[0].mesh.triangles.len();
+        let mut triangles = sources[0].mesh.triangle_count();
         for entry in context::retained_entries(app) {
             let Some(index) = &entry.index else { continue };
-            triangles = triangles.saturating_add(entry.mesh.triangles.len());
+            triangles = triangles.saturating_add(entry.mesh.triangle_count());
             if triangles > MAX_TRIANGLES || sources.len() >= MAX_SOURCES {
                 return Err("Form occlusion snapshot exceeds its geometry budget".into());
             }
@@ -484,7 +484,7 @@ impl Snapshot {
             return Ok(());
         }
         let count =
-            self.sources.iter().try_fold(0usize, |n, s| n.checked_add(s.mesh.triangles.len())).ok_or("Form occlusion triangle count overflow")?;
+            self.sources.iter().try_fold(0usize, |n, s| n.checked_add(s.mesh.triangle_count())).ok_or("Form occlusion triangle count overflow")?;
         if count > MAX_TRIANGLES {
             return Err("Form occlusion exceeds its triangle budget".into());
         }
@@ -492,7 +492,7 @@ impl Snapshot {
         let mut items = Vec::new();
         reserve(&mut items, count)?;
         for (source, s) in self.sources.iter().enumerate() {
-            for triangle in 0..s.mesh.triangles.len() {
+            for triangle in 0..s.mesh.triangle_count() {
                 let Some((_, world)) = world_triangle(&s.mesh, triangle) else { continue };
                 let mut bounds = Bounds::empty();
                 let mut usable = true;
@@ -616,29 +616,20 @@ impl Snapshot {
         let Some(p) = self.proj.to_screen(point).filter(|p| p.is_finite()) else { return Ok(false) };
         charge(budget, 1)?;
         let (o, d) = self.proj.ray(p);
-        let depth = (point - o).dot(d);
-        if !o.is_finite() || !d.is_finite() || !depth.is_finite() {
-            return Ok(false);
-        }
         let (near, _) = self.proj.ray(p + egui::vec2(2.0, 0.0));
-        let tolerance = (near - o).len().max(3.0 * self.fit.max(0.05));
-        if self.own_hit(p, budget)?.is_some_and(|t| t < depth - tolerance) {
+        let Some(visibility) = solidcore_ops::forms_view_queries::visibility(point, o, d, near, self.fit, self.proj.cam.fov > 0.0) else {
+            return Ok(false);
+        };
+        if !visibility.own_surface_visible(self.own_hit(p, budget)?) {
             return Ok(false);
         }
-        let (origin, direction, depth) = if self.proj.cam.fov > 0.0 {
-            let delta = point - o;
-            let Some(direction) = delta.normalized() else { return Ok(false) };
-            (o, direction, delta.len())
-        } else {
-            (point - d * depth, d, depth)
-        };
+        let (origin, direction, depth) = visibility.context_ray();
         for source in self.sources.iter().skip(1) {
             charge(budget, 1)?;
-            if let Some((hit, _)) = source.index.raycast_bounded(&source.mesh, origin, direction, budget).map_err(str::to_owned)? {
-                let scale = origin.x.abs().max(origin.y.abs()).max(origin.z.abs()).max(depth.abs()).max(hit.abs()).max(1.0);
-                if hit < depth - 64.0 * f64::EPSILON * scale {
-                    return Ok(false);
-                }
+            if let Some((hit, _)) = source.index.raycast_bounded(&source.mesh, origin, direction, budget).map_err(str::to_owned)?
+                && solidcore_ops::forms_view_queries::occludes(origin, depth, hit)
+            {
+                return Ok(false);
             }
         }
         Ok(true)
@@ -646,7 +637,7 @@ impl Snapshot {
 }
 
 fn world_triangle(mesh: &Mesh, triangle: usize) -> Option<([u32; 3], [Vec3; 3])> {
-    let ids = *mesh.triangles.get(triangle)?;
+    let ids = *mesh.triangle_indices().get(triangle)?;
     let points = [*mesh.positions.get(ids[0] as usize)?, *mesh.positions.get(ids[1] as usize)?, *mesh.positions.get(ids[2] as usize)?];
     points.iter().all(|p| p.is_finite()).then_some((ids, points))
 }

@@ -54,8 +54,8 @@ impl TrimWall {
             surface.mesh.normals.extend([normal; 2]);
             if i > 0 {
                 let edge = mesh_start + 2 * (i as u32 - 1);
-                surface.mesh.triangles.extend([[edge, edge + 2, edge + 3], [edge, edge + 3, edge + 1]]);
-                surface.mesh.tri_face.extend([owner; 2]);
+                surface.mesh.push_triangle([edge, edge + 2, edge + 3], owner);
+                surface.mesh.push_triangle([edge, edge + 3, edge + 1], owner);
             }
         }
         let cap = [first, first + 1];

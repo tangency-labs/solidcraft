@@ -310,11 +310,10 @@ impl Cage {
         for (fi, f) in smooth.faces.iter().enumerate() {
             for corner in 1..f.len() - 1 {
                 let tri = [f[0], f[corner], f[corner + 1]];
-                mesh.triangles.push(tri.map(|v| v as u32));
-                mesh.tri_face.push(roots.get(fi).copied().ok_or_else(|| bad("missing logical face"))? as u32);
+                mesh.push_triangle(tri.map(|v| v as u32), roots.get(fi).copied().ok_or_else(|| bad("missing logical face"))? as u32);
             }
         }
-        mesh.normals = solidcore_ops::form_subdivision::vertex_normals(&mesh.positions, &mesh.triangles).map_err(|e| bad(&e.to_string()))?;
+        mesh.normals = solidcore_ops::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices()).map_err(|e| bad(&e.to_string()))?;
         let index = crate::MeshIndex::new(&mesh);
         Ok(SurfacePreview { mesh, vertices, boundaries, index })
     }

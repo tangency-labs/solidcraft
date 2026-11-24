@@ -698,7 +698,6 @@ crates/geom/src/brep/form.rs:tube_on_grid atan2,dot
 crates/geom/src/brep/form.rs:turned cross
 crates/geom/src/brep/normal_section.rs:normal_section cross,dot
 crates/geom/src/brep/placement.rs:Affine::conic atan2
-crates/geom/src/bvh.rs:MeshIndex::raycast raycast,triangles
 crates/geom/src/bvh.rs:MeshIndex::triangles_only triangles
 crates/geom/src/chain.rs:Ring::area_vector cross
 crates/geom/src/compare.rs:TriangleTree::nearest closest_on_triangle
@@ -745,8 +744,6 @@ crates/geom/src/fill_general.rs:fit_grid dot
 crates/geom/src/fill_general.rs:locate dot,hypot
 crates/geom/src/fill_general.rs:measure dot
 crates/geom/src/fill_iso.rs:IsoEdge::tangent normalized
-crates/geom/src/fill_iso.rs:Normal::solve solve
-crates/geom/src/fill_iso.rs:Patch::normal cross,normalized
 crates/geom/src/fill_iso.rs:corner_agreement cross,dot,normalized
 crates/geom/src/fill_iso.rs:crowned dot
 crates/geom/src/fill_iso.rs:folds dot
@@ -776,7 +773,6 @@ crates/geom/src/mesh.rs:Mesh::inside_index cross,dot,triangles
 crates/geom/src/mesh.rs:Mesh::mass_properties cross,dot,triangles
 crates/geom/src/mesh.rs:Mesh::measure cross,dot,triangles
 crates/geom/src/mesh.rs:Mesh::ray_crossings triangles
-crates/geom/src/mesh.rs:Mesh::raycast triangles
 crates/geom/src/mesh.rs:Mesh::tangent_chain dot,normalized
 crates/geom/src/mesh.rs:ray_crosses cross,dot
 crates/geom/src/mesh.rs:smooth_seam normalized,triangles
@@ -1317,7 +1313,6 @@ crates/ui-egui/src/gizmo.rs:hit distance
 crates/ui-egui/src/gizmo.rs:mm_per_px distance,normalized
 crates/ui-egui/src/gizmo.rs:on_plane dot
 crates/ui-egui/src/gizmo.rs:seg_dist distance,dot
-crates/ui-egui/src/gizmo.rs:show atan2,dot
 crates/ui-egui/src/hole_place.rs:find_snaps cross,dot,normalized,triangles
 crates/ui-egui/src/hole_place.rs:nearest distance
 crates/ui-egui/src/hole_place.rs:on_face cross,dot

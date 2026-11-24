@@ -28,9 +28,9 @@ pub(super) fn visible(app: &SolveApp, proj: &Proj, point: Vec3) -> bool {
     let (near, _) = proj.ray(p + egui::vec2(2.0, 0.0));
     let Some(visibility) = solidcore_ops::forms_view_queries::visibility(point, o, d, near, fit, proj.cam.fov > 0.0) else { return false };
     let hit = if let Some((mesh, index)) = live_cad::occlusion(app) {
-        index.raycast(mesh, o, d)
+        index.face_hit(mesh, o, d)
     } else {
-        form.surface.index.raycast(&form.surface.mesh, o, d)
+        form.surface.index.face_hit(&form.surface.mesh, o, d)
     };
     // Test the exact world point rather than a ray quantized through f32 screen
     // coordinates: a touching support rim must not become a false nearer wall.
@@ -55,8 +55,8 @@ pub(super) fn nearest_with(app: &SolveApp, proj: &Proj, pos: Pos2, mode: Pick) -
                 }
                 let p = control_position(app, i, p)?;
                 let q = proj.to_screen(p)?;
-                let distance = q.distance(pos);
-                (distance < 10.0 && visible(app, proj, p)).then(|| (distance, solidcore_ops::forms_view_queries::distance2(p, proj.cam.eye()), i))
+                let distance = q.distance_sq(pos);
+                (distance < 100.0 && visible(app, proj, p)).then(|| (distance, solidcore_ops::forms_view_queries::distance2(p, proj.cam.eye()), i))
             })
             .collect();
         candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
@@ -105,14 +105,11 @@ pub(super) fn nearest_with(app: &SolveApp, proj: &Proj, pos: Pos2, mode: Pick) -
         } else {
             (&form.surface.mesh, &form.surface.index)
         };
-        let (depth, triangle) = index.raycast(mesh, o, d)?;
+        let (depth, owner) = index.face_hit(mesh, o, d)?;
         if context::occludes(app, o, d, depth) {
             return None;
         }
-        return mesh
-            .tri_face
-            .get(triangle)
-            .map(|&face| if form.profile.is_some() && face == u32::MAX { Element::Surface } else { Element::Face(face as usize) });
+        return owner.map(|face| if form.profile.is_some() && face == u32::MAX { Element::Surface } else { Element::Face(face as usize) });
     }
     None
 }

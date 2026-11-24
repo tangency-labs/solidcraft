@@ -460,7 +460,7 @@ impl Matching {
         let coarse = definition.hierarchy.as_ref().map(|h| &h.base);
         let config = support.initialize_domain(domain, &definition.placement, edge, request.order, request.tolerances, coarse)?;
         let coordinates = config.coordinates.iter().map(|&f| support.coordinate(f)).collect::<Result<Vec<_>>>()?;
-        let solution = support.solve(&definition, &config, tolerance)?;
+        let solution = support.match_opening(&definition, &config, tolerance)?;
         let (vertices, edges) = Self::history(&definition.cage, &solution.cage);
         install_evaluator(&mut definition, solution.cage)?;
         definition.matching = Some(Box::new(Self {
@@ -512,7 +512,7 @@ impl Matching {
         let mut base = definition.clone();
         base.matching = None;
         self.restore(&mut base, false)?;
-        let solution = support.solve(&base, &config, tolerance)?;
+        let solution = support.match_opening(&base, &config, tolerance)?;
         let (vertices, edges) = Self::history(&base.cage, &solution.cage);
         install_evaluator(&mut base, solution.cage)?;
         base.matching = Some(Box::new(Self {
@@ -684,7 +684,7 @@ impl Matching {
             }));
             return Ok((refined, report));
         }
-        let solution = support.solve(&refined, &config, tolerance)?;
+        let solution = support.match_opening(&refined, &config, tolerance)?;
         let (vertices, edges) = if depth == old_depth {
             Self::same_depth_history((&self.vertices, &self.edges), &refined.cage, &solution.cage)?
         } else {

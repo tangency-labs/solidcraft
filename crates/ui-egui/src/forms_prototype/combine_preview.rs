@@ -266,7 +266,7 @@ fn compute(mut scratch: Session, params: &serde_json::Value, (max_triangles, max
             continue;
         }
         let mesh = body.mesh();
-        triangles = triangles.saturating_add(mesh.triangles.len());
+        triangles = triangles.saturating_add(mesh.triangle_count());
         edges = edges.saturating_add(mesh.edges.iter().map(Vec::len).sum::<usize>());
         if triangles > max_triangles || edges > max_edges {
             return Err(DISPLAY_BUDGET.into());

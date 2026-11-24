@@ -16209,7 +16209,7 @@ mod world_placement_cache_tests {
                 .add_feature(
                     FeatureKind::Cylinder {
                         base: crate::point_expr(Vec3::ZERO),
-                        axis: Vec3::Z.into(),
+                        axis: crate::dir_expr(Vec3::Z),
                         radius: "3".into(),
                         height: "2".into(),
                         operation: Operation::NewBody,

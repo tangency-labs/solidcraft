@@ -3,6 +3,106 @@
 use super::vec::VecExt;
 use crate::Vec3;
 
+/// Distance between two projected positions, in display points.
+pub fn pixel_distance([ax, ay]: [f32; 2], [bx, by]: [f32; 2]) -> f32 {
+    let (x, y) = (ax - bx, ay - by);
+    (x * x + y * y).sqrt()
+}
+
+/// Signed pointer displacement along a screen direction.
+pub fn pixel_component([x, y]: [f32; 2], [dx, dy]: [f32; 2]) -> f32 {
+    x * dx + y * dy
+}
+
+/// Distance from a pointer to a finite screen segment.
+pub fn pixel_segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let ap = [p[0] - a[0], p[1] - a[1]];
+    let t = (pixel_component(ap, ab) / pixel_component(ab, ab).max(1e-6)).clamp(0.0, 1.0);
+    pixel_distance(p, [a[0] + ab[0] * t, a[1] + ab[1] * t])
+}
+
+/// Angle of a displacement on an oriented manipulator ring.
+pub fn ring_angle(delta: Vec3, x: Vec3, y: Vec3) -> f64 {
+    delta.dot(y).atan2(delta.dot(x))
+}
+
+/// A ray in the frame of a watertight triangle test: its dominant axis becomes z; x and
+/// y follow it cyclically, swapped to keep the frame right-handed when the ray runs towards −z.
+pub struct RayFrame {
+    o: Vec3,
+    kx: usize,
+    ky: usize,
+    kz: usize,
+    s: [f64; 3],
+}
+
+fn comp(v: Vec3, k: usize) -> f64 {
+    match k {
+        0 => v.x,
+        1 => v.y,
+        _ => v.z,
+    }
+}
+
+impl RayFrame {
+    /// `None` for a direction that is zero or not finite.
+    pub fn new(o: Vec3, dir: Vec3) -> Option<RayFrame> {
+        let a = [dir.x.abs(), dir.y.abs(), dir.z.abs()];
+        let kz = if a[0] >= a[1] && a[0] >= a[2] {
+            0
+        } else if a[1] >= a[2] {
+            1
+        } else {
+            2
+        };
+        let dz = comp(dir, kz);
+        if !(dz.is_finite() && dz != 0.0) {
+            return None;
+        }
+        let (mut kx, mut ky) = ((kz + 1) % 3, (kz + 2) % 3);
+        if dz < 0.0 {
+            std::mem::swap(&mut kx, &mut ky);
+        }
+        Some(RayFrame {
+            o,
+            kx,
+            ky,
+            kz,
+            s: [comp(dir, kx) / dz, comp(dir, ky) / dz, 1.0 / dz],
+        })
+    }
+
+    /// A vertex in the ray's frame: (x, y) across the ray, z scaled along it.
+    fn frame(&self, p: Vec3) -> (f64, f64, f64) {
+        let q = p - self.o;
+        let z = comp(q, self.kz);
+        (
+            comp(q, self.kx) - self.s[0] * z,
+            comp(q, self.ky) - self.s[1] * z,
+            self.s[2] * z,
+        )
+    }
+
+    /// The distance along the ray to triangle `[pa, pb, pc]` (`None`: missed, or not in front).
+    pub fn hit(&self, [pa, pb, pc]: [Vec3; 3]) -> Option<f64> {
+        let ((ax, ay, az), (bx, by, bz), (cx, cy, cz)) =
+            (self.frame(pa), self.frame(pb), self.frame(pc));
+        let u = cx * by - cy * bx;
+        let v = ax * cy - ay * cx;
+        let w = bx * ay - by * ax;
+        if (u < 0.0 || v < 0.0 || w < 0.0) && (u > 0.0 || v > 0.0 || w > 0.0) {
+            return None;
+        }
+        let det = u + v + w;
+        if det == 0.0 {
+            return None;
+        }
+        let t = (u * az + v * bz + w * cz) / det;
+        (t.is_finite() && t > 1e-9).then_some(t)
+    }
+}
+
 /// Column-major homogeneous projection and its screen rectangle.
 #[derive(Clone, Copy)]
 pub struct Projection {
@@ -343,6 +443,9 @@ pub fn visibility(
 ) -> Option<Visibility> {
     let delta = point - origin;
     let depth = delta.dot(direction);
+    if !origin.is_finite() || !direction.is_finite() || !depth.is_finite() {
+        return None;
+    }
     let tolerance = (nearby - origin).len().max(3.0 * fit.max(0.05));
     let (origin, direction, context_depth) = if perspective {
         (origin, delta.normalized()?, delta.len())

@@ -1543,7 +1543,7 @@ mod tests {
             .add_feature(
                 crate::FeatureKind::Cylinder {
                     base: crate::point_expr(Vec3::ZERO),
-                    axis: Vec3::Z.into(),
+                    axis: crate::dir_expr(Vec3::Z),
                     radius: "3".into(),
                     height: "2".into(),
                     operation: crate::Operation::NewBody,
@@ -1718,7 +1718,7 @@ mod tests {
             .add_feature(
                 crate::FeatureKind::Cylinder {
                     base: crate::point_expr(Vec3::ZERO),
-                    axis: Vec3::Z.into(),
+                    axis: crate::dir_expr(Vec3::Z),
                     radius: "3".into(),
                     height: "2".into(),
                     operation: crate::Operation::NewBody,
@@ -2243,7 +2243,7 @@ mod tests {
             };
             let ring = definition.cage.boundary_loops().unwrap().remove(0);
             let config = face.initialize(&definition.cage, &placement, [ring[0], ring[1]], order, Default::default()).unwrap();
-            let result = face.solve(&definition, &config, 0.01).unwrap();
+            let result = face.match_opening(&definition, &config, 0.01).unwrap();
             assert!(result.report.position_mm <= 0.001);
             assert!(order == 0 || result.report.tangent_deg <= 0.1);
             assert!(order < 2 || result.report.curvature_relative <= 0.01);

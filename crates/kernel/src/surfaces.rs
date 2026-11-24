@@ -636,7 +636,7 @@ pub fn patch_edges_on_face(body: &Body, at: &[Vec3], support: &Body, face: usize
                 let curve = CurveEval::new(edge.parameters()).ok()?;
                 let (parameter, gap) = nearest_parameter(&curve, edge.interval, point)?;
                 let direction = curve.jet(parameter)?.tangent * if use_.forward { 1.0 } else { -1.0 };
-                Some((gap, direction.dot(tangent)))
+                Some((gap, solidcore_ops::form_curves::component_along(direction, tangent)))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0));
         let (gap, orientation) = orientation.ok_or_else(|| invalid("cannot orient the cap against its support boundary"))?;

@@ -139,7 +139,7 @@ impl Form {
         }
         if let Some(symmetry) = &mut definition.symmetry {
             let axis = [Vec3::X, Vec3::Y, Vec3::Z].get(symmetry.axis).copied().ok_or_else(|| error("invalid symmetry axis"))?;
-            symmetry.origin *= local(axis).dot(axis);
+            symmetry.origin *= solidcore_ops::form_curves::component_along(local(axis), axis);
             for (i, &j) in symmetry.partners.iter().enumerate() {
                 if symmetry.reflect(definition.cage.point(i).map_err(error)?).dist(definition.cage.point(j).map_err(error)?) > 2e-6 {
                     return Err(error("this scale would skew the mirror plane; disable symmetry before applying it"));

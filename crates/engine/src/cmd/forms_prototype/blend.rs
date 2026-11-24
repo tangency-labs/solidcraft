@@ -172,7 +172,7 @@ pub(super) fn export(s: &mut Session, p: &Value) -> Result<Value> {
         let (objects, warnings) = surface::objects(s, &args)?;
         let summaries = objects
             .iter()
-            .map(|o| params::BlendObject { name: o.name.clone(), points: o.mesh.positions.len(), faces: o.mesh.triangles.len(), levels: 0 })
+            .map(|o| params::BlendObject { name: o.name.clone(), points: o.mesh.positions.len(), faces: o.mesh.triangle_count(), levels: 0 })
             .collect();
         (solidcraft_io::blend::write_surfaces(&objects).map_err(error)?, summaries, warnings)
     } else {

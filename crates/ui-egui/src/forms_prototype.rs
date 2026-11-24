@@ -1011,7 +1011,10 @@ fn show_gizmo(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, pr
         };
         app.forms_prototype.drag = None;
         let (right, _, _) = app.cam.basis();
-        let pixels = proj.to_screen(t.center).zip(proj.to_screen(t.center + right)).map_or(1.0, |(a, b)| a.distance(b).max(1e-6));
+        let pixels = proj
+            .to_screen(t.center)
+            .zip(proj.to_screen(t.center + right))
+            .map_or(1.0, |(a, b)| solidcore_ops::forms_view_queries::pixel_distance(a.into(), b.into()).max(1e-6));
         app.forms_prototype.gizmo_drag = Some(Drag {
             indices: targets.indices,
             points: targets.points,
@@ -1173,14 +1176,9 @@ fn displacement(d: &Drag, pos: Pos2) -> Option<Vec3> {
         if screen.length_sq() < 1.0 {
             return None;
         }
-        Some(axis * f64::from((pos - d.start).dot(screen) / screen.length_sq()) * 10.0)
+        Some(axis * f64::from(solidcore_ops::forms_view_queries::pixel_component((pos - d.start).into(), screen.into()) / screen.length_sq()) * 10.0)
     } else {
-        let hit = |at| {
-            let (o, ray) = d.proj.ray(at);
-            let normal = d.proj.cam.back();
-            let den = ray.dot(normal);
-            (den.abs() > 1e-9).then(|| o + ray * ((d.anchor - o).dot(normal) / den))
-        };
+        let hit = |at| crate::gizmo::on_plane(&d.proj, at, d.anchor, d.proj.cam.back());
         Some(hit(pos)? - hit(d.start)?)
     }
 }
@@ -1204,7 +1202,7 @@ fn pull_with_modifiers(app: &mut SolveApp, pos: Pos2, mods: egui::Modifiers) {
     if !d.extrude && Some(d.source) != TransformSource::current(app) {
         return;
     }
-    if pos.distance(d.start) < 2.0 && !d.moved {
+    if pos.distance_sq(d.start) < 4.0 && !d.moved {
         return;
     }
     let Some(delta) = displacement(d, pos) else { return };
@@ -1339,7 +1337,7 @@ fn render(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj) {
         let hovered = highlight.color(Tokens::get().body_selected.to_array());
         let faces = surface::selected_faces(app);
         let mesh = ghost.map(|p| &p.mesh).or_else(|| live_cad::mesh(app)).unwrap_or(&form.surface.mesh);
-        for (ti, triangle) in mesh.triangles.iter().enumerate().filter(|_| !combined) {
+        for (ti, triangle) in mesh.triangle_indices().iter().enumerate().filter(|_| !combined) {
             let root = mesh.tri_face.get(ti).copied().unwrap_or(u32::MAX) as usize;
             let c = if faces.contains(&root) {
                 Some(selected)
@@ -1379,7 +1377,7 @@ fn render(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj) {
         }
         if app.forms_prototype.wire {
             let wire_mesh = ghost.map_or(&form.surface.mesh, |p| &p.mesh);
-            for t in &wire_mesh.triangles {
+            for t in wire_mesh.triangle_indices() {
                 for [a, b] in [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]] {
                     if let (Some(a), Some(b)) = (wire_mesh.positions.get(a as usize), wire_mesh.positions.get(b as usize)) {
                         scene.line(a.to_f32(), b.to_f32(), edge_color, 0.6, false);
@@ -1449,7 +1447,7 @@ fn viewport_frame(app: &SolveApp, proj: &Proj, ppp: f32, key: u64) -> Frame {
 }
 fn fallback(ui: &egui::Ui, proj: &Proj, mesh: &Mesh, color: egui::Color32) {
     let mut triangles: Vec<_> = mesh
-        .triangles
+        .triangle_indices()
         .iter()
         .filter_map(|t| {
             let p = [*mesh.positions.get(t[0] as usize)?, *mesh.positions.get(t[1] as usize)?, *mesh.positions.get(t[2] as usize)?];

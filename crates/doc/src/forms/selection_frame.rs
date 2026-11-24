@@ -38,18 +38,18 @@ fn axes(x: Vec3, z: Vec3) -> Option<[Vec3; 3]> {
 }
 fn bisector(normals: &BTreeMap<usize, Vec3>) -> Option<Vec3> {
     let z = unit(normals.values().copied().fold(Vec3::ZERO, |sum, n| sum + n))?;
-    normals.values().all(|n| n.dot(z) > 1e-6).then_some(z)
+    normals.values().all(|n| solidcore_ops::form_curves::component_along(*n, z) > 1e-6).then_some(z)
 }
 fn insert_normal(normals: &mut BTreeMap<usize, Vec3>, sample: &EdgeSample) -> Option<()> {
     let first = normals.entry(sample.chart).or_insert(sample.normal);
-    (first.dot(sample.normal) >= SAME_DIRECTION).then_some(())
+    (solidcore_ops::form_curves::component_along(*first, sample.normal) >= SAME_DIRECTION).then_some(())
 }
 fn edge_samples(samples: &[EdgeSample]) -> Option<(Vec3, BTreeMap<usize, Vec3>)> {
     let first = samples.first()?;
     let x = unit(first.tangent)?;
     let mut normals = BTreeMap::new();
     for sample in samples {
-        if first.point.dist(sample.point) > 1e-7 || unit(sample.tangent)?.dot(x) < SAME_DIRECTION {
+        if first.point.dist(sample.point) > 1e-7 || solidcore_ops::form_curves::component_along(unit(sample.tangent)?, x) < SAME_DIRECTION {
             return None;
         }
         insert_normal(&mut normals, sample)?;

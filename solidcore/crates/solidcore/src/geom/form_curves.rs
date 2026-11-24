@@ -40,6 +40,67 @@ pub fn fitted_station<C>(
         .then_some(point)
 }
 
+/// Unit direction of an authored segment longer than the evaluator's tolerance.
+pub fn segment_direction(vector: Vec3) -> Option<Vec3> {
+    crate::eval::vec::VecExt::normalized(vector)
+}
+
+/// Signed component along a direction. For two unit directions this is their alignment.
+pub fn component_along(vector: Vec3, direction: Vec3) -> f64 {
+    vector.dot(direction)
+}
+
+/// Sine of the angle between two regular chart directions.
+pub fn transverse_sine(first: Vec3, second: Vec3) -> Option<f64> {
+    Some(
+        segment_direction(first)?
+            .cross(segment_direction(second)?)
+            .length(),
+    )
+}
+
+/// Carry an authored offset into the new guide frame, keeping its physical lengths.
+pub fn transport_detail(origin: Vec3, delta: Vec3, before: [Vec3; 3], after: [Vec3; 3]) -> Vec3 {
+    let local = affine_fit::frame_vector(before, delta);
+    origin + after[0] * local.x + after[1] * local.y + after[2] * local.z
+}
+
+/// Material frame of a guide grid with X along its first tangent.
+pub fn guide_frame(tangent: Vec3, across: Vec3) -> Option<[Vec3; 3]> {
+    let x = segment_direction(tangent)?;
+    let z = segment_direction(x.cross(across))?;
+    Some([x, z.cross(x), z])
+}
+
+/// Orient the certified normal to the area swept by consecutive boundary stations.
+pub fn winding_normal(origin: Vec3, normal: Vec3, stations: impl Iterator<Item = Vec3>) -> Vec3 {
+    let mut previous = None;
+    let mut area = Vec3::ZERO;
+    for point in stations {
+        let next = point - origin;
+        if let Some(first) = previous {
+            area += Vec3::cross(first, next);
+        }
+        previous = Some(next);
+    }
+    if area.dot(normal) < 0.0 {
+        -normal
+    } else {
+        normal
+    }
+}
+
+/// The fraction and distance of the closest point on a usable boundary segment.
+pub fn segment_proximity(point: Vec3, start: Vec3, end: Vec3) -> Option<(f64, f64)> {
+    let delta = end - start;
+    let squared = delta.length_squared();
+    if squared < 1e-20 {
+        return None;
+    }
+    let t = ((point - start).dot(delta) / squared).clamp(0.0, 1.0);
+    Some((t, (start + delta * t).distance(point)))
+}
+
 /// Normalize a finite editing direction without squaring its original scale.
 pub fn selection_unit(vector: Vec3) -> Option<Vec3> {
     let scale = vector.x.abs().max(vector.y.abs()).max(vector.z.abs());

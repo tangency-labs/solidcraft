@@ -78,25 +78,11 @@ impl Profile {
                 return Err(invalid("invalid Form Surface guide quad"));
             };
             for triangle in [[a as u32, b as u32, c as u32], [a as u32, c as u32, d as u32]] {
-                mesh.triangles.push(triangle);
-                mesh.tri_face.push(if self.partition { id as u32 } else { u32::MAX });
+                mesh.push_triangle(triangle, if self.partition { id as u32 } else { u32::MAX });
             }
         }
-        mesh.normals = vec![Vec3::ZERO; mesh.positions.len()];
-        for triangle in &mesh.triangles {
-            let Some([a, b, c]) = mesh.tri(triangle) else {
-                continue;
-            };
-            let normal = (b - a).cross(c - a);
-            for &i in triangle {
-                if let Some(n) = mesh.normals.get_mut(i as usize) {
-                    *n += normal;
-                }
-            }
-        }
-        for normal in &mut mesh.normals {
-            *normal = normal.normalized().unwrap_or(Vec3::Z);
-        }
+        mesh.normals =
+            solidcore_ops::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices()).map_err(|e| invalid(e.to_string()))?;
         let boundaries = cage
             .edges()
             .map_err(|e| invalid(e.to_string()))?
@@ -346,7 +332,7 @@ impl Profile {
                     let after = grid_frame(&rest, self.segments, i)?;
                     // Preserve sculpted lengths in millimetres. Stretch and
                     // shear rotate the material frame without scaling details.
-                    *new + after[0] * delta.dot(before[0]) + after[1] * delta.dot(before[1]) + after[2] * delta.dot(before[2])
+                    solidcore_ops::form_curves::transport_detail(*new, delta, before, after)
                 };
             }
         }
@@ -397,7 +383,7 @@ impl Profile {
                 let delta = *point - *old;
                 let before = grid_frame(&self.rest, self.segments, index)?;
                 let after = grid_frame(&rest, self.segments, index)?;
-                *new + after[0] * delta.dot(before[0]) + after[1] * delta.dot(before[1]) + after[2] * delta.dot(before[2])
+                solidcore_ops::form_curves::transport_detail(*new, delta, before, after)
             };
         }
         profile.rest = rest;
@@ -737,11 +723,9 @@ fn grid_frame(points: &[Vec3], [u, v]: [usize; 2], index: usize) -> Result<[Vec3
         return Err(invalid("an interior Form Surface guide needs two logical tangent directions"));
     }
     let at = |id| points.get(id).copied().ok_or_else(|| invalid("missing Form Surface tangent sample"));
-    let x = (at(index + 1)? - at(index - 1)?).normalized().ok_or_else(|| invalid("singular Form Surface U tangent"))?;
+    let tangent = at(index + 1)? - at(index - 1)?;
     let across = at(index + u + 1)? - at(index - u - 1)?;
-    let z = x.cross(across).normalized().ok_or_else(|| invalid("singular Form Surface guide frame"))?;
-    let y = z.cross(x);
-    Ok([x, y, z])
+    solidcore_ops::form_curves::guide_frame(tangent, across).ok_or_else(|| invalid("singular Form Surface guide frame"))
 }
 impl crate::walk::Walk for Profile {
     fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(crate::walk::RefItem<'a>)) {

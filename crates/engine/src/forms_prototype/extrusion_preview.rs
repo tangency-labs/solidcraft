@@ -40,7 +40,7 @@ impl ExtrusionResponse {
         }
         let delta = displacement - self.reference;
         let coefficients = if let Some(axis) = self.axis {
-            let along = delta.dot(axis);
+            let along = solidcore_ops::form_curves::component_along(delta, axis);
             if (delta - axis * along).len() > 1e-9 * delta.len().max(1.0) {
                 return Err(error("extrusion feedback moved outside its fixed axis"));
             }
@@ -78,19 +78,8 @@ impl ExtrusionResponse {
                 fixed.next();
             }
         }
-        preview.mesh.normals.fill(Vec3::ZERO);
-        for triangle in &preview.mesh.triangles {
-            let [a, b, c] = triangle.map(|i| preview.mesh.positions.get(i as usize).copied());
-            let (Some(a), Some(b), Some(c)) = (a, b, c) else { return Err(error("extrusion feedback triangle is invalid")) };
-            let normal = (b - a).cross(c - a);
-            for &index in triangle {
-                let target = preview.mesh.normals.get_mut(index as usize).ok_or_else(|| error("extrusion feedback normal is missing"))?;
-                *target += normal;
-            }
-        }
-        for normal in &mut preview.mesh.normals {
-            *normal = normal.normalized().unwrap_or(Vec3::Z);
-        }
+        preview.mesh.normals = solidcore_ops::form_subdivision::vertex_normals(&preview.mesh.positions, preview.mesh.triangle_indices())
+            .map_err(|e| error(e.to_string()))?;
         Ok(preview)
     }
 }
@@ -118,7 +107,7 @@ impl Form {
         checkpoint: bool,
         axis: Vec3,
     ) -> Result<ExtrusionResponse> {
-        let axis = axis.normalized().ok_or_else(|| error("extrusion feedback axis must be finite and nonzero"))?;
+        let axis = solidcore_ops::form_curves::segment_direction(axis).ok_or_else(|| error("extrusion feedback axis must be finite and nonzero"))?;
         self.prepare_surface_extrusion_response(faces, edges, displacement, checkpoint, Some(axis))
     }
 
@@ -143,7 +132,7 @@ impl Form {
         };
         let (template, original) = evaluate(displacement)?;
         let reference = positions(&template);
-        if reference.len() > 65_536 || template.mesh.triangles.len() > 131_072 {
+        if reference.len() > 65_536 || template.mesh.triangle_count() > 131_072 {
             return Err(error("extrusion feedback exceeds its interactive display budget"));
         }
         let step = 0.5;
@@ -156,7 +145,7 @@ impl Form {
             let forward = displacement + *direction * step;
             let signed_step = if forward.len() < 1e-9 { -step } else { step };
             let (preview, _) = evaluate(displacement + *direction * signed_step)?;
-            if preview.mesh.triangles != template.mesh.triangles || preview.mesh.tri_face != template.mesh.tri_face {
+            if preview.mesh.triangle_indices() != template.mesh.triangle_indices() || preview.mesh.tri_face != template.mesh.tri_face {
                 return Err(error("surface extrusion feedback changed its topology"));
             }
             let values = positions(&preview);
@@ -194,14 +183,14 @@ impl Form {
         };
         let (mut template, original) = evaluate(displacement)?;
         let reference = positions(&template);
-        if reference.len() > 65_536 || template.mesh.triangles.len() > 131_072 {
+        if reference.len() > 65_536 || template.mesh.triangle_count() > 131_072 {
             return Err(error("extrusion feedback exceeds its interactive display budget"));
         }
         let step = (displacement.len() * 0.001).clamp(1e-8, 1.0);
         let mut changes = Vec::with_capacity(3);
         for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
             let (preview, _) = evaluate(displacement + axis * step)?;
-            if preview.mesh.triangles != template.mesh.triangles || preview.mesh.tri_face != template.mesh.tri_face {
+            if preview.mesh.triangle_indices() != template.mesh.triangle_indices() || preview.mesh.tri_face != template.mesh.tri_face {
                 return Err(error("extrusion feedback changed its display topology"));
             }
             let values = positions(&preview);

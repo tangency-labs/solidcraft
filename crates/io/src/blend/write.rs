@@ -485,7 +485,7 @@ pub(super) fn write_surfaces(objects: &[SurfaceObject]) -> Result<Vec<u8>> {
     let mut faces = 0usize;
     for object in objects {
         points = points.saturating_add(object.mesh.positions.len());
-        faces = faces.saturating_add(object.mesh.triangles.len());
+        faces = faces.saturating_add(object.mesh.triangle_count());
         if points > 600_000 || faces > 500_000 {
             return Err(bad("surface export exceeds 600000 vertices or 500000 triangles"));
         }
@@ -494,7 +494,7 @@ pub(super) fn write_surfaces(objects: &[SurfaceObject]) -> Result<Vec<u8>> {
         .iter()
         .map(|o| Cage {
             points: o.mesh.positions.clone(),
-            faces: o.mesh.triangles.iter().map(|t| t.iter().map(|&v| v as usize).collect()).collect(),
+            faces: o.mesh.triangle_indices().iter().map(|t| t.iter().map(|&v| v as usize).collect()).collect(),
             ..Default::default()
         })
         .collect();
