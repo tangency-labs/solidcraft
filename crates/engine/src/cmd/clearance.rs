@@ -388,8 +388,13 @@ fn measure_pair(
     };
     let touching = mesh.is_some_and(|m| m.distance <= slack);
     if touching || holds(ba, bb) || holds(bb, ba) {
-        // A pair whose shared part can't be worked out is reported, not passed as clear.
-        match solidcraft_kernel::boolean(ka, kb, solidcraft_kernel::BoolOp::Intersect) {
+        // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
+        // check of the shared part runs here: a part it refuses is reported, not measured.
+        match solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+            solidcraft_kernel::boolean(ka, kb, solidcraft_kernel::BoolOp::Intersect)
+        })
+        .0
+        {
             Err(e) => {
                 out.unchecked = Some(e.to_string());
                 return out;
