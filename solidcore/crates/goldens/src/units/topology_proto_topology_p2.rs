@@ -69,6 +69,8 @@ fn res<T>(r: solidcore::Result<T>, status_out: &mut f64, skip: &mut bool) -> Res
             if let Some(o) = Output::unported(&e) {
                 return Err(Fail::Deferred(Box::new(o)));
             }
+            #[cfg(test)]
+            super::topology_proto_topology_p1::witness::error(&e);
             if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) {
                 *skip = true;
             } else {
@@ -161,7 +163,11 @@ fn pe_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, pe: ProtoEdgeId) -
         Ok(_) => Ok(true),
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
-            None => Ok(false),
+            None => {
+                #[cfg(test)]
+                super::topology_proto_topology_p1::witness::error(&e);
+                Ok(false)
+            }
         },
     }
 }
@@ -175,7 +181,11 @@ fn ed_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, ed: solidcore::top
         Ok(_) => Ok(true),
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
-            None => Ok(false),
+            None => {
+                #[cfg(test)]
+                super::topology_proto_topology_p1::witness::error(&e);
+                Ok(false)
+            }
         },
     }
 }
@@ -590,7 +600,7 @@ pub(super) fn run_op(
                 *skip = true;
                 return Ok(());
             };
-            let _ = res(r.mgr.remove_edge_definition(&r.k, d, flag), st, skip)?;
+            let _ = res(r.mgr.remove_edge_definition(d, flag), st, skip)?;
         }
         q::MGR_UPDATE_EDGES => {
             let Some((w, old, edges, vd)) = update_edges_args(r, rd).filter(|_| !*skip) else {

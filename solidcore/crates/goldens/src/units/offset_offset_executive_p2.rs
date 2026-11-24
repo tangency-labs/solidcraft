@@ -2080,6 +2080,12 @@ mod tests {
     /// removed): the rounded outward offsets of `extrudeHoles1` at k 0.36, with the result
     /// bodies the soundness probe measures. `None` for a case that builds no body.
     fn wr533_overlap_offsets() -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
+        overlap_offsets("0.36")
+    }
+
+    /// The rounded outward offsets of `extrudeHoles1` at `k`, each with its status, the
+    /// result body the soundness probe measures (`None` without one) and `result.present`.
+    fn overlap_offsets(k: &str) -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
         let ctx = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2088,7 +2094,7 @@ mod tests {
         [0, 2, 3, 4, 5]
             .into_iter()
             .map(|f| {
-                let name = format!("overlap_pc_extrudeHoles1_f{f}_k0.36_out_rnd");
+                let name = format!("overlap_pc_extrudeHoles1_f{f}_k{k}_out_rnd");
                 let case = cases.iter().find(|c| c.name == name).unwrap();
                 crate::soundness::start();
                 let out = Runner.run_rust(case).unwrap();
@@ -2147,6 +2153,41 @@ mod tests {
             eprintln!("{name}: built, gap {offset} against {tolerance}");
             assert!(offset > 1000.0 * tolerance, "{name}: {gap}");
             assert_eq!(body.manifold, Some(false), "{name}");
+        }
+    }
+
+    /// #18927's moved rows here (`ssi_proto_topology_statuses_pass_on` removed): the same
+    /// offsets at k 0.35 reach `resolve_overlapping_proto_edges`, whose replacement of an
+    /// overlap group fails (`find_interval`: the parameter is before the start) after the
+    /// group's proto edges and edge definitions were taken out of the intersection. Each is
+    /// refused (1001) and builds no result body.
+    #[test]
+    fn k035_overlap_offsets_are_refused() {
+        for (name, status, body, present) in overlap_offsets("0.35") {
+            assert_eq!(status, 1001, "{name}");
+            assert!(body.is_none(), "{name}: a refused case builds no result body");
+            assert_eq!(present, 0, "{name}");
+        }
+    }
+
+    /// Main's side of the k 0.35 offsets, run on main 6ea034c437 (before #18927): each
+    /// returned success with a body that `check_brep` level 2 refuses (faces with partially
+    /// coincident edges, or a loop of bad orientation), four of them not manifold. It
+    /// fails with the fix, which refuses them.
+    #[test]
+    #[ignore = "main's side, run on main before #18927; the fix refuses these"]
+    fn k035_overlap_offsets_fail_the_check_on_main() {
+        for (name, status, body, _) in overlap_offsets("0.35") {
+            assert_eq!(status, i64::from(NATIVE_SUCCESS), "{name}");
+            let Some(body) = body else {
+                panic!("{name}: no result body")
+            };
+            let lines = body.check.as_ref().unwrap();
+            assert!(
+                lines.iter().any(|l| l.contains("partially Coincident Edges") || l.contains("Loop Orientation")),
+                "{name}: {lines:?}"
+            );
+            assert!(!body.sound(), "{name}");
         }
     }
 

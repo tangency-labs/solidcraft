@@ -1820,10 +1820,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // Not upstream: proto vertices that a point's uncertainty region does not tell
         // apart are one (docs/booleans.md, "One point or two")
-        mgr.combine_proto_vertices_not_proved_apart(
-            k,
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?;
+        mgr.combine_proto_vertices_not_proved_apart(k)?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
         // (the list is re-read after each split: splitting appends proto edges)

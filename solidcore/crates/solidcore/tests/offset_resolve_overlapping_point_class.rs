@@ -7,10 +7,18 @@
 //! `Unported(query.face_p2)` ("a face's new trimmed cache from read-only topology");
 //! the B-rep owner now lends the face's B-rep, as upstream edits it in place.
 //!
-//! The expected counts are the C++ reference's (difftest
-//! `offset.offset_executive_p2` `overlap_pc_extrudeHoles1_f0_k0.35_out_rnd`). The
-//! solid is the upstream test file, read by the Rust reader when the pinned upstream
-//! checkout is present (as the difftest SMS tests do).
+//! The C++ reference builds a body of 47 faces, 100 edges and 53 vertices (difftest
+//! `offset.offset_executive_p2` `overlap_pc_extrudeHoles1_f0_k0.35_out_rnd`). It is not
+//! a solid: the checker finds 10 problems, the first a face with partially coincident
+//! edges, and the body is not manifold (measured by
+//! `offset_executive_p2::tests::moved_cases_results_measured`, #18927). It is built after
+//! a group of overlapping intersection curves was taken out of the intersection and its
+//! replacement failed (`CurveClassification::find_interval`: the parameter is before the
+//! start), which upstream ignores. The offset is refused there now, with
+//! `OverlapGroupNotReplaced` (#18927): the solve on the lent B-rep still runs (the
+//! refusal comes after it, not as `Unported`). The solid is the upstream test file, read
+//! by the Rust reader when the pinned upstream checkout is present (as the difftest SMS
+//! tests do).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -25,7 +33,6 @@ use offset_fixture::Notifications;
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
-use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
@@ -82,15 +89,22 @@ fn rounded_outset_sets_point_class_parameters_on_the_lent_brep() {
         SolidOffsetOptions::default(),
         &mut notifications.context(),
     );
-    let result = match result {
-        Ok(r) => r,
-        Err(e) => panic!("solid offset failed: {e}"),
-    };
-    // the live lists, as the shim's GetFaces / GetEdges / GetVertices walk them
-    let counts = (
-        brep_p1::faces(&result, None).unwrap().len(),
-        brep_p1::edges(&result, None).unwrap().len(),
-        brep_p1::vertices(&result, None).unwrap().len(),
+    let e = result
+        .err()
+        .expect("the overlap group's failed replacement is refused");
+    assert!(!e.is_unported_or_cancelled(), "{e}");
+    assert_eq!(e.sm_status(), Some(1001), "{e}");
+    let reasons: Vec<String> = std::iter::successors(Some(&e), |e| e.cause())
+        .filter_map(|e| e.failure().map(|f| format!("{:?}", f.reason)))
+        .collect();
+    assert!(
+        reasons
+            .first()
+            .is_some_and(|r| r.contains("OverlapGroupNotReplaced")),
+        "{e}: {reasons:?}"
     );
-    assert_eq!(counts, (47, 100, 53));
+    assert!(
+        e.to_string().contains("find_interval"),
+        "the failed step is the cause: {e}"
+    );
 }

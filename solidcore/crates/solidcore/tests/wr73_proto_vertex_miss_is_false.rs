@@ -11,14 +11,12 @@
 //! boolean's cleanup the proto vertices lie off the first proto edge's curve but inside
 //! later ones.
 //!
-//! With every other `Kernel::fixes` flag default (the two outcomes below were those of the
-//! fitted sweep; a sweep along lines and arcs is now built to its definition, flush with the
-//! rim, so the second crossing is gone and the union builds with the flag off as well):
-//! - off (upstream): every miss returns TRUE, the cleanup breaks at the first proto edge,
-//!   and the union is refused in `boolean::merge::p2::make_faceuse` with 1001;
-//! - on: a miss returns FALSE, the cleanup goes on to the remaining proto edges, removes
-//!   the coincident edgeless vertices, and the union is the block and the lip, 22 faces,
-//!   50 edges, 30 vertices.
+//! The port answers FALSE for a miss (WR-73; the opt-in `proto_vertex_miss_is_false` that
+//! made it so was retired in #18927): the cleanup goes on to the remaining proto edges and
+//! removes the coincident edgeless vertices. With the fitted sweep, upstream's TRUE refused
+//! the union in `boolean::merge::p2::make_faceuse` with 1001; a sweep along lines and arcs
+//! is now built to its definition, flush with the rim, so the second crossing is gone. The
+//! union is the block and the lip, 22 faces, 50 edges, 30 vertices.
 //!
 //! Measured twice with `cargo +1.98.0 test -p solidcore --test
 //! wr73_proto_vertex_miss_is_false`; both runs identical. The record is
@@ -145,40 +143,12 @@ fn closed_form() -> f64 {
     block + lip
 }
 
-/// The proto-vertex miss decides the union: with the flag off the first miss ends the
-/// cleanup at the first proto edge and the union is refused; with it on the cleanup tests
-/// every proto edge, removes the coincident edgeless vertices and joins the bodies.
-/// The off run pins the exact refusal; the on run pins the exact face, edge and vertex
-/// counts, the volume and the check, so a body that merely looks right (same volume, a
-/// different rim split) still fails.
+/// The union of the block and the lip: the exact face, edge and vertex counts, the volume
+/// and the check are pinned, so a body that merely looks right (same volume, a different
+/// rim split) still fails.
 #[test]
-fn wr73_proto_vertex_miss_is_false_lip_union_builds_with_either_setting() {
-    // Off (upstream: SmProtoTopology.cpp:6925 returns SM_SUCCESS, read as TRUE): the lip is
-    // swept to its definition, flush on the rim, so no proto vertex is missed and the union
-    // builds. The refusal this flag fixed needed the fitted net's second crossing of the rim
-    // arc, which a sweep along lines and arcs no longer has, so the flag has no input here.
+fn wr73_proto_vertex_miss_is_false_lip_union_builds() {
     let mut k = Kernel::default();
-    assert!(!k.fixes.proto_vertex_miss_is_false);
-    let a = block(&mut k);
-    let b = lip(&mut k);
-    let mut off = boolean_union(&mut k, a, b).unwrap();
-    assert_eq!(
-        (
-            off.face_list().len(),
-            off.edge_list().len(),
-            off.vertex_list().len()
-        ),
-        (22, 50, 30)
-    );
-    let got = volume(&k, &mut off);
-    assert!(
-        (got - closed_form()).abs() <= 1e-9 * closed_form(),
-        "volume {got}"
-    );
-
-    // On (the opt-in): the miss is FALSE, so the caller goes on to the other proto edges.
-    let mut k = Kernel::default();
-    k.fixes.proto_vertex_miss_is_false = true;
     let a = block(&mut k);
     let b = lip(&mut k);
     let mut joined = boolean_union(&mut k, a, b).unwrap();

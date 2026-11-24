@@ -346,6 +346,11 @@ pub enum BooleanFailure {
         /// The bound on the passes.
         passes: usize,
     },
+    /// Replacing a group of overlapping intersection curves failed after the group's
+    /// curves were taken out of the intersection: what is left records neither the group
+    /// nor its replacement, so no result built from it bounds the operands' overlap. The
+    /// failed step's error is the cause. Class `failed`.
+    OverlapGroupNotReplaced,
 }
 
 impl BooleanFailure {
@@ -391,7 +396,8 @@ impl BooleanFailure {
             | Self::LoopVertexUnrelated
             | Self::FaceListLimit { .. }
             | Self::EdgeListLimit { .. }
-            | Self::CoincidentFacesNotSettled { .. } => None,
+            | Self::CoincidentFacesNotSettled { .. }
+            | Self::OverlapGroupNotReplaced => None,
         }
     }
 
@@ -430,7 +436,8 @@ impl BooleanFailure {
             | Self::NotRelatedPair
             | Self::FaceListLimit { .. }
             | Self::EdgeListLimit { .. }
-            | Self::CoincidentFacesNotSettled { .. } => SM_ERR,
+            | Self::CoincidentFacesNotSettled { .. }
+            | Self::OverlapGroupNotReplaced => SM_ERR,
             Self::EntityMissing { .. }
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
@@ -471,7 +478,8 @@ impl BooleanFailure {
             | Self::NoCommonSubinterval
             | Self::NotRelatedPair
             | Self::LoopVertexUnrelated
-            | Self::EdgeNotSplit => ErrorKind::Failed,
+            | Self::EdgeNotSplit
+            | Self::OverlapGroupNotReplaced => ErrorKind::Failed,
             Self::EntityMissing { .. } => ErrorKind::Missing,
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::FaceWithoutSurface
@@ -662,6 +670,10 @@ impl core::fmt::Display for BooleanFailure {
                 f,
                 "the coincident faces still change after {passes} passes of merging their curves"
             ),
+            Self::OverlapGroupNotReplaced => f.write_str(
+                "replacing a group of overlapping intersection curves failed after the group \
+                 was taken out of the intersection",
+            ),
         }
     }
 }
@@ -808,6 +820,7 @@ mod tests {
             (F::EdgeRelationNotRepaired, SM_ERR, K::Failed),
             (F::NoCommonSubinterval, SM_ERR, K::Failed),
             (F::NotRelatedPair, SM_ERR, K::Failed),
+            (F::OverlapGroupNotReplaced, SM_ERR, K::Failed),
             (
                 F::SelfLoopSplitReachesVertex { needed: Some(0.5) },
                 SM_ERR,
