@@ -15,7 +15,7 @@ use solidcraft_io::{DxfFile, DxfLayerId, DxfLinetype, DxfShape};
 use solidcraft_viewport::Camera;
 
 use super::CommandSpec;
-use crate::mesh_lines::{self, Stage, View};
+use crate::mesh_lines::{self, Refused, Stage, View};
 use crate::params::{bad, str_};
 use crate::schema::silhouette::{DxfOutput, DxfProjection, DxfUnits, ExportViewDxfParams, ViewDxfResult, ViewDxfStats};
 use crate::schema::{TypedContract, output_schema_for};
@@ -74,15 +74,22 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
     }
     let started = web_time::Instant::now();
-    Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
-    let meshes = mesh_lines::prepare(s, CMD, tolerance, |b| s.body_visible(&b.name))?;
+    Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, refused(e)))?;
+    let meshes = mesh_lines::prepare(s, &*s.world_state()?, CMD, tolerance, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
-    let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
+    // The sketch runs (up to 4,000,000 points) go once the lines are made, not through writing.
     let view = View::from_camera(&cam);
-    let mut drawing = mesh_lines::drawing(&meshes, &sketch, &view).map_err(|e| bad(CMD, e))?;
+    let mut drawing = {
+        let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, refused(e)))?;
+        mesh_lines::drawing(&meshes, &sketch, &view).map_err(|e| bad(CMD, refused(e)))?
+    };
+    // A sketch under a body's outline is drawn once, as the body's line (#19507). Both curves are
+    // sampled at `tolerance`, so they can lie that far apart from each other twice over.
+    let reach = 2. * tolerance + drawing.eps;
+    drawing.sketch = mesh_lines::sketch_off_lines(std::mem::take(&mut drawing.sketch), &drawing.lines, reach);
     if at_origin {
         // The drawing is centred on the camera target; move it so the model origin is 0,0.
-        let zero = view.world_origin().map_err(|e| bad(CMD, e))?;
+        let zero = view.world_origin().map_err(|e| bad(CMD, refused(e)))?;
         for l in &mut drawing.lines {
             l.a -= zero;
             l.b -= zero;
@@ -94,7 +101,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let writing = Stage::new("dxf_write", 1);
-    writing.check().map_err(|e| bad(CMD, e))?;
+    writing.check().map_err(|e| bad(CMD, refused(e)))?;
     let sketch_points = drawing
         .sketch
         .iter()
@@ -135,7 +142,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let sketch = sketch_entities(drawing.sketch, dashed, &mut file, hidden_layer, sketch_layer)?;
     let text = solidcraft_io::write_dxf_file(&file)?;
-    writing.check().map_err(|e| bad(CMD, e))?;
+    writing.check().map_err(|e| bad(CMD, refused(e)))?;
     let stats = ViewDxfStats {
         bodies: meshes.placements.len(),
         shared_meshes: meshes.meshes.len(),
@@ -167,6 +174,16 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| bad(CMD, e.to_string()))
+}
+
+/// What a refusal of the view's lines says here, with what to do about it in a DXF's terms.
+fn refused(e: Refused) -> String {
+    match e {
+        Refused::Cancelled => "DXF export cancelled".into(),
+        Refused::Work | Refused::Memory => format!("{e}: hide bodies or sketches, or increase tolerance"),
+        Refused::EyePlane => format!("{e}: zoom out before exporting"),
+        Refused::Invalid(_) => e.to_string(),
+    }
 }
 
 /// `shapes` on `layer`, which must be declared when there are any.

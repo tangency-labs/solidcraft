@@ -1,7 +1,7 @@
 # Pending drawing-format changes
 
-One file per change to what a drawing file saves that no release has shipped yet. Drawings
-(`"format": "solidcraft-drawing/N"`, #3890) are versioned by the same code as designs
+One file per change to what a drawing saves (in its design's file) that no release has shipped
+yet. Drawings (`"format": "solidcraft-drawing/N"`, #3890) are versioned by the same code as designs
 (`crates/doc/src/format.rs`, `Family`), from their own first format, 1. Adding a file here is the
 whole format bump: never edit the `DRAWING` family in `format.rs`, another change's file or a
 `../v<N>/` folder.

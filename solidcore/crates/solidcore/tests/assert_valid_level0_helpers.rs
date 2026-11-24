@@ -334,3 +334,69 @@ fn the_downward_face_use_of_a_box_face_has_its_side_outside_the_surface() {
     assert_eq!(side.edgeuse_index, first_bad);
     assert!(side.on_natural_boundary);
 }
+
+/// Loop test 2 on the faces of `b` under a 0.005 face tolerance: every upward loop use passes,
+/// and the downward loop uses of every face (with `narrow_only`, of the faces narrower than
+/// the band of twice that tolerance) fail. How many faces are that narrow, by their corners.
+fn narrow_faces_keep_their_side(k: &Kernel, b: &mut Brep, narrow_only: bool) -> usize {
+    let tol = 0.005;
+    for f in b.face_list().to_vec() {
+        solidcore::topology::face::p3::set_tolerance(b, f, tol, true, true).unwrap();
+    }
+    let mut thin = 0;
+    for f in b.face_list().to_vec() {
+        // the face's extents along x, y and z, from its corners
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for &l in &b.face(f).unwrap().loops {
+            for le in &b.loop_(l).unwrap().edges {
+                for v in b.edge(le.edge).unwrap().vertices {
+                    let p = b.vertex(v).unwrap().point;
+                    for (i, c) in [p.x, p.y, p.z].into_iter().enumerate() {
+                        lo[i] = lo[i].min(c);
+                        hi[i] = hi[i].max(c);
+                    }
+                }
+            }
+        }
+        let widths = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+        let narrow = widths.iter().any(|&w| w > 0.0 && w < 2.0 * tol);
+        thin += usize::from(narrow);
+        let up = b.face(f).unwrap().faceuse.unwrap();
+        for &lu in &b.faceuse(up).unwrap().loopuses {
+            let side = is_loopuse_side_in_surface(k, b, lu, None, None).unwrap();
+            assert!(side.in_surface, "face {f:?} (widths {widths:?}): {side:?}");
+        }
+        if narrow || !narrow_only {
+            // the downward face use's loops run the other way round: still outside
+            let down = b.faceuse(up).unwrap().mate.unwrap();
+            for &lu in &b.faceuse(down).unwrap().loopuses {
+                let side = is_loopuse_side_in_surface(k, b, lu, None, None).unwrap();
+                assert!(!side.in_surface, "face {f:?} (widths {widths:?}): {side:?}");
+            }
+        }
+    }
+    thin
+}
+
+#[test]
+fn a_face_narrower_than_the_side_band_has_its_loop_side_in_the_surface() {
+    // #18540: a sample within twice the face tolerance of a side of the face's domain lies on
+    // that side. A face 0.008 across under a 0.005 tolerance, as a faceted STEP import has it,
+    // has every sample within that band of both opposite sides: each lies on the nearer, and
+    // the direction test holds each edge to its own side.
+    let mut k = Kernel::default();
+    // a plate: four of its faces are 0.008 across, two in U and two in V
+    let mut plate = create_box(&mut k, Point3::ZERO, 2.0, 0.008, 4.0).unwrap();
+    assert_eq!(
+        narrow_faces_keep_their_side(&k, &mut plate, false),
+        4,
+        "the plate's thin faces"
+    );
+    // a ring: its wall is 0.008 high, along V of a periodic surface
+    let mut ring = create_cylinder(&mut k, Point3::ZERO, 3.0, 0.008).unwrap();
+    assert_eq!(
+        narrow_faces_keep_their_side(&k, &mut ring, true),
+        1,
+        "the ring's wall"
+    );
+}

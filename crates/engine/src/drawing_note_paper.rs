@@ -1,0 +1,120 @@
+//! A drawing's notes on paper (#4896 W19i): one group for each note, its text starting at, centred on
+//! or ending at its place by its alignment ([`HAlign`], #20122), each line standing that way too (a note
+//! with no alignment, saved before them, is centred as a block with its lines starting at its left edge),
+//! at its own cap height or a dimension's, set in the drawing's lettering by the dimension's text
+//! rule ([`Text::set`]), with its own line breaks only. A note that points at the model has a leader
+//! from where each thing it points at is now to its text, ending in a dimension's arrowhead, with a
+//! landing on the side of the text it comes from: drawn once on each side, where the other leaders
+//! from that side meet it. A lost reference has no leader; the text stays where it is. A note on a view is centred on the view, as the view's lines are, and the scene moves it to
+//! the view's centre; one on a sheet sits from the sheet's corner. A view's label is set the same way,
+//! without a leader ([`label_group`]).
+
+use solidcore_record::Vec2;
+use solidcraft_doc::drawing::note::Note;
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::cell::HAlign;
+use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
+use solidcraft_geom::paper::{Group, Item, ObjectKind};
+use solidcraft_sketch::{PaperFonts, TextAlign, TextStyle};
+
+use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, OnPaper, TEXT_MM, Text, placed};
+
+/// `note`, reading `text` (its content with its fields read), at its place (from its sheet's corner,
+/// or from its view's centre as its view's lines are), in lines `line_mm` wide, a leader ending at
+/// each of `tips`, the ends it points at that are found: its group.
+pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, lettering: &PaperFonts) -> OnPaper {
+    let cap_mm = note.cap_mm.unwrap_or(TEXT_MM);
+    let text = Text::set(Some(text), cap_mm, lettering, &style(note));
+    // The text's box stands from its place by the alignment, level with it; its leaders, its landings
+    // and its group are laid out from the box.
+    let centre = box_centre(note, text.half);
+    let mut why = text.why;
+    let mut items = Vec::new();
+    // Whether a leader has drawn the landing on the text's left and on its right.
+    let mut landed = [false; 2];
+    for tip in tips {
+        match leader(*tip, centre, text.half, line_mm, &mut landed) {
+            Some(leader) => items.extend(leader),
+            None => why = why.or_else(|| Some("its leader ends too near its text to draw".to_string())),
+        }
+    }
+    items.extend(placed(text.runs, text.half, cap_mm, centre, Vec2::X));
+    OnPaper {
+        group: Group { object: note.id, kind: ObjectKind::Note, items },
+        fonts: text.fonts,
+        why,
+        pending: text.pending,
+        layout: Layout::default(),
+    }
+}
+
+/// How `note`'s lines stand in its box: by its alignment, or from the box's left edge for a note with none.
+fn style(note: &Note) -> TextStyle {
+    let align = match note.align {
+        Some(HAlign::Centre) => TextAlign::Center,
+        Some(HAlign::Right) => TextAlign::Right,
+        Some(HAlign::Left) | None => TextAlign::Left,
+    };
+    TextStyle { align, ..TextStyle::default() }
+}
+
+/// The middle of the box a text `half` in size takes round `note`'s place by its alignment: the box
+/// starts at the place for left, is centred on it, or ends at it for right. The one rule the group, its
+/// leaders and [`text_box`] share.
+fn box_centre(note: &Note, half: Vec2) -> Vec2 {
+    let reach = match note.align {
+        Some(HAlign::Left) => half.x,
+        Some(HAlign::Centre) | None => 0.0,
+        Some(HAlign::Right) => -half.x,
+    };
+    Vec2::new(note.at[0] + reach, note.at[1])
+}
+
+/// The height of a view label's capitals: the ISO 3098 height after a dimension's.
+const LABEL_MM: f64 = 5.0;
+
+/// View `view`'s label reading `text` (#13044), set as a note's text is, its capitals [`LABEL_MM`]
+/// high, centred on the origin for the scene to place by its view: its group, and half its size.
+pub fn label_group(view: u64, text: &str, lettering: &PaperFonts) -> (OnPaper, Vec2) {
+    let text = Text::set(Some(text), LABEL_MM, lettering, &TextStyle::default());
+    let items = placed(text.runs, text.half, LABEL_MM, Vec2::ZERO, Vec2::X).collect();
+    let group = Group { object: view, kind: ObjectKind::ViewLabel, items };
+    (OnPaper { group, fonts: text.fonts, why: text.why, pending: text.pending, layout: Layout::default() }, text.half)
+}
+
+/// The box `note`'s text, reading `text`, takes at its place by its alignment (from its sheet's corner, or from
+/// its view's centre), set in `lettering` as [`note_group`] sets it; None while it isn't set.
+pub fn text_box(note: &Note, text: &str, lettering: &PaperFonts) -> Option<Aabb2> {
+    let set = Text::set(Some(text), note.cap_mm.unwrap_or(TEXT_MM), lettering, &style(note));
+    if set.runs.is_empty() {
+        return None;
+    }
+    let centre = box_centre(note, set.half);
+    Some(Aabb2 { min: centre - set.half, max: centre + set.half })
+}
+
+/// A leader from `tip` to the text `half` in size round `centre`. From beside the text it ends with a
+/// landing on the side it comes from, unless one is drawn there (`landed`, left then right): then it
+/// ends where that landing starts. From over or under it, where a landing would run back through it,
+/// straight to the nearer side. None when it is too short for its arrowhead.
+fn leader(tip: Vec2, centre: Vec2, half: Vec2, line_mm: f64, landed: &mut [bool; 2]) -> Option<Vec<Item>> {
+    let landing = LANDING_PER_LINE_WIDTH * line_mm;
+    let beside = half.x + GAP_MM;
+    let (left, right) = (centre.x - beside, centre.x + beside);
+    let (end, landing_mm) = if tip.x < left - landing {
+        (left - landing, Some(landing))
+    } else if tip.x > right + landing {
+        (right + landing, Some(landing))
+    } else {
+        (if tip.x < centre.x { left } else { right }, None)
+    };
+    let side = landed.get_mut(usize::from(tip.x > centre.x))?;
+    let landing_mm = landing_mm.filter(|_| !*side);
+    let items = Leader { points: vec![tip, Vec2::new(end, centre.y)], landing_mm, terminator: ARROW, width_mm: line_mm }.items().ok()?;
+    *side |= landing_mm.is_some();
+    Some(items)
+}
+
+#[cfg(test)]
+#[path = "drawing_note_paper_tests.rs"]
+mod tests;

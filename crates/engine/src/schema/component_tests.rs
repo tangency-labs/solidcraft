@@ -41,7 +41,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MoveFeaturesParams>(), &["component", "features"]);
     assert_keys(input_schema_for::<MoveSketchesToPartsParams>(), &["sketches"]);
     assert_keys(input_schema_for::<ReparentItemsParams>(), &["bodies", "component", "component_path", "features", "occurrences"]);
-    assert_keys(input_schema_for::<CreateParams>(), &["activate", "grounded", "name", "parent", "parent_path"]);
+    assert_keys(input_schema_for::<CreateParams>(), &["activate", "bom_quantity", "grounded", "name", "parent", "parent_path", "virtual"]);
     assert_keys(input_schema_for::<FromBodiesParams>(), &["bodies"]);
     assert_keys(input_schema_for::<ActivateParams>(), &["component", "occurrence", "path"]);
     assert_keys(input_schema_for::<ListParams>(), &["bodies", "compact"]);
@@ -517,7 +517,7 @@ fn replies_match_the_output_schemas_of_the_component_commands() {
     let inserted = run("file.insert_mesh", json!({"path": rig_file("rig"), "up": "z"}));
     let rig = inserted["component"].clone();
     let unlocked = run("component.unlock", json!({"component": rig}));
-    assert!(unlocked["joints"].as_array().is_some_and(|j| !j.is_empty()), "{unlocked}");
+    assert!(unlocked["rigid_group"].as_u64().is_some(), "{unlocked}");
     matches(output_schema_for::<UnlockResult>(), "component.unlock", &unlocked);
 
     // Misspelt keys still run in Warn, say so, and the reply still matches.

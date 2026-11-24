@@ -7,6 +7,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::topology::topology::{self as topo, Topology, TopologyRecords};
@@ -198,9 +199,9 @@ impl OwningTopology {
                         .ok_or(broken_list(OP_UPDATE_SIZE))?;
                     // check back pointers
                     if rec(records, next, OP_UPDATE_SIZE)?.last() != Some(elem) {
-                        return Err(SolidError::topology_failed(
+                        return Err(SolidError::topology(
                             OP_UPDATE_SIZE,
-                            "a member's successor does not point back to it",
+                            TopologyFailure::OwnerListBroken,
                         ));
                     }
                     elem = next;
@@ -228,15 +229,15 @@ impl OwningTopology {
         on_list: Option<ObjectKey>,
     ) -> Result<()> {
         let (Some(ins), Some(cur)) = (to_insert, on_list) else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_INSERT_AFTER,
-                "an object to link is missing",
+                TopologyFailure::NothingToLink,
             ));
         };
         let Some(cur_next) = rec(records, cur, OP_INSERT_AFTER)?.next() else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_INSERT_AFTER,
-                "the list object has no successor",
+                TopologyFailure::OwnerListBroken,
             ));
         };
         rec(records, ins, OP_INSERT_AFTER)?;
@@ -324,17 +325,17 @@ impl OwningTopology {
 
         // check state - Object must be in our list.
         if r.owner() != Some(this) {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_REMOVE,
-                "the object is not on this list",
+                TopologyFailure::NotOnOwnerList,
             ));
         }
 
         // check state - look for problem circular list and ListOwner Ptrs
         let (Some(next), Some(last)) = (r.next(), r.last()) else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_REMOVE,
-                "the object has a null link",
+                TopologyFailure::OwnerListBroken,
             ));
         };
 
@@ -457,9 +458,11 @@ impl OwningTopology {
                     if count > self.list_size {
                         return Ok((
                             items,
-                            Err(SolidError::topology_failed(
+                            Err(SolidError::topology(
                                 OP_GET_ALL,
-                                "the list holds more members than its count",
+                                TopologyFailure::OwnerListOverCount {
+                                    list_size: self.list_size,
+                                },
                             )),
                         ));
                     }
@@ -558,11 +561,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.operation(), OP_INSERT_AFTER);
-        assert_eq!(
-            e.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "an object to link is missing"
-            ))
-        );
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NothingToLink));
     }
 }
