@@ -706,9 +706,13 @@ fn rust_edge_loop_face(k: &mut Kernel, f: &EdgeLoopFaceIn) -> Result<Brep, Solid
         solidcore::geom::tol::USE_DEFAULT,
         solidcore::geom::tol::USE_DEFAULT,
     )?;
-    let region = b
-        .infinite_region()
-        .ok_or_else(|| SolidError::null_pointer("difftest::face_p3::edge_loop_face"))?;
+    let region = b.infinite_region().ok_or_else(|| {
+        solidcore::error::Failure::new(
+            "difftest::face_p3::edge_loop_face",
+            solidcore::error::topology::TopologyFailure::InfiniteRegionNotFound,
+        )
+        .into_error()
+    })?;
     b.add_shell_record(solidcore::topology::Shell {
         faces: vec![FaceId::from_index(0)],
         region: Some(region),

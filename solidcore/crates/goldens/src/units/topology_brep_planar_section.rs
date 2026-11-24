@@ -15,6 +15,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
+use solidcore::error::topology::TopologyFailure;
+use solidcore::error::Failure;
 use solidcore::intersect::api_intersectors::intersect_brep_with_plane;
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
@@ -337,7 +339,13 @@ fn forced_record(
     for f in faces {
         let uv_domain = face2::uv_domain(b, f)?;
         let surface = face2::surface(b, f)?
-            .ok_or_else(|| SolidError::null_pointer("difftest::topology_brep_planar_section"))?
+            .ok_or_else(|| {
+                Failure::new(
+                    "difftest::topology_brep_planar_section",
+                    TopologyFailure::FaceWithoutSurface,
+                )
+                .into_error()
+            })?
             .clone_for_evaluation()?;
         let face_tol = face2::tolerance(b, f)?;
         let section = match face_planar_section_curves(
@@ -434,7 +442,13 @@ fn faces_record(
     for f in faces {
         let uv_domain = face2::uv_domain(b, f)?;
         let surface = face2::surface(b, f)?
-            .ok_or_else(|| SolidError::null_pointer("difftest::topology_brep_planar_section"))?
+            .ok_or_else(|| {
+                Failure::new(
+                    "difftest::topology_brep_planar_section",
+                    TopologyFailure::FaceWithoutSurface,
+                )
+                .into_error()
+            })?
             .clone_for_evaluation()?;
         match face_planar_section_curves(
             k, b, f, &surface, &uv_domain, point, normal, tol, ang_tol,

@@ -37,6 +37,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::topology::TopologyFailure;
+use solidcore::error::Failure;
 use solidcore::geom::context::{MarkLock, ALL_MARKS};
 use solidcore::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, Tri, TriedLinkType,
@@ -1733,7 +1735,7 @@ fn single_vertex_sphere_brep(
         let tol = b.tolerance();
         let inf = b
             .infinite_region()
-            .ok_or_else(|| SolidError::sm_err(OP_SVS))?;
+            .ok_or_else(|| Failure::new(OP_SVS, TopologyFailure::NoInfiniteRegion).into_error())?;
         // StartRegion
         let region = b.add_region_record(Region {
             in_brep: true,

@@ -641,7 +641,13 @@ fn is_nurb(
         .base()
         .gw_nurb()
         .cloned()
-        .ok_or_else(|| SolidError::null_pointer("difftest::surface_torus::is_nurb"))?;
+        .ok_or_else(|| {
+            solidcore::error::Failure::new(
+                "difftest::surface_torus::is_nurb",
+                solidcore::error::surface::SurfaceFailure::NoNurb,
+            )
+            .into_error()
+        })?;
     let ix = nurb.indices();
     for i in 0..=ix.n {
         for j in 0..=ix.m {

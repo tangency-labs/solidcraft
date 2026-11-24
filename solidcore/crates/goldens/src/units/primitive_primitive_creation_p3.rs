@@ -8,6 +8,10 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
+#[cfg(test)]
+use solidcore::error::topology::TopologyFailure;
+#[cfg(test)]
+use solidcore::error::Failure;
 use solidcore::error::{Result, SolidError};
 #[cfg(test)]
 use solidcore::geom::attribute::TagData;
@@ -382,7 +386,9 @@ impl SweepAccess for EmptyModel {
             .edge(edge.1)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer("primitive_p3_fixture"))?;
+            .ok_or_else(|| {
+                Failure::new("primitive_p3_fixture", TopologyFailure::EdgeWithoutCurve).into_error()
+            })?;
         Ok(None)
     }
     fn set_editing(&mut self, _: BrepId, value: bool) -> Result<bool> {

@@ -1079,8 +1079,13 @@ fn put_curve(o: &mut Vec<f64>, c: Option<&SmCurve>) -> Result<(), Fail> {
 /// `SmRegion::m_bIsVoidFlag` of the new B-rep's infinite region (`SmRegion::IsVoid`,
 /// unit `topology.shell`).
 fn region_void_flag(b: &Brep, r: Option<RegionId>) -> Result<f64, SolidError> {
-    let r =
-        r.ok_or_else(|| SolidError::null_pointer("difftest::topology_brep_p3::region_void_flag"))?;
+    let r = r.ok_or_else(|| {
+        solidcore::error::Failure::new(
+            "difftest::topology_brep_p3::region_void_flag",
+            solidcore::error::topology::TopologyFailure::InfiniteRegionNotFound,
+        )
+        .into_error()
+    })?;
     Ok(f64::from(b.region(r)?.is_void()))
 }
 

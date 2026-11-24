@@ -408,7 +408,13 @@ mod tests {
         // The expected run found nothing; the actual one failed and produced nothing.
         let expected = Output::new().values("points", Vec::<f64>::new());
         let actual = Output::from_result(
-            Err::<Vec<f64>, _>(solidcore::SolidError::sm_err("test")),
+            Err::<Vec<f64>, _>(
+                solidcore::error::Failure::new(
+                    "test",
+                    solidcore::error::query::QueryFailure::NoFoot,
+                )
+                .into_error(),
+            ),
             |_| "status_3".into(),
             |v| Output::new().values("points", v),
         );

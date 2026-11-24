@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
+use solidcore::error::query::QueryFailure;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::zone_tol3d;
 use solidcore::geom::vector2d::Point2;
@@ -401,10 +402,13 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                 let end = vu(1);
                 let point = |v: Option<VertexuseId>, default| -> solidcore::Result<Vec3> {
                     if let Some(v) = v {
-                        let vertex = b
-                            .vertexuse(v)?
-                            .vertex
-                            .ok_or_else(|| SolidError::null_pointer("difftest::brep_p9"))?;
+                        let vertex = b.vertexuse(v)?.vertex.ok_or_else(|| {
+                            solidcore::error::Failure::new(
+                                "difftest::brep_p9",
+                                QueryFailure::VertexuseWithoutVertex,
+                            )
+                            .into_error()
+                        })?;
                         Ok(b.vertex(vertex)?.point)
                     } else {
                         Ok(default)
@@ -443,8 +447,13 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                     BrepMerge, PointClassType, PointClassification,
                 };
                 use solidcore::EntityRef;
-                let edge = target::<EdgeId>(b.edges().len(), i.selector)
-                    .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?;
+                let edge = target::<EdgeId>(b.edges().len(), i.selector).ok_or_else(|| {
+                    solidcore::error::Failure::new(
+                        "difftest::brep_p9",
+                        QueryFailure::BrepWithoutEdges,
+                    )
+                    .into_error()
+                })?;
                 let target = if i.op == 6 {
                     EntityRef::Edge(edge)
                 } else {
@@ -507,8 +516,13 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                 ordinary(result)
             }
             8 => {
-                let face = target::<FaceId>(b.faces().len(), i.selector)
-                    .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?;
+                let face = target::<FaceId>(b.faces().len(), i.selector).ok_or_else(|| {
+                    solidcore::error::Failure::new(
+                        "difftest::brep_p9",
+                        QueryFailure::BrepWithoutFaces,
+                    )
+                    .into_error()
+                })?;
                 let f = b.face(face)?;
                 let surface = f
                     .surface

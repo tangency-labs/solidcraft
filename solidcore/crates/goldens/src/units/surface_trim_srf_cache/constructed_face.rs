@@ -66,7 +66,13 @@ pub(super) fn run(k: &mut Kernel, surface: BSplineSurface, build: bool, points: 
     let source = record
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer("difftest::constructed_face"))?;
+        .ok_or_else(|| {
+            solidcore::error::Failure::new(
+                "difftest::constructed_face",
+                solidcore::error::surface::SurfaceFailure::FaceHasNoSurface,
+            )
+            .into_error()
+        })?;
     // Retain exactly the constructed face's geometry, owner and tolerance, as the
     // native-face lane does. A normal Clone can fix B-spline knots a second time.
     let SurfaceKind::BSpline(source_bss) = source.kind() else {

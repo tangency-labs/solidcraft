@@ -412,9 +412,13 @@ fn build_mixed_box(k: &mut Kernel, size: [f64; 3]) -> SolidResult<Brep> {
     use solidcore::topology::brep::p2::{replace_surface, ArenaNotifyState, OldSurface};
     use solidcore::topology::brep_cache::{arena_identity, CacheObject};
     let mut b = build_box(k, size, 0.0)?;
-    let face = *bl::faces(&b, None)?
-        .first()
-        .ok_or_else(|| SolidError::sm_err("difftest::topology_api_files::build_mixed_box"))?;
+    let face = *bl::faces(&b, None)?.first().ok_or_else(|| {
+        solidcore::error::Failure::new(
+            "difftest::topology_api_files::build_mixed_box",
+            solidcore::error::query::QueryFailure::BrepWithoutFaces,
+        )
+        .into_error()
+    })?;
     let nurb = match b.face(face)?.surface.as_ref().map(Surface::kind) {
         Some(SurfaceKind::Plane(p)) => Surface::from(p.base_with_nurb()?.into_owned()),
         _ => {

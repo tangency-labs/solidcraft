@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::{BoundedLineOptions, Line};
+use solidcore::error::query::QueryFailure;
+use solidcore::error::topology::TopologyFailure;
+use solidcore::error::Failure;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use solidcore::geom::extent1d::Extent1d;
@@ -125,7 +128,8 @@ fn rust_record(
     let v2 = vertex(b, i.second);
     let e = edge(b, i.aux);
     let face = face(b, i.first);
-    let null = || SolidError::null_pointer("difftest::topology_brep_p5");
+    let null =
+        || Failure::new("difftest::topology_brep_p5", TopologyFailure::NoVertexGiven).into_error();
     let r = match i.op {
         1 => {
             let mut deleted = e;
@@ -332,8 +336,10 @@ fn notification_record(b: &Brep, i: &Inputs) -> SolidResult<Vec<f64>> {
         type_code,
         key: ObjectKey(key),
     };
-    let a = vertex(b, i.first).ok_or_else(|| SolidError::null_pointer("notification fixture"))?;
-    let z = vertex(b, i.second).ok_or_else(|| SolidError::null_pointer("notification fixture"))?;
+    let no_vertex =
+        || Failure::new("notification fixture", TopologyFailure::NoVertexGiven).into_error();
+    let a = vertex(b, i.first).ok_or_else(no_vertex)?;
+    let z = vertex(b, i.second).ok_or_else(no_vertex)?;
     let v1 = object(16021, 1_000_000 + u64::from(a.index()));
     let v2 = object(16021, 1_000_000 + u64::from(z.index()));
     let brep = object(16011, 0);
@@ -410,13 +416,13 @@ fn notification_record(b: &Brep, i: &Inputs) -> SolidResult<Vec<f64>> {
         send(Construction, v1, Some(v1), None, None)?;
         send(Destruction, v2, Some(v2), None, None)?;
     } else {
-        let e = edge(b, i.aux).ok_or_else(|| SolidError::null_pointer("notification edge"))?;
+        let e = edge(b, i.aux).ok_or_else(|| {
+            Failure::new("notification edge", QueryFailure::NoEdgeGiven).into_error()
+        })?;
         let edge_ref = object(16016, 2_000_000 + u64::from(e.index()));
-        let curve = b
-            .edge(e)?
-            .curve
-            .as_ref()
-            .ok_or_else(|| SolidError::null_pointer("notification curve"))?;
+        let curve = b.edge(e)?.curve.as_ref().ok_or_else(|| {
+            Failure::new("notification curve", TopologyFailure::EdgeWithoutCurve).into_error()
+        })?;
         let curve_ref = object(curve.type_code(), 3_000_000);
         // The native fixture constructs this curve owned by this actual edge.
         owners.insert(curve_ref.key, Some(edge_ref));

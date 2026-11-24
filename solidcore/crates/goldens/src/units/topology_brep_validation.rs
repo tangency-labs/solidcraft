@@ -16,6 +16,8 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::topology::brep::validation;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
+use solidcore::error::topology::{ConstructorPart, TopologyFailure};
+use solidcore::error::Failure;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::{Point2, Vec2};
@@ -542,6 +544,26 @@ fn opt_err<T>(x: Option<T>, op: &'static str) -> Result<T, SolidError> {
     x.ok_or_else(|| sm_err(op))
 }
 
+/// `SmBrepConstructor`'s call `call` needs `part` open, and it is not.
+fn not_open(op: &'static str, call: &'static str, part: ConstructorPart) -> SolidError {
+    Failure::new(op, TopologyFailure::ConstructorNotOpen { call, part }).into_error()
+}
+
+/// `SmBrepConstructor`'s call `call` needs `part` closed, and it is still open.
+fn still_open(op: &'static str, call: &'static str, part: ConstructorPart) -> SolidError {
+    Failure::new(op, TopologyFailure::ConstructorStillOpen { call, part }).into_error()
+}
+
+/// The open `part` a constructor call needs, or [`not_open`].
+fn need<T>(
+    x: Option<T>,
+    op: &'static str,
+    call: &'static str,
+    part: ConstructorPart,
+) -> Result<T, SolidError> {
+    x.ok_or_else(|| not_open(op, call, part))
+}
+
 impl Constructor {
     /// `StartBrep` (the B-rep is the caller's new one).
     fn new() -> Self {
@@ -559,7 +581,7 @@ impl Constructor {
     fn start_shell(&mut self, b: &mut Brep) -> Result<ShellId, SolidError> {
         const OP: &str = "difftest::brep_validation::start_shell";
         if self.outer_shell.is_some() {
-            return Err(sm_err(OP));
+            return Err(still_open(OP, "StartShell", ConstructorPart::Shell));
         }
         let region = opt_err(b.infinite_region(), OP)?;
         let shell = b.add_shell_record(Shell {
@@ -577,7 +599,7 @@ impl Constructor {
     /// (`OPPOSITE`) face uses, both posted into the outer shell.
     fn start_face(&mut self, b: &mut Brep) -> Result<FaceId, SolidError> {
         const OP: &str = "difftest::brep_validation::start_face";
-        let shell = opt_err(self.outer_shell, OP)?;
+        let shell = need(self.outer_shell, OP, "StartFace", ConstructorPart::Shell)?;
         let tolerance = b.tolerance();
         let face = b.add_face_record(Face {
             tolerance,
@@ -617,7 +639,7 @@ impl Constructor {
         uv_domain: Extent2d,
     ) -> Result<(), SolidError> {
         const OP: &str = "difftest::brep_validation::set_face_surface";
-        let face = opt_err(self.face, OP)?;
+        let face = need(self.face, OP, "SetFaceSurface", ConstructorPart::Face)?;
         surface.set_owner(Some(arena_identity(CacheObject::Face(face))));
         let f = b.face_mut(face)?;
         f.surface = Some(surface);
@@ -629,7 +651,7 @@ impl Constructor {
     /// (the first loop of a face use outer, `SAME`).
     fn start_loop(&mut self, b: &mut Brep) -> Result<LoopId, SolidError> {
         const OP: &str = "difftest::brep_validation::start_loop";
-        let face = opt_err(self.face, OP)?;
+        let face = need(self.face, OP, "StartLoop", ConstructorPart::Face)?;
         self.edge = None;
         let fu1 = opt_err(b.face(face)?.faceuse, OP)?;
         let fu2 = opt_err(b.faceuse(fu1)?.mate, OP)?;
@@ -675,7 +697,7 @@ impl Constructor {
         mut end_vertex: Option<VertexId>,
     ) -> Result<EdgeId, SolidError> {
         const OP: &str = "difftest::brep_validation::start_edge";
-        let l = opt_err(self.loop_, OP)?;
+        let l = need(self.loop_, OP, "StartEdge", ConstructorPart::Loop)?;
         let edge = match existing_edge {
             None => {
                 let tolerance = b.tolerance();
@@ -778,7 +800,7 @@ impl Constructor {
                 // the radial sector: the primary's mate of a lamina edge (the shim's
                 // shared edges join one face to another, never a third)
                 if !solidcore::topology::edge::is_lamina(b, edge)? {
-                    return Err(sm_err(OP));
+                    return Err(Failure::new(OP, TopologyFailure::NotLamina).into_error());
                 }
                 solidcore::topology::edge::add_oriented_eu_pair(b, edge, eu1, eu2, Some(eu_mate))?;
         }
@@ -790,10 +812,10 @@ impl Constructor {
     /// `SetEdgeCurve(curve, FALSE)`: the 3D curve of an edge without one, owned by it.
     fn set_edge_curve(&mut self, b: &mut Brep, mut curve: Curve) -> Result<(), SolidError> {
         const OP: &str = "difftest::brep_validation::set_edge_curve";
-        let edge = opt_err(self.edge, OP)?;
-        opt_err(self.edgeuse, OP)?;
+        let edge = need(self.edge, OP, "SetEdgeCurve", ConstructorPart::Edge)?;
+        need(self.edgeuse, OP, "SetEdgeCurve", ConstructorPart::Edge)?;
         if b.edge(edge)?.curve.is_some() {
-            return Err(sm_err(OP));
+            return Err(Failure::new(OP, TopologyFailure::EdgeCurveAlreadySet).into_error());
         }
         let _ = curve.set_owner(
             Some(arena_identity(CacheObject::Edge(edge))),
@@ -807,16 +829,17 @@ impl Constructor {
     /// interval is set directly.
     fn set_limits(&mut self, b: &mut Brep, min: f64, max: f64) -> Result<(), SolidError> {
         const OP: &str = "difftest::brep_validation::set_limits";
-        let edge = opt_err(self.edge, OP)?;
+        let edge = need(self.edge, OP, "SetLimits", ConstructorPart::Edge)?;
         if b.edge(edge)?.curve.is_none() {
-            return Err(sm_err(OP));
+            return Err(not_open(OP, "SetLimits", ConstructorPart::EdgeCurve));
         }
         b.edge_mut(edge)?.interval.set_min_max(min, max)
     }
 
     /// `EndEdge`.
     fn end_edge(&mut self) -> Result<(), SolidError> {
-        opt_err(self.edge, "difftest::brep_validation::end_edge").map(|_| ())
+        const OP: &str = "difftest::brep_validation::end_edge";
+        need(self.edge, OP, "EndEdge", ConstructorPart::Edge).map(|_| ())
     }
 
     /// `EndLoop`: a vertex for every vertex use of the up loop use (shared through the
@@ -824,7 +847,7 @@ impl Constructor {
     /// and the down loop use's vertex uses hooked to the same vertices.
     fn end_loop(&mut self, k: &Kernel, b: &mut Brep) -> Result<(), SolidError> {
         const OP: &str = "difftest::brep_validation::end_loop";
-        let l = opt_err(self.loop_, OP)?;
+        let l = need(self.loop_, OP, "EndLoop", ConstructorPart::Loop)?;
         let lu = opt_err(b.loop_(l)?.loopuse, OP)?;
         let vertexuses = solidcore::topology::loopuse::vertexuses(b, lu, None)?;
         for vu in vertexuses {
@@ -904,8 +927,11 @@ impl Constructor {
     /// `EndFace`.
     fn end_face(&mut self) -> Result<(), SolidError> {
         const OP: &str = "difftest::brep_validation::end_face";
-        if self.face.is_none() || self.loop_.is_some() {
-            return Err(sm_err(OP));
+        if self.face.is_none() {
+            return Err(not_open(OP, "EndFace", ConstructorPart::Face));
+        }
+        if self.loop_.is_some() {
+            return Err(still_open(OP, "EndFace", ConstructorPart::Loop));
         }
         self.face = None;
         Ok(())
@@ -914,8 +940,11 @@ impl Constructor {
     /// `EndShell(FALSE)` (no stitching).
     fn end_shell(&mut self) -> Result<(), SolidError> {
         const OP: &str = "difftest::brep_validation::end_shell";
-        if self.outer_shell.is_none() || self.face.is_some() {
-            return Err(sm_err(OP));
+        if self.outer_shell.is_none() {
+            return Err(not_open(OP, "EndShell", ConstructorPart::Shell));
+        }
+        if self.face.is_some() {
+            return Err(still_open(OP, "EndShell", ConstructorPart::Face));
         }
         self.outer_shell = None;
         Ok(())
@@ -923,8 +952,18 @@ impl Constructor {
 
     /// `EndBrep`.
     fn end_brep(&self) -> Result<(), SolidError> {
-        if self.outer_shell.is_some() || self.face.is_some() || self.loop_.is_some() {
-            return Err(sm_err("difftest::brep_validation::end_brep"));
+        const OP: &str = "difftest::brep_validation::end_brep";
+        let open = if self.outer_shell.is_some() {
+            Some(ConstructorPart::Shell)
+        } else if self.face.is_some() {
+            Some(ConstructorPart::Face)
+        } else if self.loop_.is_some() {
+            Some(ConstructorPart::Loop)
+        } else {
+            None
+        };
+        if let Some(part) = open {
+            return Err(still_open(OP, "EndBrep", part));
         }
         Ok(())
     }

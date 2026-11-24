@@ -478,7 +478,14 @@ impl ExecutiveAccess<Handle> for Access {
             .edge(id)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| {
+                solidcore::error::Failure::new(
+                    OP,
+                    solidcore::error::blend::BlendFailure::EdgeWithoutCurve,
+                )
+                .at(solidcore::EntityRef::Edge(id))
+                .into_error()
+            })?;
         let knots = curve.knots(k, None)?.0;
         if let std::collections::btree_map::Entry::Vacant(entry) = self.edge_caches.entry(id) {
             // The cache manager returns null on construction failure; LoadFilletSolver
@@ -495,7 +502,16 @@ impl ExecutiveAccess<Handle> for Access {
                 if error.is_unported() {
                     error
                 } else {
-                    SolidError::null_pointer(OP)
+                    solidcore::error::Failure::new(
+                        OP,
+                        solidcore::error::blend::BlendFailure::Solver(
+                            solidcore::error::blend::SolverFailure::EdgeCurveCacheNotBuilt {
+                                edge: id,
+                            },
+                        ),
+                    )
+                    .caused_by(error)
+                    .into_error()
                 }
             })?;
             entry.insert(cache);
@@ -814,7 +830,14 @@ impl ExecutiveAccess<Handle> for Access {
             .edgeuse(eu)?
             .edge
             .map(Handle::Edge)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| {
+                solidcore::error::Failure::new(
+                    P2_OP,
+                    solidcore::error::blend::BlendFailure::EdgeUseWithoutEdge,
+                )
+                .at(solidcore::EntityRef::Edgeuse(eu))
+                .into_error()
+            })
     }
     fn solver_approx_tolerance(&self, _: Handle) -> SolidResult<f64> {
         missing()

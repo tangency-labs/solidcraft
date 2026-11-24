@@ -1224,6 +1224,8 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::error::topology::TopologyFailure;
+    use solidcore::error::Failure;
     use solidcore::geom::extent2d::Extent2d;
     use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use solidcore::surface::{plane::Plane, surface::Surface};
@@ -1330,7 +1332,7 @@ mod tests {
             .edge(EdgeId::from_index(0))?
             .curve
             .clone()
-            .ok_or_else(|| SolidError::null_pointer("test"))?;
+            .ok_or_else(|| Failure::new("test", TopologyFailure::EdgeWithoutCurve).into_error())?;
         let input = FaceInput {
             region: (BrepId::from_index(0), RegionId::from_index(0)),
             loop_counts: vec![1],
@@ -1387,7 +1389,7 @@ mod tests {
         let curve = edge
             .curve
             .clone()
-            .ok_or_else(|| SolidError::null_pointer("test"))?;
+            .ok_or_else(|| Failure::new("test", TopologyFailure::EdgeWithoutCurve).into_error())?;
         let interval = edge.interval;
         assert!(matches!(
             model.make_edge_in_face(

@@ -691,7 +691,13 @@ impl TopologyObjects<Object> for Objects<'_> {
             ShapeMember::Vertex((b, v)) => Object(b.index() as usize, CacheObject::Vertex(v)),
             ShapeMember::Edge((b, e)) => Object(b.index() as usize, CacheObject::Edge(e)),
             ShapeMember::Face((b, f)) => Object(b.index() as usize, CacheObject::Face(f)),
-            ShapeMember::Other => return Err(SolidError::sm_err("shape handle")),
+            ShapeMember::Other => {
+                return Err(solidcore::error::Failure::new(
+                    "shape handle",
+                    solidcore::error::query::QueryFailure::UnsupportedObjectKind,
+                )
+                .into_error())
+            }
         })
     }
 }
