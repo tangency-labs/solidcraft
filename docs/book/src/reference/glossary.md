@@ -202,6 +202,16 @@ They are listed together in the browser's *Construction* folder.
 - **Elsewhere:** construction plane, reference plane, datum plane (and axis, point).
 - **For translators:** not a sketch's construction entity.
 
+### continuous member
+
+One physical length of structural stock following a connected tangent path of straight lines
+and circular bends.
+
+- **In SolidCraft:** `frame.member` with `continuous: true`; the selected curves are saved in
+  path order and produce one body, with its name pinned to the feature's `$path` key.
+- **For translators:** a member group can contain several separate stock pieces; selecting a
+  group does not join those pieces into one length of stock.
+
 ### curve
 
 A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spline or a conic.
@@ -817,3 +827,7 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 - **British or American spelling** in the docs. The labels are settled: `en.json` is American
   English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
   both (colour and color, centre and center); ids and keys use American spelling.
+
+## Gusset
+
+A reinforcing plate fitted between two structural support faces. SolidCraft keeps it as a separate fabrication body with its own dimensions and persistent attachments.

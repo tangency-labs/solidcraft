@@ -1365,7 +1365,7 @@ fn step_and_component_link_schema_keys_and_replies() {
         input_schema_for::<InsertStepParams>(),
         &["envelope", "flatten", "folder", "history", "link", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
     );
-    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
+    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
     let examples = [
