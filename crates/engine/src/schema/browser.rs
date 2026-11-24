@@ -168,6 +168,10 @@ pub struct RemoveHistoryResult {
     pub volume_after: f64,
     /// Features that worked before and now fail: a reference the base feature's faces do not keep.
     pub broken: Vec<RemoveHistoryBroken>,
+    /// References to the body's faces (sketch attachments, face appearances, print faces) that
+    /// could not move to the base feature's faces, each with why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

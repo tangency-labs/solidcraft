@@ -35,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("body.remove_history", 
     .contract(&CONTRACT)
     .output(output_schema_for::<RemoveHistoryResult>)
     .params(
-        "body: its name → feature, name: the base feature that now holds the body's B-rep; removed: [the features that went: those that built only this body, and the sketches only they used]; kept: [features that built this body and also build or change other bodies, so they stay]; remove?: the Remove feature added before the base when kept features still build the body; faces, edges, vertices, volume_before, volume_after: the body before and after; broken: [{feature, error}] (features that worked and now fail). One undo step; refused, with why, when nothing can be removed",
+        "body: its name → feature, name: the base feature that now holds the body's B-rep; removed: [the features that went: those that built only this body, and the sketches only they used]; kept: [features that built this body and also build or change other bodies, so they stay]; remove?: the Remove feature added before the base when kept features still build the body; faces, edges, vertices, volume_before, volume_after: the body before and after; broken: [{feature, error}] (features that worked and now fail); notes?: [references to the body's faces that could not move to the base feature's]. One undo step; refused, with why, when nothing can be removed",
     )];
 
 /// The body as it is frozen, and the base feature's STEP with each of its faces' place in it.
@@ -75,6 +75,8 @@ struct Trial {
     remove: Option<u64>,
     removed: Vec<u64>,
     broken: Vec<(String, String)>,
+    /// What could not move to the base feature's faces.
+    notes: Vec<String>,
 }
 
 /// A body's shape as the checks compare it: faces, edges, vertices, shells and volume.
@@ -239,6 +241,7 @@ fn remove_history(s: &mut Session, p: &Value) -> Result<Value> {
         volume_before: want.0.volume,
         volume_after: after.volume,
         broken,
+        notes: t.notes.clone(),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| bad(CMD, e.to_string()))
@@ -323,6 +326,17 @@ fn trial(
         map.entry(old.clone()).and_modify(|previous| *previous = None).or_insert(new);
     }
     let map: BTreeMap<String, Option<String>> = map.into_iter().filter(|(_, new)| new.is_some()).collect();
+    // The attachments that name the body's faces by what made them (a sketch on a face, a face's
+    // appearance, a print face) move to the base feature's faces, measured on the design built
+    // with the removed features left out (suppressed), and keep their sketches where they were.
+    let renamed: BTreeMap<String, String> = map.iter().filter_map(|(old, new)| Some((old.clone(), new.clone()?))).collect();
+    let mut first = doc.clone();
+    for f in first.features.iter_mut().filter(|f| gone.contains(&f.id)) {
+        f.suppressed = true;
+    }
+    let mut probe = s.model.clone();
+    probe.evaluate(&first);
+    let notes = doc.rebind_frozen_faces(&s.doc, name, base, &renamed, &s.model.state(), &probe.state());
     let none = BTreeMap::new();
     let none_bodies = BTreeMap::new();
     let rename = |text: &str| -> Option<String> {
@@ -342,7 +356,7 @@ fn trial(
         moved(joint, &rename)?;
     }
     for face in doc.appearances.faces.iter_mut().filter(|face| face.body == name) {
-        if let Some(new) = face.name.as_deref().and_then(&rename) {
+        if let Some(new) = face.name.as_deref().and_then(rename) {
             face.name = Some(new);
         }
     }
@@ -352,7 +366,7 @@ fn trial(
             removed.extend(doc.delete_feature(id)?);
         }
     }
-    let mut model = s.model.clone();
+    let mut model = probe;
     model.evaluate(&doc);
     if let Some(error) = model.result(base).and_then(|r| r.error.clone()) {
         return Err(bad(CMD, format!("the base feature fails: {error}")));
@@ -386,5 +400,5 @@ fn trial(
         return Err(bad(CMD, format!("{name} would move to another component")));
     }
     let broken = super::edit::newly_broken_in_history(&s.doc, &s.model, &doc, &model);
-    Ok(Trial { doc, model, base, remove, removed, broken })
+    Ok(Trial { doc, model, base, remove, removed, broken, notes })
 }

@@ -123,6 +123,47 @@ impl Document {
     /// only the old face's persistent name, as linked joints do; never use its picked point.
     /// Persisting the renewed certificate also keeps the attachment valid after Break Link.
     pub fn rebind_linked_faces(&mut self, feature: u64, before: &ModelState, after: &ModelState) -> Vec<String> {
+        let pick = |target: &ConfigFaceTarget| {
+            (target.origin_feature == feature && matches!(target.certificate, Some(crate::config::FaceCertificate::Imported { .. })))
+                .then(|| target.name.clone())
+        };
+        self.rebind_faces(None, feature, before, after, &pick)
+    }
+
+    /// Move the face attachments on `body` to the faces of the base feature `feature` that Remove
+    /// History put in its place: `renamed` gives each of the body's face names the name of the
+    /// base feature's face it became. `before_doc` is the design before, whose features made the
+    /// faces the attachments name now. A sketch on such a face stays where it was. What can't
+    /// move is said, never dropped.
+    pub fn rebind_frozen_faces(
+        &mut self,
+        before_doc: &Document,
+        body: &str,
+        feature: u64,
+        renamed: &std::collections::BTreeMap<String, String>,
+        before: &ModelState,
+        after: &ModelState,
+    ) -> Vec<String> {
+        let pick = |target: &ConfigFaceTarget| {
+            if target.body != body {
+                return None;
+            }
+            renamed.get(&target.name).or_else(|| renamed.get(crate::naming::strip_piece(&target.name))).cloned()
+        };
+        self.rebind_faces(Some(before_doc), feature, before, after, &pick)
+    }
+
+    /// The face attachments `pick` names a face of `feature`'s for (by its name there), given that
+    /// face's certificate in `after`, with sketches on them kept where they were in `before`.
+    /// `before_doc` is the design `before` was evaluated from, when it is not this one.
+    fn rebind_faces(
+        &mut self,
+        before_doc: Option<&Document>,
+        feature: u64,
+        before: &ModelState,
+        after: &ModelState,
+        pick: &dyn Fn(&ConfigFaceTarget) -> Option<String>,
+    ) -> Vec<String> {
         use crate::config::FaceCertificate;
         use crate::feature_geometry::Geo;
         use crate::walk::Walk;
@@ -173,18 +214,23 @@ impl Document {
         }
 
         let doc = self.clone();
+        let old_doc = before_doc.unwrap_or(&doc);
+        let linked = before_doc.is_none();
         let mut warnings = Vec::new();
         let mut flat_lost: Vec<String> = Vec::new();
         let mut renew = |target: &mut ConfigFaceTarget, label: &str| -> bool {
-            if target.origin_feature != feature || !matches!(target.certificate, Some(FaceCertificate::Imported { .. })) {
+            let Some(name) = pick(target) else {
                 return false;
-            }
+            };
             let certificate = || -> Result<FaceCertificate> {
-                let missing = || DocError::Unknown(format!("linked face `{}` on `{}` no longer exists", target.name, target.body));
+                let missing = || {
+                    let what = if linked { "linked face" } else { "face" };
+                    DocError::Unknown(format!("{what} `{}` on `{}` no longer exists", target.name, target.body))
+                };
                 let old = before.bodies.iter().find(|b| b.definition_name() == target.body).ok_or_else(missing)?;
-                doc.configuration_face_indices(old, target)?;
+                old_doc.configuration_face_indices(old, target)?;
                 let new = after.bodies.iter().find(|b| b.definition_name() == target.body).ok_or_else(missing)?;
-                let indices = crate::naming::faces_with_stem(new, &target.name);
+                let indices = crate::naming::faces_with_stem(new, &name);
                 let mut certificate = None;
                 for index in indices {
                     if !matches!(new.body.face_sources().and_then(|sources| sources.get(index)), Some(Some(solidcraft_kernel::FaceSource::Imported { producer: Some(id), .. })) if *id == feature)
@@ -202,7 +248,9 @@ impl Document {
             match certificate() {
                 Ok(certificate) => {
                     target.certificate = Some(certificate);
-                    if target.name.starts_with(&format!("F{feature}:face:")) {
+                    target.name = name;
+                    target.origin_feature = feature;
+                    if linked && target.name.starts_with(&format!("F{feature}:face:")) {
                         warnings.push(format!("{label} refers to a linked face by its place in the file; check its attachment after this update"));
                     }
                     true
@@ -223,14 +271,17 @@ impl Document {
             for anchor in targets {
                 // The anchor's coordinates are measured from the face's own plane, whose origin
                 // moves with the source. Keep the sketch where it was when the face stays in its plane.
-                let old = doc.anchor_canonical_plane(anchor, f.component, before);
+                let old = old_doc.anchor_canonical_plane(anchor, f.component, before);
                 if renew(&mut anchor.target, &format!("feature {}", f.name))
                     && let Some(old) = old
                 {
                     let Some(new) = doc.anchor_canonical_plane(anchor, f.component, after) else {
                         flat_lost.push(format!(
-                            "feature {}: linked face `{}` on `{}` no longer exists as a flat face",
-                            f.name, anchor.target.name, anchor.target.body
+                            "feature {}: {} `{}` on `{}` no longer exists as a flat face",
+                            f.name,
+                            if linked { "linked face" } else { "face" },
+                            anchor.target.name,
+                            anchor.target.body
                         ));
                         continue;
                     };
@@ -268,7 +319,9 @@ impl Document {
                     point: face.point,
                     certificate: face.certificate.clone(),
                 };
-                renew(&mut target, "face appearance");
+                if renew(&mut target, "face appearance") {
+                    face.name = Some(target.name);
+                }
                 face.certificate = target.certificate;
             }
         }

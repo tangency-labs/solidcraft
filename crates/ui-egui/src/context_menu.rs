@@ -2578,14 +2578,17 @@ fn remove_history(app: &mut SolveApp, p: Value) {
     };
     let (removed, kept, broken) = (names("removed"), names("kept"), names("broken"));
     let count = removed.len().to_string();
+    let notes: Vec<String> = out.get("notes").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
     let message = if !broken.is_empty() {
         solidcraft_ui_text::format("browser.remove_history_broken", &[("removed", &count), ("features", &broken.join(", "))])
+    } else if !notes.is_empty() {
+        solidcraft_ui_text::format("browser.remove_history_unmoved", &[("removed", &count), ("notes", &notes.join("; "))])
     } else if !kept.is_empty() {
         solidcraft_ui_text::format("browser.remove_history_kept", &[("removed", &count), ("features", &kept.join(", "))])
     } else {
         solidcraft_ui_text::format("browser.remove_history_done", &[("removed", &count)])
     };
-    app.set_status(message, !broken.is_empty());
+    app.set_status(message, !broken.is_empty() || !notes.is_empty());
 }
 
 /// Section View on a face: the Section Analysis dialog on the face's plane (its outward normal,
