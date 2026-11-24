@@ -29,6 +29,9 @@ macro_rules! layout_preferences {
             browser_rows_start_closed: bool = false, PAGE_LAYOUT;
             /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
             clear_view_tabs: bool = true, PAGE_LAYOUT;
+            /// Search commands opens centred over the view instead of in the ribbon's top-right corner
+            /// (#18309); the shortcut, results and keys are the same. Off by default: it opens in place.
+            command_search_centred: bool = false, PAGE_LAYOUT;
             /// Group Construct menus under Planes, Axes and Points headings; off keeps the original command order.
             construct_menu_groups: bool = true, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
             /// A design opens with the views it had when it was last closed.
@@ -131,9 +134,6 @@ macro_rules! layout_preferences {
             /// blinks there, and a running command that sits in a drop-down marks its section label. Off
             /// by default: the ribbon stays as it was.
             ribbon_reveal: bool = false, PAGE_LAYOUT;
-            /// Search commands opens centred over the view instead of in the ribbon's top-right corner
-            /// (#18309); the shortcut, results and keys are the same. Off by default: it opens in place.
-            command_search_centred: bool = false, PAGE_LAYOUT;
             /// Fold the ribbon to its tab row, so the view has the room its panels took (#10112). A tab's
             /// click shows its panels over the view until a command starts or the pointer leaves them.
             /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
