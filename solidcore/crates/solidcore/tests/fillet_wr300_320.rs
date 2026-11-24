@@ -232,6 +232,8 @@ fn hole_rim_touching_the_outer_loop_builds_four_top_faces() {
             }
         }
         assert_eq!(top_faces, 4, "r{r}");
+        // the round is one face, carrying its definition
+        assert_eq!(blend_definitions(&b), 1, "r{r}");
         let pi = std::f64::consts::PI;
         let expected = 1000.0 - pi * 2.5 * 2.5 * 10.0 - hole_rim_round_removed(2.5, r);
         let got = volume(&k, &mut b);
@@ -404,6 +406,20 @@ fn circle_edge(k: &Kernel, b: &Brep, z: f64, radius: f64) -> EdgeId {
         .unwrap_or_else(|| panic!("no circle of radius {radius} at z {z}"))
 }
 
+/// How many faces of `b` carry a blend definition (`procedural_blend()`).
+fn blend_definitions(b: &Brep) -> usize {
+    b.faces()
+        .ids()
+        .filter(|&f| {
+            b.face(f)
+                .unwrap()
+                .surface
+                .as_ref()
+                .is_some_and(|s| s.procedural_blend().is_some())
+        })
+        .count()
+}
+
 /// Whether `b` has a vertex at `p`.
 fn has_vertex_at(b: &Brep, p: [f64; 3]) -> bool {
     b.vertices().ids().any(|v| {
@@ -470,6 +486,13 @@ fn closed_round_touching_a_hole_edge_at_one_point_builds() {
             .lines();
         assert!(lines.is_empty(), "vertex {vertex_at_contact}: {lines:?}");
 
+        // outer and inner cylinder, top, bottom, the hole's wall and the round: the
+        // contact joins the hole's loop to the round's on the outer cylinder, so no face
+        // parts
+        assert_eq!(b.faces().ids().count(), 6, "vertex {vertex_at_contact}");
+        // the round is one face, carrying its definition
+        assert_eq!(blend_definitions(&b), 1, "vertex {vertex_at_contact}");
+
         let wall = hole_through_wall(3.0, |x| (121.0 - x * x).sqrt() - (64.0 - x * x).sqrt());
         let area = 1.0 - pi / 4.0;
         let centroid = 11.0 - (1.0 - 1.0 / (6.0 * area));
@@ -513,6 +536,11 @@ fn closed_chamfer_touching_a_pocket_edge_at_one_point_builds() {
             .unwrap()
             .lines();
         assert!(lines.is_empty(), "vertex {vertex_at_contact}: {lines:?}");
+
+        // the shaft's cylinder, top, bottom, the pocket's wall and floor and the chamfer
+        assert_eq!(b.faces().ids().count(), 6, "vertex {vertex_at_contact}");
+        // the chamfer is one face, carrying its definition
+        assert_eq!(blend_definitions(&b), 1, "vertex {vertex_at_contact}");
 
         let pocket = hole_through_wall(4.0, |x| (156.25 - x * x).sqrt() - 8.5);
         let expected = pi * 156.25 * 60.0 - pocket - 2.0 * pi * 0.5 * (12.5 - 1.0 / 3.0);
