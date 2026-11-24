@@ -1129,11 +1129,18 @@ impl Body {
         Ok(self.nearest_face_query(p, reach)?.filter(|(d, _)| *d <= reach).map(|(_, face)| face))
     }
 
-    fn nearest_face_query(&self, p: Vec3, reach: f64) -> Result<Option<(f64, usize)>> {
-        let Some(form) = self.ops_body() else { return Ok(None) };
+    /// Every face within `reach` of `p`, by its exact distance to the trimmed face, in face
+    /// order. A point on an edge or corner is within reach of each face that meets there. A mesh
+    /// body holds no B-rep face, so none.
+    pub fn faces_within(&self, p: Vec3, reach: f64) -> Result<Vec<(usize, f64)>> {
+        let Some(form) = self.ops_body() else { return Ok(Vec::new()) };
         let (ops, order) = &*form;
         let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).map_err(|e| KernelError::Failed(format!("face at point: {e}")))?;
-        Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0)))
+        Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((f, row.first().copied().flatten()?))).collect())
+    }
+
+    fn nearest_face_query(&self, p: Vec3, reach: f64) -> Result<Option<(f64, usize)>> {
+        Ok(self.faces_within(p, reach)?.into_iter().map(|(f, d)| (d, f)).min_by(|a, b| a.0.total_cmp(&b.0)))
     }
 
     /// Where the rim of `faces` cuts `outline`, a curve over `interval` lying in the plane through

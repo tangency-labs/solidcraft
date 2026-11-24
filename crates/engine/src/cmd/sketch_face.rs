@@ -11,12 +11,12 @@ pub(in crate::cmd) fn is_face(p: &Value) -> bool {
 }
 
 pub(in crate::cmd) fn capture(s: &Session, value: &Value, cmd: &str) -> Result<PlaneRef> {
-    capture_impl(s, value, cmd, false)
+    capture_attempt(s, value, cmd, false)
 }
 
 /// Internal face-profile compatibility only; never exposed as a command parameter.
 pub(in crate::cmd) fn capture_internal(s: &Session, value: &Value, cmd: &str) -> Result<PlaneRef> {
-    capture_impl(s, value, cmd, true)
+    capture_attempt(s, value, cmd, true)
 }
 
 /// A planar face pick `{face, fixed?, body?, index?, path?}` as [`capture`] reads it before it
@@ -76,18 +76,18 @@ pub(crate) fn face_pick_form(value: &Value) -> std::result::Result<FacePickForm<
 /// The message when no face holds the picked point (and, given, carries the picked index).
 const NO_SUCH_FACE: &str = "the selected planar face no longer exists; choose another face or an explicit fixed plane";
 
-fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
-    let first = capture_in(s, value, cmd, internal, true);
+fn capture_attempt(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
+    let first = capture_impl(s, value, cmd, internal, true);
     // A face index counts faces of the body as the picker showed it, which can be the finished
     // design, while a sketch attaches to the design before itself (Redefine Sketch Plane): a
     // feature after the sketch can add or remove faces, so the same face has another index here.
     // When no face of that body has that index at the picked point, the point on the same body
     // names the face; two faces holding it is still refused as ambiguous.
     let missing = value.get("index").is_some() && first.as_ref().is_err_and(|error| error.to_string().contains(NO_SUCH_FACE));
-    if missing { capture_in(s, value, cmd, internal, false).or(first) } else { first }
+    if missing { capture_impl(s, value, cmd, internal, false).or(first) } else { first }
 }
 
-fn capture_in(s: &Session, value: &Value, cmd: &str, internal: bool, use_index: bool) -> Result<PlaneRef> {
+fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index: bool) -> Result<PlaneRef> {
     let FacePickForm { point, fixed, body: requested_body, index: requested_index, path: requested_path } =
         face_pick_form(value).map_err(|why| bad(cmd, why))?;
     let requested_index = requested_index.filter(|_| use_index);
@@ -144,28 +144,17 @@ fn capture_in(s: &Session, value: &Value, cmd: &str, internal: bool, use_index: 
             let tolerance = (body.body.size() * 1e-4).max(1e-5);
             // A face of a sheet metal body attaches as every body's does, by the model's name for
             // the face, in the frame the sheet gives it (a panel's: its flat pattern's, see
-            // `ModelBody::sketch_frame`). The model's own mesh of the body, which picks name their
-            // face from: made once and kept, so a face is captured without meshing the body again.
-            // A large body with many B-spline faces took tens of seconds to mesh here twice, at a
-            // tenth of its chord.
-            let mesh = body.mesh();
-            let count = body.body.face_count();
-            // The triangles are grouped by face once, and a face's test reads only its own: the
-            // work is the mesh plus one plane test per face, not the mesh once per face (a
-            // modelled thread leaves thousands of faces, #6720).
-            work = work.saturating_add(mesh.triangles.len()).saturating_add(count);
+            // `ModelBody::sketch_frame`). The faces holding the point are the body's own exact
+            // faces: each is within the tolerance of the point by its distance to the trimmed
+            // face (its edges and rims, never display triangles), so nothing is meshed to find
+            // them.
+            let holding = body.body.faces_within(local_point, tolerance * 10.0).map_err(|why| bad(cmd, format!("face capture: {why}")))?;
+            work = work.saturating_add(holding.len());
             if work > 2_000_000 {
                 return Err(bad(cmd, "face capture work limit exceeded; use an exact body and face index"));
             }
-            let by_face = super::face_triangles(&mesh, count);
-            for (index, tris) in by_face.iter().enumerate() {
+            for (index, _) in holding {
                 if requested_index.is_some_and(|requested| requested != index) {
-                    continue;
-                }
-                // Whether the point is on the face is read from the mesh before the exact plane is
-                // asked for: a B-spline face's flatness is a kernel check, too slow for every face
-                // of a large body when the point names one.
-                if !super::face_contains(&mesh, tris, local_point, tolerance * 10.0) {
                     continue;
                 }
                 let Some(exact_plane) = (if fixed {
@@ -176,13 +165,8 @@ fn capture_in(s: &Session, value: &Value, cmd: &str, internal: bool, use_index: 
                     curved = true;
                     continue;
                 };
-                // The exact plane's own origin lies on the face's plane: the distance test and the
-                // picked plane's offset read it, not a centre worked out from the mesh.
                 let normal = exact_plane.normal();
                 let on_plane = exact_plane.origin;
-                if (local_point - on_plane).dot(normal).abs() > tolerance * 10.0 {
-                    continue;
-                }
                 if chosen.is_some() {
                     return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
                 }

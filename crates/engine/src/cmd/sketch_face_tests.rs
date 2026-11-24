@@ -775,10 +775,9 @@ fn a_sketch_on_a_face_meshes_its_body_once() {
 }
 /// Issue 6720: a face picked by its point alone was refused on a body with many faces. The
 /// search charged the whole mesh once per face, and the 5 000 facets a modelled thread left put a
-/// plain block past the limit. The search reads each face's own triangles now. A modelled thread
-/// is a few exact helical faces on SMLib, so the many faces are a block drilled with 256 holes:
-/// the old charge (every face times the whole mesh) is past the 2 000 000 budget, the new one
-/// (the mesh once, plus a test per face) well inside it.
+/// plain block past the limit. The faces holding the point are asked of the exact body now, and
+/// nothing is meshed. A modelled thread is a few exact helical faces on SMLib, so the many faces
+/// are a block drilled with 256 holes.
 #[test]
 fn a_face_picked_by_point_on_a_block_with_many_faces_is_found() {
     let mut s = Session::default();
@@ -792,10 +791,7 @@ fn a_face_picked_by_point_on_a_block_with_many_faces_is_found() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.hole", json!({"sketch":"Drills","diameter":0.8}));
     let body = s.model.state().body("Block").unwrap().body.clone();
-    // The search's own mesh (sketch_face: the tolerance it meshes the body at).
-    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord((body.size() * 1e-4).max(1e-5))).unwrap();
-    let (faces, triangles) = (body.face_count(), mesh.triangles.len());
-    assert!(faces > 256 && faces * triangles > 2_000_000 && faces + triangles < 2_000_000, "{faces} faces, {triangles} triangles");
+    assert!(body.face_count() > 256, "{} faces", body.face_count());
     run(&mut s, "sketch.create", json!({"plane":{"face":[19,19,20],"fixed":true}}));
     let plane = run(&mut s, "sketch.inspect", json!({}))["plane"].clone();
     assert!((plane["origin"][2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{plane}");
@@ -1048,4 +1044,19 @@ fn redefining_onto_a_face_picked_in_the_finished_design_reads_it_before_the_sket
         assert!((s.model.state().sketch(id).unwrap().plane.origin.z - 10.).abs() < 1e-6);
         run(&mut s, "sketch.redefine", json!({"sketch":id,"plane":"XY"}));
     }
+}
+
+/// The faces holding a picked point are the body's exact faces within the tolerance of it: a point
+/// in the middle of the top is the top alone, a point on the edge it shares with a side is both,
+/// and a point off every face is none.
+#[test]
+fn a_picked_point_names_the_exact_faces_that_hold_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base","name":"BaseFeature"}));
+    let body = s.model.state().body("Base").unwrap().body.clone();
+    assert_eq!(body.faces_within(Vec3::new(5.0, 5.0, 10.0), 1e-3).unwrap().len(), 1);
+    assert_eq!(body.faces_within(Vec3::new(10.0, 5.0, 10.0), 1e-3).unwrap().len(), 2);
+    assert!(body.faces_within(Vec3::new(5.0, 5.0, 12.0), 1e-3).unwrap().is_empty());
+    let edge = s.execute("sketch.create", &json!({"plane": {"face": [10, 5, 10], "fixed": true}}));
+    assert!(edge.is_err_and(|error| error.to_string().contains("ambiguous")));
 }
