@@ -874,6 +874,12 @@ execution follows.
 
 A `file` or `doc` command names a file in a granted folder by the grant's name, the `name` the manifest gives that folder in `runtime.permissions.files`: `grant:<name>/<path>` (for example `{"path": "grant:exports/part.step"}`), so a plugin never needs the folder's absolute path. After the name come plain names only (no `..`, `.`, root or drive). A name the command may not use is refused before it runs; any command but an input reader such as `file.insert_step` needs a folder granted for reading and writing. Replies name the file by its full path.
 
+With `doc` granted, `doc.info` tells a plugin which design it runs on: `path` (null until first
+saved), `read_only`, `unsaved`, `disk` (`{len, modified_ns}`, `modified_ns` a decimal string) and
+`document_id`. These describe the user's design when the call started, before the plugin's own
+changes. The run still works on a copy with no file: `document.inspect` gives no `path` there, and
+`file.save` without a `path` is refused.
+
 ## Plugins as tools for agents
 
 Every installed, enabled plugin's entries are tools for the assistant chat and for MCP clients,
