@@ -323,6 +323,27 @@ fn drilled_pads_cut_holes_in_the_substrate() {
     assert!((measure.volume - expected).abs() < expected * 0.01, "{measure:?}");
 }
 
+/// A missing model names the folder that was searched, and the same warning from many footprints
+/// is said once with a count.
+#[test]
+fn missing_model_warnings_name_the_folder_and_repeats_are_counted() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "b" (at 10 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "c" (at 15 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step")))"#;
+    let mut load = |model: &str| Err(format!("{model}: No such file or directory (os error 2)"));
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("JST_SH")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert_eq!(lines[0].as_str(), "JST_SH.step: not found in /libs/jst (x3)");
+    let mut unset = |_: &str| Err("unresolved environment variable `EASYEDA2KICAD`".to_string());
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut unset).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("EASYEDA2KICAD")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert!(lines[0].ends_with("(x3)"), "{lines:?}");
+}
+
 #[test]
 fn missing_model_is_warned_and_the_board_is_kept() {
     let mut load = |_: &str| Err("model file was not found".to_string());
