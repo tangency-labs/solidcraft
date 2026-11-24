@@ -525,6 +525,15 @@ automatic STEP refresh. Use **Break Link** on the
 component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
 copies because uploaded files have no disk source path.
 
+A file that an installed **importer plugin** reads links the same way: **Insert Design** takes it
+(`component.insert_design` with `path`, and `format` and `options` to choose the importer). The
+link remembers which plugin and version read the file, with its options. **Update Links** asks
+that plugin to read the file again when it changed, and keeps placements, names and joints as
+for any linked part. If the plugin is not installed or is turned off, the link says which plugin
+and version it needs and the component keeps its last bodies. A file read by a plugin is not
+read again by itself when a tab comes back; use **Update Links**. **Break Link** keeps the
+bodies and forgets both the file and the plugin.
+
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in
 another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and

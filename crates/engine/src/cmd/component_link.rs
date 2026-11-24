@@ -82,7 +82,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("break")
         .contract(&BREAK_LINK_CONTRACT)
         .output(output_schema_for::<BreakLinkResult>)
-        .params("component: id or name of a linked component — keeps its bodies as they are and forgets the source file"),
+        .params("component: id or name of a linked component — keeps its bodies as they are and forgets the source file, and the importer that read it"),
     CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
         .icon("export")
         .contract(&EXTRACT_CONTRACT)

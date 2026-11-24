@@ -3017,6 +3017,31 @@ mod importers {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Break Link keeps an importer's bodies, forgets the file and the importer, and undo brings the
+    /// link back with its importer.
+    #[test]
+    fn break_link_keeps_an_importers_bodies_and_forgets_the_file_and_the_importer() {
+        let (mut s, root) = installed("break-linked", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let comp = s.execute("component.insert_design", &json!({"path": file})).unwrap()["component"].as_u64().unwrap();
+        let broken = s.execute("component.break_link", &json!({"component": comp})).unwrap();
+        assert_eq!(broken["component"], comp, "{broken}");
+        assert!(s.doc.links.is_empty());
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"], json!([]));
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6, "the bodies stay");
+        // The file can change and nothing reads it: there is no link to update.
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        let reply = s.execute("component.update_links", &json!({})).unwrap();
+        assert_eq!((reply["updated"].as_array().map(Vec::len), reply["unchanged"].as_array().map(Vec::len)), (Some(0), Some(0)), "{reply}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        let refused = s.execute("component.break_link", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("not linked"), "{refused}");
+        s.execute("edit.undo", &json!({})).unwrap();
+        let again = s.doc.links[&comp].importer.as_ref().unwrap();
+        assert_eq!((again.format.as_str(), again.version.as_deref()), ("smp.convert", Some("1")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn imported_documents_do_not_share_the_converter_templates_identity() {
         let (mut s, root) = installed("distinct-identities", &[("smp", &["smp"], false)]);
