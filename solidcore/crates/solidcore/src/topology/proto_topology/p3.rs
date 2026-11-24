@@ -788,7 +788,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             };
             if let Some(pe) = created {
                 was_created = true;
-                let mut ids = Vec::with_capacity(overlapping.len());
+                let mut ids = Vec::new();
                 for o in &overlapping {
                     ids.push(o.ok_or(dangling("overlapping proto edge is null"))?);
                 }
