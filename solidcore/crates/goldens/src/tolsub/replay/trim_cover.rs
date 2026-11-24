@@ -6,8 +6,10 @@
 //! run after #18971 (a fillet's rail cut near a knot snaps onto the knot), which moves
 //! those rows apart from the cover. WR-732's retirement (#18934) moves
 //! `topology.brep_cutting`'s `gen0050` apart from the cover (edge 8 from 1.03e-3 to 1.48e-3
-//! and its vertices with it, vertex 32 from 5.9e-4 to 1.19e-3), so its entry is deleted; its
-//! raises are certified in `certify::trim_tolerance`.
+//! and its vertices with it, vertex 32 from 5.9e-4 to 1.19e-3), so its entry is deleted. Those
+//! raises are measured, not certified: `certify::trim_tolerance` has no row for this case
+//! (edge 8's trim bound is not enclosed), and its main digest is this branch's file
+//! (`trim_tolerance_main.tsv`), which records the change without proving it.
 //!
 //! The rows #17739's vertex step moves as well (19 `blend.fillet_executive_p3` bottle
 //! rows, `corpus.parity`'s `Fillet__bolt.smb`) are replayed from [`super::DATA`], with
