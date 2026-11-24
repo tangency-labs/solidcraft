@@ -209,6 +209,7 @@ inspect.parameter_variants        inspect: independent rebuilds and regressions 
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
+layout.delete                     application panel layout; no geometry (engine/UI/MCP tests)
 layout.get                        application panel layout; no geometry (engine/UI/MCP tests)
 layout.reset                      application panel layout; no geometry (engine/UI/MCP tests)
 layout.save                       application panel layout; no geometry (engine/UI/MCP tests)
