@@ -172,7 +172,7 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
                     && pos.is_finite()
                 {
                     c.moved |=
-                        solidcore_ops::point_distance([f64::from(pos.x), f64::from(pos.y), 0.0], [f64::from(c.start.x), f64::from(c.start.y), 0.0])
+                        solidcraft_kernel::services::point_distance([f64::from(pos.x), f64::from(pos.y), 0.0], [f64::from(c.start.x), f64::from(c.start.y), 0.0])
                             .map_or(true, |distance| distance.value > f64::from(TAP_SLOP));
                     c.at = pos;
                 }

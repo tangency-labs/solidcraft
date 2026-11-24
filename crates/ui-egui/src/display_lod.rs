@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use solidcore_record::Vec3;
-use solidcore_tess::TessPlan;
+use solidcraft_kernel::services::tess::TessPlan;
 use solidcraft_engine::doc::ModelBody;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
 use solidcraft_engine::geom::{Aabb3, Mesh};
