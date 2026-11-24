@@ -1502,45 +1502,71 @@ fn a_kept_linked_part_moves_up_to_the_component_the_deleted_one_sat_in() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// A saved design of named boxes, each `(name, edge length, x)`, in this build order.
-fn boxes(path: &Path, parts: &[(&str, u32, u32)]) {
+/// A saved design of boxes, each `(name, edge length, x, material)`, in this build order.
+fn boxes(path: &Path, parts: &[(&str, u32, u32, &str)]) {
     let mut s = Session::default();
-    for (name, size, x) in parts {
+    for (name, size, x, material) in parts {
         run(&mut s, "solid.box", json!({"length": size, "width": size, "height": size, "body_name": name, "corner": [x, 0, 0]}));
+        run(&mut s, "material.assign", json!({"bodies": [name], "material": material}));
     }
     run(&mut s, "file.save", json!({"path": path}));
 }
 
-/// Each linked body of `component`, by name, with its volume rounded to mm³.
-fn linked_volumes(s: &Session, component: u64) -> std::collections::BTreeMap<String, i64> {
+/// Each linked body of `component` by name: its volume rounded to mm³ and its material.
+fn linked_bodies(s: &Session, component: u64) -> std::collections::BTreeMap<String, (i64, String)> {
     let state = s.model.state();
-    state.bodies.iter().filter(|b| b.component == component).map(|b| (b.name.clone(), b.volume().unwrap_or_default().round() as i64)).collect()
+    state
+        .bodies
+        .iter()
+        .filter(|b| b.component == component)
+        .map(|b| (b.name.clone(), (b.volume().unwrap_or_default().round() as i64, s.doc.body_material(&b.name))))
+        .collect()
 }
 
-/// #21371: a linked design that keeps its number of bodies but lists them in another order (the
-/// first part replaced by a new one built last) leaves each body the parent's name for it, and
-/// what the parent keeps under that name, for Relink Source and Update Links alike. The new body
-/// takes the name of the one it replaced.
-#[test]
-fn linked_body_names_follow_their_bodies_when_the_design_lists_them_in_another_order() {
-    let dir = folder("reordered-names");
+/// #21371: the issue's two versions of a design with three boxes. In the second, the first box
+/// is replaced by a new one built last, so the design lists the same number of bodies in
+/// another order. The assembly gave the middle box a name of its own.
+fn reordered_versions(dir: &Path) -> (PathBuf, PathBuf) {
     let (v1, v2) = (dir.join("child_v1.sc"), dir.join("child_v2.sc"));
-    boxes(&v1, &[("PartA", 10, 0), ("PartB", 20, 50), ("PartC", 30, 100)]);
-    boxes(&v2, &[("PartB", 20, 50), ("PartC", 30, 100), ("PartA_New", 10, 0)]);
-    let before = std::collections::BTreeMap::from([("PartA".to_string(), 1000), ("PartB".to_string(), 8000), ("PartC".to_string(), 27000)]);
+    boxes(&v1, &[("PartA", 10, 0, "Aluminum"), ("PartB", 20, 50, "Steel"), ("PartC", 30, 100, "Brass")]);
+    boxes(&v2, &[("PartB", 20, 50, "Steel"), ("PartC", 30, 100, "Brass"), ("PartA_New", 10, 0, "Steel")]);
+    (v1, v2)
+}
+
+fn reordered_assembly(v1: &Path) -> (Session, u64) {
     let mut s = Session::default();
     let component = run(&mut s, "component.insert_design", json!({"path": v1, "name": "SubAsm"}))["component"].as_u64().unwrap();
-    run(&mut s, "material.assign", json!({"bodies": ["PartB"], "material": "Steel"}));
-    assert_eq!(linked_volumes(&s, component), before);
+    run(&mut s, "body.rename", json!({"body": "PartB", "name": "Bracket"}));
+    let before = [("PartA", (1000, "Aluminum")), ("Bracket", (8000, "Steel")), ("PartC", (27000, "Brass"))];
+    assert_eq!(linked_bodies(&s, component), std::collections::BTreeMap::from(before.map(|(n, (v, m))| (n.to_string(), (v, m.to_string())))));
+    (s, component)
+}
+
+/// Each body keeps the assembly's name for it, wherever the design now lists it, and the new
+/// box takes the name of the one it replaced, with the material the design gives it.
+fn assert_reordered(s: &Session, component: u64, what: &str) {
+    let after = [("PartA", (1000, "Steel")), ("Bracket", (8000, "Steel")), ("PartC", (27000, "Brass"))];
+    assert_eq!(linked_bodies(s, component), std::collections::BTreeMap::from(after.map(|(n, (v, m))| (n.to_string(), (v, m.to_string())))), "{what}");
+}
+
+#[test]
+fn relink_keeps_each_body_its_name_when_the_design_lists_its_bodies_in_another_order() {
+    let dir = folder("reordered-relink");
+    let (v1, v2) = reordered_versions(&dir);
+    let (mut s, component) = reordered_assembly(&v1);
     run(&mut s, "component.relink", json!({"component": component, "path": v2}));
-    assert_eq!(linked_volumes(&s, component), before, "relink");
-    assert_eq!(s.doc.body_material("PartB"), "Steel");
-    run(&mut s, "edit.undo", json!({}));
-    assert_eq!(linked_volumes(&s, component), before);
-    // The same design saved over in place, read by Update Links.
+    assert_reordered(&s, component, "relink");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn update_links_keeps_each_body_its_name_when_the_design_lists_its_bodies_in_another_order() {
+    let dir = folder("reordered-update");
+    let (v1, v2) = reordered_versions(&dir);
+    let (mut s, component) = reordered_assembly(&v1);
+    // The design saved over in place.
     std::fs::copy(&v2, &v1).unwrap();
     run(&mut s, "component.update_links", json!({}));
-    assert_eq!(linked_volumes(&s, component), before, "update links");
-    assert_eq!(s.doc.body_material("PartB"), "Steel");
+    assert_reordered(&s, component, "update links");
     let _ = std::fs::remove_dir_all(dir);
 }
