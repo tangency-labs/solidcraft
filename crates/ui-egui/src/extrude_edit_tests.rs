@@ -1199,6 +1199,8 @@ fn taper_angle_steps_by_one_degree() {
     assert_eq!(taper(&h), "1 deg");
     h.step(&json!({"click":{"handle":"dialog:Taper Angle down"}})).unwrap();
     assert_eq!(taper(&h), "0 deg");
+}
+
 /// Double-clicking the distance arrow in the view reverses the direction, as Reverse Direction
 /// does, and keeps the distance (#17402); Symmetric has no direction to reverse.
 #[test]
