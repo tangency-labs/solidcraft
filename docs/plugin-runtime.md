@@ -20,10 +20,16 @@ The runtime takes ownership of a host and returns `(host, result)` on success an
 This satisfies Wasmtime's requirement for store data without borrowed references. SolidCraft
 supplies an owned scratch session and adopts its edits only after a successful call.
 
-1. Put an independently built component beside a static `plugin.json` in its id folder.
+1. Install a plugin zip through **Preferences > Plugins** or `plugin.install`. Its `dry_run: true`
+   mode describes the package without writing files or grants. The single installation confirmation
+   screen collects command-group and named-folder approvals. `plugin.install` stores only the supplied
+   `approve` grants; omitting `approve` grants nothing. A manually installed package also receives no
+   stored grants. See [Installing](plugins.md#installing).
 2. `plugin.inspect` reads bounded bytes through the caller's existing file scope and returns
    the manifest and content approval hash. It neither instantiates the component nor invokes
-   a manifest function. Metadata can therefore be reviewed before code runs.
+   a manifest function. Metadata can therefore be reviewed before code runs. The package folder
+   must be named after the plugin's `id`, as Install names it; `plugin.check` accepts any folder
+   name and says when it differs.
 3. The user reviews the package and explicitly calls `plugin.run` with that exact hash, an
    exported entry and JSON parameters. The package is read once for this call; the bytes whose
    hash was checked are the bytes compiled and executed. Changing the files afterward cannot
@@ -76,14 +82,27 @@ another version of the `craft:plugin` interfaces is refused the same way before 
 
 Entry inputs are object schemas; selection and target fields are arrays. Named slots use
 `{"kind":"menu","name":"…"}` or `{"kind":"ribbon","name":"…"}`; the app decides which
-slots exist. Declaring a slot never supplies UI code. `plugin.list` and `engine.describe`
+slots exist. SolidCraft matches File and Help menu names ignoring case; other menu names draw no
+host menu items. The Model tab's Plugins group (and its Plugins menu) lists every installed entry regardless of its slots.
+Ribbon names match the existing Design tabs ignoring case; other names use the Plugins tab.
+Only enabled plugins contribute host slots. Each plugin's ribbon group carries its name, and every
+slot item has a plugin badge. Slot clicks resolve the namespaced entry against the Plugins menu's
+shared list and open the same input-schema dialog through `plugin_menu::open_entry`. The dialog
+uses the same enabled state and grant checks from every placement. Opening it runs no plugin code.
+See [menu and ribbon placement](plugins.md#menu-and-ribbon-entries).
+Declaring a slot never supplies UI code. `plugin.list` and `engine.describe`
 expose the entry declarations. A read entry can call only commands marked read in the app catalog.
 
 `files.read-file` and `files.write-file` resolve paths only within matching app-approved folder
 grants with the requested access. The caller's file scope is checked against each complete
 path on every read and write; hidden paths require explicit authorization. Declaring a folder
-name does not itself grant access. Writes use temporary sibling files, and reads in the same call
-see their staged content. Targets are replaced only after successful guest execution and app
+name does not itself grant access. Reading a file that does not exist returns `invalid-input`
+(field `path`, reason "no such file") without failing the run, so an entry can create its file
+on first use. A write into a sub-folder that does not exist yet makes that folder inside the
+grant; if the run does not publish, the folders it made are removed again while still empty.
+Only a refusal by the system is reported as `permission-denied`; another write failure, such as a
+file where a folder should be, is `invalid-input` for `path`. Writes use temporary sibling files,
+and reads in the same call see their staged content. Targets are replaced only after successful guest execution and app
 transaction commit. A trap, refusal, cancellation or failed app commit removes staged files
 without replacing targets. If publication fails after app commit, the error reports that files
 may have changed; publication of several files is not atomic. `clock.now`
@@ -112,31 +131,46 @@ the user grants it, as folders are:
 A manifest that lists a grouped command without its group is refused when it is read. A refused
 call is a typed `permission_denied` error naming the group, and it poisons the transaction like
 any other refusal. Ungrouped commands run under an empty file scope, so even a feature that names
-an external font or linked design gets no file access. A granted `file` or `doc` command runs with
-a scope of exactly the approved folders that the manifest requests for both read and write. This
-version has no user interface for granting groups; `PluginState::command_groups` holds the grants.
+an external font or linked design gets no file access. A granted `file` or `doc` command runs within the approved folders requested by its manifest. Known input-only commands (`file.insert_step`, `file.insert_mesh`, `file.insert_gerber`, `file.gerber_files`, `sketch.insert_dxf`, `sketch.insert_svg`) may read files from read-only grants. Commands that can write files, and commands that have not been reviewed as input-only, keep the stricter scope requiring both read and write approval. A read-only grant never authorizes a save, export, copy, move or delete.
+`plugin.install` validates its optional `approve` object against the manifest and stores grants
+by plugin id after successful publication. Each folder approval has `name`, absolute local `path`,
+`read` and `write`. Omitting `approve` leaves no grants, including after replacement. Explicit approvals
+replace the stored set, so stale grants cannot survive an update. Desktop preferences persist grants
+and pass them to the session and its worker copies; the plugins folder's grant store
+(`crates/engine/src/plugin/grant_store.rs`) keeps them for the command line and headless MCP too
+([Headless use](plugins.md#headless-use)). `plugin.run` intersects
+that id's stored grants with the manifest's requests; another plugin's grants never apply.
+A hand-installed package with no grant record receives no groups or folders. Removing a package
+through `plugin.remove` deletes its grant record; `plugin.revoke` deletes the record and keeps the
+package. These are host preferences, never design data.
 
 ## Versions and capabilities
 
-The WIT package is `craft:plugin@0.1.0`. Its interfaces (`types`, `commands`, `log`, `control`,
-`files`, `clock` and the exported `entry`) make up the capability `commands@0.1`. Later
+The WIT package is `craft:plugin@0.2.0`. Its interfaces (`types`, `commands`, `log`, `control`,
+`files`, `clock` and the exported `entry`) make up the capability `commands@0.2`. Later
 capabilities arrive as their own interfaces, each named and versioned on its own in the manifest:
 `ui`, `viewport`, `formats` and `storage`. While a version is 0.x, a minor version may break the
-previous one, so a host for `commands@0.1` runs only `commands@0.1` plugins.
+previous one. 0.2 added `plugin-error.unsupported`; the host also serves the frozen
+`craft:plugin@0.1.0` (`crates/craft-plugin/wit-0.1/plugin.wit`, `OLDER_CAPABILITIES`), choosing
+the bindings by the version the component's imports and exports name, so plugins built against
+0.1 run unchanged and see `invalid-input` where 0.2 has `unsupported`.
 
 ## Per-design plugin data
 
-A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design
-(`plugin_data` in the design, base64 by `<plugin-id>/<path>` in a plain JSON design). SolidCraft
+A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design, one
+part each, held as their bytes while the design is open. A plain JSON design can't carry them:
+saving one that has plugin data as `.json` is refused, and an older JSON design's base64
+`plugin_data` is decoded as it opens and never written again. SolidCraft
 keeps those files and saves them back byte for byte whether or not the plugin is installed;
-opening a design never needs, loads or runs a plugin. Plugins cannot read or write this data yet:
-the `storage` capability adds that.
+opening a design never needs, loads or runs a plugin. A plugin with the `storage@0.1` capability
+reads and writes its own folder through the `storage.*` commands (see
+[Plugins](plugins.md#plugin-data-in-a-design)); nothing else changes it.
 
 `model.mesh {body, tolerance?}` is a general read-only input boundary. Tolerance is a finite positive
 number in millimetres (default 0.05). It returns `body`, its owning `component`,
 `frame: "component-local-mm"`, `positions: [[x,y,z], ...]` and `triangles: [[i,j,k], ...]`. Indices are
 zero-based. The mesh is of the evaluated body, rather than only the original import's vertices.
-The command refuses more than 8192 vertices or 16384 triangles. A plugin's host-call result must
+Corners at exactly the same position are handed over once and shared by their triangles (no position moves), so a mesh body that stores three corners per triangle counts its distinct points. The command refuses more than 8192 vertices or 16384 triangles after that, naming the counts. A plugin's host-call result must
 also fit the JSON byte limit; a smaller mesh can still exceed that limit and be refused.
 No reconstruction, fitting, sewing, mesh replacement or conversion algorithm is part of this API.
 
@@ -154,8 +188,14 @@ and exact component bytes. `plugin.run` compares it before instantiation. Whites
 manifest also require reinspection. A matching digest is an identity check, not a signature;
 reviewing permissions does not establish whether a publisher is trustworthy.
 
-There is no persistent automatic approval list in this version. A caller supplies the reviewed
-content identity on every invocation. Agent chat separately asks before running external code;
+Stored installation grants authorize only the listed groups and folders; they do not approve
+running external code. `plugin.install` with `dry_run: true` validates and describes the archive,
+including supplied approvals, without writing anything. Installation validates the zip again before
+publication and compares any supplied `approval` hash against the exact manifest and component.
+The install dialog sends the dry-run hash, so replacing the archive after review refuses installation
+before files or grants are written. Each execution still requires the
+reviewed manifest-and-component identity
+from `plugin.inspect`. Agent chat separately asks before running external code;
 its model cannot turn an inspected hash into user consent. A host or MCP caller is responsible
 for its existing user-consent policy and package-folder scope. Desktop disable preferences apply
 to the running desktop session and all plugin worker copies; a separate CLI process has its own
@@ -208,6 +248,9 @@ zero, fractional and out-of-range values are refused. The CLI reads it once befo
 local sessions. Omit the flag to use the original ceilings. `--connect` and non-headless `mcp`
 refuse this flag because the connected desktop owns its preferences. GUI preferences and CLI
 startup files are separate user settings; a package or saved design cannot supply either.
+Approvals given at install last for the run; with `--keep-plugin-approvals` these processes read
+and write the same grant store as the desktop app, or the one in `--plugins-dir DIR`
+([Headless use](plugins.md#headless-use)).
 
 Both host and manifest accept positive integer fuel through 18446744073709551615 (`u64::MAX`),
 without conversion through floating-point controls. Memory accepts 1..4096 MiB: the remaining
@@ -227,9 +270,14 @@ explicitly raise the host ceilings, then pass the inspected content hash to `plu
 The content hash covers the declared budgets: editing them requires fresh inspection and approval.
 Raising a host ceiling alone never approves content, increases a request, executes or retries it.
 The host rechecks the current ceilings before compilation/execution. Lowering them can refuse a
-previously approved package. Desktop results prepared under changed ceilings or disable settings
+previously approved package. Desktop results prepared under changed ceilings, grants or disable settings
 are discarded rather than adopted into the current design. Settings survive new/open design
 operations and scratch copies, but are never serialized as design data.
+
+A component is compiled in memory: first with Winch, Wasmtime's baseline compiler, which compiles
+a large component in about a second; after that call, again with Cranelift on one background thread,
+whose faster code replaces it for later calls. A component Winch refuses is compiled with Cranelift
+straight away. Fuel and epoch interruption are the same under both compilers.
 
 Fuel and epoch checks contain guest execution, not arbitrary native work. Component compilation
 happens before the guest deadline; its input size is bounded, but compiler memory/time are not
@@ -249,10 +297,25 @@ execution before the application commits changes or publishes staged files. In t
 Normal command output and plugin result JSON are unchanged. The counter message contains no
 model data or package paths.
 
-Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)). There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
-network integration, persistent store, signed index, custom panels or icons.
-The WIT has no persistent store interface yet (`storage` arrives later; designs already keep
-`plugins/<plugin-id>/` data untouched). `manifest()` is not used.
+Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)).
+Compiled components are kept between sessions in Wasmtime's own compilation cache, in
+`plugin-compile/wasmtime` under the per-user cache folder (`solidcraft_engine::plugin::configure_compile_cache`).
+Only Cranelift's code is cached. `plugin-compile/optimized` holds one empty file per cached component
+(named for a hash of its bytes and the compile settings), which tells the next session to load
+Cranelift's code instead of starting with Winch; it lives outside Wasmtime's folder because Wasmtime's
+cleanup removes files it didn't write there.
+Its key covers the component's bytes, the Wasmtime version and every compile setting, fuel metering and
+epoch interruption included; an entry that fails Wasmtime's checks is compiled again. Wasmtime checks an
+entry's format and settings, not its machine code, so whoever can write that folder can change the code
+a plugin call runs: it is the user's own folder, as trusted as the app's files.
+
+There is no unsafe deserialization in SolidCraft's code, no WASI filesystem/clock/socket/process API,
+network integration, persistent guest store, signed index or plugin-supplied icons.
+The optional `ui@0.1` capability provides host-drawn panels, with declarations in `runtime.ui`
+and the matching `ui-provider.describe` export. Panel updates use the command transaction and
+are merged by the window once per frame; see [Docked panels](plugins.md#docked-panels).
+A plugin keeps data in a design through the `storage.*` commands, not a WIT interface of its own.
+`manifest()` is not used.
 
 ## Author an original plugin
 

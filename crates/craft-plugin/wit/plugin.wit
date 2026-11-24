@@ -1,11 +1,47 @@
-package craft:plugin@0.1.0;
+package craft:plugin@0.2.0;
 
-// Capability `commands@0.1`: every interface in this file. A plugin names it in its manifest's
-// `capabilities` list. Later capabilities (ui, viewport, formats, storage) arrive as their own
-// interfaces. While the version is 0.x, a minor version may break the one before it.
+// Capabilities are sets of the interfaces in this file. A plugin names the ones it needs in its
+// manifest's `capabilities` list:
+// - `commands@0.2`: types, commands, log, control, files, clock and entry (world `command-plugin`);
+// - `formats@0.2`: file-format slots (RFC 0015 §4). An import slot is world `importer-plugin`
+//   (types, log, control, clock, source, design and importer); an export slot is world
+//   `exporter-plugin` (types, commands, log, control, clock and formats-provider). A plugin
+//   declares its slots in its manifest (kind, extensions, label, options, needs_plugin_data), so
+//   the install review shows them before any of its code runs;
+// - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
+// - `storage@0.1`: with `commands`, the app's `storage.*` commands and the `storage` interface, so a
+//   plugin keeps its own data in the open design: its main document as JSON, its files as bytes.
+// - `design@0.1`: with `commands`, design-state, for document identity/revision and read listeners.
+// - `ui@0.1`: ui and ui-provider (world `panel-plugin`).
+// - `forms@0.1`: with `commands`, forms.open, to request a populated command form;
+//   programs receive an interactive-required refusal instead of a window.
+// Later capabilities (viewport) arrive as their own interfaces. While the version is
+// 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
+// still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
+// component's imports and exports, and shows their `invalid-input` as before.
 // App commands and their schemas are data; this world never names app types.
 interface types {
     type json = string;
+  /// A scalar the host can show, edit and store.
+  variant value {
+    none,
+    flag(bool),
+    integer(s64),
+    number(f64),
+    text(string),
+    /// A reference to a face, edge or body, stable across edits.
+    geometry-ref(string),
+  }
+
+  /// One entry in a panel's data, addressed by a slash path such as
+  /// "/tools/3/dia". Stored values are always mm and degrees.
+  record datum {
+    path: string,
+    value: value,
+  }
+
+  /// Colour roles. Plugins never send RGB.
+  enum color-role { accent, ok, warn, danger, dim, series-1, series-2, series-3, series-4, series-5, series-6, series-7, series-8 }
     record command-failure { command: string, reason: string }
     record field-failure { field: string, reason: string }
     variant plugin-error {
@@ -16,12 +52,29 @@ interface types {
         invalid-input(field-failure),
         trap(string),
         cancelled,
+        // The input is valid, but this plugin does not handle it: a file it can open in general
+        // but not this one (no solids, a newer file version, a feature it does not convert), or
+        // an option value it does not offer. The text says what it does not support, in the
+        // user's words. Use `invalid-input` for input that is broken.
+        unsupported(string),
     }
 }
 // The app's command surface: the same commands, inputs and results its MCP clients get.
 interface commands {
     use types.{json, plugin-error};
     run: func(command: string, args: json) -> result<json, plugin-error>;
+}
+// Additive forms@0.1 capability. Existing command components need not import this.
+interface forms {
+    use types.{json, plugin-error};
+    open: func(entry: string, params: json) -> result<_, plugin-error>;
+}
+// Additive read-only import: JSON {document_id: string, revision: string}, or null with no document.
+// Both fields are opaque printable ASCII, bounded to 128 characters; compare them for equality.
+// Importing this interface requires the manifest capability design@0.1. Older components omit it.
+interface design-state {
+    use types.{json, plugin-error};
+    get-token: func() -> result<json, plugin-error>;
 }
 interface log {
     enum level { debug, info, warn, error }
@@ -39,16 +92,292 @@ interface files {
 interface clock {
     now: func() -> u64;
 }
+// A plugin's own files in the open design (capability `storage@0.1`), as bytes: never as text.
+// Files are named by a plain relative path; a cache file is one the plugin can make again, which
+// a save may drop. Only the plugin's own run writes its files; anyone reads them.
+interface storage {
+    use types.{plugin-error};
+    // Writes the running plugin's file `name` (`cache`: as a cache file), its bytes as they are;
+    // `append` adds them to the file's end, to write a large file in parts. One name is one file:
+    // writing it as the other kind moves it. Returns the file's size. Part of the run's one undo step.
+    put-blob: func(name: string, data: list<u8>, cache: bool, append: bool) -> result<u64, plugin-error>;
+    // Up to `len` bytes (at most 1 MiB) of a plugin's file from `offset`; empty past its end.
+    // `plugin`: whose file, the running plugin's own when left out (inside a run, only its own).
+    get-blob: func(plugin: option<string>, name: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+    // Up to `len` bytes (at most 1 MiB) of a plugin's main document, its saved JSON, from
+    // `offset`; empty past its end, or when it has none.
+    get-document: func(plugin: option<string>, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+}
 // What the plugin exports: its manifest's entries, called by name.
 interface entry {
     use types.{json, plugin-error};
     execute: func(entry: string, params: json) -> result<json, plugin-error>;
 }
+// The file an importer converts, read in chunks so each host call stays small.
+interface source {
+    use types.{plugin-error};
+    // The file being imported: its name, without folders, and its size in bytes.
+    record file-info { name: string, size: u64 }
+    // At most `len` bytes (up to 1 MiB) at `offset`; empty at the end of the file. `path` "" is the
+    // file being imported. Any other path is relative to that file's folder and needs the
+    // `input_folder` permission: an assembly reads its parts this way.
+    read: func(path: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+    // The size of a file, or none when there is no such file.
+    size: func(path: string) -> result<option<u64>, plugin-error>;
+    // The path as the folder spells it: `path` itself when it exists, else the one file whose name
+    // matches it ignoring case, else none. Needs `input_folder` for any path but "".
+    resolve: func(path: string) -> result<option<string>, plugin-error>;
+}
+// Where an importer writes its result: a SolidCraft design file, in order, at most 1 MiB per call.
+interface design {
+    use types.{plugin-error};
+    write: func(bytes: list<u8>) -> result<_, plugin-error>;
+}
+// An importer checks its own result in the app (capability `evaluate@0.2`). It stages a design
+// file it made; the app opens it in a private session, apart from every open design and every
+// file, and runs read-only commands on it. Nothing here reaches the user's designs or files.
+interface evaluate {
+    use types.{json, plugin-error};
+    // Appends at most 1 MiB to the staged design (256 MiB in all). Staging after a run starts a
+    // new design.
+    stage: func(bytes: list<u8>) -> result<_, plugin-error>;
+    // Runs one command on the staged design, opening it on the first run. The app names the
+    // commands it allows (SolidCraft: document.inspect, inspect.measure, model.edges, model.faces
+    // and timeline.roll_to). A command that fails returns {"error": "..."}; a design the app
+    // can't open fails the call.
+    run: func(command: string, args: json) -> result<json, plugin-error>;
+    // Discards the staged design and its session.
+    reset: func();
+}
+// What an importer exports: its manifest's importer entries, called by name.
+interface importer {
+    use types.{json, plugin-error};
+    use source.{file-info};
+    // Convert `file` with the entry's declared options. The design goes to `design.write`; the
+    // result is the loss report: what could not be carried over, as JSON.
+    import-file: func(entry: string, file: file-info, options: json) -> result<json, plugin-error>;
+}
+// What an exporter exports: its manifest's export slots, called by name (RFC 0015 §4).
+interface formats-provider {
+    use types.{json, plugin-error};
+    // Write the open design in the slot's format, with the options the user filled in the slot's
+    // form. The plugin reads the design through `commands`, which runs only the read-only commands
+    // its manifest lists. It returns the file's bytes (at most 256 MiB); the app writes them to
+    // the path the user chose, and only when the whole call succeeds.
+    export-file: func(slot: string, options: json) -> result<list<u8>, plugin-error>;
+}
 world command-plugin {
+    import forms;
+    import commands;
+    import design-state;
+    import log;
+    import control;
+    import files;
+    import clock;
+    import storage;
+    export entry;
+}
+world importer-plugin {
+    import log;
+    import control;
+    import clock;
+    import source;
+    import design;
+    import evaluate;
+    export importer;
+}
+world exporter-plugin {
+    import commands;
+    import log;
+    import control;
+    import clock;
+    export formats-provider;
+}
+
+/// Panels and workspaces. Host-drawn; a plugin ships no UI code.
+interface ui {
+  use types.{value, datum, color-role, plugin-error};
+
+  enum dock-zone { left, right, bottom }
+
+  /// Layouts are flat: nodes refer to children by index. WIT has no
+  /// recursive types, and the flat form is easy to validate and limit.
+  record layout {
+    /// Index of the root node.
+    root: u32,
+    nodes: list<node>,
+  }
+
+  record node {
+    widget: widget,
+  }
+
+  enum field-kind { number, length, angle, text, toggle, choice, selection }
+
+  record field {
+    key: string,
+    label: string,
+    kind: field-kind,
+    /// For choice fields.
+    choices: list<string>,
+    /// Entry called when the value changes. Absent: read-only.
+    on-change: option<string>,
+  }
+
+  record column {
+    key: string,
+    label: string,
+    /// "length", "angle" and so on; shown in the user's units.
+    unit: option<string>,
+  }
+
+  enum selection-mode { none, single, multi }
+
+  record table-spec {
+    /// Data path of the rows, for example "/tools".
+    bind: string,
+    row-id: string,
+    columns: list<column>,
+    select: selection-mode,
+    on-select: option<string>,
+    on-edit: option<string>,
+  }
+
+  record button-spec {
+    label: string,
+    icon: option<string>,
+    entry: string,
+  }
+
+  record chart-series {
+    label: string,
+    role: color-role,
+    /// Data path of the x and y lists.
+    x: string,
+    y: string,
+  }
+
+  enum chart-kind { line, bar, scatter }
+
+  variant widget {
+    /// Children are indexes into layout.nodes.
+    group(list<u32>),
+    tabs(list<tab>),
+    split(split-spec),
+    toolbar(list<button-spec>),
+    button(button-spec),
+    form(form-spec),
+    item-list(list-spec),
+    item-tree(tree-spec),
+    table(table-spec),
+    chart(chart-spec),
+    text(string),
+    progress(string),
+    empty-state(string),
+  }
+
+  record tab { label: string, child: u32 }
+  record split-spec { vertical: bool, first: u32, second: u32 }
+  record form-spec { bind: string, fields: list<field> }
+  record list-spec { bind: string, on-select: option<string> }
+  record tree-spec { bind: string, on-select: option<string> }
+  record chart-spec { kind: chart-kind, series: list<chart-series> }
+
+  record panel-spec {
+    id: string,
+    title: string,
+    zones: list<dock-zone>,
+    layout: layout,
+  }
+
+  record ribbon-group { name: string, entries: list<string> }
+  record ribbon-tab { name: string, groups: list<ribbon-group> }
+
+  enum design-kind { part, assembly, sketch, drawing }
+
+  record workspace-spec {
+    id: string,
+    name: string,
+    /// Name from the app icon registry.
+    icon: string,
+    applies-to: list<design-kind>,
+    ribbon: list<ribbon-tab>,
+    /// Panel ids per zone.
+    panels: list<tuple<dock-zone, list<string>>>,
+    /// Host panels kept, for example "browser".
+    builtin-panels: list<string>,
+    /// Read-only entries with a 1 s deadline.
+    on-enter: option<string>,
+    on-exit: option<string>,
+  }
+
+  record declarations {
+    /// Bump when widget kinds are added; unknown kinds draw a placeholder.
+    ui-version: u32,
+    panels: list<panel-spec>,
+    workspaces: list<workspace-spec>,
+  }
+
+  enum event-kind { press, select, edit, change, enter, exit }
+
+  record ui-event {
+    panel: string,
+    event: event-kind,
+    path: string,
+    row: option<string>,
+    value: option<value>,
+  }
+
+  /// Host calls, available to a plugin that declares the "ui" capability.
+  /// Replace some or all of a panel's data. Merged once per frame.
+  set-data: func(panel: string, updates: list<datum>) -> result<_, plugin-error>;
+  clear-data: func(panel: string) -> result<_, plugin-error>;
+  /// Show or hide a panel in the current workspace.
+  show-panel: func(panel: string, visible: bool) -> result<_, plugin-error>;
+}
+
+/// What a UI plugin exports. Static declarations are read at install time,
+/// so the approval screen can list them without running any entry.
+interface ui-provider {
+  use types.{plugin-error};
+  use ui.{declarations, ui-event};
+
+  describe: func() -> declarations;
+  /// The host turns user actions into events. They run as ordinary commands.
+  on-event: func(event: ui-event) -> result<_, plugin-error>;
+  /// Called when a plugin workspace is entered or left, if declared.
+  on-enter: func(workspace: string) -> result<_, plugin-error>;
+  on-exit: func(workspace: string) -> result<_, plugin-error>;
+}
+
+
+world panel-plugin {
+    // Keep this world's original imports when command-plugin gains optional capabilities.
     import commands;
     import log;
     import control;
     import files;
     import clock;
     export entry;
+    import ui;
+    export ui-provider;
+}
+
+// Optional, additive capability dialog@0.1. Existing worlds retain their exports.
+interface dialog-provider {
+    use types.{json, plugin-error};
+    // Values and reply are JSON objects. The host validates the entire reply before applying it.
+    update-fields: func(entry: string, values: json) -> result<json, plugin-error>;
+}
+world dialog-plugin {
+    import commands;
+    import log;
+    import control;
+    import files;
+    import clock;
+    export dialog-provider;
+}
+world command-dialog-plugin {
+    include command-plugin;
+    export dialog-provider;
 }

@@ -228,7 +228,7 @@ pub(crate) fn tag(body: &Body, operand: usize) -> Result<Body> {
         }
         Ok(Ok(r))
     })?
-    .map(Body::new)
+    .map(Body::from_kernel)
 }
 
 /// `smlib_history_read`: each face's and edge's origins in `result`, a face's change from how

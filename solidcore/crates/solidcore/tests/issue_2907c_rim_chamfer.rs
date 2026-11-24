@@ -40,15 +40,8 @@ const CHAIN: [usize; 7] = [9, 10, 8, 0, 1, 2, 3];
 const OFFSET: f64 = 2.8673496400813243;
 
 fn kernel() -> Kernel {
-    let mut fixes = UpstreamFixes::all();
-    for held in [
-        "fillet_refuse_rounds_breaking_through",
-        "fillet_round_ends_on_outline",
-    ] {
-        *fixes.flag_mut(held).unwrap() = false;
-    }
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes = fixes;
+    k.fixes = UpstreamFixes::all();
     k
 }
 

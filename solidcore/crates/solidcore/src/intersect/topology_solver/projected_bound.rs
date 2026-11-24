@@ -1097,6 +1097,7 @@ mod tests {
                 Vec3::new(0.0, 1.0, 0.0),
             ];
             OrientedTrimBoundary {
+                edgeuses: Vec::new(),
                 loops: vec![4],
                 curves: corners
                     .iter()

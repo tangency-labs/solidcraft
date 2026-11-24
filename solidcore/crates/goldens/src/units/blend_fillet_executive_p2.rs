@@ -26,8 +26,8 @@ use solidcore::blend::fillet_custom_solver::ConstantRadiusAssistedFs;
 use solidcore::blend::fillet_executive::p1::ExecutiveObjects;
 use solidcore::blend::fillet_executive::p2::FilletParameters;
 use solidcore::blend::fillet_executive::p3::{
-    ContextMark, CornerView, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
-    StitchAttempt, StitchSettings, TopoEdgeView,
+    ContextMark, CornerView, ErrorInfo, ExecutiveAccess, FilletExecutive, StitchAttempt,
+    StitchSettings, TopoEdgeView,
 };
 use solidcore::blend::fillet_geom::p1::{FilStatus, FilletEdgeType};
 use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
@@ -644,6 +644,15 @@ impl ExecutiveAccess<Handle> for Access {
         let b = self.brep_mut(brep)?;
         orient_brep(k, b, outward, maybe_not_solid, just_unify, faces_to_swap_uv)
     }
+    fn keeps_open_result(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &SolidError,
+    ) -> SolidResult<bool> {
+        // this harness never stitches, so it never reaches the open-result pass-over
+        missing()
+    }
     fn do_stitching(
         &mut self,
         _: &mut Kernel,
@@ -1126,6 +1135,33 @@ impl ExecutiveAccess<Handle> for Access {
                             let Some(Handle::Solver(idx)) =
                                 executive.fillet_solver_of_edgeuse(Handle::Edgeuse(eu))
                             else {
+                                return false;
+                            };
+                            solvers
+                                .get(idx)
+                                .is_some_and(|s| {
+                                    use solidcore::blend::fillet_solver::p1::FilletSolverOps;
+                                    let can_change = match s {
+                                        SolverEntry::ConstantRadius(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                        SolverEntry::ConstantDistance(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                        SolverEntry::VariableRadius(s) => {
+                                            FilletSolverOps::offset_radii_can_change(&**s)
+                                        }
+                                        SolverEntry::SurfaceSurface(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                    };
+                                    matches!(can_change, Ok(false))
+                                })
+                        },
+                        |eu| {
+                            let Some(Handle::Solver(idx)) =
+                                executive.fillet_solver_of_edgeuse(Handle::Edgeuse(eu))
+                            else {
                                 return missing();
                             };
                             solvers
@@ -1413,7 +1449,9 @@ impl ExecutiveAccess<Handle> for Access {
 /// `-2`).
 const OP_P2: &str = "blend::fillet_executive::p2: ";
 
-/// The p2 module's operation: its null objects, typed, are `Missing` blend failures of it.
+/// The p2 module's operation: its null objects, typed, are blend failures of it that keep
+/// the status `SM_ERR_NULL_POINTER` (a `Defect` for an object the executive built, the
+/// named cause for the caller's missing law list; #19823).
 const P2_OP: &str = "blend::fillet_executive::p2";
 
 /// The `SmStatus` of a Rust error.
@@ -1422,13 +1460,11 @@ fn status_of(e: &SolidError) -> f64 {
         SolidError::Upstream {
             operation, code, ..
         } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
-        // the p2 module's own null objects, typed (#13790): a `Missing` blend failure of
-        // the module's operation
+        // the p2 module's own null objects, typed (#13790, #19823): a blend failure of the
+        // module's operation keeping `SM_ERR_NULL_POINTER`
         e if e.operation() == P2_OP
-            && matches!(
-                e.blend_failure(),
-                Some(solidcore::error::blend::BlendFailure::Missing(_))
-            ) =>
+            && e.blend_failure().is_some()
+            && solidcore::error::upstream_status(e) == Some(SM_ERR_NULL_POINTER) =>
         {
             NULL_DEREF
         }
@@ -1541,54 +1577,18 @@ fn box_access(bx: &BoxIn) -> Result<Result<Access, Output>, HarnessError> {
 
 /// The executive state the C++ constructor leaves (`SmFilletExecutive(ctx, target)`).
 fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
-    let mut executive = FilletExecutive {
+    let mut executive = FilletExecutive::new(
         target,
-        fillet: None,
-        corners: vec![],
-        solvers: vec![],
-        topo_edges: vec![],
-        edge_attribute: None,
-        initialized: false,
-        options: ExecutionOptions {
-            piecewise_merge: false,
-            topology_insertion: true,
-            global_merge: false,
-            trimming: true,
-            classification: true,
+        ExecutiveObjects {
+            executive: Handle::Brep(0),
+            pseudo_brep: Handle::Brep(0),
+            edge_attribute: Handle::Brep(0),
         },
-        error: ErrorInfo::default(),
-        intersector: TopologyIntersector::new(
-            None,
-            None,
-            solidcore::math::EFF_ZERO_SQ,
-            30.0 * (solidcore::math::PI / 180.0),
-        ),
-        intersection_edges: vec![],
-        intersection_vertices: vec![],
-        law_sequence_edges: vec![],
-        pseudo_brep: None,
-        surface_generators: vec![],
-        filleted_vertices: Vec::new(),
-        vertex_corner_map: BTreeMap::new(),
-        edgeuse_solver_map: BTreeMap::new(),
-        self_intersection_handler: None,
-        mark_corner_patches: false,
-        cliff_overflow: false,
-        open_ends: Vec::new(),
-        overflow_first: false,
-        classify_only: false,
-        overflow_edges: Vec::new(),
-        mitred_edges: Vec::new(),
-        fan_split_points: Vec::new(),
-        earlier_pass_faces: Vec::new(),
-        // the fork's refusal fit (WR-696): none noted, as `FilletExecutive::new` leaves it
-        fit_radius: -1.0,
-        fit_edge: None,
-        fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
-        fit_setback: -1.0,
-        rollover_adjusting: false,
-    };
-    executive.intersector.ignore_tangency = true;
+    );
+    // The fixture does not allocate these objects.
+    executive.edge_attribute = None;
+    executive.pseudo_brep = None;
+    executive.error = ErrorInfo::default();
     executive
 }
 
@@ -2354,9 +2354,7 @@ pub(crate) use loader::{loader_rust, LoaderScript};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore::blend::fillet_executive::p2::{
-        with_temporary_radius_change, with_temporary_radius_change_with_fixes, TemporaryRadiusChange,
-    };
+    use solidcore::blend::fillet_executive::p2::{with_temporary_radius_change, TemporaryRadiusChange};
 
     #[test]
     fn temporary_radius_setup_error_never_enters_the_filleting_body() {
@@ -2372,36 +2370,16 @@ mod tests {
         let solver = Handle::Solver(0);
         let side = Handle::Edgeuse(EdgeuseId::from_index(0));
         let expected = missing_error();
-        // The additive API keeps the existing constructor's pinned default.
-        assert!(TemporaryRadiusChange::new(&mut access, solver, 0, side).is_ok());
+        let error = TemporaryRadiusChange::new(&mut access, solver, 0, side).unwrap_err();
+        assert_eq!(error, expected);
         let mut default_body_called = false;
-        // Revert can fail for this intentionally absent solver; the body still ran.
-        let _ = with_temporary_radius_change(&mut access, solver, 0, side, |_| {
+        let error = with_temporary_radius_change(&mut access, solver, 0, side, |_| {
             default_body_called = true;
             Ok(())
-        });
-        assert!(default_body_called);
-        let mut fixes = solidcore::kernel::UpstreamFixes::default();
-        fixes.temporary_radius_setup_errors = true;
-        let error =
-            TemporaryRadiusChange::new_with_fixes(&mut access, solver, 0, side, &fixes).unwrap_err();
-        assert_eq!(error, expected);
-
-        let mut body_called = false;
-        let error = with_temporary_radius_change_with_fixes(
-            &mut access,
-            solver,
-            0,
-            side,
-            &fixes,
-            |_| {
-                body_called = true;
-                Ok(())
-            },
-        )
+        })
         .unwrap_err();
         assert_eq!(error, expected);
-        assert!(!body_called);
+        assert!(!default_body_called);
         assert_eq!(access.laws.len(), 1);
         assert!(matches!(
             access.laws[0].kind,

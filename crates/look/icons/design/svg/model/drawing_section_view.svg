@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Section drawing view</title>
+  <path d="M8 15L56 15L56 50L37 50L37 27L27 27L27 50L8 50Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10 38L26 22M10 25L20 15M10 50L24 36M39 35L54 20M39 48L54 33M49 50L56 43" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

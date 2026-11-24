@@ -2,7 +2,10 @@
 //! or 1, `SmBrep` boolean, the result exported to schema 4 and decoded as a kernel body. The result's history is SMLib's own (its tags carried through the
 //! operation), renumbered from SMLib's face and edge order into the operands' and the result's
 //! ([`crate::history::History`]'s contract). A result SMLib's own check or the record's geometry
-//! check refuses is an error, never a body.
+//! check refuses is an error, never a body. Solids an operand's record keeps apart where they
+//! touch each other along an edge go into SMLib sharing it, as SMLib made them
+//! (`crate::native::smlib_shared_operand_ordered`); where that fails, the operation is done again
+//! with the operands as the record keeps them, as before.
 
 pub(crate) use smlib::{boolean as smlib_boolean, union_all as smlib_union_all};
 
@@ -11,7 +14,7 @@ mod smlib {
 
     use crate::body::Body;
     use crate::history::History;
-    use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
+    use crate::native::{body_from_smlib_ordered, smlib_body_ordered, smlib_shared_operand_ordered};
     use crate::ops::BoolOp;
     use crate::validation::{Checked, Step};
     use crate::{KernelError, Result, record};
@@ -20,13 +23,36 @@ mod smlib {
         KernelError::smlib(format!("SMLib boolean: {what}"), e)
     }
 
+    /// An operand in SMLib, with where each of its faces and edges is in the body's order.
+    type Operand = (solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>);
+
     /// `a` and `b` combined by `op` in SMLib, with the history SMLib's tags give (none where a
     /// body's face and edge order cannot be matched to SMLib's). `None`: the result is empty.
     pub(crate) fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         a.require_brep("a boolean")?;
         b.require_brep("a boolean")?;
-        let (sa, oa) = smlib_body_ordered(a)?;
-        let (sb, ob) = smlib_body_ordered(b)?;
+        // Solids an operand keeps apart where they touch along an edge go in sharing it (#14419);
+        // where that fails, the operands go in as the record keeps them, as before.
+        let (shared_a, shared_b) = (smlib_shared_operand_ordered(a)?, smlib_shared_operand_ordered(b)?);
+        if shared_a.is_some() || shared_b.is_some() {
+            let sa = match shared_a {
+                Some(s) => s,
+                None => smlib_body_ordered(a)?,
+            };
+            let sb = match shared_b {
+                Some(s) => s,
+                None => smlib_body_ordered(b)?,
+            };
+            match combine(a, b, sa, sb, op) {
+                Ok(r) => return Ok(r),
+                Err(e) => log::debug!(target: "smlib", "boolean with touching solids shared: {e}"),
+            }
+        }
+        combine(a, b, smlib_body_ordered(a)?, smlib_body_ordered(b)?, op)
+    }
+
+    /// [`boolean`] of `a` and `b` as SMLib's `sa` and `sb`, each with its numbering.
+    fn combine(a: &Body, b: &Body, (sa, oa): Operand, (sb, ob): Operand, op: BoolOp) -> Result<Option<Body>> {
         let ta = sa.tagged(0).map_err(|e| failed("tag", e))?;
         let tb = sb.tagged(1).map_err(|e| failed("tag", e))?;
         let kind = match op {
@@ -44,7 +70,7 @@ mod smlib {
             }),
             _ => None,
         };
-        Ok(Some(left(with_history(body, history, a, b), step, r)))
+        Ok(Some(left(with_history(body, history, a, b), step, r, &[a, b])))
     }
 
     /// The union of `bodies` in one SMLib call, each tagged as its own operand, checked once:
@@ -53,12 +79,35 @@ mod smlib {
         if bodies.len() > solidcraft_smlib::MAX_UNION_BREPS {
             return Err(KernelError::Invalid(format!("a union takes at most {} bodies", solidcraft_smlib::MAX_UNION_BREPS)));
         }
-        let mut operands = Vec::with_capacity(bodies.len());
-        let mut tagged = Vec::with_capacity(bodies.len());
-        let mut orders = Some(Vec::with_capacity(bodies.len()));
-        for (i, body) in bodies.iter().enumerate() {
+        let mut shared = Vec::with_capacity(bodies.len());
+        for body in bodies {
             body.require_brep("a union")?;
-            let (s, order) = smlib_body_ordered(body)?;
+            shared.push(smlib_shared_operand_ordered(body)?);
+        }
+        // As in [`boolean`]: shared where an operand has touching solids, else as before.
+        if shared.iter().any(Option::is_some) {
+            let mut operands = Vec::with_capacity(bodies.len());
+            for (body, s) in bodies.iter().zip(shared) {
+                operands.push(match s {
+                    Some(s) => s,
+                    None => smlib_body_ordered(body)?,
+                });
+            }
+            match unite(bodies, operands) {
+                Ok(r) => return Ok(r),
+                Err(e) => log::debug!(target: "smlib", "union with touching solids shared: {e}"),
+            }
+        }
+        let operands = bodies.iter().map(|&body| smlib_body_ordered(body)).collect::<Result<Vec<_>>>()?;
+        unite(bodies, operands)
+    }
+
+    /// [`union_all`] of `bodies` as SMLib's `given`, in order, each with its numbering.
+    fn unite(bodies: &[&Body], given: Vec<Operand>) -> Result<Body> {
+        let mut operands = Vec::with_capacity(given.len());
+        let mut tagged = Vec::with_capacity(given.len());
+        let mut orders = Some(Vec::with_capacity(given.len()));
+        for (i, (s, order)) in given.into_iter().enumerate() {
             tagged.push(s.tagged(i).map_err(|e| failed("tag", e))?);
             operands.push(s);
             orders = orders.zip(order).map(|(mut v, o)| {
@@ -78,18 +127,18 @@ mod smlib {
             }),
             _ => None,
         };
-        Ok(left(body.with_checked_history(history, &record::counts(bodies)), step, r))
+        Ok(left(body.with_checked_history(history, &record::counts(bodies)), step, r, bodies))
     }
 
-    /// `body`, decoded from `r`, keeping `r` for the check at the end of its feature when the
-    /// step left it there.
-    fn left(body: Body, step: Step, r: solidcraft_smlib::Brep) -> Body {
-        if step == Step::Defer { body.left_unchecked("SMLib boolean", Checked::Combined, r) } else { body }
+    /// `body`, decoded from `r`, the result of combining `operands`, keeping `r` for the check at
+    /// the end of its feature when the step left it there.
+    fn left(body: Body, step: Step, r: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
+        if step == Step::Defer { body.left_unchecked("SMLib boolean", Checked::Combined, r, operands) } else { body }
     }
 
-    /// An error unless SMLib's check accepts `r`, the result of combining `operands` (checked
-    /// here unless the evaluation's validation mode leaves it to the feature's end,
-    /// `crate::validation`): what was done with the check.
+    /// An error when SMLib's check refuses `r`, the result of combining `operands`, where the
+    /// evaluation's validation mode checks each step (left to the feature's end, or not checked,
+    /// otherwise: `crate::validation`): what was done with the check.
     fn checked(r: &solidcraft_smlib::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<Step> {
         let step = crate::validation::step();
         if step != Step::Check {
@@ -103,23 +152,7 @@ mod smlib {
         if check.is_valid() {
             return Ok(step);
         }
-        // Whether an operand failed it already says whose the fault is.
-        let failing: Vec<String> = operands
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.check(CheckLevel::All).is_ok_and(|c| !c.is_valid()))
-            .map(|(i, _)| match (operands.len(), i) {
-                (2, 0) => "the first operand".to_string(),
-                (2, _) => "the second operand".to_string(),
-                _ => format!("operand {i}"),
-            })
-            .collect();
-        let what = if failing.is_empty() {
-            "SMLib's check refuses the result".to_string()
-        } else {
-            format!("SMLib's check refuses the result ({} already fails it)", failing.join(" and "))
-        };
-        Err(failed(&what, check))
+        Err(failed(&crate::validation::refuses(operands.iter().map(|s| s.check(CheckLevel::All))), check))
     }
 
     /// `body` with `history` where it describes `body` made from `a` and `b`.

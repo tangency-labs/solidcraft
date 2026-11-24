@@ -1,7 +1,8 @@
 //! A blend refused on its edges or corners, as data ([`BlendRefusal`], carried by
 //! [`crate::SolidError::BlendRefused`]), and the queries the refusals rest on: the tangent
 //! chain of edges ([`tangent_chain`], [`chains_among`]), the edge a blended edge runs on into
-//! ([`continuation`]) and a round too small to change the part ([`round_too_small`]).
+//! ([`continuation`]), a round too small to change the part ([`round_too_small`]) and a
+//! chamfer's or weld bead's setback below the body's resolution ([`setback_below_resolution`]).
 //!
 //! Not upstream (solidcore's). The chain follows the blend corner's own test of an edge
 //! running on tangentially at a vertex ([`continuing_edges`], the fork's
@@ -9,6 +10,8 @@
 //! ([`edge::blend_edgeuse_or_why`]). No recursion.
 
 use crate::blend::blend_corner::end::continuing_edges;
+use crate::blend::fillet_executive::p1::is_radius_supported;
+use crate::error::blend::BlendFailure;
 use crate::math::{rad_to_deg, PI};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
@@ -400,7 +403,7 @@ pub fn round_too_small(
         }
     }
     // the blend's tangency angle: faces within it are tangent ([`edge::blend_edgeuse`])
-    let tangent = PI / 180.0 * (90.0 - edge::crease_angle(k));
+    let tangent = PI / 180.0 * (90.0 - edge::CREASE_ANGLE);
     let reach = 1.0 / (0.5 * turn).cos() - 1.0;
     if turn <= tangent || !(reach.is_finite() && reach > 0.0) {
         return Ok(None);
@@ -415,4 +418,36 @@ pub fn round_too_small(
         tolerance,
         smallest_radius: tolerance / reach,
     }))
+}
+
+/// [`BlendFailure::SizeBelowResolution`] of `op` at edge `id` for the first of `setbacks`
+/// below the smallest size a fillet builds on a body of `tolerance`
+/// ([`is_radius_supported`]: eight times the tolerance; NaN fails too): a setback is how far
+/// a rail or a toe lies from the edge along its face, whether it was given as a distance or
+/// computed from an angle or a chord, and one that small puts it on the edge within
+/// tolerance, a sliver. Shared by the chamfer's preparation and the weld bead (#21004,
+/// #21138), so a size refused by one is refused alike by the other.
+///
+/// # Errors
+///
+/// That refusal (class `InvalidInput`, status `SM_ERR_INVALID_INPUT`), naming the setback
+/// and the tolerance.
+#[track_caller]
+pub(crate) fn setback_below_resolution(
+    op: &'static str,
+    id: EdgeId,
+    setbacks: [f64; 2],
+    tolerance: f64,
+) -> Result<()> {
+    match setbacks
+        .into_iter()
+        .find(|&s| !is_radius_supported(s, tolerance))
+    {
+        None => Ok(()),
+        Some(size) => Err(SolidError::blend_at(
+            op,
+            BlendFailure::SizeBelowResolution { size, tolerance },
+            EntityRef::Edge(id),
+        )),
+    }
 }

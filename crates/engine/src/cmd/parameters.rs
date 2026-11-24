@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::{self, Kind};
-use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, solve_with};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, keep_point_order, keep_sides_at_zero, solve_with};
 
 use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_, str_};
@@ -227,6 +227,11 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().set_favorite(&name, f)?;
     }
     let switched = switch_by_rules(s, &before);
+    if let Some(expr) = e.as_deref()
+        && let Some(flipped) = normalize_negative_dimension(s, &name, expr)
+    {
+        e = Some(flipped);
+    }
     if e.is_some() {
         keep_dimension_start(s, &name);
     }
@@ -246,6 +251,46 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         expression: e,
     };
     reply(cmd, ParamChanged { body: ParamChangedBody::One(Box::new(one)), param_warnings: Vec::new() })
+}
+
+/// A negative value on a sided distance dimension flips the free side to the opposite side of its
+/// reference and stores the positive magnitude (or `-(expr)` for parametric expressions), matching
+/// `sketch.dimension`.
+fn normalize_negative_dimension(s: &mut Session, name: &str, expr_text: &str) -> Option<String> {
+    let (vals, _) = s.doc.param_values();
+    let w = vals.get(name)?.to_kind(expr::Kind::Length).ok()?;
+    if w >= 0.0 {
+        return None;
+    }
+    let targets: Vec<(u64, ConstraintKind)> = s
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Sketch { sketch, .. } => sketch
+                .constraints
+                .iter()
+                .find(|c| !c.driven && c.param.as_deref() == Some(name) && !c.kind.is_angle())
+                .map(|c| (f.id, c.kind.clone())),
+            _ => None,
+        })
+        .collect();
+    if targets.is_empty() {
+        return None;
+    }
+    let mut flipped = false;
+    for (id, kind) in targets {
+        let Ok(stored) = sketch_store::read(&s.doc, id) else { continue };
+        let mut sk = stored.clone();
+        if sk.flip_for_negative_dimension(&kind, -w) && sketch_store::write(s.doc_mut(), id, sk).is_ok() {
+            flipped = true;
+        }
+    }
+    if !flipped {
+        return None;
+    }
+    let flipped_expr = if expr::references(expr_text).is_empty() { s.doc.design_length(-w).1 } else { format!("-({expr_text})") };
+    if s.doc_mut().change_param(name, &flipped_expr, None, None).is_ok() { Some(flipped_expr) } else { None }
 }
 
 /// Points a driving dimension keeps when its own parameter changes. A length keeps the first
@@ -336,7 +381,7 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
             continue;
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
-        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() && trial.freeform_chain_offsets.is_empty() {
             let hold = Hold { points, radii: Vec::new() };
             solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
         } else {
@@ -353,10 +398,15 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
             continue;
         }
         if stored.points.len() == trial.points.len() {
-            // Only the points move: the stored dimensions keep their own values.
+            // Only the points move: the stored dimensions keep their own values, and the order of
+            // the points of one this edit drives to zero, which keeps their sides (#15766).
+            keep_sides_at_zero(&mut trial, &reference);
             let mut kept = stored.clone();
             for (p, q) in kept.points.iter_mut().zip(&trial.points) {
                 p.pos = q.pos;
+            }
+            for (c, t) in kept.constraints.iter_mut().zip(&trial.constraints) {
+                keep_point_order(&mut c.kind, &t.kind);
             }
             let _ = sketch_store::write(s.doc_mut(), id, kept);
         }
@@ -383,7 +433,8 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     let before = s.doc.param_values().0;
     s.doc_mut().change_params_atomic(&list)?;
     let switched = switch_by_rules(s, &before);
-    for (name, _) in &list {
+    for (name, expr) in &list {
+        normalize_negative_dimension(s, name, expr);
         keep_dimension_start(s, name);
     }
     s.settle_value_edit(solved)?;

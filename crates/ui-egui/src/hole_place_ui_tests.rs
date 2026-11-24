@@ -533,6 +533,59 @@ fn editing_a_hole_replaces_its_face_instead_of_adding_one() {
     let (again, position) = last_hole(&h);
     assert_eq!(again, hole, "the same feature");
     assert!(position.dist(on_top) < 1e-3, "OK uses the new face: {position:?}");
+
+    // Rebuilding the inputs after a placement change must keep the editor's one-place rule.
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": hole}})).unwrap();
+    for (current, next) in [("Single", "Multiple"), ("Multiple", "Single")] {
+        h.step(&json!({"widget": current, "near": "Placement"})).unwrap();
+        h.step(&json!({"widget": next})).unwrap();
+    }
+    for point in [Vec3::new(30.0, 15.0, 10.0), on_top] {
+        h.step(&json!({"call": "ui.dialogInput", "params": {"index": 0}})).unwrap();
+        let at = screen(&mut h, point);
+        h.step(&json!({"click": at})).unwrap();
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "changing placement must not allow '2 selected' while editing");
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(on_top) < 1e-3), "{:?}", places(&h));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (again, position) = last_hole(&h);
+    assert_eq!(again, hole, "changing placement still edits the same feature");
+    assert!(position.dist(on_top) < 1e-3, "OK uses the last picked face after changing placement: {position:?}");
+}
+
+/// #17358: a hole of the root that drills only the Block, placed by script at points exactly on
+/// the round side of the Lid's Rod (r 5, axis along x at y 20, z 17, 2 mm over the Block). Edit
+/// Hole opens with its place on the Rod, and OK leaves the hole there: it doesn't move onto the
+/// Block's top and drill the Block.
+#[test]
+fn editing_a_hole_at_a_point_on_a_round_face_of_a_body_it_does_not_cut_keeps_it_there() {
+    for deg in [3.37f64, 7.5, 10.37] {
+        let p = Vec3::new(20.0, 20.0 + 5.0 * deg.to_radians().sin(), 17.0 + 5.0 * deg.to_radians().cos());
+        let mut h = Harness::new();
+        h.app.set_origin_shown(false);
+        h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "Block"})).unwrap();
+        h.app.run("component.create", json!({"name": "Lid"})).unwrap();
+        h.app
+            .run("solid.cylinder", json!({"radius": 5, "height": 40, "base": [0, 20, 17], "axis": "X", "operation": "new", "body_name": "Rod"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        let hole = json!({"position": [p.x, p.y, p.z], "direction": [0, 0, -1], "diameter": 1, "depth": 1.5, "participants": ["Block"], "name": "H"});
+        let hole = h.app.run("solid.hole", hole).unwrap()["feature"].as_u64().unwrap();
+        h.settle();
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": hole}})).unwrap();
+        h.frames(3);
+        let seeded = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+        assert!(matches!(seeded.as_slice(), [Sel::Face { body, point, .. }] if body == "Rod" && point.dist(p) < 1e-9), "{deg}°: {seeded:?}");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+        let (again, position) = last_hole(&h);
+        assert_eq!(again, hole, "the same feature");
+        assert!(position.dist(p) < 1e-9, "{deg}°: OK keeps the hole on the Rod, not at {position:?}");
+        let m = h.app.run("inspect.measure", json!({})).unwrap();
+        let block = m["bodies"].as_array().and_then(|bs| bs.iter().find(|b| b["name"] == "Block")).and_then(|b| b["volume_mm3"].as_f64());
+        assert!(block.is_some_and(|v| (v - 16_000.0).abs() < 1e-6), "{deg}°: the Block is not drilled: {block:?}");
+    }
 }
 
 /// Single holes on two faces with the depth typed as `ScrewDepth = 5`: OK runs one command per

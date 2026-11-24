@@ -17,6 +17,7 @@
 
 use solidcore::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfCurves, SrfSrfOptions};
 use solidcore::error::blend::BlendFailure;
+use solidcore::error::ErrorKind;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
@@ -24,6 +25,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder_surface;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
+use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::Kernel;
 
@@ -510,10 +512,21 @@ fn a_heading_along_neither_way_round_is_refused() {
             )
             .err()
             .unwrap_or_else(|| panic!("{from} -> {to}, {what}: an arc was built"));
+            // no curve through the points leaves the start along the heading (#19810): an
+            // empty search, keeping `SM_ERR`
             assert_eq!(
-                e.blend_failure(),
-                Some(&BlendFailure::StageFailed),
+                (e.kind(), e.is_defect(), e.blend_failure()),
+                (
+                    ErrorKind::NotFound,
+                    false,
+                    Some(&BlendFailure::SrfSrfHeadingNotFollowed)
+                ),
                 "{from} -> {to}, {what}: {e:?}"
+            );
+            assert_eq!(
+                solidcore::error::upstream_status(&e),
+                Some(1001),
+                "{from} -> {to}, {what}"
             );
         }
     }
@@ -537,7 +550,16 @@ fn a_heading_along_neither_way_round_is_refused() {
     )
     .err()
     .unwrap_or_else(|| panic!("half circle 20 -> 110 heading down: an arc was built"));
-    assert_eq!(e.blend_failure(), Some(&BlendFailure::StageFailed), "{e:?}");
+    assert_eq!(
+        (e.kind(), e.is_defect(), e.blend_failure()),
+        (
+            ErrorKind::NotFound,
+            false,
+            Some(&BlendFailure::SrfSrfHeadingNotFollowed)
+        ),
+        "{e:?}"
+    );
+    assert_eq!(solidcore::error::upstream_status(&e), Some(1001));
     // heading up, the half circle's arc
     let mut up = heading(20.0, 1.0);
     check_arc(
@@ -662,4 +684,127 @@ fn check_arc(
         (length - want).abs() <= 1e-4,
         "{what}: length {length}, want {want}"
     );
+}
+
+/// The sphere of radius 10 about the origin, its seam (the meridian where its longitude
+/// starts and ends) at 90 degrees about z, through (0, 10, 0).
+fn sphere_seamed_at_90(k: &Kernel) -> Surface {
+    let frame = Axis2Placement::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(-1.0, 0.0, 0.0),
+    );
+    Surface::from(Sphere::create_canonical(k, &frame, 10.0).unwrap())
+}
+
+/// The point at `deg` degrees about z on the circle the sphere of radius 10 meets z = 5 in
+/// (radius sqrt 75).
+fn on_level_circle(deg: f64) -> Point3 {
+    let t = deg.to_radians();
+    let r = 75.0_f64.sqrt();
+    Point3::new(r * t.cos(), r * t.sin(), 5.0)
+}
+
+/// #16354's seam-only UV pass-over, old to new. With `closed_by_start_direction`, an arc
+/// between two points of a closed candidate the other way round runs through the candidate's
+/// closure, and on a surface whose seam holds that closure it has no UV curve, which is
+/// accepted. The plane z = 5 meets the sphere of [`sphere_seamed_at_90`] in a circle whose
+/// closure lies at 0 degrees, off the sphere's seam at 90. The arc from 100 down to -10
+/// degrees runs through the closure and crosses the sphere's seam at 90: it drops onto the
+/// sphere as no UV curve, and since the closure is not on that seam the intersection fails
+/// with the drop's error. Before #16354 a curve through a closure went without a UV curve on
+/// any surface: this arc was built with none on the sphere. The arc from 80 to 100 degrees,
+/// over the seam but not through the closure, fails the same way (it did before #16354 too).
+/// Still accepted: the arc from -10 to 10 degrees through the closure, which crosses no seam
+/// of the sphere (both UV curves), and an arc through the closure of the plane's circle on a
+/// cylinder, whose seam holds it (no UV curve on the cylinder).
+#[test]
+fn a_curve_through_a_closure_off_a_seam_it_crosses_keeps_the_drop_error() {
+    let k = Kernel::default();
+    let sphere = sphere_seamed_at_90(&k);
+    let plane = level(5.0);
+    let intersect = |a: &Surface, from: Point3, to: Point3, mut dir: Vec3| {
+        srf_srf_intersection(
+            &k,
+            Some(from),
+            Some(to),
+            Some(&mut dir),
+            None,
+            a,
+            &plane,
+            TOL,
+            ANG_TOL,
+            SrfSrfOptions {
+                closed_by_start_direction: true,
+                ..SrfSrfOptions::default()
+            },
+        )
+    };
+    let ends = |c: &SrfSrfCurves| {
+        let curve = c.curve_3d.as_ref().unwrap();
+        let ivl = curve.natural_interval();
+        (
+            curve.evaluate_point(&k, ivl.min()).unwrap(),
+            curve.evaluate_point(&k, ivl.max()).unwrap(),
+        )
+    };
+    // over the sphere's seam, through the closure and not
+    for (from, to, swept) in [(100.0, -10.0, -110.0), (80.0, 100.0, 20.0)] {
+        let r = intersect(
+            &sphere,
+            on_level_circle(from),
+            on_level_circle(to),
+            heading(from, swept),
+        );
+        let e = match r {
+            Err(e) => e,
+            Ok(c) => panic!(
+                "{from} -> {to}: built, its UV curve on the sphere {:?}, ends {:?}",
+                c.uv_curve1.is_some(),
+                ends(&c)
+            ),
+        };
+        // the drop made no UV curve on the sphere (#15034): a curve the kernel builds no UV
+        // curve for, unsupported (#19810), keeping `SM_ERR`
+        assert_eq!(
+            (e.operation(), e.kind(), e.is_defect(), e.blend_failure()),
+            (
+                "blend::fillet_geom::p2::srf_srf_intersection",
+                ErrorKind::Unsupported,
+                false,
+                Some(&BlendFailure::IntersectionCurveHasNoUvCurve { on_second: false })
+            ),
+            "{from} -> {to}: {e:?}"
+        );
+        assert_eq!(
+            solidcore::error::upstream_status(&e),
+            Some(1001),
+            "{from} -> {to}"
+        );
+    }
+    // through the closure, over no seam of the sphere: both UV curves
+    let c = intersect(
+        &sphere,
+        on_level_circle(-10.0),
+        on_level_circle(10.0),
+        heading(-10.0, 20.0),
+    )
+    .unwrap();
+    let (start, end) = ends(&c);
+    assert!(start.distance(on_level_circle(-10.0)) <= 1e-9, "{start:?}");
+    assert!(end.distance(on_level_circle(10.0)) <= 1e-9, "{end:?}");
+    assert!(c.uv_curve1.is_some() && c.uv_curve2.is_some());
+    // through the closure on the cylinder's seam (at 5 degrees): none on the cylinder
+    let cylinder = seamed_cylinder(&k, 5.0);
+    let c = intersect(
+        &cylinder,
+        on_circle(-5.0),
+        on_circle(15.0),
+        heading(-5.0, 20.0),
+    )
+    .unwrap();
+    let (start, end) = ends(&c);
+    assert!(start.distance(on_circle(-5.0)) <= 1e-9, "{start:?}");
+    assert!(end.distance(on_circle(15.0)) <= 1e-9, "{end:?}");
+    assert!(c.uv_curve1.is_none() && c.uv_curve2.is_some());
 }

@@ -1122,11 +1122,12 @@ mod tests {
         h.app.session.selection.push(Sel::SketchCurve { id: other["curves"][0].as_str().unwrap().into(), sketch: None });
         assert!(selected_entity(&h.app).is_none());
         assert!(!crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport).iter().any(|item| item.id == "sketch.edit_text"));
-        h.app.session.selection = vec![Sel::SketchCurve { id: curve, sketch: None }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: curve.clone(), sketch: None }];
         h.app.start("sketch.edit_text");
         assert!(editing(&h.app));
         h.app.start("sketch.line");
         assert!(!editing(&h.app));
+        h.app.session.selection = vec![Sel::SketchCurve { id: curve, sketch: None }];
         h.app.start("sketch.edit_text");
         assert!(editing(&h.app));
         crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();

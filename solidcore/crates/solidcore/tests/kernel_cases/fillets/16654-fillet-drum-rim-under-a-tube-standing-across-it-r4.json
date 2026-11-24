@@ -1,0 +1,376 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "distance": 40.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 30.0,
+              "reference": [
+                1.0,
+                0.0,
+                -0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "distance": 40.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                -20.0,
+                30.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 12.0,
+              "reference": [
+                1.0,
+                0.0,
+                -0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -11.757550765359255,
+                  -40.0,
+                  27.600000000000005
+                ],
+                [
+                  24.53604579473932,
+                  -40.0,
+                  17.262168367805216
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  -11.757550765359255,
+                  -40.0,
+                  27.600000000000005
+                ],
+                [
+                  24.53604579473932,
+                  -40.0,
+                  17.262168367805216
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  24.53604579473932,
+                  -40.0,
+                  17.262168367805216
+                ],
+                [
+                  11.757550765359248,
+                  -40.0,
+                  27.600000000000005
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              -8.212202556178628,
+              -40.0,
+              -28.823495240615813
+            ],
+            [
+              -8.212202556178628,
+              -40.0,
+              -28.823495240615813
+            ],
+            [
+              18.857050763210726,
+              -40.0,
+              23.30698089688032
+            ]
+          ],
+          "tolerance": 5.363812454276391
+        },
+        "kind": "round",
+        "sizes": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "16654-fillet-drum-rim-under-a-tube-standing-across-it-r4",
+  "expected": {
+    "bbox": {
+      "max": [
+        30,
+        0,
+        42
+      ],
+      "min": [
+        -30,
+        -60,
+        -30
+      ]
+    },
+    "body_count": 1,
+    "method": "Drum pi 900 40 = 113097.34. Tube pi 144 40 = 18095.57, half its length inside the drum's span of y: the lens of the circles R30 and R12 with centres 30 apart, r^2 acos((d^2+r^2-R^2)/(2dr)) + R^2 acos((d^2+R^2-r^2)/(2dR)) - sqrt((-d+r+R)(d+r-R)(d-r+R)(d+r+R))/2 = 206.9169, times 20. Union V0 = 127054.57. A convex round takes material: less than V0. Round the whole rim it takes r^2 (1 - pi/4) = 3.4336 swept round at most 2 pi 30: 647.22; the rim outside the tube is 337 of 360 degrees (the tube covers 2 asin(6/30)), so it takes more than half that. V in [V0 - 647.2, V0 - 323.6]. The round is inside the union's box.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#16654"
+    ],
+    "volume_mm3": [
+      126407.3,
+      126731.0
+    ],
+    "what": "an R4 round on the rim of a drum R30 x 40 (along -y, the rim at y = -40) that a tube R12 stands across, parallel to the drum's axis and centred on the rim (y from -20 to -60): the rim is the arc outside the tube, and the round's rail on the end face, a circle of radius 26, leaves that face across the tube's foot short of the rim's ends and comes back across it"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 17,
+      "faces": 8,
+      "vertices": 11
+    }
+  },
+  "records": "16654-fillet-drum-rim-under-a-tube-standing-across-it-r4.bodies.json.gz",
+  "result": [
+    {
+      "body": "Drum",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 15279.243172609136,
+      "body_count": 1,
+      "edges": 17,
+      "faces": 8,
+      "vertices": 11,
+      "volume_mm3": 126507.96799552483
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#16654"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "an R4 round on the rim of a drum R30 x 40 (along -y, the rim at y = -40) that a tube R12 stands across, parallel to the drum's axis and centred on the rim (y from -20 to -60): the rim is the arc outside the tube, and the round's rail on the end face, a circle of radius 26, leaves that face across the tube's foot short of the rim's ends and comes back across it",
+  "why_not": []
+}

@@ -13,8 +13,8 @@ pub mod p2;
 pub mod p3;
 
 pub use p1::{
-    EdgeDefId, EdgeDefinition, OwningRecords, OwningTopology, ProtoEdge, ProtoEdgeId, ProtoFace,
-    ProtoFaceId, ProtoGeometry, ProtoTopologyManager, ProtoVertex, ProtoVertexId, VertexDefId,
-    VertexDefinition,
+    DeclaredContact, EdgeDefId, EdgeDefinition, OwningRecords, OwningTopology, ProtoEdge,
+    ProtoEdgeId, ProtoFace, ProtoFaceId, ProtoGeometry, ProtoTopologyManager, ProtoVertex,
+    ProtoVertexId, VertexDefId, VertexDefinition,
 };
 pub use p2::ProtoBrep;

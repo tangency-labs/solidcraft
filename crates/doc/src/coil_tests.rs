@@ -23,6 +23,23 @@ fn an_old_coil_saves_unchanged() {
 }
 
 #[test]
+fn a_coil_cut_square_saves_its_end_cut() {
+    let v = json!({
+        "type": "coil",
+        "base": [0.0, 0.0, 0.0],
+        "axis": [0.0, 0.0, 1.0],
+        "diameter": "20",
+        "pitch": "7",
+        "turns": "4",
+        "section_size": "2",
+        "section": "circular",
+        "end_cut": "square",
+        "operation": "new_body"
+    });
+    assert_eq!(serde_json::to_value(kind(v.clone())).unwrap(), v);
+}
+
+#[test]
 fn a_coil_from_a_sketch_saves_its_sketch_and_profiles() {
     let v = json!({
         "type": "coil",
