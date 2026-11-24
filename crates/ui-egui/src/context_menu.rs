@@ -1691,7 +1691,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
-    v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
+    v.push(cmd(app, "sketch.move", "Move/Copy"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
     // Points switch too (#18448): a construction point is reference geometry a Hole leaves out.
     // The origin is the sketch's own and is not offered.
