@@ -4732,6 +4732,33 @@ fn align_edits_take_the_ways_of_their_new_picks() {
     assert_bounds(&mut s, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
 }
 
+/// A design saved with an Align of two bare points (no stored ways) reopens as it was, flip
+/// true or false: a plain move, as it always evaluated (#21331).
+#[test]
+fn a_saved_align_of_two_points_reopens_unchanged() {
+    fn align_of(v: &mut Value) -> Option<&mut serde_json::Map<String, Value>> {
+        if matches!(v, Value::Object(o) if o.contains_key("bodies") && o.contains_key("from") && o.contains_key("to")) {
+            return v.as_object_mut();
+        }
+        match v {
+            Value::Object(o) => o.values_mut().find_map(align_of),
+            Value::Array(a) => a.iter_mut().find_map(align_of),
+            _ => None,
+        }
+    }
+    let mut s = drilled_plate_and_block();
+    run(&mut s, "solid.align", json!({"bodies": ["Block"], "from": [35, 30, 10], "to": [14.5, -1, 0]}));
+    for flip in [false, true] {
+        let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        let align = align_of(&mut saved).expect("the Align");
+        assert!(!align.contains_key("from_normal") && !align.contains_key("to_normal"), "{align:?}");
+        align.insert("flip".into(), json!(flip));
+        let mut reopened = Session { doc: solidcraft_doc::format::read(&saved.to_string()).unwrap().into(), ..Default::default() };
+        reopened.refresh();
+        assert_bounds(&mut reopened, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
+    }
+}
+
 /// The ways the Align of `s` stores for its two sides.
 fn align_ways(s: &Session) -> (Option<solidcore_record::Vec3>, Option<solidcore_record::Vec3>) {
     let way = |n: &Option<solidcraft_doc::Dir>| n.map(|d| d.0);
