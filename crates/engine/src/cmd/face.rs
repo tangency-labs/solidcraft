@@ -540,12 +540,19 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body:
     let author_inverse = mat_inverse(&author).ok_or_else(|| bad(cmd, "invalid face profile author frame"))?;
     let author_inside = apply_point(&author_inverse, world_inside);
     drop(doc);
+    // The face's boundary is the profile: it stays profile geometry, even when the design
+    // projects references as construction. As construction it would leave the sketch with no
+    // profile at all, and the feature that uses the face would have nothing to build.
+    let construction = s.project_construction;
+    s.project_construction = false;
     let r = super::sketch::create_face_profile(
         s,
         &json!({"plane": {"face": [world_inside.x, world_inside.y, world_inside.z], "body": world_body, "index": f, "path":path, "fixed": fixed}, "project_edges": true}),
         &body,
         f as usize,
-    )?;
+    );
+    s.project_construction = construction;
+    let r = r?;
     let sid = r.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the face"))?;
     s.refresh();
     let plane = s.model.state().sketch(sid).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "could not start a sketch on the face"))?;

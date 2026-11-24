@@ -33,6 +33,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.rectangle.center", scopes: DRAW_SCOPES, bindings: SQUARE_BINDINGS, audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.rectangle.rounded", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.rectangle.three_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.rectangle.edge_center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.two_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.three_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
@@ -135,6 +136,7 @@ impl Tool {
             "sketch.rectangle.center" => ("sketch.rectangle.center", Kind::Draw(2)),
             "sketch.rectangle.rounded" => ("sketch.rectangle.rounded", Kind::Draw(2)),
             "sketch.rectangle.three_point" => ("sketch.rectangle.three_point", Kind::Draw(3)),
+            "sketch.rectangle.edge_center" => ("sketch.rectangle.edge_center", Kind::Draw(3)),
             "sketch.circle.center" => ("sketch.circle.center", Kind::Draw(2)),
             "sketch.circle.two_point" => ("sketch.circle.two_point", Kind::Draw(2)),
             "sketch.circle.three_point" => ("sketch.circle.three_point", Kind::Draw(3)),
@@ -191,6 +193,7 @@ pub fn hint(id: &str) -> String {
         "sketch.rectangle.center" => tr("sketch.hint.rectangle.center").into(),
         "sketch.rectangle.rounded" => tr("sketch.hint.rectangle.rounded").into(),
         "sketch.rectangle.three_point" => tr("sketch.hint.rectangle.three_point").into(),
+        "sketch.rectangle.edge_center" => tr("sketch.hint.rectangle.edge_center").into(),
         "sketch.circle.center" => tr("sketch.hint.circle.center").into(),
         "sketch.arc.three_point" => tr("sketch.hint.arc.three_point").into(),
         "sketch.arc3d" => tr("sketch.hint.arc3d").into(),
@@ -218,36 +221,73 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
     json!([p.0.x, p.0.y])
 }
 
+/// A clicked point that is held where it snapped: a midpoint, on-curve, crossing or body-vertex
+/// snap goes as itself, so the command keeps the point there. A snap to an existing point goes as
+/// its place, where the command's `connect` joins the two with a Coincident the sketch shows.
+/// So does a snap whose curve is no longer in the sketch: Undo between a rectangle's two clicks
+/// can take away the curve its first corner snapped to, and the command would refuse the snap
+/// click after click (the Line's chain re-checks the same way, #10016). And so does every snap
+/// in a drawing sheet's sketch, where the commands take no snap yet.
+fn held(app: &SolveApp, p: &(Vec2, Option<String>)) -> Value {
+    let stands = |id: &str| {
+        if app.session.sheet_sketching() {
+            return false;
+        }
+        let st = crate::open_meshing::session_world(&app.session);
+        app.session.active_sketch.and_then(|sid| st.sketch(sid)).is_some_and(|ss| crate::sketch_line_arc::chain_point(&ss.sketch, id, p.0).is_some())
+    };
+    match &p.1 {
+        Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && stands(id) => json!(id),
+        _ => xy(p),
+    }
+}
+
 /// Shift exposes a line midpoint as a point target, only in the alignment tool.
 /// How near (screen pixels) a Coincident pick on a model edge must be to the edge's middle to
 /// take that middle, as near as a sketch line's middle is offered.
 const EDGE_MIDDLE_PX: f32 = 8.0;
 
-fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
+/// How near (screen pixels) the cursor must be to a sketch line's middle for the alignment tool
+/// to take that middle as the point it aligns, as near as the idle viewport offers that middle
+/// (#20442).
+const LINE_MIDDLE_PX: f32 = 8.0;
+
+/// The middle of the straight line among `hits` whose middle is within `radius` (screen pixels)
+/// of the cursor.
+fn midpoint_of(app: &SolveApp, proj: &Proj, hits: &[Hit], pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
     let sid = app.session.active_sketch?;
     let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sid)?;
-    pick(app, proj, pos).into_iter().find_map(|hit| {
+    hits.iter().find_map(|hit| {
         let Hit::SketchCurve { sketch, id, straight: true, .. } = hit else { return None };
-        if sketch != sid {
+        if *sketch != sid {
             return None;
         }
-        let l = ss.sketch.curve_index(&id)?;
+        let l = ss.sketch.curve_index(id)?;
         let solidcraft_engine::sketch::Shape::Line { a, b } = ss.sketch.shape(l)? else { return None };
         let mid = (a + b) * 0.5;
         let screen = proj.to_screen(ss.plane.to_world(mid))?;
-        (screen.distance(pos) <= radius).then_some((mid, id))
+        (screen.distance(pos) <= radius).then_some((mid, id.clone()))
     })
 }
 
-/// The corner of a rectangle (two-point or centre) held to a square while the square chord is
-/// down: the side is the larger of the two distances from the first point, in the direction the
-/// cursor went. A snap on the corner no longer applies once it has moved.
+/// The active sketch's closest point or curve under the cursor.
+fn active_hit<'a>(hits: &'a [Hit], app: &SolveApp) -> Option<&'a Hit> {
+    hits.iter().find(|hit| match hit {
+        Hit::SketchPoint { sketch, .. } | Hit::SketchCurve { sketch, .. } => Some(*sketch) == app.session.active_sketch,
+        _ => false,
+    })
+}
+
 /// Whether the rectangle `t` is about to be drawn is held to a square.
 fn squared_rectangle(t: &Tool) -> bool {
     crate::tool_modifiers::square_rectangle() && matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center")
 }
 
+/// The corner of a rectangle (two-point or centre) held to a square while the square chord is
+/// down: the side is the larger of the two distances from the first point, in the direction the
+/// cursor went. A corner the square moved loses its snap, which was for where the pointer was. A
+/// corner already square to the first point stays where it was clicked and keeps its snap.
 fn squared(t: &Tool, p: (Vec2, Option<String>)) -> (Vec2, Option<String>) {
     let rectangle = matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center");
     let (true, true, [first]) = (rectangle, crate::tool_modifiers::square_rectangle(), t.pts.as_slice()) else { return p };
@@ -264,9 +304,23 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         crate::sketch_line_arc::rejoin(app, &mut tool);
         app.tool = Some(tool);
     }
-    let midpoint = (shift && app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical))
-        .then(|| midpoint_at(app, proj, pos, f32::INFINITY))
-        .flatten();
+    // The alignment tool takes a line's middle as a point: with Shift held, from anywhere on the
+    // line; with a point already picked, where the cursor is on the middle (#20442). With no
+    // point picked the cursor takes the line, so a line picked on its own is still made
+    // horizontal or vertical.
+    let alignment = app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical);
+    let picked = app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical && !t.point_picks.is_empty());
+    let want_middle = alignment && (shift || picked);
+    let hits = if want_middle { pick(app, proj, pos) } else { Vec::new() };
+    let midpoint = if !want_middle {
+        None
+    } else if shift {
+        midpoint_of(app, proj, &hits, pos, f32::INFINITY)
+    } else if matches!(active_hit(&hits, app), Some(Hit::SketchCurve { straight: true, .. })) {
+        midpoint_of(app, proj, &hits, pos, LINE_MIDDLE_PX)
+    } else {
+        None
+    };
     let h = if let Some((point, _)) = midpoint {
         Some((point, Some("Midpoint".into())))
     } else if let Some(point) = app.tool.as_ref().and_then(|tool| crate::sketch_tools::periodic_start_snap(app, tool, proj, pos)) {
@@ -346,11 +400,19 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         }
         Kind::HorizontalVertical => {
             let hits = pick(app, proj, pos);
-            let midpoint = shift.then(|| midpoint_at(app, proj, pos, 12.0)).flatten();
-            let hit = hits.iter().find(|hit| match hit {
-                Hit::SketchPoint { sketch, .. } | Hit::SketchCurve { sketch, .. } => Some(*sketch) == app.session.active_sketch,
-                _ => false,
-            });
+            let hit = active_hit(&hits, app);
+            // A line's middle is a point the tool takes, the way it takes the line's ends: with
+            // Shift held, from anywhere on the line; with a point already picked, where the
+            // cursor is on the middle (#20442). With no point picked the click takes the line,
+            // so a line picked on its own is still made horizontal or vertical.
+            let picked = !tool.point_picks.is_empty();
+            let midpoint = if shift {
+                midpoint_of(app, proj, &hits, pos, 12.0)
+            } else if picked && matches!(hit, Some(Hit::SketchCurve { straight: true, .. })) {
+                midpoint_of(app, proj, &hits, pos, LINE_MIDDLE_PX)
+            } else {
+                None
+            };
             let point = midpoint.map(|(_, id)| json!({"midpoint": id})).or_else(|| match hit {
                 Some(Hit::SketchPoint { id, .. }) => Some(json!(id)),
                 _ => None,
@@ -686,12 +748,27 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
     let d = |a: usize, b: usize| p[a].0.dist(p[b].0);
     let sides = crate::sketch_dims::locked_value(app, t, "Sides").map_or(6, |v| v as usize);
     let params = match t.cmd {
-        "sketch.rectangle.two_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1])}),
-        "sketch.rectangle.center" => json!({"center": xy(&p[0]), "corner": xy(&p[1])}),
+        // A corner or centre clicked on a curve, a midpoint or a crossing stays there, as a
+        // line's end does (#18756).
+        "sketch.rectangle.two_point" => json!({"p0": held(app, &p[0]), "p1": held(app, &p[1])}),
+        "sketch.rectangle.center" => json!({"center": held(app, &p[0]), "corner": held(app, &p[1])}),
         "sketch.rectangle.rounded" => {
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "radius": crate::sketch_dims::rounded_radius_value(app, t, p[0].0, p[1].0)})
         }
         "sketch.rectangle.three_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "p2": xy(&p[2])}),
+        "sketch.rectangle.edge_center" => {
+            // The second click gives the edge's direction and half-length, the third its width.
+            // The middle goes as the circle's centre does: a snap to a line's midpoint, a curve or
+            // a crossing as itself, so it is held there; a snap to a point as its place (#7299).
+            let (a, p1) = (p[0].0, edge_end(p[0].0, &p[1]));
+            let d = (p1 - a).normalized().ok_or("the edge's end must differ from its middle")?;
+            let corner = a + d * (p1 - a).len() + d.perp() * (p[2].0 - a).dot(d.perp());
+            let anchor = match &p[0].1 {
+                Some(id) if ["mid:", "on:", "vertex:", "x:"].iter().any(|k| id.starts_with(k)) => json!(id),
+                _ => xy(&p[0]),
+            };
+            json!({"anchor": anchor, "direction": [d.x, d.y], "corner": xy(&(corner, None))})
+        }
         "sketch.circle.center" => {
             // A centre snapped to an existing point goes as its place, where `connect` ties
             // them with a Coincident the sketch shows (#7299); a midpoint, on-curve, crossing or
@@ -1362,6 +1439,18 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
             let outline: Vec<_> = rounded_outline(*a, h, r).into_iter().map(|q| ss.plane.to_world(q)).collect();
             paint_sketch_path(&outline, crate::sketch_palette::mode(app), painter, proj, stroke);
         }
+        ("sketch.rectangle.edge_center", [a]) => {
+            let e = edge_end(*a, &(h, t.hover.as_ref().and_then(|x| x.1.clone())));
+            line(*a * 2.0 - e, e);
+        }
+        ("sketch.rectangle.edge_center", [a, b]) => {
+            let e = edge_end(*a, &(*b, t.pts.get(1).and_then(|x| x.1.clone())));
+            if let Some(k) = edge_center_outline(*a, e, h) {
+                for i in 0..4 {
+                    line(k[i], k[(i + 1) % 4]);
+                }
+            }
+        }
         ("sketch.rectangle.center", [c]) => {
             let d = h - *c;
             let k =
@@ -1377,6 +1466,27 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         }
         _ => {}
     }
+}
+
+/// The end of the anchored edge for the second click `p`: within a couple of degrees of a sketch
+/// axis it is nudged onto it (as for a line), unless it snapped to existing geometry.
+pub(crate) fn edge_end(a: Vec2, p: &(Vec2, Option<String>)) -> Vec2 {
+    let v = p.0 - a;
+    if p.1.is_some() || v.len() < 1e-12 {
+        return p.0;
+    }
+    a + Vec2::from_angle(crate::sketch_dims::snap_axis(v.angle())) * v.len()
+}
+
+/// The corners of the edge-centre rectangle whose edge is centred at `a` and ends at `e`, with
+/// its width taken from the cursor `c` (the geometry of the `sketch.rectangle.edge_center`
+/// command). None until the edge has a direction.
+fn edge_center_outline(a: Vec2, e: Vec2, c: Vec2) -> Option<[Vec2; 4]> {
+    let d = (e - a).normalized()?;
+    let n = d.perp();
+    let w = (c - a).dot(n);
+    let (c0, c1) = (a * 2.0 - e, e);
+    Some([c0, c1, c1 + n * w, c0 + n * w])
 }
 
 /// The closed outline of the rectangle with corners `a`, `b` and corner radius `r` (clamped to

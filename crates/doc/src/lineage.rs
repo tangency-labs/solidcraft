@@ -36,6 +36,9 @@ pub(crate) enum Operand {
     /// pattern or mirror of that feature: its faces named by their roles in that feature
     /// (`F<feature>:<role>@F<pattern>.<instance>`).
     CopiedTool { roles: Vec<Vec<String>>, feature: u64, instance: usize },
+    /// A body another feature (`feature`) builds, built again by this one in its place (a frame
+    /// member with its ends trimmed): its faces keep that feature's names (`F<feature>:<role>`).
+    Rebuilt { roles: Vec<Vec<String>>, feature: u64 },
     /// A body the feature made on the way to its result (a cut body before it falls into lumps),
     /// named as a whole first so pieces of one face in different results are told apart.
     Stage(Box<Stage>),
@@ -117,6 +120,7 @@ impl Lineage {
                 Operand::Made(roles) => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature, instance }),
                 // A sheet's faces are named by what made them in the sheet: no copy has them.
                 Operand::Grown { faces, .. } => Arc::new(Operand::Made(vec![Vec::new(); faces.len()])),
+                Operand::Rebuilt { roles, feature: built } => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature: *built, instance }),
                 _ => op.clone(),
             })
             .collect();
@@ -167,6 +171,22 @@ impl Lineage {
             })
             .collect()
     }
+
+    /// [`Lineage::lumps`] for pieces that become bodies of their own rather than one body's lumps: each piece is
+    /// named through a stage of its own, so [`order_lumps`] never trades their body names (a frame tube split where
+    /// another overlaps it keeps its pieces in order along its line, #4003).
+    pub(crate) fn pieces(whole: &Body, lineage: Option<&Lineage>, pieces: &[Body]) -> Vec<Option<Lineage>> {
+        let Some(lineage) = lineage else { return vec![None; pieces.len()] };
+        pieces
+            .iter()
+            .map(|piece| {
+                let history = piece.history()?.clone();
+                let body = crate::ModelBody::new(String::new(), whole.clone(), 0);
+                let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: lineage.clone(), names: OnceLock::new() })));
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage] })
+            })
+            .collect()
+    }
 }
 
 /// A body made during a feature, with its lineage (`None`: not known; it is then named from
@@ -213,6 +233,22 @@ impl Traced {
         let lineages: Option<Vec<&Lineage>> = inputs.iter().map(|t| t.lineage.as_ref()).collect();
         let lineage = lineages.and_then(|l| Lineage::step(&result, &l));
         Traced { body: result, lineage, recipe: None }
+    }
+
+    /// This tool replaces faces built by `feature`, preserving that feature's roles even
+    /// when a later trim supplies the replacement cap.
+    pub fn rebuilt(mut self, feature: u64) -> Traced {
+        if let Some(lineage) = &mut self.lineage {
+            lineage.operands = lineage
+                .operands
+                .iter()
+                .map(|op| match op.as_ref() {
+                    Operand::Made(roles) => Arc::new(Operand::Rebuilt { roles: roles.clone(), feature }),
+                    _ => op.clone(),
+                })
+                .collect();
+        }
+        self
     }
 
     /// `result`, made by one kernel operation from this body alone. Where that operation's
@@ -600,6 +636,13 @@ pub(crate) fn link_role(fid: u64, name: &str, depth: usize) -> String {
     role
 }
 
+/// [`numbered_tool`] for a body feature `feature` built, built again by another feature: its
+/// faces keep the names `feature` gave them.
+pub(crate) fn numbered_rebuilt(body: Body, feature: u64) -> Traced {
+    let roles = (0..body.face_count()).map(|k| vec![format!("face:{k}")]).collect();
+    Traced { lineage: Some(Lineage::of(&body, Operand::Rebuilt { roles, feature })), body, recipe: None }
+}
+
 /// The role of an extrude's cap at `height` along the sketch normal: on the sketch plane, above
 /// it or below it.
 pub(crate) fn extrude_cap_role(height: f64) -> String {
@@ -963,12 +1006,16 @@ impl crate::ModelBody {
         crate::ModelBody::new(name, made.body, feature).with_lineage(made.lineage)
     }
 
-    /// This body as the feature changed it: under its name, from the feature that made it and with
-    /// its `component`, so a later step of the same feature still counts it among that
-    /// component's bodies (the copies of a pattern's second cut, #14305).
+    /// This body as the feature changed it: under its name, from the feature that made it, with
+    /// its `component` and the frame a transfer gave it, so a later step of the same feature still
+    /// counts it among that component's bodies (the copies of a pattern's second cut, #14305) and
+    /// meets it where it is placed (a mirror's round after its join, #19451).
     pub(crate) fn remade(&self, made: Traced) -> Self {
         let mut remade = Self::traced_new(self.name.clone(), made, self.feature);
         remade.component = self.component;
+        remade.transferred = self.transferred;
+        remade.source_name = self.source_name.clone();
+        remade.source_transform = self.source_transform;
         remade
     }
 

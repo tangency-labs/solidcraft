@@ -94,7 +94,7 @@ impl Look {
         self.color.map(|x| x as f32 / 255.0)
     }
     pub fn hex(&self) -> String {
-        format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2])
+        solidcraft_color::hex::format(self.color)
     }
 }
 

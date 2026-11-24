@@ -463,10 +463,14 @@ mod imp {
                     None => failed(what, "operation", SmError::CornerRefused { corner }),
                 },
                 SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {what} reported success but built no face")),
-                SmError::CornerUnsupported => KernelError::Invalid(format!(
-                    "not supported yet: the {what} meets a corner of this kind, which SMLib's blends do not handle yet (where its edges \
-                     run on tangentially into each other, or meet in a way no blend corner builds)"
-                )),
+                SmError::CornerUnsupported { why, at } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    let why = why.map(|why| format!(": {why}")).unwrap_or_default();
+                    KernelError::Invalid(format!(
+                        "not supported yet: the {what} meets a corner of this kind{at}, which SMLib's blends do not handle yet (where its edges \
+                         run on tangentially into each other, or meet in a way no blend corner builds){why}"
+                    ))
+                }
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
                 // Not a size a smaller radius fixes: solidcore builds no swept turn there.
                 SmError::TurnRefused { why, at, .. } => {
@@ -505,7 +509,7 @@ mod imp {
                 }
                 e => failed(what, "operation", e),
             })?;
-            // Checked here unless the evaluation's validation mode leaves it to the feature's end
+            // Checked here when the evaluation's validation mode checks each step
             // (`crate::validation`).
             let step = crate::validation::step();
             if step == crate::validation::Step::Check {

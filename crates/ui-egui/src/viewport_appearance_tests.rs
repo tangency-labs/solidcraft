@@ -36,7 +36,7 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
                 assert!(remainder.is_empty());
                 let halo = super::c4(tokens.sketch_halo);
                 let halo_count = lines.iter().filter(|line| line_color(&scene, *line) == halo).count();
-                crate::prefs::set(&mut app, &json!({"sketch_halo": false})).unwrap();
+                crate::prefs::set(&mut app, &json!({"sketch_halo": false, "dimension_rim": false})).unwrap();
                 assert_ne!(super::sketch_scene_key(&app, &projection), enabled_key, "changing the preference rebuilds the sketch scene");
                 let disabled = super::build_sketch_scene(&app, &projection);
                 let disabled_bytes = if finished { &disabled.lines } else { &disabled.overlay };
@@ -807,6 +807,38 @@ fn a_shown_sketch_failing_for_a_lost_projection_draws_its_last_geometry() {
     assert!(crate::open_meshing::session_world(&h.app.session).sketch(outline).is_none());
     h.app.session.visibility.hidden_sketches.push(outline);
     assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0, "hidden");
+}
+
+/// A sketch that failed for a lost projection marks where the lost face was on the model: the
+/// point the face was picked at, with the point under it in the sketch's plane (#5048). Shown
+/// or open for editing it is marked once; used by another feature, or hidden, it isn't. The mark
+/// follows its component when the component moves.
+#[test]
+fn a_lost_projection_marks_where_its_face_was_on_the_model() {
+    use solidcraft_engine::geom::prelude::*;
+    let (mut h, outline, part) = part_lost(true);
+    assert!(super::lost_sources(&h.app).is_empty(), "used by Peg, not shown");
+    h.app.session.visibility.shown_sketches.push(outline);
+    let marked = |h: &crate::scenario::Harness| super::lost_sources(&h.app);
+    let check = |sources: &[super::LostSource], at: Vec3| {
+        let [source] = sources else { panic!("{sources:?}") };
+        assert!(source.at.dist(at) < 1e-6, "picked on the block's front face: {source:?}");
+        // Guide is 30 off XZ: the foot is straight across from the pick, in the sketch's plane.
+        let across = source.foot - source.at;
+        assert!(across.x.abs() < 1e-6 && across.z.abs() < 1e-6 && (across.len() - 30.0).abs() < 1e-6, "{source:?}");
+    };
+    // Only Block's face lost its name: Block2's projection is still found.
+    check(&marked(&h), Vec3::new(20.0, 0.0, 5.0));
+    h.app.run("occurrence.move", json!({"occurrence": part, "translate": [0, 0, 50]})).unwrap();
+    h.frames(2);
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
+    h.app.session.visibility.hidden_sketches.push(outline);
+    assert!(marked(&h).is_empty(), "hidden");
+    h.app.session.visibility.hidden_sketches.retain(|s| *s != outline);
+    h.app.run("sketch.edit", json!({"sketch": "Outline"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.active_sketch, Some(outline));
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
 }
 
 /// A 40 x 20 x 10 block and, in the same design (no components), `copies` sketches (Outline,

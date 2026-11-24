@@ -84,7 +84,8 @@
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p3::PointSolveOptions;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{Solution, SolutionType};
@@ -505,10 +506,7 @@ impl<O: ClassObject> CurveClassification<O> {
         // check state - lIntervalIndex within bounds
         let size = self.size();
         if index >= size {
-            return Err(SolidError::intersect_failed(
-                OP_CONNECT,
-                "the interval index is past the end of the classification",
-            ));
+            return Err(index_past_end(OP_CONNECT, index, size));
         }
         let mut end_to_squeeze = end_to_squeeze;
 
@@ -606,10 +604,7 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         // check input
         if index >= self.size() {
-            return Err(SolidError::intersect_failed(
-                OP_EDIT,
-                "the interval index is past the end of the classification",
-            ));
+            return Err(index_past_end(OP_EDIT, index, self.size()));
         }
 
         // Get allowed displacement range for the new Param value
@@ -622,10 +617,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // check input - new MinParam Value is in allowed range
         if !allowed.contains_value(new_param, 0.0) {
-            return Err(SolidError::intersect_failed(
-                OP_EDIT,
-                "the new start parameter is outside the range the interval allows",
-            ));
+            return Err(outside_range(OP_EDIT, new_param, &allowed));
         }
 
         // modify the target interval boundary position
@@ -681,10 +673,7 @@ impl<O: ClassObject> CurveClassification<O> {
         // check input
         let size = self.size();
         if index >= size {
-            return Err(SolidError::intersect_failed(
-                OP_EDIT,
-                "the interval index is past the end of the classification",
-            ));
+            return Err(index_past_end(OP_EDIT, index, size));
         }
 
         // Get allowed displacement range for the new Param value
@@ -697,10 +686,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // check input - new MaxParam Value is in allowed range
         if !allowed.contains_value(new_param, 0.0) {
-            return Err(SolidError::intersect_failed(
-                OP_EDIT,
-                "the new end parameter is outside the range the interval allows",
-            ));
+            return Err(outside_range(OP_EDIT, new_param, &allowed));
         }
 
         // modify the target interval boundary position
@@ -854,11 +840,8 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // Curve is 3d branch - Use drop point
         let Some(face) = self.face else {
-            // check state - the surface must be given
-            return Err(SolidError::intersect_failed(
-                OP_UV,
-                "the classification has no face to drop the point onto",
-            ));
+            // check state - the surface must be given (the caller's classification, rule 9)
+            return Err(SolidError::intersect(OP_UV, IntersectFailure::NoClassFace));
         };
         let surface = match geometry.topology_entity(face) {
             Some((b, EntityRef::Face(f))) => face_p2::surface(b, f)?,
@@ -876,7 +859,9 @@ impl<O: ClassObject> CurveClassification<O> {
             }
         };
         let surface = surface.ok_or_else(|| {
-            SolidError::intersect_failed(OP_UV, "the classification's face has no surface")
+            Failure::new(OP_UV, IntersectFailure::FaceWithoutSurface)
+                .with_status(SM_ERR)
+                .into_error()
         })?;
 
         // (EvaluatePoint's status is ignored upstream: an undefined point on failure)
@@ -1464,6 +1449,27 @@ fn tail_curve_curve<O: ClassObject, S: Copy>(
     }
     // (else upstream only warns: refined curve/edge intersection failed)
     Ok(true)
+}
+
+/// An interval index the caller gave that is not below the classification's `size` (rule 9;
+/// upstream's `SER(SM_ERR)`).
+#[track_caller]
+fn index_past_end(op: &'static str, index: usize, size: usize) -> SolidError {
+    SolidError::intersect(op, IntersectFailure::IntervalIndexPastEnd { index, size })
+}
+
+/// A new interval end the caller gave outside the range its neighbours `allowed` (rule 9;
+/// upstream's `SER(SM_ERR)`).
+#[track_caller]
+fn outside_range(op: &'static str, param: f64, allowed: &Extent1d) -> SolidError {
+    SolidError::intersect(
+        op,
+        IntersectFailure::ParameterOutsideRange {
+            param,
+            min: allowed.min(),
+            max: allowed.max(),
+        },
+    )
 }
 
 /// The mutable-adapter dispatch gap of the large-gap part: an adapter that cannot lend
@@ -2260,9 +2266,14 @@ mod tests {
         let k = Kernel::default();
         let g = line();
         let mut c = cc(&k, &[0.0, 0.25, 0.5, 1.0]);
-        assert!(c
+        let e = c
             .connect_intervals(3, IntervalPosition::Start, true)
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::IntervalIndexPastEnd { index: 3, size: 3 })
+        );
+        assert_eq!(e.sm_status(), Some(SM_ERR));
         c.connect_intervals(1, IntervalPosition::End, true).unwrap();
         assert_eq!(c.size(), 2);
         assert_eq!(c.at(1).unwrap().min(), 0.25);
@@ -2271,7 +2282,16 @@ mod tests {
         assert_eq!(c.interval().min(), 0.25);
 
         let mut c = cc(&k, &[0.0, 0.25, 0.5, 1.0]);
-        assert!(c.edit_interval_min(&k, &g, 1, 0.6, true).is_err());
+        let e = c.edit_interval_min(&k, &g, 1, 0.6, true).unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::ParameterOutsideRange {
+                param: 0.6,
+                min: 0.0,
+                max: 0.5,
+            })
+        );
+        assert_eq!(e.sm_status(), Some(SM_ERR));
         c.edit_interval_min(&k, &g, 1, 0.1, true).unwrap();
         assert_eq!(c.at(0).unwrap().max(), 0.1);
         c.edit_interval_max(&k, &g, 1, 1.0, true).unwrap();

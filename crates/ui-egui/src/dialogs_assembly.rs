@@ -16,7 +16,7 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::joints::{Coupling, JointKind, JointOrigin, Size, Snap};
+use solidcraft_engine::doc::joints::{Coupling, JointKind, JointOrigin, Size, Snap, XRef};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::geom::{Aabb3, Mesh};
 
@@ -30,6 +30,8 @@ use crate::selection::{
 use solidcraft_theme::Tokens;
 
 use crate::viewport::Proj;
+
+pub(crate) const ALIGNMENTS: crate::selection::Accept = FACES | EDGES | AXES | PLANES;
 
 #[path = "dialogs_trace.rs"]
 mod trace;
@@ -89,6 +91,7 @@ const MOVES: &[&str] = &[
     "joint.drive",
     "joint.edit",
     "joint.limits",
+    "joint.dynamics",
     "joint.rigid_group",
     "joint.gear",
     "joint.rack_pinion",
@@ -110,6 +113,8 @@ pub enum Asm {
     },
     Joint(Box<JointForm>),
     JointOrigin {
+        /// Robot exports write it as a frame of its own.
+        frame: bool,
         name: String,
         hover: Hover,
     },
@@ -190,7 +195,7 @@ impl Searched {
 pub struct JointForm {
     pub name: String,
     pub as_built: bool,
-    /// Editing this joint (its origins stay; type, alignment and limits change).
+    /// Editing this joint, including its primary origins, secondary alignment and limits.
     pub editing: Option<u64>,
     pub kind: usize,
     /// Edit Joint: the sides as the dialog opened on them. A side still that pick is not sent,
@@ -215,10 +220,29 @@ pub struct JointForm {
     pub searched: Option<Searched>,
     /// Edit Joint Limits: open the Limits section when the dialog first draws.
     pub show_limits: bool,
+    /// Per joint value: effort, velocity, damping, friction, as typed (empty: not set). Shown
+    /// when editing: a joint being created has no id to set them on yet.
+    pub dynamics: Vec<[String; 4]>,
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
     pub hover: Hover,
+    /// Temporary hover mode in this dialog's Options section.
+    preview_alignment_on_hover: bool,
+    /// Saved secondary references while editing; picked replacements live in the inputs.
+    pub alignment: [Option<Value>; 2],
+    pub reverse_alignment: [bool; 2],
+    /// UI row -> backend A/B side. References and inversion remain backend-indexed.
+    pub alignment_order: [usize; 2],
+    pub alignment_order_ready: bool,
+    pub alignment_origin_problem: Option<&'static str>,
+    pub alignment_origins: Option<[u64; 2]>,
+    pub alignment_revision: u64,
+    /// Primary-origin resolution is reused until the authored picks or source revision change.
+    alignment_primary_key: Option<u64>,
+    alignment_primary_cache: [Option<JointOrigin>; 2],
+    /// Backend A/B -> primary UI row, captured when this creation dialog opens.
+    pub primary_order: [usize; 2],
 }
 
 impl JointForm {
@@ -239,9 +263,21 @@ impl JointForm {
             found_note: None,
             searched: None,
             show_limits: false,
+            dynamics: Vec::new(),
             animate: false,
             phase: 0.0,
             hover: None,
+            preview_alignment_on_hover: true,
+            alignment: [None, None],
+            reverse_alignment: [false; 2],
+            alignment_order: [0, 1],
+            alignment_order_ready: false,
+            alignment_origin_problem: None,
+            alignment_origins: None,
+            alignment_revision: 0,
+            alignment_primary_key: None,
+            alignment_primary_cache: [None, None],
+            primary_order: [0, 1],
         }
     }
 
@@ -269,6 +305,7 @@ impl JointForm {
             });
         }
         self.limits.truncate(n);
+        self.dynamics.resize_with(n, Default::default);
     }
 }
 
@@ -307,12 +344,27 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let (asm, inputs) = match id {
         "component.from_bodies" => (Asm::FromBodies, vec![SelInput::new("Bodies", BODIES, true)]),
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
-        "joint.create" => (Asm::Joint(Box::new(JointForm::new(false, &app.session.doc))), side_inputs()),
+        "joint.create" => {
+            let mut form = JointForm::new(false, &app.session.doc);
+            let moving_first = app.preferences.joint_moving_first;
+            if moving_first {
+                form.primary_order = [1, 0];
+            }
+            (
+                Asm::Joint(Box::new(form)),
+                vec![
+                    SelInput::new("Component 1", SNAPS, false),
+                    SelInput::new("Component 2", SNAPS, false),
+                    SelInput::new("dialog.alignment_1_optional", ALIGNMENTS, false),
+                    SelInput::new("dialog.alignment_2_optional", ALIGNMENTS, false),
+                ],
+            )
+        }
         "joint.as_built" => (
             Asm::Joint(Box::new(JointForm::new(true, &app.session.doc))),
             vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)],
         ),
-        "joint.origin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
+        "joint.origin" => (Asm::JointOrigin { name: String::new(), frame: false, hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
         "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
             let joint = picked_joint(app, true);
@@ -573,24 +625,51 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     for (input, pick) in inputs.iter_mut().zip(&f.sides) {
         input.items = pick.iter().cloned().collect();
     }
+    inputs.extend([SelInput::new("dialog.alignment_1_optional", ALIGNMENTS, false), SelInput::new("dialog.alignment_2_optional", ALIGNMENTS, false)]);
     f.kind = TYPES.iter().position(|t| JointKind::parse(t) == Some(j.kind)).unwrap_or(0);
     f.flip = j.flip;
+    for (i, origin) in [&j.a, &j.b].into_iter().enumerate() {
+        if let Snap::FaceCenter { x: Some(XRef::Planar { planar_face, reverse }), .. }
+        | Snap::CircleCenter { x: Some(XRef::Planar { planar_face, reverse }), .. }
+        | Snap::Plane { x: Some(XRef::Planar { planar_face, reverse }), .. }
+        | Snap::Axis { x: Some(XRef::Planar { planar_face, reverse }), .. } = &origin.snap
+        {
+            f.alignment[i] = Some(json!({"face": planar_face, "occurrence": origin.occurrence}));
+            f.reverse_alignment[i] = *reverse;
+        } else if let Snap::FaceCenter { x: Some(XRef::Reference { reference, reverse }), .. }
+        | Snap::CircleCenter { x: Some(XRef::Reference { reference, reverse }), .. }
+        | Snap::Plane { x: Some(XRef::Reference { reference, reverse }), .. }
+        | Snap::Axis { x: Some(XRef::Reference { reference, reverse }), .. } = &origin.snap
+        {
+            f.alignment[i] = Some(json!({"reference":reference,"occurrence":origin.occurrence}));
+            f.reverse_alignment[i] = *reverse;
+        }
+    }
     // An offset or angle typed as an expression shows (and is sent back) as that expression, so
     // the joint keeps following its parameters.
     f.angle = j.exprs.angle.clone().unwrap_or_else(|| num(j.angle.to_degrees(), "deg"));
     f.angle_shown = f.angle.clone();
-    for (text, value) in f.offset.iter_mut().zip(j.offset_xy) {
-        *text = crate::length_input::model(&app.session.doc, value);
-    }
+    f.offset[0] = j.exprs.offset_x.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset_xy[0]));
+    f.offset[1] = j.exprs.offset_y.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset_xy[1]));
     f.offset[2] = j.exprs.offset.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset));
     f.fit_limits(&app.session.doc);
     for (i, l) in f.limits.iter_mut().enumerate() {
         if let Some(Some((lo, hi))) = j.limits.get(i) {
             let fmt = |v: f64| if j.kind.is_angle(i) { num(v.to_degrees(), "deg") } else { crate::length_input::model(&app.session.doc, v) };
-            *l = (true, fmt(*lo), fmt(*hi));
+            // An end typed as an expression shows (and is sent back) as that expression (#20242).
+            let [lo_expr, hi_expr] = j.exprs.limit(i);
+            *l = (true, lo_expr.map_or_else(|| fmt(*lo), str::to_string), hi_expr.map_or_else(|| fmt(*hi), str::to_string));
         }
     }
-    Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs))
+    for (i, row) in f.dynamics.iter_mut().enumerate() {
+        if let Some(Some(d)) = j.dynamics.get(i) {
+            let fmt = |v: Option<f64>| v.map(|x| x.to_string()).unwrap_or_default();
+            *row = [fmt(d.effort), fmt(d.velocity), fmt(d.damping), fmt(d.friction)];
+        }
+    }
+    let mut dialog = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs);
+    resolve_alignment_order(&app.session, &mut dialog, None);
+    Some(dialog)
 }
 
 /// Edit Joint with its Limits section open (the browser's Edit Joint Limits).
@@ -1034,14 +1113,27 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             }
         }
         Sel::Vertex { body, point } => {
+            // A woken centre (a flat face's, a round edge's) is kept by that face or edge, so it
+            // follows the part as a pick of the face or edge does (#11231).
+            if let Some(source) = centre_source(&st, body, *point) {
+                return snap_of(s, &source);
+            }
             // The corner of the edges meeting there, kept by their names, z along the part's +Z
             // as a point's is.
             let z = occurrence_of_body(s, body)
                 .map_or(Vec3::Z, |o| solidcraft_engine::doc::apply_vector(&solidcraft_engine::doc::joints::occurrence_world(&s.doc, o), Vec3::Z));
-            (
-                body.as_str(),
-                SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)}) },
-            )
+            let mut param = json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)});
+            // A woken point on a part that is no corner (an edge's middle, #11231) is kept by the
+            // edge it lies on, so it follows that edge as a pick of the edge does.
+            let tol = 1e-6 * (1.0 + point.len());
+            if st
+                .body(body)
+                .is_some_and(|b| !b.mesh().edges.iter().any(|e| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*point) <= tol)))
+                && let Value::Object(m) = &mut param
+            {
+                m.remove("corner");
+            }
+            (body.as_str(), SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param })
         }
         Sel::SketchPoint { id } => {
             // A sketch point's world position, its plane's normal as the joint's z, kept by its
@@ -1115,6 +1207,19 @@ pub(crate) fn takes_snaps(d: &Dialog) -> bool {
     d.active_input().is_some_and(|i| i.accept == SNAPS)
 }
 
+/// The flat face or round edge of `body` whose centre is at `at`, if one is.
+fn centre_source(st: &solidcraft_engine::doc::ModelState, body: &str, at: Vec3) -> Option<Sel> {
+    let b = st.body(body)?;
+    let near = |p: Vec3| p.dist(at) <= 1e-6 * (1.0 + at.len());
+    let m = b.mesh();
+    if let Some((i, e)) = m.edges.iter().enumerate().find(|(_, e)| circle_of(e).is_some_and(|(c, _)| near(c))) {
+        return Some(Sel::Edge { body: body.into(), index: i, point: *e.first()? });
+    }
+    let tol = (b.body.size() * 2e-3).max(1e-3);
+    let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.plane_normal.is_some() && near(f.centroid))?;
+    Some(Sel::Face { body: body.into(), index: f.index, point: f.centroid })
+}
+
 /// Each pick's snap, measured once for the world state, design and open sketch it was measured in.
 #[derive(Default)]
 pub(crate) struct SnapMemo(std::sync::Mutex<Snaps>);
@@ -1168,7 +1273,8 @@ pub(crate) fn face_point_source(
     let Sel::Vertex { point, .. } = sel else { return None };
     let item = app.viewport.woken.item.as_ref().filter(|i| snaps && matches!(i, Sel::Face { .. }))?;
     let tol = 1e-4 * (1.0 + point.len());
-    solidcraft_engine::snap::snap_points_from(&app.session, item)
+    let scratch = crate::viewport::interaction_session(app);
+    solidcraft_engine::snap::snap_points_from(scratch.as_ref().unwrap_or(&app.session), item)
         .into_iter()
         .find(|(p, from)| p.at.dist(*point) <= tol && matches!(p.kind, Kind::End | Kind::Middle | Kind::Centre) && from.normal.is_some())
         .map(|(p, from)| (p.kind, from))
@@ -1207,7 +1313,15 @@ pub fn snap_in(app: &SolveApp, input: &SelInput, sel: &Sel) -> Option<SnapPt> {
 /// The snap under the pointer in a joint origin input: tied to the hovered face when the face
 /// offered it, else the pick's own snap ([`picked_snap`]).
 fn snap_hovered(app: &SolveApp, sel: &Sel) -> Option<SnapPt> {
-    face_point_source(app, true, sel).and_then(|(kind, from)| face_tied(&app.session, sel, kind, &from)).or_else(|| picked_snap(app, sel))
+    if let Some((kind, from)) = face_point_source(app, true, sel) {
+        // Woken points and their provenance already belong to the displayed pose.
+        let scratch = crate::viewport::interaction_session(app);
+        if let Some(snap) = face_tied(scratch.as_ref().unwrap_or(&app.session), sel, kind, &from) {
+            return Some(snap);
+        }
+    }
+    let authored = authored_hover(app, sel);
+    picked_snap(app, &authored).map(|snap| placed_snap(app, &authored, snap))
 }
 
 /// The frame used for lateral offsets, with the same axes as the original shifted snap.
@@ -1226,7 +1340,7 @@ fn offset_frame(s: &SnapPt) -> Value {
 // ---- rows ----
 
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [SelInput], active: &mut usize) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec<SelInput>, active: &mut usize) -> bool {
     let t = Tokens::get();
     let mut enter = false;
     let problem = joint_problem(app, k, inputs);
@@ -1278,6 +1392,26 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             enter |= text_row(ui, "Name", &mut f.name, &hint).0;
             f.fit_limits(&app.session.doc);
             if !f.as_built {
+                let selected = f
+                    .alignment_order
+                    .iter()
+                    .enumerate()
+                    .find_map(|(row, side)| (f.alignment[*side].is_some() || !sel_items(inputs, row + 2).is_empty()).then_some(*side));
+                let mut reverse = f.reverse_alignment[0] ^ f.reverse_alignment[1];
+                form_row(ui, "dialog.invert_alignment", |ui| {
+                    let response = ui.add_enabled_ui(selected.is_some(), |ui| crate::ui_kit::checkbox(ui, "", &mut reverse)).inner;
+                    if response.changed()
+                        && let Some(side) = selected
+                    {
+                        f.reverse_alignment[side] = !f.reverse_alignment[side];
+                    }
+                    crate::scenario::publish_handle("dialog:invert-alignment", response.rect.center());
+                });
+                if let Some(problem) = f.alignment_origin_problem {
+                    form_row(ui, "", |ui| {
+                        ui.label(RichText::new(solidcraft_ui_text::tr(problem)).color(t.warning));
+                    });
+                }
                 enter |= expr_row(ui, "Angle", &mut f.angle);
                 let lateral = f.lateral_offsets(&app.session.doc);
                 crate::ui_kit::section(ui, "joint_position", "Position", false, |ui| {
@@ -1288,7 +1422,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         enter |= expr_row(ui, l, v);
                     }
                 });
-                crate::ui_kit::options(ui, "joint_options", &mut [("Flip", &mut f.flip)]);
+                crate::ui_kit::options(
+                    ui,
+                    "joint_options",
+                    &mut [("Flip", &mut f.flip), ("dialog.preview_alignment_on_hover", &mut f.preview_alignment_on_hover)],
+                );
             }
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
@@ -1328,6 +1466,19 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         find_limits_row(app, ui, f, id, inputs);
                     }
                 });
+                if f.editing.is_some() {
+                    crate::ui_kit::section(ui, "joint_dynamics", "Dynamics", false, |ui| {
+                        for (i, row) in f.dynamics.iter_mut().enumerate() {
+                            let angle = kind.is_angle(i);
+                            let name = kind.dofs().get(i).copied().unwrap_or("value");
+                            crate::ui_kit::text(ui, &capital(name), crate::ui_kit::Text::Note(&format!("dynamics_{i}")));
+                            let units = if angle { ["N m", "rad/s", "N m s/rad", "N m"] } else { ["N", "m/s", "N s/m", "N"] };
+                            for ((label, value), unit) in ["Effort", "Velocity", "Damping", "Friction"].into_iter().zip(row.iter_mut()).zip(units) {
+                                enter |= text_row(ui, label, value, unit).0;
+                            }
+                        }
+                    });
+                }
             } else {
                 f.animate = false;
             }
@@ -1338,8 +1489,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
             }
         }
-        Asm::JointOrigin { name, .. } => {
+        Asm::JointOrigin { name, frame, .. } => {
             enter |= text_row(ui, "Name", name, solidcraft_ui_text::tr_label("Joint Origin1")).0;
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Export as a robot frame"), frame);
         }
         Asm::RigidGroup => {}
         Asm::Drive { joint, values, focus } => {
@@ -1357,8 +1509,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     crate::scenario::publish_handle("drive:edit_joint", r.rect.center());
                     edit = r.clicked();
                 });
-                if edit && let Some(Kind::Assembly(e)) = edit_joint(app, *id).map(|d| d.kind) {
+                if edit
+                    && let Some(dialog) = edit_joint(app, *id)
+                    && let Kind::Assembly(e) = dialog.kind
+                {
                     *k = e;
+                    *inputs = dialog.inputs;
+                    *active = dialog.active;
                     return false;
                 }
             }
@@ -1614,10 +1771,14 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
 }
 
 /// The commands OK would run for the joint as the dialog has it (its sides as picked in
-/// `inputs`), but its limits (what Find Limits fills in).
+/// `inputs`), but its limits (what Find Limits fills in) and dynamics (Find Limits doesn't use them).
 fn edit_commands(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
-    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), inputs.to_vec());
-    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits").collect())
+    // Without the Dynamics fields: Find Limits doesn't use them, so a half-typed value there
+    // must not stop it.
+    let mut f = f.clone();
+    f.dynamics.clear();
+    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs.to_vec());
+    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits" && id != "joint.dynamics").collect())
 }
 
 /// Find Limits: on a copy of the design, the joint as the dialog has it now (its type and
@@ -1801,7 +1962,10 @@ fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mes
     let pairs: Vec<_> =
         r["overlaps"].as_array().into_iter().flatten().filter_map(|hit| Some((st.body(hit["a"].as_str()?)?, st.body(hit["b"].as_str()?)?))).collect();
     kernel::map_with_local_pools(&pairs, usize::MAX, |&(a, b)| {
-        let Some(o) = kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)? else { return Ok(None) };
+        // SMLib's check of the shared part runs here, as the interference check that found it ran it.
+        let Some(o) = kernel::validating(kernel::Validation::EachStep, || kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)).0? else {
+            return Ok(None);
+        };
         o.mesh(&kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3))).map(Some)
     })
     .into_iter()
@@ -1872,6 +2036,393 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
 }
 
 // ---- commands ----
+
+pub(crate) fn alignment_side(k: &Kind, input: usize) -> Option<usize> {
+    let Kind::Assembly(Asm::Joint(f)) = k else { return None };
+    if f.as_built {
+        return None;
+    }
+    let side = input.checked_sub(2)?;
+    f.alignment_order.get(side).copied()
+}
+
+pub(crate) fn alignment_dialog(d: &Dialog) -> bool {
+    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if !f.as_built)
+}
+
+fn alignment_primary_key(s: &Session, f: &JointForm, inputs: &[SelInput]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    (s.revision, f.editing, f.primary_order).hash(&mut key);
+    for input in inputs.iter().take(2) {
+        format!("{:?}{:?}", input.items, input.from_face).hash(&mut key);
+    }
+    key.finish()
+}
+
+fn alignment_primary_origin(s: &Session, f: &JointForm, inputs: &[SelInput], side: usize) -> Option<JointOrigin> {
+    if f.alignment_primary_key == Some(alignment_primary_key(s, f, inputs)) {
+        return f.alignment_primary_cache[side].clone();
+    }
+    resolve_primary_alignment_origin(s, f, inputs, side)
+}
+
+fn resolve_primary_alignment_origin(s: &Session, f: &JointForm, inputs: &[SelInput], side: usize) -> Option<JointOrigin> {
+    let row = f.primary_order[side];
+    let input = inputs.get(row)?;
+    let pick = input.items.first();
+    if let Some(id) = f.editing
+        && pick == f.sides[side].as_ref()
+    {
+        let j = s.doc.assembly.joints.iter().find(|j| j.id == id)?;
+        return Some(if side == 0 { j.a.clone() } else { j.b.clone() });
+    }
+    let pick = pick?;
+    let snap =
+        input.from_face.iter().find(|(x, ..)| x == pick).and_then(|(_, kind, from)| face_tied(s, pick, *kind, from)).or_else(|| snap_of(s, pick))?;
+    s.joint_origin_for_alignment(&snap.param).ok()
+}
+
+fn alignment_occurrences(s: &Session, f: &JointForm, inputs: &[SelInput]) -> Option<[u64; 2]> {
+    Some([alignment_primary_origin(s, f, inputs, 0)?.occurrence, alignment_primary_origin(s, f, inputs, 1)?.occurrence])
+}
+
+/// Prefer measured motion of the base solution. Explicit grounding (including rigidly
+/// grounded chains) also identifies the stationary side when an edited joint already sits
+/// in its solved pose. Never assume that the first picked origin is the moving component.
+pub(crate) fn resolve_alignment_order(s: &Session, d: &mut Dialog, interaction: Option<&crate::preview::JointInteraction>) {
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
+    if f.as_built {
+        return;
+    }
+    let key = alignment_primary_key(s, f, &d.inputs);
+    if f.alignment_primary_key != Some(key) {
+        f.alignment_primary_cache = std::array::from_fn(|side| resolve_primary_alignment_origin(s, f, &d.inputs, side));
+        f.alignment_primary_key = Some(key);
+    }
+    let supported = (0..2).all(|side| {
+        alignment_primary_origin(s, f, &d.inputs, side)
+            .is_none_or(|o| matches!(o.snap, Snap::FaceCenter { .. } | Snap::CircleCenter { .. } | Snap::Plane { .. } | Snap::Axis { .. }))
+    });
+    f.alignment_origin_problem = (!supported).then_some("dialog.secondary_alignment_origins_required");
+    if !supported {
+        f.alignment_order_ready = false;
+        return;
+    }
+    let Some(origins) = alignment_occurrences(s, f, &d.inputs) else {
+        f.alignment_order_ready = false;
+        return;
+    };
+    let same = f.alignment_origins == Some(origins) && f.alignment_revision == s.revision;
+    if same && f.alignment_order_ready {
+        return;
+    }
+    let interaction = interaction.filter(|view| view.source_revision == s.revision).filter(|view| {
+        let joint =
+            if let Some(id) = f.editing { view.document.assembly.joints.iter().find(|j| j.id == id) } else { view.document.assembly.joints.last() };
+        joint.is_some_and(|j| [j.a.occurrence, j.b.occurrence] == origins)
+    });
+    let mut fixed = std::collections::BTreeSet::from([0]);
+    fixed.extend(s.doc.occurrences.iter().filter(|o| o.grounded).map(|o| o.id));
+    if let Some(view) = interaction {
+        fixed.extend(view.fixed_occurrences.iter().copied());
+    }
+    loop {
+        let size = fixed.len();
+        for o in &s.doc.occurrences {
+            if o.parent != 0 && fixed.contains(&o.parent) {
+                fixed.insert(o.id);
+            }
+        }
+        for j in s.doc.assembly.joints.iter().filter(|j| !j.suppressed && Some(j.id) != f.editing && j.kind == JointKind::Rigid) {
+            if fixed.contains(&j.a.occurrence) {
+                fixed.insert(j.b.occurrence);
+            }
+            if fixed.contains(&j.b.occurrence) {
+                fixed.insert(j.a.occurrence);
+            }
+        }
+        if size == fixed.len() {
+            break;
+        }
+    }
+    let anchored = origins.map(|o| fixed.contains(&o));
+    let order = match anchored {
+        [true, false] => Some([1, 0]),
+        [false, true] => Some([0, 1]),
+        _ => interaction.and_then(|view| {
+            let j = if let Some(id) = f.editing {
+                view.document.assembly.joints.iter().find(|j| j.id == id)
+            } else {
+                view.document.assembly.joints.last()
+            }?;
+            if [j.a.occurrence, j.b.occurrence] != origins {
+                return None;
+            }
+            let raw = s.model.state();
+            let frames = s.doc.body_frames_with_source(&raw);
+            let moved = origins.map(|o| {
+                frames.iter().any(|(body, _, _, path, _)| {
+                    path.first().copied().unwrap_or(0) == o && view.to_document.get(body).is_some_and(|m| !solidcraft_engine::doc::is_identity(m))
+                })
+            });
+            match moved {
+                [true, false] => Some([0, 1]),
+                [false, true] => Some([1, 0]),
+                _ => None,
+            }
+        }),
+    };
+    let Some(order) = order else {
+        f.alignment_order_ready = false;
+        return;
+    };
+    let base = 2;
+    if order != f.alignment_order && d.inputs.len() > base + 1 {
+        let old_first = std::mem::take(&mut d.inputs[base].items);
+        d.inputs[base].items = std::mem::replace(&mut d.inputs[base + 1].items, old_first);
+    }
+    f.alignment_order = order;
+    f.alignment_order_ready = true;
+    f.alignment_origins = Some(origins);
+    f.alignment_revision = s.revision;
+}
+
+pub(crate) fn update_alignment_order(app: &mut SolveApp) {
+    let Some(mut d) = app.dialog.take() else { return };
+    resolve_alignment_order(&app.session, &mut d, app.preview.interaction.as_ref());
+    app.dialog = Some(d);
+}
+
+pub(crate) fn alignment_input_available(d: &Dialog, index: usize) -> bool {
+    if alignment_side(&d.kind, index).is_none() {
+        return true;
+    }
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
+    if !f.alignment_order_ready {
+        return false;
+    }
+    let base = 2;
+    index == base || f.alignment[f.alignment_order[0]].is_some() || !sel_items(&d.inputs, base).is_empty()
+}
+
+pub(crate) fn alignment_hover_commands(app: &SolveApp, d: &Dialog) -> Option<Vec<(String, Value)>> {
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return None };
+    if !f.preview_alignment_on_hover {
+        return None;
+    }
+    let side = alignment_side(&d.kind, d.active)?;
+    // Highlight and snap markers are always available, but the first reference must be
+    // clicked before a counterpart can transiently change the assembled pose.
+    let other = 1 - side;
+    let row = f.alignment_order.iter().position(|s| *s == other)? + 2;
+    if f.alignment[other].is_none() && sel_items(&d.inputs, row).is_empty() {
+        return None;
+    }
+    let hit = app.viewport.hover.as_ref()?;
+    let sel = d.candidate(&app.session, hit)?;
+    let mut candidate = d.clone();
+    candidate.inputs.get_mut(d.active)?.items = vec![sel];
+    crate::dialogs::apply_commands(app, &candidate).ok()
+}
+
+pub(crate) fn stored_alignment(k: &Kind, input: usize) -> Option<Value> {
+    let side = alignment_side(k, input)?;
+    let Kind::Assembly(Asm::Joint(f)) = k else { return None };
+    f.alignment.get(side)?.clone()
+}
+
+pub(crate) fn clear_alignment(k: &mut Kind, input: usize) {
+    let Some(side) = alignment_side(k, input) else { return };
+    if let Kind::Assembly(Asm::Joint(f)) = k {
+        f.alignment[side] = None;
+        f.reverse_alignment[side] = false;
+    }
+}
+
+/// Exact authored path, independent of the solved preview's body placement.
+fn alignment_occurrence(s: &Session, sel: &Sel) -> Option<u64> {
+    match sel {
+        Sel::Face { body, .. } | Sel::Edge { body, .. } => {
+            let model = s.model.state();
+            let frames = s.doc.body_frames_with_source(&model);
+            let (_, _, _, path, _) = frames.iter().find(|(name, ..)| name == body)?;
+            (path.len() <= 1).then(|| path.first().copied().unwrap_or(0))
+        }
+        Sel::ExternalSketchCurve { sketch, .. } => feature_occurrence(s, *sketch),
+        Sel::Axis { .. } | Sel::Plane { .. } => alignment_pick(s, sel, false).ok()?.get("occurrence")?.as_u64(),
+        _ => None,
+    }
+}
+
+fn feature_occurrence(s: &Session, feature: u64) -> Option<u64> {
+    let component = s.doc.feature(feature)?.component;
+    if component == 0 {
+        return Some(0);
+    }
+    let mut occurrences = s.doc.occurrences.iter().filter(|o| o.component == component);
+    let first = occurrences.next()?;
+    (first.parent == 0 && occurrences.next().is_none()).then_some(first.id)
+}
+
+/// Reject a wrong component before hover, Select Other or a click can replace an input.
+/// The engine independently validates persisted references and programmatic commands.
+pub(crate) fn alignment_accepts(s: &Session, d: &Dialog, sel: &Sel) -> bool {
+    let Some(side) = alignment_side(&d.kind, d.active) else { return true };
+    if !alignment_input_available(d, d.active) {
+        return false;
+    }
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
+    let expected = alignment_primary_origin(s, f, &d.inputs, side).map(|o| o.occurrence);
+    expected.is_some() && alignment_occurrence(s, sel) == expected && alignment_projection_valid(s, d, sel, side)
+}
+
+fn primary_alignment_frame(s: &Session, d: &Dialog, side: usize) -> Option<(Vec3, Vec3)> {
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return None };
+    let mut origin = alignment_primary_origin(s, f, &d.inputs, side)?;
+    if let Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } = &mut origin.snap {
+        *x = None;
+    }
+    let frame = solidcraft_engine::doc::joints::resolve_origin(&s.doc, &s.model.state(), &origin).ok()?;
+    let placement = if origin.occurrence == 0 { solidcraft_engine::doc::IDENTITY } else { s.occurrence_placement(&[origin.occurrence]).ok()?.world };
+    Some((
+        solidcraft_engine::doc::apply_point(&placement, Vec3::new(frame[3][0], frame[3][1], frame[3][2])),
+        solidcraft_engine::doc::apply_vector(&placement, Vec3::new(frame[2][0], frame[2][1], frame[2][2])),
+    ))
+}
+
+/// Acceptance uses the command's exact reference resolution, including ownership and projection.
+fn alignment_projection_valid(s: &Session, d: &Dialog, sel: &Sel, side: usize) -> bool {
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
+    let Some(origin) = alignment_primary_origin(s, f, &d.inputs, side) else { return false };
+    alignment_pick(s, sel, matches!(sel, Sel::Edge { .. })).is_ok_and(|alignment| s.joint_alignment_frame(origin, &alignment).is_ok())
+}
+
+/// Persist exact topology or feature identity, never a direction fitted from a display mesh.
+fn alignment_pick(s: &Session, sel: &Sel, center: bool) -> Result<Value, String> {
+    let model = s.model.state();
+    let feature_ref = |feature: u64, reference: Value| -> Result<Value, String> {
+        Ok(json!({"reference":reference,"occurrence":feature_occurrence(s, feature).ok_or("alignment feature occurrence is ambiguous or nested")?}))
+    };
+    match sel {
+        Sel::Face { body, index, .. } | Sel::Edge { body, index, .. } => {
+            let frames = s.doc.body_frames_with_source(&model);
+            let (_, source, _, path, _) = frames.iter().find(|(name, ..)| name == body).ok_or("alignment occurrence no longer exists")?;
+            if path.len() > 1 {
+                return Err("secondary alignment on nested occurrence paths is not supported yet".into());
+            }
+            let b = model.body(source).ok_or("alignment body no longer exists")?;
+            let names = solidcraft_engine::doc::naming::face_names(b);
+            let face_name = |i: usize| -> Result<String, String> {
+                names
+                    .get(i)
+                    .filter(|n| !n.is_empty() && solidcraft_engine::doc::naming::face_name_exact(b, i))
+                    .cloned()
+                    .ok_or_else(|| "alignment face has no exact persistent name".into())
+            };
+            let mut value = if matches!(sel, Sel::Edge { .. }) {
+                let record = b.body.record();
+                let edge = record.edges.get(*index).ok_or("alignment edge no longer exists")?;
+                let faces: std::collections::BTreeSet<usize> = edge.uses.iter().map(|u| u.face as usize).collect();
+                let edge_name = || -> Result<String, String> {
+                    let mut names = faces.iter().map(|i| face_name(*i)).collect::<Result<Vec<_>, _>>()?;
+                    names.sort();
+                    if names.len() < 2 {
+                        return Err("alignment edge needs unique incident faces".into());
+                    }
+                    Ok(names.join("|"))
+                };
+                match &edge.curve {
+                    solidcore_record::brep::Curve::Circle { .. } => {
+                        let cylinders: Vec<_> = faces
+                            .iter()
+                            .copied()
+                            .filter(|i| {
+                                matches!(
+                                    solidcraft_engine::kernel::face_surface(&b.body, *i),
+                                    Some(solidcraft_engine::kernel::FaceSurface::Cylinder { .. })
+                                )
+                            })
+                            .collect();
+                        match cylinders.as_slice() {
+                            [cylinder] if center => {
+                                let ends: Vec<_> = faces.iter().copied().filter(|i| i != cylinder).collect();
+                                let [end] = ends.as_slice() else { return Err("circle center needs a unique end face".into()) };
+                                json!({"reference":{"type":"circle_center","name":face_name(*cylinder)?,"end":face_name(*end)?}})
+                            }
+                            [cylinder] => json!({"reference":{"type":"cylinder","name":face_name(*cylinder)?}}),
+                            [] => json!({"reference":{"type":"edge","name":edge_name()?}}),
+                            _ => return Err("select a circular rim with one cylindrical wall and one end face".into()),
+                        }
+                    }
+                    solidcore_record::brep::Curve::Line { .. } => json!({"reference":{"type":"edge","name":edge_name()?}}),
+                    _ => return Err("alignment edge must be an exact line or circle".into()),
+                }
+            } else {
+                match solidcraft_engine::kernel::face_surface(&b.body, *index) {
+                    Some(solidcraft_engine::kernel::FaceSurface::Plane { .. }) => json!({"face":face_name(*index)?}),
+                    Some(solidcraft_engine::kernel::FaceSurface::Cylinder { .. }) if !center => {
+                        json!({"reference":{"type":"cylinder","name":face_name(*index)?}})
+                    }
+                    _ => return Err("select a planar face or cylindrical axis, or a circular rim for Center".into()),
+                }
+            };
+            value["occurrence"] = json!(path.first().copied().unwrap_or(0));
+            Ok(value)
+        }
+        Sel::ExternalSketchCurve { sketch, id } => feature_ref(*sketch, json!({"type":"sketch_line","sketch":sketch,"curve":id})),
+        Sel::Axis { name } | Sel::Plane { name } => {
+            let axis = matches!(sel, Sel::Axis { .. });
+            if let Some(datum) = solidcraft_engine::doc::construct::DatumRef::parse_key(name) {
+                let [occurrence] = datum.path.as_slice() else {
+                    return Err("secondary alignment on nested occurrence paths is not supported yet".into());
+                };
+                let placed = s.doc.occurrences.iter().find(|o| o.id == *occurrence).ok_or("alignment occurrence no longer exists")?;
+                if placed.parent != 0 {
+                    return Err("secondary alignment on nested occurrence paths is not supported yet".into());
+                }
+                let item = datum.item.name();
+                let matching = if axis { matches!(item, "X" | "Y" | "Z") } else { matches!(item, "XY" | "XZ" | "YZ") };
+                if !matching {
+                    return Err("select a planar face, cylindrical axis, exact edge, sketch line, axis or plane".into());
+                }
+                let reference = if axis { json!({"type":"origin_axis","axis":item}) } else { json!({"type":"origin_plane","plane":item}) };
+                return Ok(json!({"reference":reference,"occurrence":occurrence}));
+            }
+            let origin = if axis { matches!(name.as_str(), "X" | "Y" | "Z") } else { matches!(name.as_str(), "XY" | "XZ" | "YZ") };
+            if origin {
+                let reference = if axis { json!({"type":"origin_axis","axis":name}) } else { json!({"type":"origin_plane","plane":name}) };
+                return Ok(json!({"reference":reference,"occurrence":0}));
+            }
+            let mut found = model.construct.iter().filter(|c| c.name == *name);
+            let construction = found.next().ok_or("alignment construction no longer exists")?;
+            if found.next().is_some() {
+                return Err("alignment construction name is ambiguous".into());
+            }
+            feature_ref(construction.feature, json!({"type":if axis { "construction" } else { "construction_plane" },"feature":construction.feature}))
+        }
+        _ => Err("select a planar face, cylindrical axis, exact edge, sketch line, axis or plane".into()),
+    }
+}
+
+fn alignment_params(s: &Session, f: &JointForm, inputs: &[SelInput]) -> Result<[Option<Value>; 2], String> {
+    let mut out = [None, None];
+    if f.as_built {
+        return Ok(out);
+    }
+    for (side, slot) in out.iter_mut().enumerate() {
+        let row = f.alignment_order.iter().position(|s| *s == side).ok_or("invalid alignment order")?;
+        let picked = sel_items(inputs, row + 2).first();
+        *slot = match picked {
+            Some(sel) => Some(alignment_pick(s, sel, matches!(sel, Sel::Edge { .. }))?),
+            None => f.alignment[side].clone(),
+        };
+        if let Some(value) = slot {
+            value["reverse"] = json!(f.reverse_alignment[side]);
+        }
+    }
+    Ok(out)
+}
 
 /// The body a pick is on.
 pub(crate) fn body_of(sel: &Sel) -> Option<&str> {
@@ -1961,6 +2512,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
         }
         Asm::Joint(f) => {
+            let alignment = alignment_params(s, f, inputs)?;
             let kind = TYPES.get(f.kind).copied().unwrap_or("rigid");
             let jk = f.joint_kind();
             let custom_name = f.name.trim();
@@ -1969,8 +2521,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             if let Some(id) = f.editing {
                 let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
                 if f.lateral_offsets(&app.session.doc) {
-                    p["offset_x"] = json!(eval(&f.offset[0], ValueKind::Length)?);
-                    p["offset_y"] = json!(eval(&f.offset[1], ValueKind::Length)?);
+                    let _ = eval(&f.offset[0], ValueKind::Length)?;
+                    let _ = eval(&f.offset[1], ValueKind::Length)?;
+                    p["offset_x"] = if f.offset[0].trim().is_empty() { json!(0.0) } else { json!(f.offset[0]) };
+                    p["offset_y"] = if f.offset[1].trim().is_empty() { json!(0.0) } else { json!(f.offset[1]) };
                 }
                 if !custom_name.is_empty() {
                     p["name"] = json!(custom_name);
@@ -1987,6 +2541,20 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                         p[key] = snap(i, what)?.param;
                     }
                 }
+                let old = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or("joint no longer exists")?;
+                for (i, (key, origin)) in [("a_alignment", &old.a), ("b_alignment", &old.b)].into_iter().enumerate() {
+                    if alignment[i].is_some()
+                        || matches!(
+                            &origin.snap,
+                            Snap::FaceCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                                | Snap::CircleCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                                | Snap::Plane { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                                | Snap::Axis { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                        )
+                    {
+                        p[key] = alignment[i].clone().unwrap_or(Value::Null);
+                    }
+                }
                 let mut out = cmd("joint.edit", p);
                 for (i, l) in limits.iter().enumerate() {
                     let p = match l.as_array() {
@@ -1994,6 +2562,21 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                         None => json!({"joint": id, "index": i}),
                     };
                     out.push(("joint.limits".into(), p));
+                }
+                let saved = app.session.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.dynamics.as_slice()).unwrap_or_default();
+                for (i, row) in f.dynamics.iter().enumerate().take(jk.dofs().len()) {
+                    if row.iter().all(|x| x.trim().is_empty()) && !saved.get(i).is_some_and(Option::is_some) {
+                        continue;
+                    }
+                    let mut p = json!({"joint": id, "index": i});
+                    for (key, text) in ["effort", "velocity", "damping", "friction"].into_iter().zip(row) {
+                        if !text.trim().is_empty() {
+                            let x = text.trim().parse::<f64>().ok().filter(|x| x.is_finite());
+                            let x = x.ok_or_else(|| format!("{}: {text}", solidcraft_ui_text::tr_label("Not a number")))?;
+                            p[key] = json!(x);
+                        }
+                    }
+                    out.push(("joint.dynamics".into(), p));
                 }
                 return Ok(out);
             }
@@ -2011,27 +2594,40 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 }
                 return Ok(cmd("joint.as_built", p));
             }
-            let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
+            let (a, b) = (snap(f.primary_order[0], "component 1's joint origin")?, snap(f.primary_order[1], "component 2's joint origin")?);
             let placed = |x: &SnapPt| (x.param.get("occurrence").cloned(), x.param.get("path").cloned());
             if a.param.get("occurrence").is_some() && placed(&a) == placed(&b) {
                 return Err("the two origins are on the same component".into());
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
+            if (x.abs() > 1e-12 || y.abs() > 1e-12) && alignment.iter().any(Option::is_some) {
+                return Err("Secondary alignment needs Offset X and Offset Y to be zero".into());
+            }
             let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { offset_frame(&a) } else { a.param };
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
+            let offset_x = if f.offset[0].trim().is_empty() { json!(0.0) } else { json!(f.offset[0]) };
+            let offset_y = if f.offset[1].trim().is_empty() { json!(0.0) } else { json!(f.offset[1]) };
             let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip,
-                "offset_x": x, "offset_y": y, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+                "offset_x": offset_x, "offset_y": offset_y, "offset": f.offset[2], "angle": f.angle, "limits": limits});
             if !custom_name.is_empty() {
                 p["name"] = json!(custom_name);
             }
+            for (i, key) in ["a_alignment", "b_alignment"].into_iter().enumerate() {
+                if let Some(value) = &alignment[i] {
+                    p[key] = value.clone();
+                }
+            }
             cmd("joint.create", p)
         }
-        Asm::JointOrigin { name, .. } => {
+        Asm::JointOrigin { name, frame, .. } => {
             let mut p = snap(0, "a snap")?.param;
             if !name.trim().is_empty() {
                 p["name"] = json!(name.trim());
+            }
+            if *frame {
+                p["export_frame"] = json!(true);
             }
             cmd("joint.origin", p)
         }
@@ -2155,26 +2751,84 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         .map(|(_, r)| r.clone());
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
-    // A moved component looks like itself (no new surface), with its old place as the ghost.
-    // A plugin's run in a design with nothing placed keeps the colours of a new body.
-    let colors = if was_placed { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
-    Some(build_world_preview(preview, colors).map(|mut built| {
+    let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
+    let before = preview.before.clone();
+    let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
+    // A Frame Member's tubes, for its dialog to pick (#15705).
+    let centrelines = crate::dialogs_frame::centrelines(&preview);
+    // A moved component looks like itself (no new surface), with its old place as the ghost; Ghost
+    // Frame Members' new tubes keep their see-through tint (`preview::colors`). A plugin can both
+    // move and make bodies: the builder distinguishes them per body.
+    let colors = if was_placed && !plugin {
+        let new_body = if colors.glass_new { colors.new_body } else { colors.body };
+        Colors { added: colors.body, new_body, ..colors }
+    } else {
+        colors
+    };
+    let joint_motion = cmds.iter().all(|(id, _)| id.starts_with("joint."));
+    Some(build_world_scene(&preview, colors, joint_motion).map(|mut built| {
+        if cmds.iter().any(|(id, _)| matches!(id.as_str(), "joint.create" | "joint.edit")) {
+            let raw = s.model.state();
+            let before_frames = s.doc.body_frames_with_source(&raw);
+            let mut to_document = std::collections::HashMap::new();
+            for (name, _, _, _, frame) in preview.doc.body_frames_with_source(&raw) {
+                if let Some((_, _, _, _, before)) = before_frames.iter().find(|(old, ..)| old == &name)
+                    && let Ok(inverse) = solidcore_ops::affine::inverse(&frame)
+                    && let Ok(mapping) = solidcore_ops::affine::then(&inverse, before)
+                {
+                    to_document.insert(name, mapping);
+                }
+            }
+            let fixed_occurrences = cmds
+                .iter()
+                .zip(&preview.replies)
+                .find(|((id, _), _)| matches!(id.as_str(), "joint.create" | "joint.edit"))
+                .and_then(|(_, reply)| reply["fixed"].as_array())
+                .map(|items| items.iter().filter_map(Value::as_u64).collect())
+                .unwrap_or_default();
+            built.interaction = Some(crate::preview::JointInteraction {
+                source_revision: s.revision,
+                fixed_occurrences,
+                document: preview.doc.clone(),
+                state: preview.after.clone(),
+                to_document,
+            });
+        }
         built.stopped = stopped;
         built.placed = placed;
+        built.plugin_view = plugin_view;
+        if plugin {
+            // Match committed Fit with every sketch shown after the run, even unchanged ones.
+            // The preview diff separately retains changed geometry, including hidden sketches.
+            built.bounds = shown_after.iter().fold(built.bounds, |b, sketch| b.union(&solidcraft_engine::view::sketch_bounds(sketch)));
+        }
+        // Deleting the last body still draws its removed-material ghost.
+        if plugin && built.bounds.is_empty() && !built.replaced.is_empty() {
+            built.bounds = before.bodies.iter().fold(Aabb3::EMPTY, |b, body| b.union(&body.mesh().bounds()));
+        }
+        built.centrelines = centrelines;
         built
     }))
 }
 
 /// Draw a placed model before and after an assembly edit using the common preview scene.
 pub(crate) fn build_world_preview(preview: solidcraft_engine::Preview, colors: Colors) -> Result<Built, String> {
-    let (before, after) = (preview.before, preview.after);
-    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
+    build_world_scene(&preview, colors, false)
+}
+
+fn build_world_scene(preview: &solidcraft_engine::Preview, colors: Colors, joint_motion: bool) -> Result<Built, String> {
+    let (before, after) = (&preview.before, &preview.after);
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if joint_motion { crate::preview::build_motion(before, after, colors) } else { crate::preview::build(before, after, colors) }
+    }));
     match built {
         Ok(mut b) => {
             if !colors.ghost {
                 b.scene.ghost.clear();
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
+            // The joints the preview posed: what a reader of the pose sees the preview show.
+            b.joints = preview.joints.clone();
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),
@@ -2210,6 +2864,17 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 
 /// Snap glyphs under the cursor and at the picked origins; the overlap of an interference.
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
+    let aligning = alignment_side(&d.kind, d.active).is_some();
+    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS) || aligning;
+    let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
+    let center_frame = under
+        .as_ref()
+        .filter(|sel| {
+            matches!(sel, Sel::Edge { .. })
+                && alignment_pick(&app.session, sel, true).is_ok_and(|reference| reference["reference"]["type"] == "circle_center")
+        })
+        .and_then(|_| alignment_side(&d.kind, d.active))
+        .and_then(|side| primary_alignment_frame(&app.session, d, side));
     let t = Tokens::get();
     let Kind::Assembly(k) = &mut d.kind else { return };
     if let Asm::Interference { overlaps, .. } = k {
@@ -2260,20 +2925,22 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .iter()
         .enumerate()
         .filter(|(_, i)| i.accept == SNAPS)
-        .filter_map(|(n, i)| i.items.first().and_then(|x| snap_in(app, i, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
+        .filter_map(|(n, i)| {
+            i.items.first().and_then(|x| snap_in(app, i, x).map(|snap| (placed_snap(app, x, snap), if n == 0 { t.accent } else { t.warning })))
+        })
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
         let tag = format!("Component {}", n + 1);
         glyph(painter, proj, s, *c, app.cam.half_height(), two.then_some(tag.as_str()));
     }
     // The snap under the cursor (found again only when the hovered item changes).
-    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS);
-    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting).map(|s| woken_pick(app, accepting, s));
+
     match under {
         Some(sel) => {
-            let fresh = !matches!(hover, Some((s, _)) if *s == sel);
+            let fresh = aligning || app.preview.interaction.is_some() || !matches!(hover, Some((s, _)) if *s == sel);
             if fresh {
-                *hover = Some((sel.clone(), snap_hovered(app, &sel)));
+                let snap = if aligning { alignment_marker(app, &sel, center_frame) } else { snap_hovered(app, &sel) };
+                *hover = Some((sel.clone(), snap));
             }
             if let Some((_, Some(s))) = hover.as_ref() {
                 glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_tag(s)));
@@ -2283,8 +2950,75 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     }
 }
 
-/// A snap: the plane square to its z as a disc about the point, its kind's marker at the point and
-/// the z axis as an arrow.
+/// Convert a raw viewport hover to the pose used by persisted primary picks.
+fn authored_hover(app: &SolveApp, sel: &Sel) -> Sel {
+    let mut authored = sel.clone();
+    if app.preview.active
+        && !app.preview.rolled_back
+        && let Some(interaction) = &app.preview.interaction
+    {
+        match &mut authored {
+            Sel::Face { body, point, .. } | Sel::Edge { body, point, .. } | Sel::Vertex { body, point } => {
+                if let Some(frame) = interaction.to_document.get(body) {
+                    *point = solidcraft_engine::doc::apply_point(frame, *point);
+                }
+            }
+            _ => {}
+        }
+    }
+    authored
+}
+
+fn alignment_marker(app: &SolveApp, sel: &Sel, center_frame: Option<(Vec3, Vec3)>) -> Option<SnapPt> {
+    let authored = authored_hover(app, sel);
+    let mut snap = snap_of(&app.session, &authored).or_else(|| {
+        let Sel::ExternalSketchCurve { sketch, id } = &authored else { return None };
+        let state = app.session.model.state();
+        let ss = state.sketch(*sketch)?;
+        let curve = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
+        let solidcraft_engine::sketch::CurveKind::Line { a, b } = curve.kind else { return None };
+        let (a, b) = (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?));
+        let occurrence = feature_occurrence(&app.session, *sketch)?;
+        let frame = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, occurrence);
+        Some(SnapPt {
+            at: solidcraft_engine::doc::apply_point(&frame, (a + b) * 0.5),
+            z: solidcraft_engine::doc::apply_vector(&frame, b - a).normalized()?,
+            kind: SnapKind::EdgeMid,
+            param: json!({}),
+        })
+    })?;
+    if let Some((origin, z)) = center_frame
+        && let Some(frame) = solidcraft_engine::doc::joints::frame_of(origin, z, Some(snap.at - origin))
+    {
+        snap.z = Vec3::new(frame[0][0], frame[0][1], frame[0][2]);
+    }
+    Some(placed_snap(app, &authored, snap))
+}
+
+fn placed_snap(app: &SolveApp, sel: &Sel, mut snap: SnapPt) -> SnapPt {
+    if app.preview.active
+        && !app.preview.rolled_back
+        && let Some(interaction) = &app.preview.interaction
+    {
+        let frame = body_of(sel)
+            .and_then(|body| interaction.to_document.get(body))
+            .and_then(|frame| solidcore_ops::affine::inverse(frame).ok())
+            .or_else(|| {
+                let occurrence = alignment_occurrence(&app.session, sel)?;
+                let before = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, occurrence);
+                let after = solidcraft_engine::doc::joints::occurrence_world(&interaction.document, occurrence);
+                let inverse = solidcore_ops::affine::inverse(&before).ok()?;
+                solidcore_ops::affine::then(&inverse, &after).ok()
+            });
+        if let Some(frame) = frame {
+            snap.at = solidcraft_engine::doc::apply_point(&frame, snap.at);
+            snap.z = solidcraft_engine::doc::apply_vector(&frame, snap.z);
+        }
+    }
+    snap
+}
+
+/// A snap: its kind's marker at the point and the z axis as an arrow.
 fn glyph(painter: &egui::Painter, proj: &Proj, s: &SnapPt, col: Color32, half_height: f64, tag: Option<&str>) {
     let Some(c) = proj.to_screen(s.at) else { return };
     let len = half_height * 2.0 * 0.06;
@@ -2326,7 +3060,7 @@ pub(crate) fn snap_name(k: SnapKind) -> &'static str {
 // ---- timeline and browser ----
 
 /// A joint's menu (timeline and browser): Edit, Drive, Suppress, Delete.
-fn joint_menu(
+pub(crate) fn joint_menu(
     app: &SolveApp,
     ui: &mut egui::Ui,
     (id, kind, suppressed): (u64, JointKind, bool),
@@ -3026,22 +3760,31 @@ thread_local! {
     static ORIGINS: std::cell::RefCell<Option<(String, Vec<(String, solidcraft_engine::doc::Mat)>)>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Where the view shows the occurrences moved from where the design has them (in their parents):
+/// moves not captured yet, and a joint drag's frame over them (#6325).
+fn shown_moves(s: &Session) -> std::collections::BTreeMap<u64, solidcraft_engine::doc::Mat> {
+    let mut moves = s.pending_moves.clone();
+    moves.extend(s.drag_moves().iter().map(|(o, m)| (*o, *m)));
+    moves
+}
+
 /// Named joint origins in the world: on their occurrence's component, so they move with it
-/// (joint drives, free moves not captured yet, Capture Position).
+/// (joint drives, free moves not captured yet, a joint drag's frame, Capture Position).
 pub fn origins_world(s: &Session) -> Vec<(String, solidcraft_engine::doc::Mat)> {
     if s.doc.assembly.origins.is_empty() {
         return Vec::new();
     }
-    let key = format!("{}:{:?}", s.revision, s.pending_moves);
+    let moves = shown_moves(s);
+    let key = format!("{}:{:?}", s.revision, moves);
     if let Some(v) = ORIGINS.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return v;
     }
-    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if s.pending_moves.is_empty() {
+    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let mut d = (*s.doc).clone();
         for o in &mut d.occurrences {
-            if let Some(m) = s.pending_moves.get(&o.id) {
+            if let Some(m) = moves.get(&o.id) {
                 o.transform = *m;
             }
         }
@@ -3100,23 +3843,31 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
     if s.doc.assembly.joints.is_empty() {
         return Vec::new();
     }
-    let key = format!("{}:{:?}", s.revision, s.pending_moves);
+    let moves = shown_moves(s);
+    let key = format!("{}:{:?}", s.revision, moves);
     if let Some(v) = JOINT_FRAMES.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return v;
     }
-    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if s.pending_moves.is_empty() {
+    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let mut d = (*s.doc).clone();
         for o in &mut d.occurrences {
-            if let Some(m) = s.pending_moves.get(&o.id) {
+            if let Some(m) = moves.get(&o.id) {
                 o.transform = *m;
             }
         }
         std::borrow::Cow::Owned(d)
     };
     let st = s.model.state();
-    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m)))).collect();
+    let inactive = doc.inactive_pattern_occurrences();
+    let v: Vec<_> = doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| !j.uses_any_occurrence(&inactive))
+        .filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m))))
+        .collect();
     JOINT_FRAMES.with(|o| *o.borrow_mut() = Some((key, v.clone())));
     v
 }
@@ -3128,11 +3879,13 @@ pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
     // `Session::joint_drawn` for each joint, with the Joints folder looked up once: it was looked
     // up again for every joint of the design at every frame.
     let folder_shown = !app.session.folder_hidden("c0/joints");
+    let inactive = app.session.doc.inactive_pattern_occurrences();
     app.session
         .doc
         .assembly
         .joints
         .iter()
+        .filter(|j| !j.uses_any_occurrence(&inactive))
         .filter_map(|j| {
             let picked = app.tree.picked_joints.contains(&j.id);
             (picked || (folder_shown && app.session.joint_visible(j.id))).then_some((j.id, picked))

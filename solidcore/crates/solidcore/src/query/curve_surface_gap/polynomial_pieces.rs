@@ -34,7 +34,7 @@
 //! the cell holding `W(t)`, so the largest of the cells' bounds (each cell's polynomial
 //! taken over the whole piece) bounds it. Past the net's end (a box a ulp out on a seam or
 //! boundary) the end cell's polynomial is continued, plus the slack `NetSurface::partials`
-//! adds there, as [`super::piece`] does. A piece whose values reach into more than
+//! adds there, as [`super::piece_bound`] does. A piece whose values reach into more than
 //! [`MAX_CELLS`] cells, run too far past the net, or whose `D` is not proved positive is
 //! bisected.
 //!
@@ -115,10 +115,43 @@ fn magnitude(c: &[Ivl], rho: f64, from: usize) -> f64 {
     }
 }
 
+/// `c`'s constant coefficient (its value at `δ = 0`), enclosed.
+fn head(c: &[Ivl]) -> Ivl {
+    c.first().copied().unwrap_or_else(zero)
+}
+
 /// The values of `c` over `|δ| ≤ ρ`, enclosed.
 fn range(c: &[Ivl], rho: f64) -> Ivl {
     let rest = magnitude(c, rho, 1);
-    c.first().copied().unwrap_or_else(zero) + Ivl::new(-rest, rest)
+    head(c) + Ivl::new(-rest, rest)
+}
+
+/// The values of the quotient `x / w` over `|δ| ≤ ρ`, enclosed; not finite where `w` is not
+/// proved positive (or negative) there.
+///
+/// Two enclosures both hold, and the result is their intersection: the plain quotient
+/// `range(x) / range(w)`, and the centred form `x0 + range(x − x0 w) / range(w)` (`x0` any
+/// number, here the quotient's value at `δ = 0`). The plain one's width is first order in `ρ`
+/// through `w'` even where the quotient itself is stationary (`x / w` constant, or tangent to
+/// a knot line or the net's end); the centred one's numerator has the coefficients of
+/// `w (x / w − x0)`, so its first-order width is that of the quotient's own derivative. A
+/// trim running along a knot line or ending tangent to the net's end (`ss_plane_sph1.smp`'s
+/// sphere sheet) then stays on its side of it on all but the pieces next to the tangency,
+/// instead of reaching across it (into another cell, or past the end with the
+/// continuation's first-order slack) on every piece within `√ρ` of it. The box is never
+/// wider than the plain quotient's; its midpoint is also the cells' expansion centre, so a
+/// piece's bound can shift by rounding either way.
+fn quotient_range(x: &[Ivl], w: &[Ivl], rho: f64) -> Ivl {
+    let den = range(w, rho);
+    let plain = range(x, rho) / den;
+    let x0 = (head(x) / head(w)).mid();
+    if !x0.is_finite() {
+        return plain;
+    }
+    let centred = Ivl::from(x0) + range(&sub(x, &mul(&[Ivl::from(x0)], w)), rho) / den;
+    // (each holds the true values, so they meet; an overflow that inverts them fails
+    // `is_finite` downstream)
+    Ivl::new(plain.lo.max(centred.lo), plain.hi.min(centred.hi))
 }
 
 /// `c(x)`, enclosed (Horner).
@@ -443,10 +476,7 @@ fn polynomial_piece(
     let w = curve_taylor(wn, kw, m);
     let [wu, wv, _, ww] = &w;
     let uv_over = |x: Ivl| (at(wu, x) / at(ww, x), at(wv, x) / at(ww, x));
-    let (bu, bv) = (
-        range(wu, rho) / range(ww, rho),
-        range(wv, rho) / range(ww, rho),
-    );
+    let (bu, bv) = (quotient_range(wu, ww, rho), quotient_range(wv, ww, rho));
     if !(bu.is_finite() && bv.is_finite()) {
         return None;
     }
@@ -531,7 +561,7 @@ fn polynomial_piece(
 /// enclosed is the curve evaluated. (`NurbsCurve::of` rebuilds them from the Euclidean
 /// points, which rounds: a stored `x w = 3` with `w = 10` comes back as `3.0000000000000004`.)
 /// `None` when the degree, knots and points do not agree or a weight is not positive.
-fn stored_nurbs(c: &BSplineCurve) -> Option<NurbsCurve> {
+pub(super) fn stored_nurbs(c: &BSplineCurve) -> Option<NurbsCurve> {
     use crate::nurbs::math::{NOW, NOZ};
     let (knots, mult) = c.knots(None).ok()?;
     let p = c.degree().ok()?;
@@ -954,6 +984,32 @@ mod tests {
         trim_distance_bound(k, curve, [0.0, 1.0], uv, trim, s, floor, accept)
     }
 
+    /// A stationary quotient's enclosure is as narrow as its own variation, not as wide as its
+    /// denominator's: `x / w` with `x = w / 2` and `w = 1 + δ` is `1/2` everywhere, enclosed
+    /// to rounding over `|δ| ≤ 0.1` (the plain quotient `range(x) / range(w)` is about `0.2`
+    /// wide there); and `(1 + 2δ + δ²) / (1 + δ)`, which is `1 + δ`, is enclosed over the
+    /// same range, every sampled value inside and the enclosure narrower than the plain
+    /// quotient's.
+    #[test]
+    fn a_stationary_quotient_is_enclosed_by_its_own_variation() {
+        let iv = |c: &[f64]| c.iter().map(|&x| Ivl::from(x)).collect::<Vec<_>>();
+        let rho = 0.1;
+        let w = iv(&[1.0, 1.0]);
+        let half = quotient_range(&iv(&[0.5, 0.5]), &w, rho);
+        assert!(half.lo <= 0.5 && 0.5 <= half.hi, "{half:?}");
+        assert!(half.hi - half.lo < 1e-14, "{half:?}");
+        let plain = range(&iv(&[0.5, 0.5]), rho) / range(&w, rho);
+        assert!(plain.hi - plain.lo > 0.19, "{plain:?}");
+        let line = quotient_range(&iv(&[1.0, 2.0, 1.0]), &w, rho);
+        for j in 0..=1000 {
+            let d = -rho + 2.0 * rho * f64::from(j) / 1000.0;
+            assert!(line.lo <= 1.0 + d && 1.0 + d <= line.hi, "{d}: {line:?}");
+        }
+        // (centred: 1 + [-0.11, 0.11] / [0.9, 1.1], about 0.244 wide; plain: [0.79, 1.21] /
+        // [0.9, 1.1], about 0.627)
+        assert!(line.hi - line.lo < 0.245, "{line:?}");
+    }
+
     /// The plane z = 0 over x, y in 0..1 as a bilinear net cut at 0.5 both ways (four cells).
     fn plane() -> Surface {
         let mut points = Vec::new();
@@ -1020,6 +1076,28 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(g >= lift && g <= 1e-5, "{g:e}");
+    }
+
+    /// An arc `lift` above its own UV arc where the UV arc touches the net's end `v = 1`
+    /// tangentially at its top (centre `(cx, 0.6)`, radius 0.4). Every piece near the
+    /// tangency has a UV box that, enclosed as the plain quotient, reaches past the end and
+    /// takes the continuation's slack, so the pieces never close and the bisection budget
+    /// runs out (no bound). With the centred form those boxes stay on the net, and the bound
+    /// closes as it does away from the end: at least `lift`, within the closing rule's
+    /// thousandth.
+    #[test]
+    fn an_arc_tangent_to_the_net_end_is_bounded_by_its_height() {
+        let k = Kernel::default();
+        let s = plane();
+        let lift = 3.0e-7;
+        for cx in [0.45, 0.5] {
+            let curve = half_circle(cx, 0.6, lift);
+            let uv = half_circle(cx, 0.6, 0.0);
+            let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, 0.0)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{cx}: no bound"));
+            assert!(g >= lift && g <= lift * (1.0 + 1.1e-3), "{cx}: {g:e}");
+        }
     }
 
     /// A UV arc moved 1e-4 along u from its curve's shadow (the half circle of radius `r`):
