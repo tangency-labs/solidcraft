@@ -336,7 +336,7 @@ pub fn arc_circle_points(c: [f64; 2], start: [f64; 2], frame: &super::Frame) -> 
 /// Whether two orthonormal planes share a support, allowing 1e-6 mm of height.
 pub fn same_plane(a: &super::Frame, b: &super::Frame) -> bool {
     use crate::geom::vector3d::Vec3;
-    let vector = |[x, y, z]| Vec3::new(x, y, z);
+    let vector = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
     crate::geom::plane_height::is_square_plane_at(
         vector(a.origin),
         vector(plane_normal(a)),
