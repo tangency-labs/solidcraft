@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: seam only</title>
+  <path d="M6 40L29 40L29 48L6 48Z" fill="#b8c3cf"/>
+  <path d="M6 40L29 40L29 48L6 48Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35 14L41 14L41 48L35 48Z" fill="#b8c3cf"/>
+  <path d="M35 14L41 14L41 48L35 48Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M29 38L35 38L35 48L29 48Z" fill="#328bd3"/>
+  <path d="M29 38L35 38L35 48L29 48Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

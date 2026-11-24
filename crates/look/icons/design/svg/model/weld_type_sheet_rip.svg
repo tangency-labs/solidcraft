@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: sheet-metal rip</title>
+  <path d="M6 40L40 40L40 50L6 50Z" fill="#b8c3cf"/>
+  <path d="M6 40L40 40L40 50L6 50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40 12L50 12L50 50L40 50Z" fill="#b8c3cf"/>
+  <path d="M40 12L50 12L50 50L40 50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40 40L40 26A14 14 0 0 1 26 40Z" fill="#328bd3"/>
+  <path d="M40 40L40 26A14 14 0 0 1 26 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -201,7 +201,7 @@ sketch = [
 constraint = [
   "auto_constrain", "c_coincident", "c_collinear", "c_concentric", "c_equal",
   "c_fix", "c_hv", "c_midpoint", "c_parallel", "c_perpendicular",
-  "c_polygon", "c_smooth", "c_symmetry", "c_tangent",
+  "c_polygon", "c_smooth", "c_symmetry", "c_tangent", "weld_state_lost_reference",
 ]
 construction = [
   "centerline", "construction", "construction_line", "construction_line_angle",

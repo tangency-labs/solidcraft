@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: edge</title>
+  <path d="M6 24L29 24L29 52L6 52Z" fill="#b8c3cf"/>
+  <path d="M6 24L29 24L29 52L6 52Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35 24L58 24L58 52L35 52Z" fill="#b8c3cf"/>
+  <path d="M35 24L58 24L58 52L35 52Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M29 24L35 24L35 52L29 52Z" fill="#328bd3"/>
+  <path d="M29 24L35 24L35 52L29 52Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 24Q32 10 40 24Z" fill="#328bd3"/>
+  <path d="M24 24Q32 10 40 24Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

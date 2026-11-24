@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: groove and fillet</title>
+  <path d="M6 44L58 44L58 56L6 56Z" fill="#b8c3cf"/>
+  <path d="M6 44L58 44L58 56L6 56Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 10L38 10L38 38L34 44L30 44L26 38Z" fill="#b8c3cf"/>
+  <path d="M26 10L38 10L38 38L34 44L30 44L26 38Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 38L30 44L26 44Z" fill="#328bd3"/>
+  <path d="M26 38L30 44L26 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38 38L34 44L38 44Z" fill="#328bd3"/>
+  <path d="M38 38L34 44L38 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 44L26 32L12 44Z" fill="#328bd3"/>
+  <path d="M26 44L26 32L12 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38 44L38 32L52 44Z" fill="#328bd3"/>
+  <path d="M38 44L38 32L52 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

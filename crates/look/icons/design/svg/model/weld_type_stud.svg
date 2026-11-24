@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: stud</title>
+  <path d="M6 44L58 44L58 54L6 54Z" fill="#b8c3cf"/>
+  <path d="M6 44L58 44L58 54L6 54Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28 12L36 12L36 44L28 44Z" fill="#b8c3cf"/>
+  <path d="M28 12L36 12L36 44L28 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28 44L28 34L18 44Z" fill="#328bd3"/>
+  <path d="M28 44L28 34L18 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M36 44L36 34L46 44Z" fill="#328bd3"/>
+  <path d="M36 44L36 34L46 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: friction stir</title>
+  <path d="M6 26L29 26L29 42L6 42Z" fill="#b8c3cf"/>
+  <path d="M6 26L29 26L29 42L6 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35 26L58 26L58 42L35 42Z" fill="#b8c3cf"/>
+  <path d="M35 26L58 26L58 42L35 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M29 26L35 26L35 42L29 42Z" fill="#328bd3"/>
+  <path d="M29 26L35 26L35 42L29 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22 34A10 10 0 1 0 42 34A10 10 0 1 0 22 34Z" fill="#328bd3"/>
+  <path d="M22 34A10 10 0 1 0 42 34A10 10 0 1 0 22 34Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

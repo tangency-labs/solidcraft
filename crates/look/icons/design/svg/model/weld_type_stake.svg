@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: stake</title>
+  <path d="M6 28L46 28L46 38L6 38Z" fill="#b8c3cf"/>
+  <path d="M6 28L46 28L46 38L6 38Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 38L58 38L58 48L18 48Z" fill="#b8c3cf"/>
+  <path d="M18 38L58 38L58 48L18 48Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M29 14L35 14L35 48L29 48Z" fill="#328bd3"/>
+  <path d="M29 14L35 14L35 48L29 48Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 12L40 12L40 18L24 18Z" fill="#328bd3"/>
+  <path d="M24 12L40 12L40 18L24 18Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

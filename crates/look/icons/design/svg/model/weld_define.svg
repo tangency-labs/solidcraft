@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Define weld</title>
+  <path d="M25 22L25 12Q25 9 28 9L36 9Q39 9 39 12L39 22Z" fill="#8e9faf"/>
+  <path d="M25 22L25 12Q25 9 28 9L36 9Q39 9 39 12L39 22Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42 22L42 12Q42 9 45 9L53 9Q56 9 56 12L56 22Z" fill="#8e9faf"/>
+  <path d="M42 22L42 12Q42 9 45 9L53 9Q56 9 56 12L56 22Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8 22L8 12Q8 9 11 9L19 9Q22 9 22 12L22 18L52 18Q56 18 56 22L56 52Q56 56 52 56L12 56Q8 56 8 52Z" fill="#e2e8ef"/>
+  <path d="M8 22L8 12Q8 9 11 9L19 9Q22 9 22 12L22 18L52 18Q56 18 56 22L56 52Q56 56 52 56L12 56Q8 56 8 52Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M25 31L50.6 31" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M25 31L18.42 45.26" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15.4 51.8L15.37 43.85L21.47 46.67Z" fill="#34465b" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.4 31L44.2 31L31.4 43.8Z" fill="#328bd3"/>
+  <path d="M31.4 31L44.2 31L31.4 43.8Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

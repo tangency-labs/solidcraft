@@ -218,6 +218,41 @@ mod tests {
     }
 
     #[test]
+    fn every_weld_stem_resolves_and_draws_in_both_themes() {
+        // Discover the source files independently of the compiled table so a missing
+        // registration cannot silently remove an icon from this test's coverage.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/design/svg");
+        let mut stems = std::collections::BTreeSet::new();
+        for family in ["model", "flat"] {
+            for entry in std::fs::read_dir(root.join(family)).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().is_some_and(|ext| ext == "svg") {
+                    let stem = path.file_stem().unwrap().to_str().unwrap();
+                    if stem.starts_with("weld") {
+                        assert!(stems.insert(stem.to_owned()), "duplicate weld master: {stem}");
+                    }
+                }
+            }
+        }
+        assert!(stems.len() >= 68, "the approved weld batch must be present");
+        for stem in stems {
+            let resolved = resolve(&stem);
+            assert!(!resolved.placeholder, "{stem}");
+            assert_eq!(resolved.master, stem, "{stem} must resolve by its own file stem");
+            let accent = if stem == "weld_state_lost_reference" { accent_index("constraint") } else { None };
+            assert_eq!(resolved.accent, accent, "{stem}: semantic accent");
+            for dark in [false, true] {
+                let look = Look { dark, accent: resolved.accent, vision: solidcraft_theme::ColorVision::Off, palette: None };
+                for px in [16, 24, 64] {
+                    let doc = doc_for(resolved.master, px).unwrap_or_else(|| panic!("{stem}: missing document"));
+                    let pm = render(doc, look, px).unwrap_or_else(|| panic!("{stem}: render failed"));
+                    assert!(coverage(&pm) > 8, "{stem} at {px}px (dark {dark}) is blank");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn reviewed_model_folder_is_also_the_folder_drawn_in_the_app() {
         let source = MASTERS.iter().find(|(id, fam, _)| *id == "folder" && *fam == "model").unwrap().2;
         let expected = SET.parse(source).unwrap();
