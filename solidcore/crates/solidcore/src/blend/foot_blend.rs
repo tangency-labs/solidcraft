@@ -2262,11 +2262,11 @@ const MAX_PIECES: f64 = 1024.0;
 const CHAIN_FIRST: f64 = 0.125;
 
 /// Each of [`FootBlend::prove_chain`]'s further steps ends this many times as far from the
-/// root as it starts: a step of one eighth of its distance. Over a step the distance from the
+/// root as it starts: a step of one quarter of its distance. Over a step the distance from the
 /// root (`|w|`, which `G₂` sets) changes by that share, and the box's centred form spreads its
 /// rate in `ρ` by it; steps of an equal share of the leg would spread it by a half next to
-/// the first, where Krawczyk's test fails (by the eighth of the leg, 18 steps).
-const CHAIN_GROWTH: f64 = 1.125;
+/// the first, where Krawczyk's test fails (by the quarter, 10 steps up the leg).
+const CHAIN_GROWTH: f64 = 1.25;
 
 /// How far from the root [`FootBlend::prove_chain`] starts, in bounds on the gap between the
 /// support's point on the root's path and the root: there the gap moves the branch's direction
