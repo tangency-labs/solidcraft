@@ -777,7 +777,7 @@ pub fn tab_surfaces_enabled() -> bool {
 }
 
 /// A kind of line on a drawing sheet that has its own screen colour (#18989): its place in
-/// [`Tokens::paper_lines`] and the other sheets' sets. The visible edges are the sheet's ink.
+/// [`Tokens::paper_lines`] and [`Tokens::paper_dark_lines`]. The visible edges are the sheet's ink.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PaperLine {
     /// Hidden lines.
@@ -1285,15 +1285,14 @@ pub struct Tokens {
     pub paper_prussian_blue_ink: Color32,
     pub paper_dark: Color32,
     pub paper_dark_ink: Color32,
-    /// Screen colours for each kind of line on a drawing sheet, beside its ink (which draws the
-    /// visible edges), in [`PaperLine`] order (#18989). One set for each sheet appearance, as its
-    /// paper and ink above. Each colour stays apart from the others and from the ink for normal
-    /// vision and for every colour vision mode, so no mode changes them, and reads on its paper
-    /// (WCAG: 3:1 for a line, 4.5:1 for text). The line types still carry the meaning: a colour is
-    /// extra help on screen (D26 of #13159), and print and export keep the one ink.
+    /// Colours for each kind of line on a drawing sheet, beside its ink (which draws the visible
+    /// edges), in [`PaperLine`] order (#18989): on a white sheet (also the print colours) and on a
+    /// dark one. A blueprint or Prussian blue sheet keeps its one white ink, as a real blueprint
+    /// does. Each colour stays apart from the others and from the ink for normal vision and for
+    /// every colour vision mode, so no mode changes them, and reads on its paper (WCAG: 3:1 for a
+    /// line, 4.5:1 for text). The line types still carry the meaning: a colour is extra help (D26
+    /// of #13159).
     pub paper_lines: [Color32; 5],
-    pub paper_blueprint_lines: [Color32; 5],
-    pub paper_prussian_blue_lines: [Color32; 5],
     pub paper_dark_lines: [Color32; 5],
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
@@ -1722,12 +1721,7 @@ mod tests {
         for dark in [false, true] {
             for mode in ColorVision::ALL {
                 let t = Tokens::themed(dark, mode);
-                let sheets = [
-                    ("white", t.paper_white, t.paper_ink, t.paper_lines),
-                    ("blueprint", t.paper_blueprint, t.paper_blueprint_ink, t.paper_blueprint_lines),
-                    ("prussian blue", t.paper_prussian_blue, t.paper_prussian_blue_ink, t.paper_prussian_blue_lines),
-                    ("dark", t.paper_dark, t.paper_dark_ink, t.paper_dark_lines),
-                ];
+                let sheets = [("white", t.paper_white, t.paper_ink, t.paper_lines), ("dark", t.paper_dark, t.paper_dark_ink, t.paper_dark_lines)];
                 for (sheet, paper, ink, lines) in sheets {
                     assert!(contrast_ratio(ink, paper) >= 4.5, "{sheet}: the ink");
                     for kind in PaperLine::ALL {
@@ -1737,11 +1731,7 @@ mod tests {
                     }
                 }
                 let base = if dark { Tokens::dark() } else { Tokens::light() };
-                assert_eq!(
-                    [t.paper_lines, t.paper_blueprint_lines, t.paper_prussian_blue_lines, t.paper_dark_lines],
-                    [base.paper_lines, base.paper_blueprint_lines, base.paper_prussian_blue_lines, base.paper_dark_lines],
-                    "{mode:?} leaves them as they are"
-                );
+                assert_eq!([t.paper_lines, t.paper_dark_lines], [base.paper_lines, base.paper_dark_lines], "{mode:?} leaves them as they are");
             }
         }
         assert_eq!(PaperLine::ALL.map(PaperLine::index), [0, 1, 2, 3, 4]);
