@@ -59,12 +59,22 @@ pub enum NavButton {
     Extra1,
     /// The side "forward" button.
     Extra2,
+    /// A further button of a mouse with many, by its number (6 to 16, as
+    /// [`egui::PointerButton::number`] counts them). Make one with [`NavButton::of_pointer`] or
+    /// [`NavButton::from_id`].
+    Numbered(u8),
 }
 
+/// The setting's names of the further buttons, from button 6.
+const NUMBERED_IDS: [&str; 11] =
+    ["button6", "button7", "button8", "button9", "button10", "button11", "button12", "button13", "button14", "button15", "button16"];
+
 impl NavButton {
+    /// The five buttons every mouse mapping names; the further ones are listed only once mapped.
     pub const ALL: [NavButton; 5] = [NavButton::Left, NavButton::Middle, NavButton::Right, NavButton::Extra1, NavButton::Extra2];
 
-    /// The name the setting and the control channel use.
+    /// The name the setting and the control channel use: `left`, `middle`, `right`, `extra1`,
+    /// `extra2`, or `button6` to `button16`.
     pub fn id(self) -> &'static str {
         match self {
             NavButton::Left => "left",
@@ -72,7 +82,53 @@ impl NavButton {
             NavButton::Right => "right",
             NavButton::Extra1 => "extra1",
             NavButton::Extra2 => "extra2",
+            NavButton::Numbered(n) => usize::from(n).checked_sub(6).and_then(|i| NUMBERED_IDS.get(i)).copied().unwrap_or(""),
         }
+    }
+
+    /// The button a setting's name names.
+    pub fn from_id(id: &str) -> Option<NavButton> {
+        Self::ALL.into_iter().find(|b| b.id() == id).or_else(|| {
+            let i = NUMBERED_IDS.iter().position(|n| *n == id)?;
+            Some(NavButton::Numbered(u8::try_from(i + 6).ok()?))
+        })
+    }
+
+    /// The button egui reports as `button`.
+    pub fn of_pointer(button: egui::PointerButton) -> NavButton {
+        match button {
+            egui::PointerButton::Primary => NavButton::Left,
+            egui::PointerButton::Secondary => NavButton::Right,
+            egui::PointerButton::Middle => NavButton::Middle,
+            egui::PointerButton::Extra1 => NavButton::Extra1,
+            egui::PointerButton::Extra2 => NavButton::Extra2,
+            further => NavButton::Numbered(u8::try_from(further.number()).unwrap_or(u8::MAX)),
+        }
+    }
+
+    /// The button egui reports for this one.
+    pub fn pointer(self) -> Option<egui::PointerButton> {
+        match self {
+            NavButton::Left => Some(egui::PointerButton::Primary),
+            NavButton::Right => Some(egui::PointerButton::Secondary),
+            NavButton::Middle => Some(egui::PointerButton::Middle),
+            NavButton::Extra1 => Some(egui::PointerButton::Extra1),
+            NavButton::Extra2 => Some(egui::PointerButton::Extra2),
+            NavButton::Numbered(n) => egui::PointerButton::from_number(u16::from(n)).filter(|b| b.number() >= 6),
+        }
+    }
+
+    /// A button no mouse mapping uses: it does nothing until the user maps it.
+    pub fn is_side(self) -> bool {
+        matches!(self, NavButton::Extra1 | NavButton::Extra2 | NavButton::Numbered(_))
+    }
+
+    /// The further buttons the user mapped, in order of their numbers.
+    pub fn mapped_numbered(prefs: &Prefs) -> impl Iterator<Item = NavButton> {
+        let mut numbered: Vec<NavButton> =
+            prefs.nav_button_map.keys().filter_map(|id| NavButton::from_id(id)).filter(|b| matches!(b, NavButton::Numbered(_))).collect();
+        numbered.sort_by_key(|b| b.pointer().map(egui::PointerButton::number));
+        numbered.into_iter()
     }
 }
 
@@ -686,6 +742,17 @@ pub enum HistorySketches {
     InOrder,
     /// A sketch a feature is built from is listed one level in, under that feature.
     UnderFeature,
+}
+
+/// How unsuppressing an upstream feature in the 2D Timeline affects downstream dependents.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Timeline2dUnsuppressMode {
+    /// Restore each downstream feature's original suppression state (features separately suppressed remain suppressed).
+    #[default]
+    RestoreState,
+    /// Unsuppress all downstream features that depend on the upstream feature.
+    UnsuppressAll,
 }
 
 /// How a section hatches the faces it cuts (Preferences: "Section hatch").
@@ -2315,7 +2382,11 @@ fn save_graphics(app: &SolveApp) {
         let path = std::path::Path::new(path);
         let result = (|| {
             let mut graphics = read_graphics_settings(path)?;
-            graphics["msaa"] = json!(app.preferences.msaa);
+            // A saved `msaa` is a level someone chose, which the software renderer draws instead
+            // of its 1x (#3321): saving the window system or adapter doesn't choose the default.
+            if graphics.get("msaa").is_some() || app.preferences.msaa != Prefs::default().msaa {
+                graphics["msaa"] = json!(app.preferences.msaa);
+            }
             graphics["window_system"] = json!(app.preferences.window_system);
             graphics["adapter"] = json!(app.preferences.graphics_adapter);
             solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
@@ -4070,8 +4141,8 @@ fn prepare_preferences(
         return Err("`middle_double_click` must be home, fit or off".into());
     }
     for (button, choice) in &new.nav_button_map {
-        if !NavButton::ALL.iter().any(|b| b.id() == button) || NavChoice::parse(choice).is_none() {
-            return Err("`nav_button_map` maps left, middle, right, extra1 or extra2 to orbit, pan, zoom or none, after shift+, ctrl+ or alt+".into());
+        if NavButton::from_id(button).is_none() || NavChoice::parse(choice).is_none() {
+            return Err("`nav_button_map` maps left, middle, right, extra1, extra2 or button6 to button16 to orbit, pan, zoom or none, after shift+, ctrl+ or alt+".into());
         }
     }
     let mut new = new;
@@ -6413,6 +6484,55 @@ mod tests {
         assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
     }
 
+    /// #5522: Browse… fills a folder setting with the folder chosen, starting in the one it
+    /// names; Clear empties it; Defaults empties both; a host without folders shows neither.
+    #[test]
+    fn design_folders_browse_clear_defaults_and_a_host_without_folders() {
+        let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let seen = started.clone();
+        h.app.services.pick_folder = Some(Box::new(move |current: &str| {
+            seen.borrow_mut().push(current.to_string());
+            Box::pin(async { Some("/home/sam/Picked".to_string()) })
+        }));
+        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
+        assert_eq!((h.app.preferences.designs_folder.as_str(), h.app.preferences.exports_folder.as_str()), ("", ""));
+
+        h.app.prefs_window.shell.filter = "Designs folder".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:designs_folder:browse");
+        h.step(&json!({"click":{"handle":"prefs:designs_folder:browse"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.designs_folder, "/home/sam/Picked");
+        assert_eq!(started.borrow().as_slice(), [""], "an empty setting lets the system choose where Browse… starts");
+        super::reveal_preference(&mut h, "prefs:designs_folder:clear");
+        h.step(&json!({"click":{"handle":"prefs:designs_folder:clear"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.designs_folder, "");
+
+        h.app.preferences.exports_folder = "/home/sam/Prints".into();
+        h.app.prefs_window.shell.filter = "Exports folder".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:exports_folder:browse");
+        h.step(&json!({"click":{"handle":"prefs:exports_folder:browse"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.exports_folder, "/home/sam/Picked");
+        assert_eq!(started.borrow().last().map(String::as_str), Some("/home/sam/Prints"), "Browse… starts in the folder set");
+
+        h.call("ui.prefs", json!({"designs_folder":"/home/sam/Designs"}));
+        assert_eq!(h.app.preferences.designs_folder, "/home/sam/Designs", "scripts set it by name");
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert_eq!((h.app.preferences.designs_folder.as_str(), h.app.preferences.exports_folder.as_str()), ("", ""));
+
+        // The web app has no folders: no rows to show.
+        h.app.services.pick_folder = None;
+        h.app.prefs_window.shell.filter = "folder".into();
+        h.frames(5);
+        assert!(crate::scenario::rect_of("prefs:designs_folder").is_none() && crate::scenario::rect_of("prefs:exports_folder:browse").is_none());
+        h.call("ui.prefs", json!({"button":"cancel"}));
+    }
+
     #[test]
     fn tools_ghost_and_pointer_tiles_edit_only_their_state_and_preserve_transactions() {
         for theme in ["light", "dark"] {
@@ -6543,6 +6663,7 @@ mod tests {
             ("feature_menus_act_on_selection", json!(false), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
+            ("timeline_2d", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
             ("viewport_theme", json!("light"), PAGE_APPEARANCE),
             ("viewport_background", json!([255, 255, 255]), PAGE_APPEARANCE),
@@ -9332,6 +9453,17 @@ mod tests {
         let out = h.call("ui.prefs", json!({"button": "cancel"}));
         assert_eq!(out["result"]["window_system"], "wayland", "Cancel takes the change back");
         assert_eq!(saved()["window_system"], "wayland", "and the file with it");
+
+        // No anti-aliasing level saved: the window system doesn't save the default as a chosen
+        // one, which the software renderer would then draw (#3321). A chosen level is saved.
+        std::fs::write(&path, r#"{"backend":"vulkan"}"#).unwrap();
+        h.call("ui.prefs", json!({"window_system": "x11"}));
+        assert_eq!(saved()["window_system"], "x11");
+        assert!(saved().get("msaa").is_none(), "{}", saved());
+        h.call("ui.prefs", json!({"msaa": 2}));
+        assert_eq!(saved()["msaa"], 2);
+        h.call("ui.prefs", json!({"msaa": 4}));
+        assert_eq!(saved()["msaa"], 4, "a saved level follows the choice back to the default");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -10495,7 +10627,7 @@ mod tests {
         h.call("ui.resize", json!({"width":2400,"height":1000}));
         for (lang, want) in [
             ("en", ["Model", "Surface", "Mesh", "Form", "Sheet Metal", "Render"]),
-            ("de", ["Modell", "Fläche", "Mesh", "Form", "Blech", "Rendern"]),
+            ("de", ["Modell", "Fläche", "Netz", "Form", "Blech", "Rendern"]),
             ("fr", ["Modèle", "Surface", "Maillage", "Forme", "Tôlerie", "Rendu"]),
         ] {
             h.app.preferences.language = lang.into();
@@ -11545,6 +11677,30 @@ mod tests {
         assert!(!app.preferences.selection_shift_add_only, "the merged Sketch & selection page resets both sets of modifiers");
         control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(app.preferences.suppress_sketch_snap, ModifierCombo::CTRL);
+    }
+
+    #[test]
+    fn preview_modifier_persists_and_follows_shortcut_dialog_buttons() {
+        use crate::tool_modifiers::PreviewModifier;
+        let old: Prefs = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(old.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for (value, binding) in [("control", PreviewModifier::Control), ("alt", PreviewModifier::Alt), ("disabled", PreviewModifier::Disabled)] {
+            control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":value})).unwrap();
+            control(&mut app, &json!({"button":"apply"})).unwrap();
+            let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            restored.load_prefs(&app.prefs());
+            assert_eq!(restored.preferences.preview_reselect_modifier, binding);
+            control(&mut app, &json!({"preview_reselect_modifier":"shift"})).unwrap();
+            control(&mut app, &json!({"button":"cancel"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, binding);
+            control(&mut app, &json!({"open":"Keyboard Shortcuts", "button":"defaults"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+            control(&mut app, &json!({"button":"cancel"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, binding);
+        }
+        control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":"primary", "button":"ok"})).unwrap();
+        assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::Primary);
     }
 
     #[test]

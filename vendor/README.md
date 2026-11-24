@@ -102,6 +102,14 @@ SolidCraft changes to egui and eframe:
   next frame: on Wayland a window that gets no frames (off-screen, on another workspace) otherwise
   stalled each request for up to a second. Normal redraws still paint.
 
+- `crates/egui/src/data/input/pointer_button.rs`, `crates/egui-winit/src/lib.rs`,
+  `crates/eframe/src/web/input.rs`: mice with more than five buttons. `PointerButton` has
+  `Extra3` to `Extra13` (buttons 6 to 16; `NUM_POINTER_BUTTONS` is 16), `PointerButton::ALL`,
+  `number` and `from_number`. egui-winit turns winit's `MouseButton::Other(code)` into them by
+  each platform's code (`other_button_number`) and the web runner its `button` 5 and up, where
+  upstream drops them. Tests: `buttons_are_numbered_in_order` (egui) and
+  `further_mouse_buttons_reach_egui_by_number` (egui-winit).
+
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 
@@ -175,6 +183,12 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
   eframe so startup can retry another backend instead of invoking wgpu's panic handler.
+- `src/lib.rs`, `src/winit.rs`: `stalled_frames` counts the frames in a row whose texture took
+  at least `STALLED_ACQUIRE` (950 ms) to acquire. wgpu waits at most a second for the next
+  image and D3D12 then goes on as if it had come, so a hung GPU shows only as frames that each
+  wait that second; the app restarts on another renderer after a few of them (#3321). Only the
+  main window counts. `refused_for` says how long the main window has skipped its frames on a
+  refused configure, which never reach the acquire.
 
 ## winit 0.30.13 (Apache-2.0, © The winit contributors, https://github.com/rust-windowing/winit)
 

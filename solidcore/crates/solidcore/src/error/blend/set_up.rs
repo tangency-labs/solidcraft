@@ -38,6 +38,10 @@ pub enum FilletSetUp {
     InterpolationEndRail,
     /// A Join's fillet vertex's mate.
     Mate,
+    /// A mate vertex's main vertex (its first mate), whose geometry the mate's calculation
+    /// reads: a fillet vertex a caller builds and passes to the public calculator need not
+    /// have one.
+    MateMainVertex,
     /// The cross-section opposite a rail/rail interpolation edge at its corner.
     OppositeCrossSection,
     /// The original face a fillet edge records, of any fillet edge type (a rail/rail
@@ -123,6 +127,7 @@ impl FilletSetUp {
                 "an end of the rail/rail interpolation edge is no rail's end"
             }
             Self::Mate => "a Join's fillet vertex has no mate",
+            Self::MateMainVertex => "a mate vertex has no main vertex",
             Self::OppositeCrossSection => {
                 "the fillet edge opposite the rail/rail interpolation edge is not a cross-section"
             }
