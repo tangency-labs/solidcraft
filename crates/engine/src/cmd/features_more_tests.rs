@@ -4635,3 +4635,129 @@ fn a_draft_past_where_a_short_walls_sides_meet_ends_the_wall_in_a_point() {
     assert_eq!([b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()], [1, 6, 12, 8]);
     assert!(b.validity().is_empty(), "{:?}", b.validity());
 }
+
+/// The plate and the block of the Align picks below (#21331): Plate (z -5..0) with a hole d8
+/// through it at (14.5, -1), Block (z 0..10) with a hole d10 through it at (35, 30).
+fn drilled_plate_and_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, -10, -5], "length": 30, "width": 20, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [14.5, -1, 0], "diameter": 8, "targets": ["Plate"]}));
+    run(&mut s, "solid.box", json!({"corner": [25, 20, 0], "length": 60, "width": 40, "height": 10, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [35, 30, 10], "diameter": 10, "targets": ["Block"]}));
+    s
+}
+
+/// The block's hole rim onto the plate's: each circle faces out of its body's top.
+fn rims(flip: bool) -> Value {
+    let (from, to) = (json!({"snap": "circle_center", "at": [40, 30, 10]}), json!({"snap": "circle_center", "at": [18.5, -1, 0]}));
+    json!({"bodies": ["Block"], "from": from, "to": to, "flip": flip})
+}
+
+/// A circle picks a direction, its axis out of its body: two rims meet face to face, and `flip`
+/// sets the block flush below the plate instead (#21331).
+#[test]
+fn align_circle_centres_meet_and_flip() {
+    for (flip, lo, hi) in [(false, [-35.5, -11., 0.], [24.5, 29., 10.]), (true, [4.5, -11., -10.], [64.5, 29., 0.])] {
+        let mut s = drilled_plate_and_block();
+        run(&mut s, "solid.align", rims(flip));
+        assert_bounds(&mut s, "Block", lo, hi);
+    }
+}
+
+/// Two bare points face no way: without `flip` they are a plain move, as before; `flip` is
+/// refused with what to pick instead of doing nothing (#21331).
+#[test]
+fn align_bare_points_refuse_a_flip() {
+    let mut s = drilled_plate_and_block();
+    let p = json!({"bodies": ["Block"], "from": [35, 30, 10], "to": [14.5, -1, 0]});
+    let mut flipped = p.clone();
+    flipped["flip"] = json!(true);
+    let e = s.execute("solid.align", &flipped);
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("flip needs a face")), "{e:?}");
+    run(&mut s, "solid.align", p);
+    assert_bounds(&mut s, "Block", [4.5, -11., -10.], [64.5, 29., 0.]);
+}
+
+/// A face and a circle mate as two faces do; a side that faces no way (a vertex) keeps the
+/// bodies' turn, and `flip` turns them half round about an axis square to the other side's way (#21331).
+#[test]
+fn align_faces_and_circles_mix() {
+    let aligned = |p: Value| {
+        let mut s = drilled_plate_and_block();
+        run(&mut s, "solid.align", p);
+        s
+    };
+    let circle = json!({"snap": "circle_center", "at": [40, 30, 10]});
+    let mut s = aligned(json!({"bodies": ["Block"], "from": circle, "to_face": [14.5, 5, 0]}));
+    assert_bounds(&mut s, "Block", [-35.5, -5., 0.], [24.5, 35., 10.]);
+    let plate_rim = json!({"snap": "circle_center", "at": [18.5, -1, 0]});
+    let mut s = aligned(json!({"bodies": ["Block"], "from": {"snap": "face_center", "at": [50, 20, 5]}, "to": plate_rim}));
+    assert_bounds(&mut s, "Block", [-15.5, -6., 0.], [44.5, 4., 40.]);
+    let corner = json!({"snap": "vertex", "at": [25, 20, 0]});
+    let mut s = aligned(json!({"bodies": ["Block"], "from": corner, "to": plate_rim}));
+    assert_bounds(&mut s, "Block", [14.5, -1., 0.], [74.5, 39., 10.]);
+    let mut s = aligned(json!({"bodies": ["Block"], "from": corner, "to": plate_rim, "flip": true}));
+    assert_bounds(&mut s, "Block", [-45.5, -1., -10.], [14.5, 39., 0.]);
+}
+
+/// `{snap: circle_center}` finds a bore drilled by Hole from a pick on its rim, at its centre
+/// and on its wall (the nearer rim), and faces out of the plate there (#21331).
+#[test]
+fn align_snaps_to_the_centre_of_a_drilled_bore() {
+    for (at, z) in [([18.5, -1., 0.], 0.), ([14.5, -1., 0.], 0.), ([14.5, 3., 0.], 0.), ([18.5, -1., -1.], 0.), ([18.5, -1., -4.], -5.)] {
+        let mut s = drilled_plate_and_block();
+        run(&mut s, "solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+        let to = json!({"snap": "circle_center", "at": at});
+        run(&mut s, "solid.align", json!({"bodies": ["Cube"], "from": {"snap": "vertex", "at": [100, 0, 0]}, "to": to, "flip": true}));
+        assert_bounds(&mut s, "Cube", [4.5, -1., z - 10.], [14.5, 9., z]);
+    }
+}
+
+/// The ways the Align of `s` stores for its two sides.
+fn align_ways(s: &Session) -> (Option<solidcore_record::Vec3>, Option<solidcore_record::Vec3>) {
+    let way = |n: &Option<solidcraft_doc::Dir>| n.map(|d| d.0);
+    let ways = s.doc.features.iter().find_map(|f| match &f.kind {
+        solidcraft_doc::FeatureKind::Align { from_normal, to_normal, .. } => Some((way(from_normal), way(to_normal))),
+        _ => None,
+    });
+    ways.expect("an Align")
+}
+
+fn assert_way(got: Option<solidcore_record::Vec3>, want: solidcore_record::Vec3) {
+    assert!(got.is_some_and(|n| n.dist(want) < 1e-12), "{got:?}, want {want:?}");
+}
+
+/// The plate and the block, the block's top front edge chamfered 2 (its face at y 20…22, z 8…10).
+fn chamfered_block() -> Session {
+    let mut s = drilled_plate_and_block();
+    run(&mut s, "solid.chamfer", json!({"edges": [[50, 20, 10]], "distance": 2}));
+    s
+}
+
+/// A face pick faces along its face's exact outward normal (#21331): the block's top beside its
+/// hole, the plate's top, the chamfer's tilted face.
+#[test]
+fn align_face_picks_store_their_exact_normals() {
+    use solidcore_record::Vec3;
+    let tilted = Vec3::new(0.0, -std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2);
+    let mut s = chamfered_block();
+    run(&mut s, "solid.align", json!({"bodies": ["Block"], "from_face": [50, 50, 10], "to_face": [14.5, 5, 0]}));
+    let (from, to) = align_ways(&s);
+    assert_way(from, Vec3::Z);
+    assert_way(to, Vec3::Z);
+    let mut s = chamfered_block();
+    run(&mut s, "solid.align", json!({"bodies": ["Block"], "from_face": [50, 21, 9], "to_face": [14.5, 5, 0]}));
+    assert_way(align_ways(&s).0, tilted);
+}
+
+/// A face pick or a face centre snap on a face that is not planar (the wall of the block's hole)
+/// is refused with what it needs, instead of facing a way the display mesh made up (#21331).
+#[test]
+fn align_refuses_a_curved_face() {
+    let mut s = drilled_plate_and_block();
+    let e = s.execute("solid.align", &json!({"bodies": ["Block"], "from_face": [40, 30, 5], "to_face": [14.5, 5, 0]}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("`from_face` must be on a planar face")), "{e:?}");
+    let centre = json!({"snap": "face_center", "at": [40, 30, 5]});
+    let e = s.execute("solid.align", &json!({"bodies": ["Block"], "from": centre, "to_face": [14.5, 5, 0]}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("face_center snaps to the centre of a planar face")), "{e:?}");
+}
