@@ -939,14 +939,16 @@ mod tests {
         assert_eq!(Tokens::get().panel, Color32::from_rgb(0x20, 0x30, 0x40), "the organization's colours are on");
         assert_eq!(saved(&h.app)["theme_follow"], json!(""), "the person's own choice is kept");
 
-        // The control channel refuses to stop following or to follow another file.
-        for value in [json!(""), json!(other)] {
+        // The control channel refuses another file, the organization's included: only the stored
+        // choice goes back, and sending it back doesn't stop following.
+        for value in [json!(other), json!(path)] {
             let refused = h.call("ui.prefs", json!({ "theme_follow": value }));
             assert_eq!(refused["ok"], json!(false), "{refused}");
             assert!(refused["error"].as_str().unwrap_or_default().contains("set by your organization's policy"), "{refused}");
         }
-        let read = h.call("ui.prefs", json!({}));
-        assert_eq!(h.call("ui.prefs", json!({ "theme_follow": read["result"]["theme_follow"] }))["ok"], json!(true), "sending back what was read is no change");
+        let back = h.call("ui.prefs", json!({ "theme_follow": "" }));
+        assert_eq!(back["ok"], json!(true), "sending back what was read is no change: {back}");
+        assert_eq!(back["result"]["theme_followed"].as_str(), Some(path.as_str()), "{back}");
         // Picking a theme records the person's choice and keeps following the file.
         let picked = h.call("ui.prefs", json!({"theme": "dark"}));
         assert_eq!(picked["result"]["theme_followed"].as_str(), Some(path.as_str()), "{picked}");
