@@ -63,6 +63,22 @@ fn unit(a: V3) -> Option<V3> {
 /// its round.
 const SQUARE: f64 = 1e-12;
 
+/// `x > t`, false when either is NaN.
+fn exceeds(x: f64, t: f64) -> bool {
+    matches!(x.partial_cmp(&t), Some(std::cmp::Ordering::Greater))
+}
+
+/// `x <= t`, false when either is NaN.
+fn at_most(x: f64, t: f64) -> bool {
+    matches!(
+        x.partial_cmp(&t),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    )
+}
+
+/// A side of a corner patch's net: its control points, and its (u, v) at its parameter 0 and 1.
+type Side2<'a> = (&'a [[f64; 4]], [f64; 2], [f64; 2]);
+
 /// A plane's origin, its two axes and its unit natural normal, `u × v`.
 #[derive(Clone, Copy)]
 struct Plane {
@@ -106,7 +122,7 @@ impl Plane {
         );
         let (a, b) = (dot(self.u, d), dot(self.v, d));
         let det = uu * vv - uv * uv;
-        if !(det.abs() > 1e-300) {
+        if !exceeds(det.abs(), 1e-300) {
             return None;
         }
         Some([(a * vv - b * uv) / det, (b * uu - a * uv) / det])
@@ -190,12 +206,12 @@ impl Round {
         }
         let ([n0, n1], [m0, m1]) = (n, m);
         let bend = dot(m0, n1);
-        if !(bend.abs() > 1e-6) || bend * dot(m1, n0) <= 0.0 {
+        if !exceeds(bend.abs(), 1e-6) || bend * dot(m1, n0) <= 0.0 {
             return None;
         }
         let s = if bend < 0.0 { 1.0 } else { -1.0 };
         let cos = dot(n0, n1);
-        if !(1.0 + cos > 1e-6) {
+        if !exceeds(1.0 + cos, 1e-6) {
             return None;
         }
         // the axis: n_k . x = -s r on the section through `a`, x = c (n0 + n1)
@@ -236,7 +252,7 @@ impl Round {
     #[must_use]
     pub fn open_end(&self, v: V3, end: &Surface, outward: bool) -> Option<End> {
         let nf = outward_normal(end, outward)?;
-        if !((1.0 - dot(nf, self.d).abs()) <= SQUARE) {
+        if !at_most(1.0 - dot(nf, self.d).abs(), SQUARE) {
             return None;
         }
         Some(End {
@@ -294,7 +310,7 @@ pub fn ball_centre(v: V3, faces: [(&Surface, bool); 3], convex: bool, radius: f6
         outward_normal(faces[2].0, faces[2].1)?,
     ];
     let det = dot(a, cross(b, c));
-    if !(det.abs() > 1e-6) {
+    if !exceeds(det.abs(), 1e-6) {
         return None;
     }
     // x with n_i . x = h: x = h (b x c + c x a + a x b) / det
@@ -453,11 +469,7 @@ pub fn round_face(round: &Round, ends: [&End; 2], open: [bool; 2]) -> Option<Rou
     ];
     // u runs from the side where the natural normal, du x dv, points away from the axis
     let toward1 = sub(p1, p0);
-    let u0_side = if dot(cross(toward1, round.d), sub(p0, c0)) > 0.0 {
-        0
-    } else {
-        1
-    };
+    let u0_side = usize::from(!exceeds(dot(cross(toward1, round.d), sub(p0, c0)), 0.0));
     let (q0, q2) = if u0_side == 0 { (p0, p1) } else { (p1, p0) };
     let (u_knots, section) = arc_form(c0, round.radius, q0, q2)?;
     // each control point of the section, and it moved along the edge to the end's section
@@ -604,7 +616,7 @@ impl CornerFace {
             .map(|row| row.last().copied())
             .collect::<Option<_>>()?;
         // the sides: (control points along it, its (u, v) at the side's parameter 0 and 1)
-        let sides: [(&[[f64; 4]], [f64; 2], [f64; 2]); 3] = [
+        let sides: [Side2; 3] = [
             (first, [u0, v0], [u0, v1]),
             (last, [u1, v0], [u1, v1]),
             (&far, [u0, v1], [u1, v1]),
@@ -820,7 +832,7 @@ pub fn plane_pcurve(
             let mut pts = Vec::new();
             for c in homogeneous {
                 let w = c[3];
-                if !(w > 0.0) {
+                if !exceeds(w, 0.0) {
                     return None;
                 }
                 let p = plane.uv([c[0] / w, c[1] / w, c[2] / w])?;

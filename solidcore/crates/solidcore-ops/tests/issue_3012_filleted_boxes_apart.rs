@@ -99,7 +99,8 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
             // 30 dx h, each to that 1e-8.
             let h = 10.0;
             let exact = dx * 30.0 * h;
-            let both_ends_short = (dx * 30.0 - 2.0 * dx * dx * dx / 12.0) * h;
+            let section = dx * 30.0 - 2.0 * dx * dx * dx / 12.0;
+            let both_ends_short = section * h;
             let v = volume(&r);
             assert!(
                 v > both_ends_short - 1e-8 && v < exact + 1e-8,
