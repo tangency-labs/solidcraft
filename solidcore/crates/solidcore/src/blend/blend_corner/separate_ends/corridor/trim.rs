@@ -1,13 +1,14 @@
 //! Enclose the exact endpoints of straight edges on non-cardinal support planes.
 
-use super::{coords, expansion_span, measured_span, resolved_vertex};
+use super::{coords, expansion_span, lift_component, measured_span, resolved_vertex};
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::CurveKind;
 use crate::curve::line::Line;
 use crate::error::Result;
 use crate::geom::certified::next_up;
 use crate::geom::expansion;
-use crate::math::Point3;
+use crate::geom::extent1d::Extent1d;
+use crate::math::{Point2, Point3};
 use crate::nurbs::math::{CPoint, NOW};
 use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -179,6 +180,20 @@ pub(super) fn vertex_bounds(b: &Brep, v: VertexId) -> Result<Option<PointBounds>
 /// The plane's affine UV lift with outward interval arithmetic. Unlike an
 /// expansion, this also encloses products for subnormal UV error bounds.
 fn lift_box(plane: &Plane, [u, v]: [Ivl; 2], point: bool) -> PointBounds {
+    if u.lo == u.hi && v.lo == v.hi {
+        let lifted = [0, 1, 2].map(|axis| {
+            expansion_span(&lift_component(
+                plane,
+                Point2::new(u.lo, v.lo),
+                axis,
+                point,
+            )?)
+            .map(|s| Ivl::new(s.lo, s.hi))
+        });
+        if let [Some(x), Some(y), Some(z)] = lifted {
+            return [x, y, z];
+        }
+    }
     let frame = plane.position();
     let u = u.mul_ulp(Ivl::from(plane.uv_scale().x));
     let v = v.mul_ulp(Ivl::from(plane.uv_scale().y));
@@ -199,7 +214,7 @@ fn lift_box(plane: &Plane, [u, v]: [Ivl; 2], point: bool) -> PointBounds {
     result
 }
 
-fn uv_bounds(plane: &Plane, [first, last]: [[Ivl; 2]; 2]) -> [PointBounds; 2] {
+pub(super) fn uv_bounds(plane: &Plane, [first, last]: [[Ivl; 2]; 2]) -> [PointBounds; 2] {
     let endpoints = [lift_box(plane, first, true), lift_box(plane, last, true)];
     if plane.is_out_of_bounds_enabled() {
         return endpoints;
@@ -247,10 +262,52 @@ fn match_endpoints(
     monotone && encloses_distance(a, u, first) && encloses_distance(z, v, last)
 }
 
+pub(super) fn line_endpoints(line: &Line, interval: &Extent1d) -> Option<[PointBounds; 2]> {
+    let [first, last] = line.segment_over(interval)?;
+    let bounds = |t, (point, error)| {
+        line.exact_point_at_parameter(t).map_or_else(
+            || {
+                coords(point).map(|x| {
+                    let span = measured_span(x, error);
+                    Ivl::new(span.lo, span.hi)
+                })
+            },
+            point_bounds,
+        )
+    };
+    Some([bounds(interval.min(), first), bounds(interval.max(), last)])
+}
+
+/// The lifted ends of an affine stored trim over the actual edge interval.
+pub(super) fn lifted_trim(
+    b: &Brep,
+    eu: EdgeuseId,
+    interval: &Extent1d,
+    plane: &Plane,
+) -> Result<Option<[PointBounds; 2]>> {
+    let Some(trim) = eu1::uv_trim_curve(b, eu)?.0 else {
+        return Ok(None);
+    };
+    let uv = match trim.kind() {
+        CurveKind::BSpline(spline)
+            if spline.dim() == 2
+                && spline.degree()? == 1
+                && trim.natural_interval() == *interval =>
+        {
+            spline_uv_endpoints(spline.control_points()?)
+        }
+        CurveKind::Line(line) if line.dim() == 2 => {
+            line_endpoints(line, interval).map(|ends| ends.map(|[u, v, _]| [u, v]))
+        }
+        _ => None,
+    };
+    Ok(uv.map(|uv| uv_bounds(plane, uv)))
+}
+
 /// Both incident plane charts select a unique straight carrier. Affine trims
 /// stay within the existing edge zone of its bounded segment by convexity,
 /// once their ordered endpoints agree within the edge and vertex zones.
-pub(super) fn binds_affine_trim(
+pub(super) fn bound_affine_trim(
     b: &Brep,
     eu: EdgeuseId,
     e: EdgeId,
@@ -259,16 +316,16 @@ pub(super) fn binds_affine_trim(
     vertices: [VertexId; 2],
     endpoints: [PointBounds; 2],
     allowance: f64,
-) -> Result<bool> {
+) -> Result<Option<[PointBounds; 2]>> {
     let faces = edge::faces(b, e, None)?;
     let [a, z] = faces.as_slice() else {
-        return Ok(false);
+        return Ok(None);
     };
     let (Some(a), Some(z)) = (support_plane(b, *a)?, support_plane(b, *z)?) else {
-        return Ok(false);
+        return Ok(None);
     };
     if !cross(a.normal, z.normal).into_iter().any(excludes_zero) {
-        return Ok(false);
+        return Ok(None);
     }
     let [u, v] = vertices;
     let zone = edge::tolerance(b, e)?.min(allowance);
@@ -277,40 +334,12 @@ pub(super) fn binds_affine_trim(
         zone.min(vertex::tolerance(b, v)?),
     ];
     let interval = edge::interval(b, e)?;
-    let Some(points) = line.segment_over(&interval) else {
-        return Ok(false);
+    let Some(xyz) = line_endpoints(line, &interval) else {
+        return Ok(None);
     };
-    let xyz = points.map(|(p, error)| {
-        coords(p).map(|component| {
-            let range = measured_span(component, error);
-            Ivl::new(range.lo, range.hi)
-        })
-    });
     if !match_endpoints(xyz, endpoints, tolerances) {
-        return Ok(false);
+        return Ok(None);
     }
-    let Some(trim) = eu1::uv_trim_curve(b, eu)?.0 else {
-        // A later drop onto the face can move and clip the edge's 3D line.
-        // Its 3D endpoint bounds do not enclose that unobserved trim.
-        return Ok(false);
-    };
-    let uv = match trim.kind() {
-        CurveKind::BSpline(spline)
-            if spline.dim() == 2
-                && spline.degree()? == 1
-                && trim.natural_interval() == interval =>
-        {
-            spline_uv_endpoints(spline.control_points()?)
-        }
-        CurveKind::Line(line) if line.dim() == 2 => line.segment_over(&interval).map(|points| {
-            points.map(|(p, err)| {
-                [p.x, p.y].map(|value| {
-                    let span = measured_span(value, err);
-                    Ivl::new(span.lo, span.hi)
-                })
-            })
-        }),
-        _ => None,
-    };
-    Ok(uv.is_some_and(|uv| match_endpoints(uv_bounds(plane, uv), endpoints, tolerances)))
+    Ok(lifted_trim(b, eu, &interval, plane)?
+        .filter(|&lifted| match_endpoints(lifted, endpoints, tolerances)))
 }

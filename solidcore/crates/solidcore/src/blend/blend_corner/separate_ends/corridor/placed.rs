@@ -244,7 +244,7 @@ impl Placed {
         if cardinal(coords(a), coords(z)).is_none() {
             return Ok(false);
         }
-        trim::binds_affine_trim(
+        Ok(trim::bound_affine_trim(
             b,
             eu,
             e,
@@ -253,7 +253,8 @@ impl Placed {
             [u, v],
             [a, z].map(|p| self.frame.world(coords(p))),
             self.zone,
-        )
+        )?
+        .is_some())
     }
 
     pub(super) fn width(&self, physical: f64) -> Option<f64> {
@@ -261,6 +262,11 @@ impl Placed {
         // by one existing zone. Budget both deviations at the outer boundary.
         let physical = Ivl::from(physical).add_ulp(Ivl::from(self.zone).mul_ulp(Ivl::from(2.0)));
         self.frame.width(physical.hi)
+    }
+
+    /// Outward allowance for a foreign boundary on each placed axis.
+    pub(super) fn foreign_margin(&self) -> Option<f64> {
+        self.frame.width(2.0 * self.zone)
     }
 
     /// Enclose both representations on every side. Contacts of an unrelated
@@ -276,7 +282,7 @@ impl Placed {
         if arm.contacts(bounds)? {
             return Some(true);
         }
-        let margin = self.frame.width(2.0 * self.zone)?;
+        let margin = self.foreign_margin()?;
         let meets = arm.spans.into_iter().zip(bounds).all(|(span, boundary)| {
             let total = Ivl::new(boundary.lo, boundary.hi).add_ulp(Ivl::new(-margin, margin));
             total.lo <= span.hi && span.lo <= total.hi

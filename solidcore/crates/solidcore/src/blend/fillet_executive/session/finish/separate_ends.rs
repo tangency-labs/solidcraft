@@ -5,8 +5,9 @@ use crate::blend::blend_corner::separate_ends::{plan, SectionKind, SeparateEndPl
 use crate::blend::fillet_executive::p3::{FitKind, FitSize, NoRoomReason};
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::blend::fillet_solver::p1::{FilletSurfaceGenerator, FilletSurfaceGeneratorType};
+use crate::error::blend::BlendFailure;
 use crate::error::topology::TopologyFailure;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use crate::topology::{edgeuse::p1 as eu1, Brep, EdgeId};
@@ -85,7 +86,7 @@ impl FilletSession<'_> {
                 Result::is_ok,
             )
         });
-        result?;
+        result.map_err(without_group_fit)?;
         objects.attributes = attrs;
         Ok(true)
     }
@@ -174,6 +175,25 @@ impl FilletSession<'_> {
     }
 }
 
+/// A group's fit is measured on only part of the selection, possibly after the
+/// other group changed its supports. The joint plan alone can name a size for
+/// the original selection. Rollback can also remove the group's reported edge.
+fn without_group_fit(error: SolidError) -> SolidError {
+    let SolidError::FilletRefused {
+        operation,
+        code,
+        reason,
+        ..
+    } = error
+    else {
+        return error;
+    };
+    let failure = reason.map_or(BlendFailure::CornerRefused, BlendFailure::NoRoom);
+    Failure::new(operation, failure)
+        .with_status(code)
+        .into_error()
+}
+
 fn constant_group(
     k: &mut Kernel,
     b: &mut Brep,
@@ -190,4 +210,35 @@ fn constant_group(
     stitch_and_orient(k, b, &StitchAndOrientOptions::default())?;
     b.refresh_cached_topology();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_group_refusal_does_not_report_a_fit_on_a_reverted_edge() {
+        let edge = EdgeId::from_index(42);
+        let operation = "separate_ends::test_group";
+        let code = crate::error::SM_ERR;
+        let error = without_group_fit(SolidError::FilletRefused {
+            operation,
+            code,
+            entity: Some(EntityRef::Edge(edge)),
+            reason: Some(NoRoomReason::RailLeavesFace),
+            fit: FitSize {
+                size: 3.0,
+                edge: Some(edge),
+                kind: FitKind::Radius,
+            },
+        });
+        assert!(matches!(
+            error.blend_failure(),
+            Some(BlendFailure::NoRoom(NoRoomReason::RailLeavesFace))
+        ));
+        assert_eq!(error.operation(), operation);
+        assert_eq!(error.sm_status(), Some(code));
+        assert_eq!(error.entity(), None);
+        assert!(!matches!(error, SolidError::FilletRefused { .. }));
+    }
 }

@@ -1302,6 +1302,107 @@ mod tests {
     }
 
     #[test]
+    fn a_shorter_lifted_rail_trim_does_not_certify_the_nominal_size() {
+        use crate::blend::blend_corner::separate_ends::{plan, SectionKind, SeparateEndPlan};
+        use crate::curve::curve::Curve;
+        use crate::curve::line::Line;
+        use crate::math::Point3;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::surface::{Surface, SurfaceKind};
+        use crate::topology::edgeuse::p1 as eu1;
+        use crate::topology::face::p2 as face2;
+        use crate::topology::{edge, vertex};
+
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let (mut b, edges) = post_foot(&mut k);
+        let corner = Vec3::new(10.0, 10.0, 4.0);
+        let end = Vec3::new(15.0, 10.0, 4.0);
+        let rail = b
+            .edge_list()
+            .iter()
+            .copied()
+            .find(|&edge_id| {
+                let (Some(a), Some(z)) = edge::start_end_vertices(&b, edge_id).unwrap() else {
+                    return false;
+                };
+                let [a, z] = [a, z].map(|v| vertex::point(&b, v).unwrap());
+                (a == corner && z == end) || (z == corner && a == end)
+            })
+            .unwrap();
+        let (Some(a), Some(z)) = edge::start_end_vertices(&b, rail).unwrap() else {
+            panic!("two rail vertices");
+        };
+        let points = [a, z].map(|v| vertex::point(&b, v).unwrap());
+        let delta = edge::tolerance(&b, rail)
+            .unwrap()
+            .min(vertex::tolerance(&b, a).unwrap())
+            .min(vertex::tolerance(&b, z).unwrap())
+            / 4.0;
+        assert!(delta > 0.0 && end.x - delta < end.x);
+        let eu = edge::edgeuses(&b, rail, None, None)
+            .unwrap()
+            .into_iter()
+            .find(|&eu| {
+                eu1::face(&b, eu).unwrap().is_some_and(|face| {
+                    matches!(face2::surface(&b, face).unwrap().map(Surface::kind),
+                    Some(SurfaceKind::Plane(plane)) if plane.position().z_axis().z.abs() == 1.0)
+                })
+            })
+            .unwrap();
+        let face = eu1::face(&b, eu).unwrap().unwrap();
+        let Some(SurfaceKind::Plane(plane)) = face2::surface(&b, face).unwrap().map(Surface::kind)
+        else {
+            panic!("planar floor");
+        };
+        let interval = edge::interval(&b, rail).unwrap();
+        let trims = [end.x - delta, end.x.next_down()].map(|end_x| {
+            let [a, z] = points.map(|point| {
+                let moved = if point == end {
+                    Vec3::new(end_x, point.y, point.z)
+                } else {
+                    point
+                };
+                let uv = plane.project_point_to_uv_domain(moved);
+                Point3::new(uv.x, uv.y, 0.0)
+            });
+            let span = z - a;
+            let direction = span / span.length();
+            let scale = span.length() / interval.length();
+            Curve::from(Line::from_parts(
+                BSplineCurve::new(2),
+                a - interval.min() * scale * direction,
+                direction,
+                interval,
+                scale,
+                false,
+            ))
+        });
+        let owner = eu1::uv_trim_curve(&b, eu).unwrap().1.unwrap();
+        for kind in [SectionKind::Chamfer, SectionKind::Round] {
+            assert!(matches!(
+                plan(&k, &mut b, &edges, &[5.0], kind).unwrap(),
+                SeparateEndPlan::Ends(_)
+            ));
+        }
+        for trim in trims {
+            b.edgeuse_mut(owner).unwrap().uv_trim_curve = Some(trim);
+            for kind in [SectionKind::Chamfer, SectionKind::Round] {
+                assert!(!matches!(
+                    plan(&k, &mut b, &edges, &[5.0], kind).unwrap(),
+                    SeparateEndPlan::Ends(_)
+                ));
+                assert!(!matches!(
+                    plan(&k, &mut b, &edges, &[6.0], kind).unwrap(),
+                    SeparateEndPlan::Limited { size: 5.0, .. }
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn missing_uv_can_be_proved_without_committing_it_and_displaced_uv_cannot() {
         use crate::blend::blend_corner::separate_ends::{plan, SectionKind, SeparateEndPlan};
         use crate::curve::curve::Curve;

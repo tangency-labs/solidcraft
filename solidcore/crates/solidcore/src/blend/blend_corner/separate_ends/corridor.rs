@@ -20,16 +20,19 @@ use crate::geom::certified::{difference, distance, next_down, next_up};
 use crate::geom::expansion;
 use crate::geom::extent3d::Extent3d;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3};
+use crate::math::{Point2, Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::{CPoint, NOW};
 use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::topology::brep::p5::initial_stitch_tolerance;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use crate::topology::face::p2 as face2;
 use crate::topology::face::p4 as face4;
-use crate::topology::{edge, loopuse, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
+use crate::topology::{
+    edge, loopuse, vertex, Brep, EdgeId, EdgeuseId, FaceId, LoopuseId, VertexId,
+};
 
 const OP: &str = "blend::blend_corner::separate_ends::corridor";
 
@@ -49,7 +52,16 @@ pub(super) enum Clearance {
 
 type Coords = [f64; 3];
 type Segment = [PointBounds; 2];
-type Polygon = Vec<Vec<Segment>>;
+
+struct Polygon {
+    loops: Vec<Vec<BoundarySegment>>,
+    lifted: Option<[Span; 3]>,
+}
+
+struct BoundarySegment {
+    nominal: Segment,
+    lifted: Option<Segment>,
+}
 
 #[derive(Clone, Copy)]
 struct Span {
@@ -187,6 +199,13 @@ impl Arm {
         self.rail_faces.contains(&face) || self.near_caps.contains(&face) || self.far_cap == face
     }
 
+    fn extent(self, placed: Option<&Placed>) -> Option<Extent3d> {
+        if let Some(placed) = placed {
+            return placed.extent(self);
+        }
+        bounds_extent(self.spans.map(|span| Ivl::new(span.lo, span.hi)))
+    }
+
     fn contacts(self, bounds: [Span; 3]) -> Option<bool> {
         let along = *self.spans.get(self.along)?;
         let across = *self.spans.get(self.across)?;
@@ -205,6 +224,22 @@ impl Arm {
                     && height.overlaps_from(above, *self.origin.get(self.above)?)),
         )
     }
+}
+
+fn bounds_extent([x, y, z]: PointBounds) -> Option<Extent3d> {
+    [x, y, z].into_iter().all(Ivl::is_finite).then(|| {
+        Extent3d::from_points(Point3::new(x.lo, y.lo, z.lo), Point3::new(x.hi, y.hi, z.hi))
+    })
+}
+
+fn with_zone(extent: &Extent3d, zone: f64) -> Option<Extent3d> {
+    if !extent.is_bounded() || !zone.is_finite() || zone < 0.0 {
+        return None;
+    }
+    let margin = Ivl::new(-zone, zone);
+    let [x, y, z] = coords(extent.min());
+    let [u, v, w] = coords(extent.max());
+    bounds_extent([(x, u), (y, v), (z, w)].map(|(lo, hi)| Ivl::new(lo, hi).add_ulp(margin)))
 }
 
 /// Intersect the vertex's three exact cardinal support planes. The stored
@@ -451,6 +486,13 @@ enum TrimUse {
     OtherFace,
 }
 
+struct TrimSegment {
+    nominal: Segment,
+    start: LoopEnd,
+    end: LoopEnd,
+    lifted: Option<Segment>,
+}
+
 /// Bind a straight polygon segment to the edge's 3D line and lifted UV trim.
 fn segment(
     b: &Brep,
@@ -458,7 +500,7 @@ fn segment(
     plane: &Plane,
     use_: TrimUse,
     placed: Option<&Placed>,
-) -> Result<Option<(Segment, LoopEnd, LoopEnd)>> {
+) -> Result<Option<TrimSegment>> {
     let Some(e) = eu1::edge(b, eu)? else {
         return Ok(None);
     };
@@ -468,14 +510,16 @@ fn segment(
     let (Some(u), Some(v)) = edge::start_end_vertices(b, e)? else {
         return Ok(None);
     };
-    let (a, z) = if let Some(placed) = placed {
+    let (a, z, lifted) = if let Some(placed) = placed {
         let (Some(a), Some(z)) = (placed.point(b, u)?, placed.point(b, v)?) else {
             return Ok(None);
         };
         if !placed.binds_trim(b, eu, e, plane, line, [u, v], [a, z])? {
             return Ok(None);
         }
-        (point_bounds(a), point_bounds(z))
+        // The placed chart already pads the foreign check by the zone of
+        // both the swept surface and the affine trim.
+        (point_bounds(a), point_bounds(z), None)
     } else {
         let (Some(a), Some(z)) = (vertex_bounds(b, u)?, vertex_bounds(b, v)?) else {
             return Ok(None);
@@ -484,43 +528,70 @@ fn segment(
             (Some(a), Some(z)) => cardinal(coords(a), coords(z)),
             _ => None,
         };
-        let bound = if let Some((along, _)) = cardinal_bounds {
+        let other_face = matches!(use_, TrimUse::OtherFace);
+        let exact = if let Some((along, _)) = cardinal_bounds {
             binds_cardinal_trim(b, eu, e, plane, line, [u, v], [a, z], along)?
-                || (matches!(use_, TrimUse::OtherFace)
-                    && trim::binds_affine_trim(
-                        b,
-                        eu,
-                        e,
-                        plane,
-                        line,
-                        [u, v],
-                        [a, z],
-                        f64::INFINITY,
-                    )?)
         } else {
-            trim::binds_affine_trim(b, eu, e, plane, line, [u, v], [a, z], f64::INFINITY)?
+            false
         };
-        if !bound {
+        let lifted = if exact && !other_face {
+            None
+        } else if exact {
+            let Some(bounds) = trim::lifted_trim(b, eu, &edge::interval(b, e)?, plane)? else {
+                return Ok(None);
+            };
+            Some(bounds)
+        } else if other_face || cardinal_bounds.is_none() {
+            let Some(bounds) =
+                trim::bound_affine_trim(b, eu, e, plane, line, [u, v], [a, z], f64::INFINITY)?
+            else {
+                return Ok(None);
+            };
+            Some(bounds)
+        } else {
             return Ok(None);
-        }
-        (a, z)
+        };
+        (a, z, lifted)
     };
     let (u, v, direction) = match eu1::orientation(b, eu)? {
         OrientType::Same => (u, v, subtract(z, a)),
         OrientType::Opposite => (v, u, subtract(a, z)),
         OrientType::Unknown => return Ok(None),
     };
-    Ok(Some((
-        [a, z],
-        LoopEnd {
+    let lifted = if let (TrimUse::OtherFace, Some([from, to])) = (use_, lifted) {
+        // Close only the arithmetic difference where the certified trim and
+        // its independent carrier intersection describe the same point.
+        let snap = |[fx, fy, fz]: PointBounds, [x, y, z]: PointBounds, roundoff| {
+            [(fx, x), (fy, y), (fz, z)].map(|(actual, nominal)| {
+                if nominal.lo == nominal.hi
+                    && enclosed_difference(actual, nominal).is_some_and(|gap| gap.mag() <= roundoff)
+                {
+                    nominal
+                } else {
+                    actual
+                }
+            })
+        };
+        Some(
+            line_roundoff(line, &edge::interval(b, e)?).map_or([from, to], |roundoff| {
+                [snap(from, a, roundoff), snap(to, z, roundoff)]
+            }),
+        )
+    } else {
+        lifted
+    };
+    Ok(Some(TrimSegment {
+        nominal: [a, z],
+        start: LoopEnd {
             vertex: u,
             direction,
         },
-        LoopEnd {
+        end: LoopEnd {
             vertex: v,
             direction,
         },
-    )))
+        lifted,
+    }))
 }
 
 /// Bind a cardinal trim to its projected carrier, including exact contacts
@@ -602,17 +673,17 @@ fn binds_cardinal_trim(
 fn segments(
     k: &Kernel,
     b: &Brep,
-    face: FaceId,
+    loops: &[LoopuseId],
     plane: &Plane,
     use_: TrimUse,
     placed: Option<&Placed>,
 ) -> Result<Option<Polygon>> {
     let mut polygon = Vec::new();
-    let loops = face4::upward_loopuses(b, face, false, None)?;
+    let mut lifted = None;
     polygon
         .try_reserve_exact(loops.len())
         .map_err(|_| SolidError::topology(OP, TopologyFailure::AllocationFailed))?;
-    for lu in loops {
+    for &lu in loops {
         let mut segments = Vec::new();
         let uses = loopuse::edgeuses(b, lu, None, None)?;
         segments
@@ -622,7 +693,13 @@ fn segments(
         let mut last: Option<LoopEnd> = None;
         for eu in uses {
             k.check_cancelled(OP)?;
-            let Some((segment, start, end)) = segment(b, eu, plane, use_, placed)? else {
+            let Some(TrimSegment {
+                nominal,
+                start,
+                end,
+                lifted: actual,
+            }) = segment(b, eu, plane, use_, placed)?
+            else {
                 return Ok(None);
             };
             if last.is_some_and(|prev| !prev.joins(start)) {
@@ -630,14 +707,64 @@ fn segments(
             }
             first.get_or_insert(start);
             last = Some(end);
-            segments.push(segment);
+            segments.push(BoundarySegment {
+                nominal,
+                lifted: actual,
+            });
+            if let Some(actual) = actual {
+                let bounds = segment_bounds(actual);
+                lifted = Some(lifted.map_or(bounds, |other| merge_spans(other, bounds)));
+            }
         }
         if !matches!((last, first), (Some(last), Some(first)) if last.joins(first)) {
             return Ok(None);
         }
         polygon.push(segments);
     }
-    Ok((!polygon.is_empty()).then_some(polygon))
+    Ok((!polygon.is_empty()).then_some(Polygon {
+        loops: polygon,
+        lifted,
+    }))
+}
+
+/// A distant inner trim loop cannot change the winding within the corridor.
+fn distant_loop(
+    k: &Kernel,
+    b: &Brep,
+    lu: LoopuseId,
+    plane: &Plane,
+    envelope: &Extent3d,
+) -> Result<bool> {
+    let mut total: Option<Extent3d> = None;
+    for eu in loopuse::edgeuses(b, lu, None, None)? {
+        k.check_cancelled(OP)?;
+        let (Some(edge), (Some(uv), _)) = (eu1::edge(b, eu)?, eu1::uv_trim_curve(b, eu)?) else {
+            return Ok(false);
+        };
+        let Some(curve) = edge::curve(b, edge)? else {
+            return Ok(false);
+        };
+        let (Some(spatial), Some(param)) = (
+            curve.certified_bounding_box(k, &edge::interval(b, edge)?)?,
+            uv.certified_bounding_box(k, &uv.natural_interval())?,
+        ) else {
+            return Ok(false);
+        };
+        let [x, y] = [
+            Ivl::new(param.min().x, param.max().x),
+            Ivl::new(param.min().y, param.max().y),
+        ];
+        let [lifted, _] = trim::uv_bounds(plane, [[x, y]; 2]);
+        let Some(lifted) = bounds_extent(lifted) else {
+            return Ok(false);
+        };
+        let zone = edge::tolerance(b, edge)?.max(b.tolerance());
+        let Some(bounds) = with_zone(&spatial.union(&lifted), zone) else {
+            return Ok(false);
+        };
+        total = Some(total.map_or(bounds, |other| other.union(&bounds)));
+    }
+    Ok(total.is_some_and(|bounds| bounds.are_disjoint(envelope, 0.0)))
 }
 
 fn planar_polygon(
@@ -646,24 +773,40 @@ fn planar_polygon(
     face: FaceId,
     use_: TrimUse,
     placed: Option<&Placed>,
+    envelope: &Extent3d,
 ) -> Result<Option<Polygon>> {
-    if !matches!(
-        face2::surface(b, face)?.map(Surface::kind),
-        Some(SurfaceKind::Plane(_))
-    ) || face2::outer_loops(b, face)?.is_empty()
-    {
+    let Some(SurfaceKind::Plane(plane)) = face2::surface(b, face)?.map(Surface::kind) else {
+        return Ok(None);
+    };
+    let outer = face2::outer_loops(b, face)?;
+    if outer.is_empty() {
         return Ok(None);
     }
-    for eu in face4::upward_edgeuses(b, face, false, None)? {
-        k.check_cancelled(OP)?;
-        if eu1::uv_trim_curve(b, eu)?.0.is_none() && !certifiable_lazy_trim(k, b, eu)? {
-            return Ok(None);
+    let loops = face4::upward_loopuses(b, face, false, None)?;
+    let mut nearby = Vec::new();
+    nearby
+        .try_reserve_exact(loops.len())
+        .map_err(|_| SolidError::topology(OP, TopologyFailure::AllocationFailed))?;
+    for lu in loops {
+        if loopuse::loop_(b, lu)?.is_some_and(|lp| !outer.contains(&lp))
+            && distant_loop(k, b, lu, plane, envelope)?
+        {
+            continue;
+        }
+        nearby.push(lu);
+    }
+    for &lu in &nearby {
+        for eu in loopuse::edgeuses(b, lu, None, None)? {
+            k.check_cancelled(OP)?;
+            if eu1::uv_trim_curve(b, eu)?.0.is_none() && !certifiable_lazy_trim(k, b, eu)? {
+                return Ok(None);
+            }
         }
     }
     let Some(SurfaceKind::Plane(plane)) = face2::surface(b, face)?.map(Surface::kind) else {
         return Ok(None);
     };
-    segments(k, b, face, plane, use_, placed)
+    segments(k, b, &nearby, plane, use_, placed)
 }
 
 /// Populate a missing planar UV trim on the planning copy. A drop that needs
@@ -732,11 +875,69 @@ fn crosses([x, y]: [f64; 2], [a, b]: [Ivl; 2], [u, v]: [Ivl; 2]) -> Option<bool>
     if above(b)? == last_above {
         return Some(false);
     }
-    let side = u
-        .sub_ulp(a)
-        .mul_ulp(Ivl::from(y).sub_ulp(b))
-        .sub_ulp(v.sub_ulp(b).mul_ulp(Ivl::from(x).sub_ulp(a)));
+    let side = line_side([x, y], [[a, b], [u, v]]);
     excludes_zero(side).then_some((side.lo > 0.0) == last_above)
+}
+
+fn line_side([x, y]: [f64; 2], [[a, b], [u, v]]: [[Ivl; 2]; 2]) -> Ivl {
+    u.sub_ulp(a)
+        .mul_ulp(Ivl::from(y).sub_ulp(b))
+        .sub_ulp(v.sub_ulp(b).mul_ulp(Ivl::from(x).sub_ulp(a)))
+}
+
+/// Test the segment after its box passes the half-open rectangle filter.
+fn segment_contacts_rectangle(
+    segment @ [a, z]: [[Ivl; 2]; 2],
+    spans @ [u, v]: [Span; 2],
+    origins: [Option<f64>; 2],
+) -> Option<bool> {
+    let admitted = |point: [Ivl; 2]| {
+        point
+            .into_iter()
+            .zip(spans)
+            .zip(origins)
+            .all(|((p, s), at)| {
+                (p.lo > s.lo || (at == Some(s.hi) && p.lo == s.lo))
+                    && (p.hi < s.hi || (at == Some(s.lo) && p.hi == s.hi))
+            })
+    };
+    if segment.into_iter().any(admitted) {
+        return Some(true);
+    }
+    let corners = [[u.lo, v.lo], [u.lo, v.hi], [u.hi, v.lo], [u.hi, v.hi]];
+    let sides = corners.map(|p| line_side(p, segment));
+    let positive = |s: &Ivl| s.lo > 0.0;
+    let negative = |s: &Ivl| s.hi < 0.0;
+    if sides.iter().all(positive) || sides.iter().all(negative) {
+        return Some(false);
+    }
+    let exact_line =
+        |[x, y]: [Ivl; 2]| (x.lo == x.hi && y.lo == y.hi).then_some(Vec3::new(x.lo, y.lo, 1.0));
+    let reaches_corner = corners.into_iter().zip(sides).any(|(p, side)| {
+        let [x, y] = p;
+        admitted(p.map(Ivl::from))
+            && a.into_iter()
+                .zip(z)
+                .zip(p)
+                .all(|((a, z), p)| a.hi.min(z.hi) <= p && a.lo.max(z.lo) >= p)
+            && (side == Ivl::from(0.0)
+                || (side.lo <= 0.0
+                    && side.hi >= 0.0
+                    && exact_line(a).zip(exact_line(z)).is_some_and(|(a, z)| {
+                        expansion::det3(a, z, Vec3::new(x, y, 1.0))
+                            .is_some_and(|terms| expansion::is_zero(&terms))
+                    })))
+    });
+    // The rectangle axes and the segment normal separate two disjoint
+    // convex sets. Strict overlap on every axis proves interior contact.
+    let overlaps_interior = a
+        .into_iter()
+        .zip(z)
+        .zip(spans)
+        .all(|((a, z), span)| a.hi.min(z.hi) < span.hi && a.lo.max(z.lo) > span.lo);
+    (reaches_corner
+        || (overlaps_interior && sides.iter().any(positive) && sides.iter().any(negative)))
+    .then_some(true)
 }
 
 fn clear_rectangle(
@@ -754,33 +955,58 @@ fn clear_rectangle(
     let v_at = *arm.origin.get(v)?;
     let mut contained = false;
     let center = [u_span.middle()?, v_span.middle()?];
-    for segments in path {
-        let bounds = polygon_bounds(segments.iter().copied())?;
+    let rectangle = [u_span, v_span];
+    let open_sides = [(!inside).then_some(u_at), Some(v_at)];
+    let can_contact = |edge| {
+        let bounds = segment_bounds(edge);
+        let ub = *bounds.get(u)?;
+        let vb = *bounds.get(v)?;
+        // Allow both caps on a rail rectangle. On an end rectangle
+        // allow the sides on the original support planes.
+        Some(if inside {
+            ub.overlaps_open(u_span) && vb.overlaps_from(v_span, v_at)
+        } else {
+            ub.overlaps_from(u_span, u_at) && vb.overlaps_from(v_span, v_at)
+        })
+    };
+    let project = |at: PointBounds| Some([*at.get(u)?, *at.get(v)?]);
+    for segments in &path.loops {
+        for segment in segments {
+            if let Some([a, z]) = segment.lifted {
+                let [first, last] = segment.nominal;
+                // Enclose the whole motion from the carrier to the lifted trim.
+                // A possible crossing leaves the support's winding unproved.
+                let hull = |[x, y, z]: PointBounds, [a, b, c]: PointBounds| {
+                    [x.hull(a), y.hull(b), z.hull(c)]
+                };
+                let [a, z] = [hull(first, a), hull(last, z)];
+                if can_contact([a, z])?
+                    && segment_contacts_rectangle(
+                        [project(a)?, project(z)?],
+                        rectangle,
+                        open_sides,
+                    )?
+                {
+                    return None;
+                }
+            }
+        }
+        let bounds = polygon_bounds(segments.iter().map(|segment| segment.nominal))?;
         // A closed loop lying outside the rectangle contributes neither a
         // boundary contact nor a winding at any point in the rectangle.
         if !bounds.get(u)?.overlaps(u_span) || !bounds.get(v)?.overlaps(v_span) {
             continue;
         }
-        for &edge in segments {
+        for segment in segments {
+            let edge = segment.nominal;
             let [from, to] = edge;
             if *from.get(normal)? != Ivl::from(value) || *to.get(normal)? != Ivl::from(value) {
                 return None;
             }
-            let box_ = segment_bounds(edge);
-            let ub = *box_.get(u)?;
-            let vb = *box_.get(v)?;
-            // In a rail rectangle allow the caps on the two short sides. In an
-            // end rectangle allow the sides on the original support planes.
-            let meets = if inside {
-                ub.overlaps_open(u_span) && vb.overlaps_from(v_span, v_at)
-            } else {
-                ub.overlaps_from(u_span, u_at) && vb.overlaps_from(v_span, v_at)
-            };
-            if meets {
+            let (a, z) = (project(from)?, project(to)?);
+            if can_contact(edge)? && segment_contacts_rectangle([a, z], rectangle, open_sides)? {
                 return Some(false);
             }
-            let a = [*from.get(u)?, *from.get(v)?];
-            let z = [*to.get(u)?, *to.get(v)?];
             contained ^= crosses(center, a, z)?;
         }
     }
@@ -793,6 +1019,7 @@ fn clears_arm(
     arm: Arm,
     far: Point3,
     placed: Option<&Placed>,
+    extent: &Extent3d,
 ) -> Result<Option<bool>> {
     let [wall, floor] = arm.rail_faces;
     let [first_near, second_near] = arm.near_caps;
@@ -826,7 +1053,7 @@ fn clears_arm(
             false,
         ),
     ] {
-        let Some(path) = planar_polygon(k, b, face, TrimUse::Support, placed)? else {
+        let Some(path) = planar_polygon(k, b, face, TrimUse::Support, placed, extent)? else {
             return Ok(None);
         };
         match clear_rectangle(&path, arm, plane, axes, inside) {
@@ -839,14 +1066,16 @@ fn clears_arm(
 
 fn polygon_bounds(path: impl Iterator<Item = Segment>) -> Option<[Span; 3]> {
     let mut segments = path.map(segment_bounds);
-    let mut bounds = segments.next()?;
-    for segment in segments {
-        for (span, next) in bounds.iter_mut().zip(segment) {
-            span.lo = span.lo.min(next.lo);
-            span.hi = span.hi.max(next.hi);
-        }
+    let bounds = segments.next()?;
+    Some(segments.fold(bounds, merge_spans))
+}
+
+fn merge_spans(mut first: [Span; 3], second: [Span; 3]) -> [Span; 3] {
+    for (span, next) in first.iter_mut().zip(second) {
+        span.lo = span.lo.min(next.lo);
+        span.hi = span.hi.max(next.hi);
     }
-    Some(bounds)
+    first
 }
 
 /// The sweep must fit even at the closest possible end of the rail.
@@ -879,6 +1108,221 @@ fn bounded_rail_end(start: Point3, end: PointBounds, width: f64) -> Option<Point
         });
     let [x, y, z] = nearest;
     bounded.then_some(Point3::new(x, y, z))
+}
+
+fn enclosed_difference(a: Ivl, z: Ivl) -> Option<Ivl> {
+    let low = expansion_span(&expansion::sub(&[a.lo], &[z.hi]))?;
+    let high = expansion_span(&expansion::sub(&[a.hi], &[z.lo]))?;
+    Some(Ivl::new(low.lo, high.hi))
+}
+
+fn line_roundoff(line: &Line, interval: &crate::geom::extent1d::Extent1d) -> Option<f64> {
+    let first = line.point_error(interval.min())?;
+    let last = line.point_error(interval.max())?;
+    let bound = Ivl::from(first).add_ulp(Ivl::from(last)).hi;
+    bound.is_finite().then_some(bound)
+}
+
+/// At least one bound trim must reach the independent far plane. A near end
+/// before the corner still covers it. A shorter trim agrees with the rounded
+/// rail only if it has the same recorded span at both ends.
+fn reconciles_rail_ends(spatial: [Ivl; 2], trims: [[Ivl; 2]; 2], ideal: Ivl) -> bool {
+    let [near, far] = spatial;
+    let independent = |[start, end]: [Ivl; 2]| {
+        let reaches = start.hi <= 0.0 && end.lo >= ideal.hi;
+        let encloses_shared_ends = start.lo <= near.lo.min(0.0)
+            && start.hi >= near.hi.max(0.0)
+            && end.lo <= far.lo.min(ideal.lo)
+            && end.hi >= far.hi.max(ideal.hi);
+        reaches || encloses_shared_ends
+    };
+    trims.into_iter().any(independent)
+        && trims
+            .into_iter()
+            .all(|trim| trim == spatial || independent(trim))
+}
+
+/// Reach from the corner, limited by the bounded 3D edge and both lifted trims.
+pub(super) fn rail_reach(
+    k: &Kernel,
+    b: &mut Brep,
+    rail: EdgeId,
+    start: Point3,
+    end: Point3,
+) -> Result<Option<Ivl>> {
+    let faces = edge::faces(b, rail, None)?;
+    let &[first_face, last_face] = faces.as_slice() else {
+        return Ok(None);
+    };
+    let occurrence = |face| -> Result<Option<EdgeuseId>> {
+        for eu in face4::upward_edgeuses(b, face, false, None)? {
+            if eu1::edge(b, eu)? == Some(rail) {
+                return Ok(Some(eu));
+            }
+        }
+        Ok(None)
+    };
+    let (Some(a), Some(z)) = (occurrence(first_face)?, occurrence(last_face)?) else {
+        return Ok(None);
+    };
+    for eu in [a, z] {
+        if eu1::uv_trim_curve(b, eu)?.0.is_none() && !certifiable_lazy_trim(k, b, eu)? {
+            return Ok(None);
+        }
+    }
+    let Some(CurveKind::Line(line)) = edge::curve(b, rail)?.map(Curve::kind) else {
+        return Ok(None);
+    };
+    let interval = edge::interval(b, rail)?;
+    let lift = |eu| -> Result<Option<Segment>> {
+        let Some(face) = eu1::face(b, eu)? else {
+            return Ok(None);
+        };
+        let Some(SurfaceKind::Plane(plane)) = face2::surface(b, face)?.map(Surface::kind) else {
+            return Ok(None);
+        };
+        trim::lifted_trim(b, eu, &interval, plane)
+    };
+    let endpoints = [trim::line_endpoints(line, &interval), lift(a)?, lift(z)?];
+    let [Some(spatial), Some(a), Some(z)] = endpoints else {
+        return Ok(None);
+    };
+    let mut direction = line.line_vector();
+    let from = point_bounds(start);
+    let points_toward = dot(subtract(point_bounds(end), from), point_bounds(direction));
+    if !excludes_zero(points_toward) {
+        return Ok(None);
+    }
+    if points_toward.hi < 0.0 {
+        direction = -direction;
+    }
+    let axis = cardinal([0.0; 3], coords(direction));
+    let normal = point_bounds(direction);
+    let length = dot(normal, normal).sqrt();
+    let along = |point: PointBounds| {
+        if let Some((axis, positive)) = axis {
+            let p = *point.get(axis)?;
+            let at = *from.get(axis)?;
+            if positive {
+                enclosed_difference(p, at)
+            } else {
+                enclosed_difference(at, p)
+            }
+        } else {
+            Some(dot(subtract(point, from), normal).div_ulp(length))
+        }
+    };
+    let ordered = |[first, last]: Segment| {
+        let (first, last) = (along(first)?, along(last)?);
+        if first.hi < last.lo {
+            Some([first, last])
+        } else {
+            (last.hi < first.lo).then_some([last, first])
+        }
+    };
+    let [Some(spatial), Some(a), Some(z)] = [spatial, a, z].map(ordered) else {
+        return Ok(None);
+    };
+    let reach = [spatial, a, z]
+        .into_iter()
+        .try_fold(None, |common, [near, far]| {
+            let span = enclosed_difference(far, near)?;
+            let reach = Ivl::new(span.lo.min(far.lo), span.hi.min(far.hi));
+            let common = common.map_or(reach, |other: Ivl| {
+                Ivl::new(other.lo.min(reach.lo), other.hi.min(reach.hi))
+            });
+            (common.is_finite() && common.lo > 0.0).then_some(Some(common))
+        });
+    let mut reach = reach.flatten();
+    if let (Some(actual), Some(_), Some(ideal), Some(roundoff)) = (
+        reach,
+        axis,
+        along(point_bounds(end)),
+        line_roundoff(line, &interval),
+    ) {
+        // Reconcile a glued support with the transverse plane intersections
+        // only when the independent trim enclosures agree with that support.
+        // An independently shortened trim retains its own bound.
+        if ideal.lo == ideal.hi
+            && enclosed_difference(actual, ideal).is_some_and(|gap| gap.mag() <= roundoff)
+            && reconciles_rail_ends(spatial, [a, z], ideal)
+        {
+            reach = Some(ideal);
+        }
+    }
+    Ok(reach)
+}
+
+/// Largest physical width up to `maximum` whose padded placed sweep fits the rail.
+pub(super) fn placed_rail_limit(
+    k: &Kernel,
+    b: &Brep,
+    corridor: &Corridor,
+    end: VertexId,
+    maximum: f64,
+) -> Result<Option<f64>> {
+    let (start, world) = corridor.at;
+    if resolved_vertex(b, start)? == Some(world) {
+        return Ok(Some(maximum));
+    }
+    let Some(placed) = Placed::read(k, b, corridor)? else {
+        return Ok(None);
+    };
+    let (Some(start), Some(end)) = (placed.point(b, start)?, placed.point(b, end)?) else {
+        return Ok(None);
+    };
+    let Some((axis, positive)) = cardinal(coords(start), coords(end)) else {
+        return Ok(None);
+    };
+    let mut end_bounds = point_bounds(end);
+    let (Some(&start_level), Some(end_level), Some(margin)) = (
+        coords(start).get(axis),
+        end_bounds.get_mut(axis),
+        placed.foreign_margin(),
+    ) else {
+        return Ok(None);
+    };
+    // A foreign boundary at the stopping level also has a zone. Leave room
+    // for its enclosure beyond the already padded sweep, with strict clearance.
+    let zone = end_level.add_ulp(Ivl::new(-margin, margin));
+    let usable_end = if positive {
+        next_down(zone.lo)
+    } else {
+        next_up(zone.hi)
+    };
+    if !usable_end.is_finite()
+        || (if positive {
+            usable_end <= start_level
+        } else {
+            usable_end >= start_level
+        })
+    {
+        return Ok(None);
+    }
+    *end_level = Ivl::from(usable_end);
+    // Leave the new rail outside the initial stitch that follows construction.
+    // This additional clearance applies to the suggested width, not to the
+    // obstruction test for an unrelated face.
+    let stitch = Ivl::from(initial_stitch_tolerance(b.tolerance(), 0.0));
+    let fits = |size| {
+        let with_stitch = Ivl::from(size).add_ulp(stitch);
+        placed
+            .width(with_stitch.hi)
+            .is_some_and(|width| bounded_rail_end(start, end_bounds, width).is_some())
+    };
+    if fits(maximum) {
+        return Ok(Some(maximum));
+    }
+    let (mut lo, mut hi) = (0, maximum.to_bits());
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if fits(f64::from_bits(mid)) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Ok((lo != 0).then(|| f64::from_bits(lo)))
 }
 
 /// Checks the two sweeps at their requested widths or the common limiting width.
@@ -962,9 +1406,13 @@ pub(super) fn check_corridor(
     ) else {
         return Ok(Clearance::Unproven);
     };
+    let (Some(a_extent), Some(z_extent)) = (a.extent(placed), z.extent(placed)) else {
+        return Ok(Clearance::Unproven);
+    };
+    let envelope = a_extent.union(&z_extent);
     let mut clear = true;
-    for (arm, end) in [(a, far_a), (z, far_b)] {
-        match clears_arm(k, b, arm, end, placed)? {
+    for (arm, end, extent) in [(a, far_a, &a_extent), (z, far_b, &z_extent)] {
+        match clears_arm(k, b, arm, end, placed, extent)? {
             Some(true) => {}
             Some(false) => return Ok(Clearance::Obstructed),
             None => clear = false,
@@ -998,9 +1446,34 @@ pub(super) fn check_corridor(
         if !look_a && !look_z {
             continue;
         }
-        let Some(bounds) = planar_polygon(k, b, face, TrimUse::OtherFace, placed)?
-            .and_then(|loops| polygon_bounds(loops.into_iter().flatten()))
-        else {
+        let Some(surface) = face2::surface(b, face)? else {
+            clear = false;
+            continue;
+        };
+        if !matches!(surface.kind(), SurfaceKind::Plane(_)) {
+            let zone = face2::tolerance(b, face)?.max(b.tolerance());
+            let bounds = surface.certified_bounding_box(k, &face2::uv_domain(b, face)?)?;
+            if !bounds
+                .and_then(|bounds| with_zone(&bounds, zone))
+                .is_some_and(|bounds| {
+                    (!look_a || bounds.are_disjoint(&a_extent, 0.0))
+                        && (!look_z || bounds.are_disjoint(&z_extent, 0.0))
+                })
+            {
+                clear = false;
+            }
+            continue;
+        }
+        let Some(path) = planar_polygon(k, b, face, TrimUse::OtherFace, placed, &envelope)? else {
+            clear = false;
+            continue;
+        };
+        let Some(bounds) = polygon_bounds(
+            path.loops
+                .into_iter()
+                .flatten()
+                .map(|segment| segment.nominal),
+        ) else {
             clear = false;
             continue;
         };
@@ -1015,7 +1488,14 @@ pub(super) fn check_corridor(
             };
             match contact {
                 Some(true) => return Ok(Clearance::Obstructed),
-                Some(false) => {}
+                Some(false) => {
+                    if path
+                        .lifted
+                        .is_some_and(|bounds| arm.contacts(bounds) != Some(false))
+                    {
+                        clear = false;
+                    }
+                }
                 None => {
                     clear = false;
                 }
@@ -1048,4 +1528,107 @@ fn plane_level(b: &Brep, face: FaceId) -> Result<Option<(usize, f64)>> {
             .filter(|c| c.is_finite())
             .map(|c| (axis, c))
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_oblique_trim_needs_more_than_box_overlap_to_obstruct() {
+        let test = |segment: [[f64; 2]; 2]| {
+            segment_contacts_rectangle(
+                segment.map(|end| end.map(Ivl::from)),
+                [Span::between(0.0, 1.0); 2],
+                [Some(0.0); 2],
+            )
+        };
+        for (mut segment, expected) in [
+            ([[0.5, 2.0], [2.0, 0.5]], false),
+            ([[0.5, 1.5], [1.5, 0.5]], true),
+        ] {
+            assert_eq!(test(segment), Some(expected));
+            segment.reverse();
+            assert_eq!(test(segment), Some(expected));
+        }
+        assert_eq!(test([[-1.0, 0.5], [2.0, 0.5]]), Some(true));
+        assert_eq!(
+            segment_contacts_rectangle(
+                [
+                    [Ivl::from(0.5), Ivl::new(1.25, 2.0)],
+                    [Ivl::from(1.5), Ivl::from(0.5)]
+                ],
+                [Span::between(0.0, 1.0); 2],
+                [Some(0.0); 2],
+            ),
+            None
+        );
+    }
+    #[test]
+    fn an_oblique_carrier_that_misses_the_cap_cannot_hide_a_lifted_trim_entering_it() {
+        let arm = Arm::new(
+            Point3::ZERO,
+            Point3::X,
+            Point3::Y,
+            Point3::Z,
+            1.0,
+            [FaceId::from_index(0); 5],
+        )
+        .unwrap();
+        let point = |x, y| point_bounds(Point3::new(x, y, 0.0));
+        let delta = 1e-9;
+        let a = point(0.5, 1.5 + delta);
+        let z = point(1.5 + delta, 0.5);
+        let far = point(2.0, 2.0);
+        let cap = |lifted| Polygon {
+            loops: vec![vec![
+                BoundarySegment {
+                    nominal: [a, z],
+                    lifted,
+                },
+                BoundarySegment {
+                    nominal: [z, far],
+                    lifted: None,
+                },
+                BoundarySegment {
+                    nominal: [far, a],
+                    lifted: None,
+                },
+            ]],
+            lifted: None,
+        };
+        assert_eq!(
+            clear_rectangle(&cap(None), arm, (2, 0.0), [0, 1], false),
+            Some(true)
+        );
+        let lifted = Some([point(0.5, 1.5 - delta), point(1.5 - delta, 0.5)]);
+        assert_eq!(
+            clear_rectangle(&cap(lifted), arm, (2, 0.0), [0, 1], false),
+            None
+        );
+    }
+    #[test]
+    fn a_glued_rail_can_start_just_before_the_corner() {
+        let near = Ivl::from(-3.552713678800501e-15);
+        let ideal = Ivl::from(5.0);
+        let rounded = [near, Ivl::from(4.999999999999998)];
+        let at_plane = [near, ideal];
+        let enclosed = [
+            Ivl::new(-5.329070518200751e-15, 1.7763568394002505e-15),
+            Ivl::new(4.9999999999999964, 5.0000000000000036),
+        ];
+        assert!(reconciles_rail_ends(rounded, [at_plane, enclosed], ideal));
+        assert!(reconciles_rail_ends(rounded, [at_plane, rounded], ideal));
+        assert!(!reconciles_rail_ends(at_plane, [at_plane, rounded], ideal));
+
+        let zero = Ivl::from(0.0);
+        let bits = 5.0_f64.to_bits();
+        let spatial = [zero, Ivl::from(f64::from_bits(bits - 4))];
+        let might_reach = [zero, Ivl::new(f64::from_bits(bits - 2), 5.0)];
+        assert!(!reconciles_rail_ends(
+            spatial,
+            [spatial, might_reach],
+            ideal
+        ));
+    }
 }

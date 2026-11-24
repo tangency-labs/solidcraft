@@ -57,7 +57,7 @@ impl Levels {
             let Some((axis, coordinate)) =
                 read_plane(b, face)?.and_then(|plane| frame.plane_coordinate(plane))
             else {
-                return Ok(None);
+                continue;
             };
             supports.push(Support {
                 face,
@@ -76,7 +76,15 @@ impl Levels {
         for &v in b.vertex_list() {
             k.check_cancelled(OP)?;
             let mut axes = [None; 3];
-            for face in vertex::faces(b, v)? {
+            let tagged = vertex::faces(b, v)?;
+            if tagged.iter().any(|face| {
+                supports
+                    .binary_search_by_key(face, |support| support.face)
+                    .is_err()
+            }) {
+                continue;
+            }
+            for face in tagged {
                 let Ok(index) = supports.binary_search_by_key(&face, |support| support.face) else {
                     return Ok(None);
                 };
@@ -95,7 +103,7 @@ impl Levels {
                 }
             }
             let [Some(a), Some(b), Some(c)] = axes else {
-                return Ok(None);
+                continue;
             };
             fans.push((v, [a, b, c]));
         }

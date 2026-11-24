@@ -367,6 +367,103 @@ fn post_foot_blends_keep_their_clearance_after_rotation() {
 }
 
 #[test]
+fn post_foot_blends_report_a_usable_limit_after_rotation() {
+    use solidcore_ops::affine::{apply_point, rotation};
+
+    all_fixes();
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    let query = [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|p| apply_point(&map, p));
+    for (kind, fit_kind, section) in [
+        (Blend::Chamfer, FitKind::Distance, 0.5),
+        (Blend::Round, FitKind::Radius, 1.0 - PI / 4.0),
+    ] {
+        let original = post_foot(true);
+        original.transform(&map).unwrap();
+        let (body, _) = Body::from_record(&original.to_record().unwrap().0, true).unwrap();
+        let edges = query.map(|p| edge_at(&body, p));
+        let before = body.to_record().unwrap().0;
+        let refused = blend(&body, kind, &edges, &[6.0], &[], Corners::Filled);
+        let Err(Error::TooLarge {
+            size,
+            kind: reported,
+            ..
+        }) = refused
+        else {
+            panic!("{kind:?}: {refused:?}");
+        };
+        assert_eq!(reported, fit_kind);
+        // Rotation preserves the 5 mm support length. The placed certificate
+        // can reduce the suggestion by its rounding and tolerance margin.
+        assert!(size > 4.2 && size <= 5.0, "{kind:?}: {size}");
+        assert_eq!(body.to_record().unwrap().0, before);
+        let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+        assert_eq!(made.dropped, [false; 2]);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert!(rel(volume(&body), 12_900.0 + 20.0 * section * size.powi(2)) < 1e-9);
+    }
+}
+
+#[test]
+fn post_foot_blends_clear_a_distant_cylindrical_bore_after_rotation() {
+    use solidcore_ops::affine::{apply_point, rotation};
+    use solidcore_ops::{boolean::boolean, BooleanOp, PointClass};
+
+    all_fixes();
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    let query = [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|p| apply_point(&map, p));
+    let radius = 1.5_f64;
+    let width = 4.2_f64;
+    for with_bore in [false, true] {
+        let original = post_foot(true);
+        let original = if with_bore {
+            // Its two circular rims belong to the same plate faces as the cutout.
+            let drill = make_cylinder([34.0, 30.0, -1.0], radius, 6.0).unwrap();
+            boolean(original, drill, BooleanOp::Subtract)
+                .unwrap()
+                .unwrap()
+        } else {
+            original
+        };
+        original.transform(&map).unwrap();
+        let record = original.to_record().unwrap().0;
+        let bore_volume = if with_bore {
+            4.0 * PI * radius.powi(2)
+        } else {
+            0.0
+        };
+        for (kind, section) in [(Blend::Chamfer, 0.5), (Blend::Round, 1.0 - PI / 4.0)] {
+            let (body, _) = Body::from_record(&record, true).unwrap();
+            let edges = query.map(|p| edge_at(&body, p));
+            let result = blend(&body, kind, &edges, &[width], &[], Corners::Filled).unwrap();
+            assert_eq!(result.dropped, [false, false], "{kind:?}, bore={with_bore}");
+            assert_eq!(body.solid_count().unwrap(), 1);
+            assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+            assert!(body.check(CheckLevel::All).unwrap().is_valid());
+            let expected = 12_900.0 - bore_volume + 20.0 * section * width.powi(2);
+            assert!(
+                rel(volume(&body), expected) < 1e-9,
+                "{kind:?}, bore={with_bore}"
+            );
+            let bore_center = if with_bore {
+                PointClass::Outside
+            } else {
+                PointClass::Inside
+            };
+            let offset = width / 8.0;
+            for (point, expected) in [
+                ([34.0, 30.0, 2.0], bore_center),
+                ([37.0, 30.0, 2.0], PointClass::Inside),
+                ([10.0 + offset, 5.0, 4.0 + offset], PointClass::Inside),
+                ([5.0, 10.0 + offset, 4.0 + offset], PointClass::Inside),
+            ] {
+                let point = apply_point(&map, point);
+                assert_eq!(body.classify_point(point).unwrap(), expected, "{point:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn post_foot_blends_leave_the_body_intact_when_the_opening_is_too_short() {
     all_fixes();
     for (kind, fit_kind, section) in [

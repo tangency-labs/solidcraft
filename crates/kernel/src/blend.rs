@@ -30,7 +30,9 @@ pub(crate) fn too_large(msg: &str) -> KernelError {
 /// that fits: "the largest radius that fits is 3 mm". The kernel's own sized refusals and a fillet
 /// feature's search for the size ([`fillet_max`]) word it alike.
 pub fn largest_fit_note(size: &str, largest: f64) -> String {
-    format!("the largest {size} that fits is {} mm", trimmed_mm(largest))
+    // Preserve the reported size when the user enters this number again.
+    // Rounding to six decimal places can cross either end of the usable range.
+    format!("the largest {size} that fits is {largest} mm")
 }
 
 /// The note naming the largest scale of a two-sided chamfer's distances that fits: "the largest
@@ -2967,6 +2969,15 @@ mod tests {
         assert_eq!(named_fit(&format!("x; {}", largest_fit_note("distance", 0.25))), Some(0.25));
         assert_eq!(named_fit("too large; the largest that fits is 2 times the distances given"), None);
         assert_eq!(named_fit("the trim leaks"), None);
+    }
+
+    #[test]
+    fn a_fit_note_preserves_the_reported_size() {
+        for size in [4.99995999999999, 4.99996_f64.next_down(), 0.0000010000001, 5.0] {
+            for kind in ["radius", "distance"] {
+                assert_eq!(named_fit(&largest_fit_note(kind, size)), Some(size));
+            }
+        }
     }
 
     /// The largest-fit clause comes out of a refusal with its separator, and nothing else does.
