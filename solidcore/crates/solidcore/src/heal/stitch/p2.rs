@@ -2118,6 +2118,46 @@ mod tests {
         assert_eq!(void_count(&build()), 2);
     }
 
+    /// (#21540) The same twelve loose faces sewn by `SmBrep::StitchFaces`, the cavity's
+    /// faces turned either way: both shells close, and the region inside the inner shell is
+    /// a void, so every face lies between material and a void. The infinite region holds
+    /// the outer shell, the material region the outer and the inner shell, the cavity the
+    /// inner shell's other side.
+    #[test]
+    fn stitch_faces_leaves_a_closed_cavity_void() {
+        for inward in [true, false] {
+            let mut k = Kernel::default();
+            let mut b = crate::topology::brep::p3::new_brep(
+                &mut k,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            add_cube_faces(&mut k, &mut b, 0.0, 10.0, false);
+            add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
+            let r = crate::topology::brep::p4::stitch_faces(&mut k, &mut b, 0.01, None, false)
+                .unwrap();
+            assert_eq!((r.stitched_edges, r.lamina_edges), (24, 0), "inward {inward}");
+            assert_eq!(bp1::faces(&b, None).unwrap().len(), 12, "inward {inward}");
+            let infinite = b.infinite_region().unwrap();
+            let mut regions: Vec<(bool, i32, usize)> = bp1::regions(&b, None)
+                .unwrap()
+                .into_iter()
+                .map(|r| {
+                    let region = b.region(r).unwrap();
+                    (r == infinite, region.is_void, region.shells.len())
+                })
+                .collect();
+            regions.sort_unstable();
+            // (infinite, void flag, shells): the cavity, the material, the infinite region
+            assert_eq!(
+                regions,
+                vec![(false, 0, 2), (false, 1, 1), (true, 1, 1)],
+                "inward {inward}"
+            );
+        }
+    }
+
     /// (#2506) Four loose faces end on the z axis from the origin to (0, 0, 1): two half
     /// squares in y = 0, leaving it along +x and -x, and two half squares in x = 0
     /// bounded there by the bumps (0, ±8 t (1 - t) (t - 1/2)^2, t), leaving it along +y
