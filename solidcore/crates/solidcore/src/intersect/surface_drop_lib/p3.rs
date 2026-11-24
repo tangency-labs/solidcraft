@@ -218,6 +218,22 @@ const MAX_CROSSING_DROPS: usize = 128;
 /// Most seam crossings [`Surface::drop_curve_base`] follows inside one curve cache span.
 const MAX_SEAM_CROSSINGS: usize = 128;
 
+/// Which closed-surface seam axis(es) a solved span endpoint actually crossed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CrossedSeam {
+    u: bool,
+    v: bool,
+}
+
+impl CrossedSeam {
+    const fn from_axis(axis: SurfParamType) -> Self {
+        Self {
+            u: matches!(axis, SurfParamType::U),
+            v: matches!(axis, SurfParamType::V),
+        }
+    }
+}
+
 /// Which closed-surface seam directions are interior to the drop's UV domain (both sides
 /// of the natural domain's seam lie on the boundary of the drop domain, so a trace exiting
 /// across the seam continues from the opposite seam boundary as a new UV curve piece).
@@ -232,13 +248,20 @@ impl SeamWrap {
     fn new(closed_u: bool, closed_v: bool, uv_domain: &Extent2d, nat: &Extent2d) -> Self {
         let tol_u = EFF_ZERO_PARAM * (1.0 + nat.x_length());
         let tol_v = EFF_ZERO_PARAM * (1.0 + nat.y_length());
+        // Require both natural seam edges to lie inside `uv_domain` (never inset from them)
+        // so wrapping to the opposite natural seam edge never places a point outside the
+        // working drop domain.
         Self {
             u: closed_u
-                && (uv_domain.min().x - nat.min().x).abs() <= tol_u
-                && (uv_domain.max().x - nat.max().x).abs() <= tol_u,
+                && uv_domain.min().x <= nat.min().x
+                && (nat.min().x - uv_domain.min().x) <= tol_u
+                && uv_domain.max().x >= nat.max().x
+                && (uv_domain.max().x - nat.max().x) <= tol_u,
             v: closed_v
-                && (uv_domain.min().y - nat.min().y).abs() <= tol_v
-                && (uv_domain.max().y - nat.max().y).abs() <= tol_v,
+                && uv_domain.min().y <= nat.min().y
+                && (nat.min().y - uv_domain.min().y) <= tol_v
+                && uv_domain.max().y >= nat.max().y
+                && (uv_domain.max().y - nat.max().y) <= tol_v,
             nat: *nat,
         }
     }
@@ -249,8 +272,11 @@ impl SeamWrap {
 
     /// If `pt` is leaving `uv_domain` strictly across a wrappable seam (not at a pole, and
     /// not simultaneously leaving a non-wrappable boundary), returns `(arriving_uv,
-    /// departing_uv)`: the snapped point on the arriving seam side and the matching point on
-    /// the opposite seam side.
+    /// departing_uv, crossed)`: the snapped point on the arriving seam side, the matching
+    /// point on the opposite seam side, and which axis(es) actually crossed. On a doubly
+    /// closed surface, both axes wrap together only when both lie on their seam boundary
+    /// within parameter zero at the same curve parameter; otherwise only the axis at its
+    /// boundary wraps so `arriving_uv` and `departing_uv` always name the same 3D point.
     fn exit_crossing(
         self,
         k: &Kernel,
@@ -259,7 +285,7 @@ impl SeamWrap {
         uv_domain: &Extent2d,
         uv_tol_x: f64,
         uv_tol_y: f64,
-    ) -> Result<Option<(Point2, Point2)>> {
+    ) -> Result<Option<(Point2, Point2, CrossedSeam)>> {
         if !self.any() || truthy(pt.on_pole) || pt.leaving_domain != Some(true) {
             return Ok(None);
         }
@@ -275,47 +301,109 @@ impl SeamWrap {
             map_to_2d_dir(k, zone_tol, uv, Vec2::new(0.0, 1.0), surface)?,
         );
 
-        let mut arriving = uv;
-        let mut departing = uv;
-        let mut crossed = false;
-
         let u_min = uv_domain.min().x;
         let u_max = uv_domain.max().x;
-        if uv.x <= u_min + tol_u && tan.x < 0.0 {
+        let u_hit = if uv.x <= u_min + tol_u && tan.x < 0.0 {
             if !self.u {
                 return Ok(None);
             }
-            arriving.x = self.nat.min().x;
-            departing.x = self.nat.max().x;
-            crossed = true;
+            Some(((uv.x - u_min).abs(), self.nat.min().x, self.nat.max().x))
         } else if uv.x >= u_max - tol_u && tan.x > 0.0 {
             if !self.u {
                 return Ok(None);
             }
-            arriving.x = self.nat.max().x;
-            departing.x = self.nat.min().x;
-            crossed = true;
-        }
+            Some(((u_max - uv.x).abs(), self.nat.max().x, self.nat.min().x))
+        } else {
+            None
+        };
 
         let v_min = uv_domain.min().y;
         let v_max = uv_domain.max().y;
-        if uv.y <= v_min + tol_v && tan.y < 0.0 {
+        let v_hit = if uv.y <= v_min + tol_v && tan.y < 0.0 {
             if !self.v {
                 return Ok(None);
             }
-            arriving.y = self.nat.min().y;
-            departing.y = self.nat.max().y;
-            crossed = true;
+            Some(((uv.y - v_min).abs(), self.nat.min().y, self.nat.max().y))
         } else if uv.y >= v_max - tol_v && tan.y > 0.0 {
             if !self.v {
                 return Ok(None);
             }
-            arriving.y = self.nat.max().y;
-            departing.y = self.nat.min().y;
-            crossed = true;
+            Some(((v_max - uv.y).abs(), self.nat.max().y, self.nat.min().y))
+        } else {
+            None
+        };
+
+        let (wrap_u, wrap_v) = match (u_hit, v_hit) {
+            (Some((du, _, _)), Some((dv, _, _))) => {
+                let eps_u = EFF_ZERO_PARAM * (1.0 + self.nat.x_length());
+                let eps_v = EFF_ZERO_PARAM * (1.0 + self.nat.y_length());
+                if du <= eps_u && dv <= eps_v {
+                    (true, true)
+                } else if du * tol_v <= dv * tol_u {
+                    (true, false)
+                } else {
+                    (false, true)
+                }
+            }
+            (Some(_), None) => (true, false),
+            (None, Some(_)) => (false, true),
+            (None, None) => return Ok(None),
+        };
+
+        let mut arriving = uv;
+        let mut departing = uv;
+        if wrap_u {
+            if let Some((_, arr_u, dep_u)) = u_hit {
+                arriving.x = arr_u;
+                departing.x = dep_u;
+            }
+        }
+        if wrap_v {
+            if let Some((_, arr_v, dep_v)) = v_hit {
+                arriving.y = arr_v;
+                departing.y = dep_v;
+            }
+        }
+        Ok(Some((
+            arriving,
+            departing,
+            CrossedSeam {
+                u: wrap_u,
+                v: wrap_v,
+            },
+        )))
+    }
+
+    /// Maps the arriving seam point `uv` to the opposite seam side for the axes in `crossed`
+    /// whose outgoing right-hand tangent `out_tan` still points across the seam. Returns
+    /// `None` when the outgoing tangent stays in or turns back into the arriving chart (e.g.
+    /// a corner bounce or tangent touch at a curve knot).
+    fn wrap_for_outgoing(self, uv: Point2, out_tan: Vec2, crossed: CrossedSeam) -> Option<Point2> {
+        let eps_u = EFF_ZERO_PARAM * (1.0 + self.nat.x_length());
+        let eps_v = EFF_ZERO_PARAM * (1.0 + self.nat.y_length());
+        let mut departing = uv;
+        let mut wrapped = false;
+
+        if crossed.u && self.u {
+            if (uv.x - self.nat.min().x).abs() <= eps_u && out_tan.x < 0.0 {
+                departing.x = self.nat.max().x;
+                wrapped = true;
+            } else if (uv.x - self.nat.max().x).abs() <= eps_u && out_tan.x > 0.0 {
+                departing.x = self.nat.min().x;
+                wrapped = true;
+            }
+        }
+        if crossed.v && self.v {
+            if (uv.y - self.nat.min().y).abs() <= eps_v && out_tan.y < 0.0 {
+                departing.y = self.nat.max().y;
+                wrapped = true;
+            } else if (uv.y - self.nat.max().y).abs() <= eps_v && out_tan.y > 0.0 {
+                departing.y = self.nat.min().y;
+                wrapped = true;
+            }
         }
 
-        Ok(crossed.then_some((arriving, departing)))
+        wrapped.then_some(departing)
     }
 
     /// Which wrappable seam axis (`U` or `V`) jumped by more than half the natural domain
@@ -427,10 +515,11 @@ fn drop_point_near_seam(
         }
         let p = surface.evaluate_point(k, uv)?;
         let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-        // Match `DropPt::set_properties`'s normal-line tolerance (`max(1, |drop_param|) *
-        // approx_tol_3d`) so every accepted bracket point is held to the caller's tolerance.
+        // Match `DropPt::set_properties`'s normal-line tolerance (`max(1, drop_param) *
+        // approx_tol_3d`, keeping the sign of `drop_param`) so every accepted bracket point
+        // obeys the exact same gate as `set_properties`.
         let (dev, drop_param) = line_point_distance(p, n, pt_3d);
-        let scaled_limit = max2(1.0, drop_param.abs()) * approx_tol_3d;
+        let scaled_limit = max2(1.0, drop_param) * approx_tol_3d;
         let d = cyclic_uv_dist(uv);
         if !(dev.is_finite() && scaled_limit.is_finite() && d.is_finite() && dev <= scaled_limit) {
             continue;
@@ -458,9 +547,11 @@ fn drop_point_near_seam(
 ///   full parameter precision, avoiding the quadratic `dist^2` precision loss of boundary-clamped
 ///   distance minimization.
 ///
-/// Returns a `DropPt` lying on the arriving seam side with its arriving tangent (pointing
-/// forward along the curve, `leaving_domain = Some(true)`), or `None` if no valid crossing is
-/// found.
+/// Returns `(crossing, crossed_seam)` where `crossing` is a `DropPt` lying on the arriving
+/// seam side with its arriving tangent (pointing forward along the curve, `leaving_domain =
+/// Some(true)`), and `crossed_seam` records which seam axis(es) actually crossed at `t_cross`
+/// (both axes on a doubly closed surface only when the crossing hits the seam corner within
+/// parameter zero), or `None` if no valid crossing is found.
 #[allow(clippy::too_many_arguments)]
 fn seam_crossing(
     k: &Kernel,
@@ -476,7 +567,7 @@ fn seam_crossing(
     start: &DropPt,
     end_t: f64,
     end_uv: Point2,
-) -> Result<Option<DropPt>> {
+) -> Result<Option<(DropPt, CrossedSeam)>> {
     let (min_p, max_p, mid_p, len_p) = if axis == SurfParamType::U {
         (
             seam_wrap.nat.min().x,
@@ -750,10 +841,37 @@ fn seam_crossing(
     }
     // Pin exact arriving seam coordinate and mark the transverse crossing as leaving so
     // shallow crossings (< 30 deg, inside `set_properties`'s dead band) still wrap cleanly.
+    let mut crossed = CrossedSeam::from_axis(axis);
     if axis == SurfParamType::U {
         crossing.uv_pd[0].x = arriving_p;
+        if seam_wrap.v {
+            if (crossing.uv_pd[0].y - seam_wrap.nat.min().y).abs() <= other_zero
+                && crossing.uv_pd[1].y < 0.0
+            {
+                crossing.uv_pd[0].y = seam_wrap.nat.min().y;
+                crossed.v = true;
+            } else if (crossing.uv_pd[0].y - seam_wrap.nat.max().y).abs() <= other_zero
+                && crossing.uv_pd[1].y > 0.0
+            {
+                crossing.uv_pd[0].y = seam_wrap.nat.max().y;
+                crossed.v = true;
+            }
+        }
     } else {
         crossing.uv_pd[0].y = arriving_p;
+        if seam_wrap.u {
+            if (crossing.uv_pd[0].x - seam_wrap.nat.min().x).abs() <= other_zero
+                && crossing.uv_pd[1].x < 0.0
+            {
+                crossing.uv_pd[0].x = seam_wrap.nat.min().x;
+                crossed.u = true;
+            } else if (crossing.uv_pd[0].x - seam_wrap.nat.max().x).abs() <= other_zero
+                && crossing.uv_pd[1].x > 0.0
+            {
+                crossing.uv_pd[0].x = seam_wrap.nat.max().x;
+                crossed.u = true;
+            }
+        }
     }
     let across = if axis == SurfParamType::U {
         crossing.uv_pd[1].x
@@ -766,7 +884,7 @@ fn seam_crossing(
         crossing.leaving_domain = Some(true);
         crossing.entering_domain = Some(false);
     }
-    Ok(Some(crossing))
+    Ok(Some((crossing, crossed)))
 }
 
 /// Not upstream: the drop point, dropped from `start`, where the dropped curve crosses the
@@ -2212,9 +2330,10 @@ impl Surface {
                     // side; in the second find the exact seam crossing `t_cross` and finish
                     // the piece ending there so the next pass of the loop continues from the
                     // opposite seam side.
+                    let mut end_crossed_seam: Option<CrossedSeam> = None;
                     if ret_status == SM_ERR_OUTSIDE_OF_DOMAIN && seam_wrap.any() {
                         if raw_status == SM_SUCCESS {
-                            if let Some((arriving_uv, _)) = seam_wrap.exit_crossing(
+                            if let Some((arriving_uv, _, axes)) = seam_wrap.exit_crossing(
                                 k,
                                 this,
                                 &end,
@@ -2223,12 +2342,13 @@ impl Surface {
                                 uv_tol_y,
                             )? {
                                 end.uv_pd[0] = arriving_uv;
+                                end_crossed_seam = Some(axes);
                                 ret_status = SM_SUCCESS;
                             }
                         } else if let Some(axis) =
                             seam_wrap.jumped_axis(start.uv_pd[0], end.uv_pd[0])
                         {
-                            if let Some(crossing) = seam_crossing(
+                            if let Some((crossing, axes)) = seam_crossing(
                                 k,
                                 this,
                                 &mut offset,
@@ -2244,6 +2364,7 @@ impl Surface {
                                 end.uv_pd[0],
                             )? {
                                 end = crossing;
+                                end_crossed_seam = Some(axes);
                                 if end.drop_to_surf.abs() > max_drop_to_surf {
                                     max_drop_to_surf = end.drop_to_surf.abs();
                                 }
@@ -2337,12 +2458,14 @@ impl Surface {
                     }
 
                     // subdivide the span until every piece passes the accuracy test
-                    let mut stack = vec![(start.t, end)];
+                    let mut stack = vec![(start.t, end, end_crossed_seam)];
                     let mut stop_spans = false;
                     let mut span_failure_path = CreateUvTrimCurvePathType::DropStartPointFail;
                     // not upstream: spans passed in a row without moving the start on (#21092)
                     let mut stalled = 0usize;
-                    while let Some(&(queued_start_t, saved_end)) = stack.last() {
+                    while let Some(&(queued_start_t, saved_end, mut saved_crossed_seam)) =
+                        stack.last()
+                    {
                         // not upstream: a curve that lies farther off the surface than the
                         // tolerance fails the accuracy test at every halving, down to an
                         // eight-thousandth of the curve, so the walk is stopped by the caller's
@@ -2399,8 +2522,9 @@ impl Surface {
                                 approx_tol_3d,
                             ) {
                                 end = accepted;
+                                saved_crossed_seam = None;
                             } else if status == SM_SUCCESS && seam_wrap.any() {
-                                if let Some((arriving_uv, _)) = seam_wrap.exit_crossing(
+                                if let Some((arriving_uv, _, axes)) = seam_wrap.exit_crossing(
                                     k,
                                     this,
                                     &redrop,
@@ -2410,6 +2534,7 @@ impl Surface {
                                 )? {
                                     redrop.uv_pd[0] = arriving_uv;
                                     end = redrop;
+                                    saved_crossed_seam = Some(axes);
                                 }
                             }
                         }
@@ -2449,7 +2574,7 @@ impl Surface {
                                 if max_approx_dev < end.approx_dev {
                                     max_approx_dev = end.approx_dev;
                                 }
-                                stack.push((start.t, end));
+                                stack.push((start.t, end, None));
                                 continue;
                             }
                         }
@@ -2591,26 +2716,38 @@ impl Surface {
                             have_start_uv_tan = true;
 
                             // not upstream (#20836): when an interior span ends on a closed
-                            // seam leaving across it, wrap the next span's start to the
-                            // opposite seam side and recompute its forward tangent so
-                            // `add_to_curve_with_policy` flushes the arriving piece and
-                            // starts the continuing piece cleanly on the other side.
-                            let wrapped_seam = if seam_wrap.any()
-                                && !s_interval.is_value_on_boundary(start.t, EFF_ZERO).0
-                            {
-                                if let Some((_, departing_uv)) = seam_wrap.exit_crossing(
+                            // seam leaving across it, classify the outgoing right-hand tangent
+                            // before wrapping: a curve knot that touches the seam and turns
+                            // back into the same chart stays on the arriving side; only axes
+                            // that both crossed at `end` and still leave across the seam wrap
+                            // to the opposite seam side so `add_to_curve_with_policy` flushes
+                            // the arriving piece and starts the continuing piece cleanly.
+                            let checked_outgoing_on_seam = if let Some(crossed) = saved_crossed_seam
+                                .filter(|_| {
+                                    seam_wrap.any()
+                                        && !s_interval.is_value_on_boundary(start.t, EFF_ZERO).0
+                                }) {
+                                let mut outgoing = start;
+                                let pd = curve.evaluate(k, start.t, 2, true, true)?;
+                                for (dst, src) in outgoing.crv_pd.iter_mut().zip(pd.iter()) {
+                                    *dst = *src;
+                                }
+                                ignore_status(outgoing.set_properties(
                                     k,
                                     this,
-                                    &start,
+                                    &mut offset,
+                                    singularities,
+                                    approx_tol_3d,
                                     &s_uv_domain,
-                                    uv_tol_x,
-                                    uv_tol_y,
-                                )? {
+                                    false,
+                                ))?;
+                                if let Some(departing_uv) = seam_wrap.wrap_for_outgoing(
+                                    start.uv_pd[0],
+                                    outgoing.uv_pd[1],
+                                    crossed,
+                                ) {
                                     start.uv_pd[0] = departing_uv;
-                                    let pd = curve.evaluate(k, start.t, 2, true, true)?;
-                                    for (dst, src) in start.crv_pd.iter_mut().zip(pd.iter()) {
-                                        *dst = *src;
-                                    }
+                                    start.crv_pd = outgoing.crv_pd;
                                     ignore_status(start.set_properties(
                                         k,
                                         this,
@@ -2620,10 +2757,58 @@ impl Surface {
                                         &s_uv_domain,
                                         false,
                                     ))?;
-                                    true
                                 } else {
-                                    false
+                                    // Touch-and-turn on the seam at a curve knot: flush the
+                                    // arriving piece here so the corner knot sits at piece
+                                    // ends rather than as an interior knot on `u0`/`u1` (where
+                                    // `fix_boundary_curves` would flatten both transverse
+                                    // tangents onto the seam), and continue on the arriving
+                                    // chart with the outgoing right-hand tangent.
+                                    if let Some(b) = move_bound.as_mut() {
+                                        b.budget = approx_tol_3d - max_approx_dev;
+                                    }
+                                    let flush_policy = if preserve_uv {
+                                        BoundaryPolicy::Preserve
+                                    } else {
+                                        move_bound.as_ref().map_or(BoundaryPolicy::Unbounded, |b| {
+                                            BoundaryPolicy::Bounded(k, b)
+                                        })
+                                    };
+                                    let flushed = flush_curve_with_policy(
+                                        &s_uv_domain,
+                                        &mut ctrl_poly,
+                                        &mut knots,
+                                        uv_tol_x,
+                                        uv_tol_y,
+                                        &mut out.uv_curves,
+                                        &mut fix_bc_change,
+                                        flush_policy,
+                                    );
+                                    let flush_refusal = if preserve_uv {
+                                        flushed?;
+                                        None
+                                    } else {
+                                        let refusal = flushed.as_ref().err().cloned();
+                                        ignore_status(flushed)?;
+                                        refusal
+                                    };
+                                    if let Some(b) = move_bound.as_ref() {
+                                        if b.refused() {
+                                            let stop = Failure::new(
+                                                OP_REFUSED,
+                                                IntersectFailure::BoundaryFixRefused,
+                                            );
+                                            return Err(match flush_refusal {
+                                                Some(cause) => stop.caused_by(cause),
+                                                None => stop,
+                                            }
+                                            .into_error());
+                                        }
+                                        max_approx_dev += b.spent();
+                                    }
+                                    start = outgoing;
                                 }
+                                true
                             } else {
                                 false
                             };
@@ -2633,7 +2818,7 @@ impl Surface {
                             // next span leaves on the side the curve runs to, so its start
                             // is dropped again looking forward (status ignored, as the span
                             // start's)
-                            if !wrapped_seam && start.on_knot_line.contains(&true) {
+                            if !checked_outgoing_on_seam && start.on_knot_line.contains(&true) {
                                 let pd = curve.evaluate(k, start.t, 2, true, true)?;
                                 for (dst, src) in start.crv_pd.iter_mut().zip(pd.iter()) {
                                     *dst = *src;
@@ -2654,6 +2839,7 @@ impl Surface {
 
                         // the span fails: find a split point that drops
                         let mut found_good_one = false;
+                        let mut split_crossed_seam: Option<CrossedSeam> = None;
                         for _kk in 0..6 {
                             end.t = (start.t + end.t) / 2.0;
                             ret_status = match start.get_next_point(
@@ -2674,6 +2860,19 @@ impl Surface {
                                 Err(e) => status_of(&e),
                             };
                             if ret_status == SM_SUCCESS {
+                                if seam_wrap.any() && end.leaving_domain == Some(true) {
+                                    if let Some((arriving_uv, _, axes)) = seam_wrap.exit_crossing(
+                                        k,
+                                        this,
+                                        &end,
+                                        &s_uv_domain,
+                                        uv_tol_x,
+                                        uv_tol_y,
+                                    )? {
+                                        end.uv_pd[0] = arriving_uv;
+                                        split_crossed_seam = Some(axes);
+                                    }
+                                }
                                 found_good_one = true;
                                 break;
                             }
@@ -2681,7 +2880,7 @@ impl Surface {
                                 if let Some(axis) =
                                     seam_wrap.jumped_axis(start.uv_pd[0], end.uv_pd[0])
                                 {
-                                    if let Some(crossing) = seam_crossing(
+                                    if let Some((crossing, axes)) = seam_crossing(
                                         k,
                                         this,
                                         &mut offset,
@@ -2697,6 +2896,7 @@ impl Surface {
                                         end.uv_pd[0],
                                     )? {
                                         end = crossing;
+                                        split_crossed_seam = Some(axes);
                                         ret_status = SM_SUCCESS;
                                         found_good_one = true;
                                         break;
@@ -2726,7 +2926,7 @@ impl Surface {
                                 iterations: MAX_SPAN_DEPTH as u32,
                             });
                         }
-                        stack.push((start.t, end));
+                        stack.push((start.t, end, split_crossed_seam));
                     }
                     if stop_spans {
                         fs.set(
@@ -3726,6 +3926,43 @@ mod tests {
             "half-cylinder must not wrap across u = 0"
         );
 
+        // 1b. Slightly inset domain [1e-8, 1.0]: u = 0 lies outside the working drop domain,
+        // so wrapping must stay disabled (while the full-domain control still splits).
+        let inset_dom = Extent2d::from_bounds(1e-8, 0.0, 1.0, 40.0);
+        let out_inset = surface
+            .drop_and_trim_curve::<NoObject>(
+                &k,
+                &inset_dom,
+                &across_zero,
+                &across_zero.natural_interval(),
+                1e-6,
+                true,
+                false,
+                None,
+            )
+            .unwrap();
+        assert!(
+            out_inset.uv_curves.is_empty(),
+            "inset drop domain [1e-8, 1] must not wrap to u = 0 outside the domain"
+        );
+        let out_full_ctrl = surface
+            .drop_and_trim_curve::<NoObject>(
+                &k,
+                &full_dom,
+                &across_zero,
+                &across_zero.natural_interval(),
+                1e-6,
+                true,
+                false,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            out_full_ctrl.uv_curves.len(),
+            2,
+            "full-domain control must still split into 2 pieces across the seam"
+        );
+
         // 2. Full cylinder, curve crosses the U seam and then exits the top (z = 45 > 40):
         // abandoning the trace must not leave the pre-seam piece behind.
         let exits_top = Curve::from(
@@ -3842,6 +4079,33 @@ mod tests {
             "normal-line deviation 2*tol must be rejected under approx_tol_3d: {no_foot:?}"
         );
 
+        // 1b. Negative signed drop (`drop_param = -9` on the inward side of the radius-10
+        // cylinder) keeps the same signed `max(1, drop_param) * approx_tol_3d = tol` gate
+        // as `DropPt::set_properties`, rejecting a `2 * tol` residual.
+        let inward_above_rim = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Point3::new(1.0, 0.0, 40.0 + 2.0 * tol),
+                Point3::new(1.0, 0.1, 40.0 + 2.0 * tol),
+            )
+            .unwrap(),
+        );
+        let no_inward_foot = drop_point_near_seam(
+            &k,
+            &surface,
+            &dom,
+            seam_wrap,
+            &inward_above_rim,
+            0.0,
+            Point2::new(0.0, 40.0),
+            tol,
+        )
+        .unwrap();
+        assert!(
+            no_inward_foot.is_none(),
+            "negative signed drop with 2*tol residual must be rejected: {no_inward_foot:?}"
+        );
+
         // 2. A curve whose endpoints lie on opposite sides of the U seam at z = 20, but whose
         // midpoint probe (t = 0.5) rises to z = 45 above the cylinder top before returning to
         // cross the seam at z = 20: `drop_point_near_seam` returns `None` at t = 0.5, and
@@ -3916,6 +4180,119 @@ mod tests {
         assert!(
             crossing.is_none(),
             "seam_crossing must reject a bracket whose probe has no normal foot: {crossing:?}"
+        );
+    }
+
+    #[test]
+    fn seam_touch_at_knot_and_doubly_closed_single_axis_wrap() {
+        let k = Kernel::default();
+        let surface = closed_cylinder_surface(10.0, 40.0, false);
+        let dom = surface.natural_uv_domain_with_nurb(&k).unwrap();
+
+        // 1. V-shaped polyline approaching the U seam transversely (~76 deg > 30 deg dead
+        // band) from y < 0 (u near 1.0), touching the seam at its interior knot t = 0.5, and
+        // turning back into y < 0: the incoming tangent classifies the knot as leaving, but
+        // the outgoing tangent points back into the arriving chart, so the drop must stay on
+        // the arriving side without wrapping to u = 0.
+        let bounce = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(20.0, -4.0, 19.0, NOW),
+                    CPoint::new(20.0, 0.0, 20.0, NOW),
+                    CPoint::new(20.0, -4.0, 21.0, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 0.5, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let out_bounce = surface
+            .drop_and_trim_curve::<NoObject>(
+                &k,
+                &dom,
+                &bounce,
+                &bounce.natural_interval(),
+                1e-6,
+                true,
+                false,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            out_bounce.uv_curves.len(),
+            2,
+            "touch-and-turn at seam knot flushes at the corner knot on the arriving chart: {:?}",
+            out_bounce.uv_curves.len()
+        );
+        let ivl0 = out_bounce.uv_curves[0].natural_interval();
+        let ivl1 = out_bounce.uv_curves[1].natural_interval();
+        assert!(
+            (ivl0.min() - 0.0).abs() < 1e-9
+                && (ivl0.max() - 0.5).abs() < 1e-9
+                && (ivl1.min() - 0.5).abs() < 1e-9
+                && (ivl1.max() - 1.0).abs() < 1e-9,
+            "touch-and-turn must partition [0, 1] at the corner knot 0.5: {ivl0:?}, {ivl1:?}"
+        );
+        let arrive_uv = out_bounce.uv_curves[0]
+            .evaluate_point(&k, ivl0.max())
+            .unwrap();
+        let depart_uv = out_bounce.uv_curves[1]
+            .evaluate_point(&k, ivl1.min())
+            .unwrap();
+        assert!(
+            (arrive_uv.x - 1.0).abs() < 1e-9
+                && (depart_uv.x - 1.0).abs() < 1e-9
+                && (arrive_uv.y - depart_uv.y).abs() < 1e-6,
+            "touch-and-turn must stay on u = 1.0 without wrapping to u = 0: {arrive_uv:?} -> {depart_uv:?}"
+        );
+        for uv_c in &out_bounce.uv_curves {
+            let uivl = uv_c.natural_interval();
+            for i in 0..=10 {
+                let t = uivl.min() + (uivl.max() - uivl.min()) * (f64::from(i) / 10.0);
+                let uv = uv_c.evaluate_point(&k, t).unwrap();
+                assert!(
+                    uv.x > 0.5,
+                    "touch-and-turn at t={t} must stay on the u -> 1 side, got {uv:?}"
+                );
+                let srf_pt = surface.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+                let crv_pt = bounce.evaluate_point(&k, t).unwrap();
+                let rad = crv_pt.x.hypot(crv_pt.y);
+                let want = Point3::new(10.0 * crv_pt.x / rad, 10.0 * crv_pt.y / rad, crv_pt.z);
+                assert!(
+                    srf_pt.distance(want) < 5e-6,
+                    "touch-and-turn lift mismatch at t={t}: {srf_pt:?} vs {want:?}"
+                );
+            }
+        }
+
+        // 2. Doubly closed seam wrap: a U-seam event at (UMax, VMax - delta) where delta lies
+        // inside V's zone band (not at VMax) must wrap ONLY U, leaving V unchanged so arriving
+        // and departing UVs name the same 3D point; only a simultaneous corner crossing wraps
+        // both axes.
+        let both_wrap = SeamWrap::new(true, true, &dom, &dom);
+        let delta = 1e-4;
+        let mut pt = DropPt::new(0.5, Some(false));
+        pt.uv_pd[0] = Point2::new(1.0, 40.0 - delta);
+        pt.uv_pd[1] = Vec2::new(1.0, 1.0);
+        pt.on_pole = Some(false);
+        pt.leaving_domain = Some(true);
+        let (arr, dep, crossed) = both_wrap
+            .exit_crossing(&k, &surface, &pt, &dom, 1e-3, 1e-3)
+            .unwrap()
+            .expect("U exit must be recognized");
+        assert_eq!(crossed, CrossedSeam { u: true, v: false });
+        assert_eq!(arr, Point2::new(1.0, 40.0 - delta));
+        assert_eq!(dep, Point2::new(0.0, 40.0 - delta));
+        assert_eq!(
+            both_wrap.wrap_for_outgoing(arr, Vec2::new(1.0, 1.0), crossed),
+            Some(Point2::new(0.0, 40.0 - delta))
+        );
+        // Outgoing tangent turning back into the arriving chart must not wrap.
+        assert_eq!(
+            both_wrap.wrap_for_outgoing(arr, Vec2::new(-1.0, 1.0), crossed),
+            None
         );
     }
 }
