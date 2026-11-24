@@ -2721,6 +2721,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.fold"
                 | "sheet.path_flange"
                 | "sheet.tab"
+                | "sheet.bead"
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"
