@@ -166,7 +166,8 @@ mod tests {
     fn a_hardware_vulkan_adapter_comes_first_and_nothing_else_is_picked() {
         let (vk, dx, gl) = (Backend::Vulkan, Backend::Dx12, Backend::Gl);
         // Windows with one GPU: D3D12 and OpenGL list it too, Vulkan's wins.
-        let windows = [kind(dx, DeviceType::IntegratedGpu), kind(vk, DeviceType::IntegratedGpu), kind(gl, DeviceType::Other), kind(dx, DeviceType::Cpu)];
+        let windows =
+            [kind(dx, DeviceType::IntegratedGpu), kind(vk, DeviceType::IntegratedGpu), kind(gl, DeviceType::Other), kind(dx, DeviceType::Cpu)];
         assert_eq!(vulkan_first(&windows), Some(1));
         // Integrated and discrete: the discrete GPU, as wgpu's high-performance preference does.
         let both = [kind(vk, DeviceType::IntegratedGpu), kind(vk, DeviceType::DiscreteGpu), kind(vk, DeviceType::DiscreteGpu)];

@@ -2376,7 +2376,8 @@ fn wgpu_options(
             setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
                 let names: Vec<_> = adapters.iter().map(|a| startup::AdapterChoice::of(a, surface)).collect();
                 let kinds: Vec<_> = adapters.iter().map(|a| gpu_startup::AdapterKind::of(a, surface)).collect();
-                let picked = startup::choose_adapter(&names, environment.as_deref(), adapter.as_deref()).or_else(|| gpu_startup::vulkan_first(&kinds));
+                let picked =
+                    startup::choose_adapter(&names, environment.as_deref(), adapter.as_deref()).or_else(|| gpu_startup::vulkan_first(&kinds));
                 Ok(picked.and_then(|i| adapters.get(i)).cloned())
             }));
         }
