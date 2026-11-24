@@ -6813,3 +6813,96 @@ fn a_round_meeting_a_short_rib_s_end_reads_back() {
         .unwrap_or_else(|e| panic!("the rim fillet builds: {e}"));
     read_back(b, "the rim fillet");
 }
+
+/// The cylinder of radius 9.5 about +z, 30 high, its seam at `seam` radians from +x (SolidCraft's
+/// `solid.cylinder` extrudes one arc starting at 0.6131), less the notch 20 x 8 x 6 across its top
+/// on the side of `sign` y: the box x -10..10, |y| 5..13, z 26..32.
+fn seamed_notched_cylinder(seam: f64, sign: f64) -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::BooleanOp;
+    let cylinder = extrude(
+        &[Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 9.5,
+            start: seam,
+            end: seam + 2.0 * PI,
+        }],
+        [0.0, 0.0, 1.0],
+        30.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let y = if sign > 0.0 { 5.0 } else { -13.0 };
+    let notch = make_box([-10.0, y, 26.0], [20.0, 8.0, 6.0]).unwrap();
+    boolean(cylinder, notch, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// tangency-labs/solidcraft#21416: the notch's inside edge (y = 5, z = 26) rounded or chamfered
+/// 1 builds wherever the cylinder's seam lies. The blend adds material in the notch's corner and
+/// ends on the cylinder at both ends; near x > 0 its end curve runs from the wall's rail, at
+/// atan(5 / 8.078) = 31.76 degrees, to the floor's, at atan(6 / 7.365) = 39.17 degrees. Where
+/// the seam lies between them (SolidCraft's at 35.13 degrees), the end curve crosses it; the
+/// intersections traced the curve within the cylinder's domain, which ends at its seam, so none
+/// ran from one end to the other, and the blend failed ("failure to calculate intersection of
+/// fillet surface with side face"); traced across the seam, the cut of its UV curve beyond the
+/// seam lay a period outside the face's domain. The seams tried lie beside each end of the end
+/// curve, in its middle, and away from it (near the notch's far end, on the -x side, and a
+/// quarter turn off), on the notch at +y and at -y (the mirror image, which built before).
+///
+/// Expected: a valid, closed solid, whose volume is the closed form: the cylinder, less the
+/// notch's circular segment R^2 acos(d/R) - d sqrt(R^2 - d^2) (d = 5) over its 4 mm depth, plus
+/// the blend's section at the height and depth (s, t) from the edge times the cylinder's chord
+/// there, 2 sqrt(R^2 - (d + s)^2): for the round the section is the square [0, 1]^2 less the
+/// ball's quarter disc, so with s = 1 - sin(a) its depth is 1 - cos(a); for the chamfer it is
+/// the triangle t < 1 - s. The integrals are smooth and taken by Simpson's rule on 2000 panels,
+/// far below the 1e-10 compared (the round's is 8303.852506129, the issue's).
+#[test]
+fn a_notch_s_round_and_chamfer_end_across_the_cylinder_s_seam() {
+    rig_fixes();
+    let (big_r, d, r) = (9.5_f64, 5.0_f64, 1.0_f64);
+    let simpson = |f: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let n = 2000;
+        let h = (b - a) / f64::from(n);
+        let mut s = f(a) + f(b);
+        for i in 1..n {
+            s += f(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        s * h / 3.0
+    };
+    let chord = |y: f64| 2.0 * (big_r * big_r - y * y).sqrt();
+    let notched = PI * big_r * big_r * 30.0
+        - 4.0 * (big_r * big_r * (d / big_r).acos() - d * (big_r * big_r - d * d).sqrt());
+    let round = notched
+        + simpson(
+            &|a: f64| chord(d + r - r * a.sin()) * (r - r * a.cos()) * r * a.cos(),
+            0.0,
+            PI / 2.0,
+        );
+    let chamfer = notched + simpson(&|y: f64| chord(y) * (d + r - y), d, d + r);
+    assert!(rel(round, 8_303.852_506_129) < 1e-12, "{round}");
+    let degrees: [f64; 8] = [35.13, 31.9, 32.5, 38.5, 39.0, 120.0, 200.0, 305.0];
+    for seam in degrees {
+        for sign in [1.0, -1.0] {
+            for (kind, want) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let case = format!("seam {seam} degrees, notch at {sign} y, {kind:?}");
+                // the -y notch at the seam's mirror image: the same part mirrored in y = 0
+                let at = if sign > 0.0 { seam } else { -seam };
+                let b = seamed_notched_cylinder(at.to_radians(), sign);
+                let edge = edge_at(&b, [0.0, d * sign, 26.0]);
+                blend(&b, kind, &[edge], &[r], &[], Corners::Filled)
+                    .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{case}: {}", report.text);
+                b.check_solid().unwrap_or_else(|e| panic!("{case}: {e:?}"));
+                let v = b.volume(1e-11).unwrap();
+                assert!(rel(v, want) < 1e-10, "{case}: {v} {want}");
+            }
+        }
+    }
+}
