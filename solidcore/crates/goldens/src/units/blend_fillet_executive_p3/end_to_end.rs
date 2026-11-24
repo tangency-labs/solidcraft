@@ -3726,3 +3726,125 @@ mod wr664_near_knot_trims {
         check(ROWS[4].0, ROWS[4].1, ROWS[4].2);
     }
 }
+
+/// #21421: rounding an edge of `sphere_diff_3cylinders` whose rail ends on the sphere's seam
+/// edge places the round's end vertex on that seam. The seam is the meridian at the start of
+/// the sphere's closed u range (the half-plane of local x > 0, y = 0). On main the vertex sat
+/// 4.2e-9 (r 0.1) and 2.1e-8 (r 0.5) off it, inside its 4.1e-5 tolerance but past the
+/// `1000 * EFF_ZERO` beyond which `CurveClassification::has_near_misses` counts a vertex as a
+/// near miss of the seam, so `check_brep` Level 2 reported "Face Near missing Seam" on the e4
+/// rows' sphere face. On the e1 rows main's clean-up merges the sphere patches, the seam
+/// check does not see that vertex there, but it sits off the seam by the same amount.
+///
+/// The cylinder faces' near misses on these rows come from the input body
+/// (`sphere_diff_3cylinders.smb` reports three of them at Level 2 before the round) and are
+/// not checked here.
+#[cfg(test)]
+mod issue_21421_round_ends_on_the_sphere_seam {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::{counts, inputs};
+    use super::*;
+    use solidcore::math::EFF_ZERO;
+    use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
+    use solidcore::surface::surface::p2::SurfaceKind;
+    use solidcore::topology::brep::p1::HealLoopHandle;
+    use solidcore::topology::face::p4::has_seam_problem_in_brep_mut;
+    use solidcore::topology::vertex;
+
+    /// The rows, whose golden status and vertex, edge and face counts (`[0, 27, 42, 10]`)
+    /// placing the vertex on the seam leaves as they were.
+    const ROWS: [&str; 4] = [
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+    ];
+
+    /// `name` builds with the golden's counts; every vertex of a sphere face that lies within
+    /// its own tolerance of the sphere's seam lies closer to it than `1000 * EFF_ZERO`, the
+    /// near-miss distance of the seam check; and no sphere face has a near-missed seam.
+    fn check(name: &str) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        assert_eq!(counts(&body, 0), [0, 27, 42, 10], "{name}");
+        let near_miss = 1000.0 * EFF_ZERO;
+        let mut on_seam = Vec::new();
+        let mut spheres = 0;
+        for f in p1::faces(&body, None).unwrap() {
+            let Some(surface) = face::surface(&body, f).unwrap() else {
+                continue;
+            };
+            let SurfaceKind::Sphere(sphere) = surface.kind() else {
+                continue;
+            };
+            spheres += 1;
+            // S(u, v) = O + r (cos v (cos u X + sin u Y) + sin v Z), u in degrees: the seam
+            // is the meridian at the start of u's range, in the half-plane through the axis
+            // along `out`, whose normal is `across`
+            let rev = sphere.base();
+            let frame = rev.position();
+            let (centre, x, y) = (frame.origin(), frame.x_axis(), frame.y_axis());
+            let u0 = rev.step_uv_domain().min().x.to_radians();
+            let out = x * u0.cos() + y * u0.sin();
+            let across = y * u0.cos() - x * u0.sin();
+            for v in p1::vertices(&body, None).unwrap() {
+                if !vertex::faces(&body, v).unwrap().contains(&f) {
+                    continue;
+                }
+                let p = vertex::point(&body, v).unwrap();
+                let tol = vertex::tolerance(&body, v).unwrap();
+                let d = (p - centre).dot(across).abs();
+                // Written to accept: a NaN distance counts as off the seam.
+                if (p - centre).dot(out) > 0.0 && (d.is_nan() || d <= tol) {
+                    println!(
+                        "21421 {name}: face {f:?} vertex {v:?} at {p:?} is {d:e} off the seam"
+                    );
+                    on_seam.push((f, v, d));
+                }
+            }
+            let check = has_seam_problem_in_brep_mut::<HealLoopHandle>(
+                &k,
+                &mut body,
+                f,
+                Default::default(),
+            )
+            .unwrap();
+            assert_eq!(
+                check.problem.near_miss,
+                SurfParamType::Neither,
+                "{name}: face {f:?} {:?}",
+                check.problem
+            );
+        }
+        assert!(spheres > 0, "{name}: no sphere face");
+        assert!(!on_seam.is_empty(), "{name}: no vertex on the sphere's seam");
+        for &(f, v, d) in &on_seam {
+            // Written to accept: a NaN distance fails.
+            assert!(d < near_miss, "{name}: face {f:?} vertex {v:?} is {d:e} off the seam");
+        }
+    }
+
+    #[test]
+    fn e1_r0_1() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn e1_r0_5() {
+        check(ROWS[1]);
+    }
+
+    #[test]
+    fn e4_r0_1() {
+        check(ROWS[2]);
+    }
+
+    #[test]
+    fn e4_r0_5() {
+        check(ROWS[3]);
+    }
+}
