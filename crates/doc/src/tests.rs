@@ -917,9 +917,16 @@ type Shown = (Vec<(u64, Option<String>, Option<String>, Vec<(String, u64)>)>, Ve
 fn shown(m: &Model) -> Shown {
     let bodies = |st: &ModelState| st.bodies.iter().map(|b| (b.name.clone(), b.component)).collect();
     // A failed cut's hint at a body of another component follows where that is placed, which the
-    // key of a failure does not hold.
-    let error = |r: &FeatureResult| r.error.as_ref().map(|e| e.split(" in component '").next().unwrap_or_default().to_string());
-    let results = m.results.iter().map(|r| (r.id, error(r), r.warning.clone(), bodies(&r.state))).collect();
+    // key of a failure does not hold. Of a body SMLib's check refuses, which one is compared: its
+    // words can differ between two evaluations.
+    let told = |e: &str| {
+        let cut = if e.contains("SMLib's check refuses") { ": the operation failed: SMLib" } else { " in component '" };
+        e.split(cut).next().unwrap_or(e).to_string()
+    };
+    let error = |r: &FeatureResult| r.error.as_deref().map(told);
+    // An import's warning has what its own check of the parts found once that ended, whenever it does.
+    let warning = |r: &FeatureResult| r.warning.clone().filter(|_| r.import_report.is_none());
+    let results = m.results.iter().map(|r| (r.id, error(r), warning(r), bodies(&r.state))).collect();
     (results, summary(&m.state()), m.state().body_counter)
 }
 
@@ -927,7 +934,9 @@ fn shown(m: &Model) -> Shown {
 fn same_as_opened(m: &Model, doc: &Document, what: &str) {
     let mut opened = Model::new();
     opened.no_cache = true;
-    opened.evaluate(&crate::format::read(&doc.to_json()).unwrap());
+    let read = crate::format::read(&doc.to_json()).unwrap();
+    opened.evaluate(&read);
+    settled(&mut opened, &read);
     let (kept, fresh) = (shown(m), shown(&opened));
     for (f, (kept, fresh)) in doc.features.iter().zip(kept.0.iter().zip(&fresh.0)) {
         assert_eq!(kept, fresh, "{what}: feature {} `{}`", f.id, f.name);
@@ -1157,6 +1166,65 @@ fn a_round_is_not_kept_without_the_note_of_a_body_added_by_its_pick() {
     doc.features.rotate_right(1);
     m.evaluate(&doc);
     same_as_opened(&m, &doc, "a rail added by the pick");
+}
+
+/// The design whose join SMLib's check refuses: an imported block with an edge off its face, and a
+/// box joined to it.
+fn block_with_a_refused_join() -> Document {
+    let mut doc = Document::new("refused join");
+    boxed(&mut doc, 0, "Before", -60.0, &["Before"]);
+    let step: std::sync::Arc<str> = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step").into();
+    let kind = FeatureKind::Import { file: "block.step".into(), step, components: Vec::new(), skip: Vec::new(), records: None };
+    let block = doc.add_feature(kind, Some("Block")).unwrap();
+    doc.feature_mut(block).unwrap().body_names = vec!["Block".into()];
+    let join = serde_json::json!({"type": "box", "corner": [15.0, 25.0, 5.0], "length": "10", "width": "10", "height": "10", "operation": "join"});
+    add_in(&mut doc, 0, "Join", join);
+    let join = doc.find_feature("Join").unwrap().id;
+    doc.feature_mut(join).unwrap().participants = vec!["Block".into()];
+    boxed(&mut doc, 0, "After", 200.0, &["After"]);
+    doc
+}
+
+/// Bring in every check still running, of features and of imported parts, and what it refuses.
+fn settled(m: &mut Model, doc: &Document) {
+    for _ in 0..=doc.features.len() {
+        let refused = m.settle_feature_checks(true);
+        while m.checking_imports() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        if !m.settle_import_checks() && !refused {
+            return;
+        }
+        m.evaluate(doc);
+    }
+    panic!("a check refuses again and again");
+}
+
+/// What a window shows before a check ends ([`Model::set_background_checks`]) is kept neither
+/// for what it read nor whole: an edit made while the check runs, of a body the checked feature
+/// does not read, ends with the failure the design opened afresh has, and so does its undo.
+#[test]
+fn a_result_shown_before_its_check_refuses_it_is_not_kept() {
+    let doc = block_with_a_refused_join();
+    let join = doc.find_feature("Join").unwrap().id;
+    let mut without = doc.clone();
+    without.delete_feature(doc.find_feature("Before").unwrap().id).unwrap();
+    let mut added = doc.clone();
+    boxed(&mut added, 0, "Added", -120.0, &["Added"]);
+    added.features.rotate_right(1);
+    let mut m = Model::new();
+    m.set_background_checks(true);
+    for (what, d) in
+        [("shown", &doc), ("one deleted", &without), ("undone", &doc), ("one added", &added), ("undone again", &doc), ("as it was", &doc)]
+    {
+        m.evaluate(d);
+        // Left running as far as the window leaves it, for the next edit to meet.
+        if what != "shown" && what != "undone" {
+            settled(&mut m, d);
+            assert!(m.result(join).unwrap().error.is_some(), "{what}: the join is refused");
+            same_as_opened(&m, d, what);
+        }
+    }
 }
 
 /// Boxes with one rounded edge each, past the 400 features a body's names are worked out from
@@ -1409,9 +1477,9 @@ impl Edits {
 
 /// Edit a timeline at random for `steps` steps from `seed`, undoing and reopening now and then:
 /// after each the session's model is the design's opened afresh. `before`: features already there.
-fn edited_as_opened(seed: u64, steps: usize, before: usize) -> usize {
+fn edited_as_opened(seed: u64, steps: usize, before: usize, running: bool) -> usize {
     let mut e = Edits { state: seed, made: 0 };
-    let mut doc = Document::new("edited");
+    let mut doc = if running { block_with_a_refused_join() } else { Document::new("edited") };
     for (name, value) in [("w", "10 mm"), ("r", "1 mm"), ("n", "2")] {
         doc.set_param(name, value, None, None).unwrap();
     }
@@ -1426,6 +1494,7 @@ fn edited_as_opened(seed: u64, steps: usize, before: usize) -> usize {
         }
     }
     let mut m = Model::new();
+    m.set_background_checks(running);
     m.evaluate(&doc);
     for _ in 0..5 {
         e.add(&mut doc, &m);
@@ -1442,6 +1511,7 @@ fn edited_as_opened(seed: u64, steps: usize, before: usize) -> usize {
             1 => match m.saved(&doc).and_then(|s| Model::adopt(&doc, &s).ok()) {
                 Some(opened) => {
                     m = opened;
+                    m.set_background_checks(running);
                     "reopen".into()
                 }
                 None => continue,
@@ -1453,6 +1523,13 @@ fn edited_as_opened(seed: u64, steps: usize, before: usize) -> usize {
         };
         done.push(what);
         m.evaluate(&doc);
+        // The checks of some edits are still running when the next one comes.
+        if running {
+            if step + 1 < steps && e.below(2) == 0 {
+                continue;
+            }
+            settled(&mut m, &doc);
+        }
         let what = format!("seed {seed}, step {step}:\n{}\n", done.join("\n"));
         same_as_opened(&m, &doc, &what);
     }
@@ -1465,7 +1542,16 @@ fn edited_as_opened(seed: u64, steps: usize, before: usize) -> usize {
 fn any_edits_leave_the_model_of_the_design_opened_afresh() {
     let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
     let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 8), env("SOLIDCRAFT_EDIT_STEPS", 25));
-    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 0)).sum();
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 0, false)).sum();
+    eprintln!("{done} edits compared");
+}
+
+/// The same with the checks a window leaves running, among them ones that refuse a join.
+#[test]
+fn any_edits_with_checks_left_running_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 4), env("SOLIDCRAFT_EDIT_STEPS", 20));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 0, true)).sum();
     eprintln!("{done} edits compared");
 }
 
@@ -1474,7 +1560,7 @@ fn any_edits_leave_the_model_of_the_design_opened_afresh() {
 fn any_edits_about_the_naming_limit_leave_the_model_of_the_design_opened_afresh() {
     let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
     let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 3), env("SOLIDCRAFT_EDIT_STEPS", 15));
-    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 397)).sum();
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 397, false)).sum();
     eprintln!("{done} edits compared");
 }
 
