@@ -850,7 +850,7 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut b = match own_brep(&mut k, &i.brep)? {
             Ok(b) => b,
             Err(o) => return Ok(o),
