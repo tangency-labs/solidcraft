@@ -110,6 +110,23 @@ own artwork or change protected acceptance hashes.
 
 ## Verification
 
+### Base View command search
+
+In the Drawing workspace, press `S`, type `Base View`, and press `Enter`.
+The search uses the same interactive entry as Layout → Views → Base View.
+Both open the Base View options and placement preview;
+`Escape` closes them without changing the drawing or source design. Test with a
+synthetic box and a new drawing before placing any views.
+
+Search lists one Base View entry and one Projected View entry, using their ribbon
+IDs, icons and homes. Their JSON providers remain registered without adding
+duplicate search rows. Existing search pins and recent entries for either ID
+still find the interactive tool.
+`engine.execute` and an explicit command line with JSON parameters execute the
+command directly. They create the requested view without opening options.
+
+### Workspace coverage
+
 UI scenarios cover entering/leaving Drawing, all four task tabs, shared ribbon
 unfolding/pinning, faded known-options versus disabled uncertain tools, compact
 sheet navigation, all three strip docks, settings side/width changes, and both

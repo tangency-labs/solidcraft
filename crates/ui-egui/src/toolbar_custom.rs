@@ -383,7 +383,7 @@ pub fn reset(app: &mut SolveApp, tab: &str) {
 pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     let tab = app.ui.tab.clone();
     let on = pinned_on(app, &tab, id).is_some();
-    let fav = app.sbox.pinned.iter().any(|p| p == id);
+    let fav = app.sbox.is_pinned(id);
     let mut v = Vec::new();
     v.push(if on {
         Item::action("ui.toolbarRemove", "Remove from Toolbar", "close").with(json!({ "command": id }))

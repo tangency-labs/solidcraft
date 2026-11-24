@@ -96,6 +96,16 @@ fn end_preview(app: &mut SolveApp) {
     }
 }
 
+/// Drawing's ribbon entries carry the interactive tools' icons and homes. Keep their JSON
+/// providers available to scripts without listing the same tool twice in command search.
+fn search_command_id(id: &str) -> &str {
+    match id {
+        "drawing.view.base" => "drawing.view.base.planned",
+        "drawing.view.projected" => "drawing.view.projected.planned",
+        _ => id,
+    }
+}
+
 impl ShortcutBox {
     pub fn prefs(&self) -> Value {
         json!({ "recent": self.recent, "pinned": self.pinned })
@@ -112,16 +122,21 @@ impl ShortcutBox {
     }
     /// A command was run from the box: it goes to the front of the recent list.
     pub fn used(&mut self, id: &str) {
+        let id = search_command_id(id);
         if solidcraft_engine::find_command(id).is_none() {
             return;
         }
-        self.recent.retain(|r| r != id);
+        self.recent.retain(|r| search_command_id(r) != id);
         self.recent.insert(0, id.to_string());
         self.recent.truncate(RECENT);
     }
+    pub fn is_pinned(&self, id: &str) -> bool {
+        self.pinned.iter().any(|p| search_command_id(p) == search_command_id(id))
+    }
     pub fn toggle_pin(&mut self, id: &str) {
-        if self.pinned.iter().any(|p| p == id) {
-            self.pinned.retain(|p| p != id);
+        let id = search_command_id(id);
+        if self.is_pinned(id) {
+            self.pinned.retain(|p| search_command_id(p) != id);
         } else {
             self.pinned.push(id.to_string());
         }
@@ -196,15 +211,19 @@ pub type Row = (&'static str, &'static str, &'static str, Option<(&'static str, 
 
 fn available_in_workspace(app: &SolveApp, id: &str) -> bool {
     if crate::drawing_workspace::active(app) {
-        id.starts_with("drawing.") || matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata")
+        id == search_command_id(id) && (id.starts_with("drawing.") || matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata"))
     } else {
         !id.starts_with("drawing.")
     }
 }
 
+fn has_drawing_options(app: &SolveApp, id: &str) -> bool {
+    crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(id)
+}
+
 fn can_start(app: &SolveApp, id: &str) -> bool {
     solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
-        || (crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(id))
+        || has_drawing_options(app, id)
 }
 
 /// Commands matching `q`, best first. With an empty query, recent commands come first, then
@@ -234,9 +253,9 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
                 .max(keyword_score(&q, keywords(c.id)))
                 .max(score(&q, tab).max(score(&q, home_tab)) / 3)
                 .max(score(&q, panel).max(score(&q, home_panel)) / 3);
-            let recent = app.sbox.recent.iter().position(|r| r == c.id).map_or(0, |i| 2000u32.saturating_sub(i.min(2000) as u32));
-            // Commands that can run now come before those that can't.
-            let usable = if info.enabled { 150 } else { 0 };
+            let recent = app.sbox.recent.iter().position(|r| search_command_id(r) == c.id).map_or(0, |i| 2000u32.saturating_sub(i.min(2000) as u32));
+            // Rank tools by the same interactive availability the selectable rows use.
+            let usable = if info.enabled || has_drawing_options(app, c.id) { 150 } else { 0 };
             (s > 0).then_some((s + usable + if q.is_empty() { recent } else { recent / 20 }, (c.id, label, info.icon, place)))
         })
         .collect();
@@ -503,7 +522,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             .filter(|r| {
                                 !query.trim().is_empty()
                                     || (app.sbox.recent.is_empty() && app.sbox.pinned.is_empty())
-                                    || app.sbox.recent.iter().chain(&app.sbox.pinned).any(|id| id == r.0)
+                                    || app.sbox.recent.iter().chain(&app.sbox.pinned).any(|id| search_command_id(id) == r.0)
                             })
                             .take(if query.trim().is_empty() {
                                 if app.sbox.recent.is_empty() && app.sbox.pinned.is_empty() { 8 } else { MAX_RESULTS }
@@ -565,10 +584,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                     let empty = query.trim().is_empty();
                                     let mut last_recent = None;
                                     for (index, (id, label, icon, place)) in rows.iter().enumerate() {
-                                        let recent = empty && app.sbox.recent.iter().any(|r| r == id);
+                                        let recent = empty && app.sbox.recent.iter().any(|r| search_command_id(r) == *id);
                                         if last_recent != Some(recent) {
-                                            let count =
-                                                rows.iter().filter(|r| (empty && app.sbox.recent.iter().any(|id| id == r.0)) == recent).count();
+                                            let count = rows
+                                                .iter()
+                                                .filter(|r| (empty && app.sbox.recent.iter().any(|id| search_command_id(id) == r.0)) == recent)
+                                                .count();
                                             ui_kit::CommandSearch::heading(ui, if recent { "search.recent" } else { "search.commands" }, count);
                                             last_recent = Some(recent);
                                         }
@@ -916,6 +937,35 @@ mod tests {
     }
 
     #[test]
+    fn drawing_view_search_has_one_interactive_entry_per_tool() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        crate::workspace::enter(&mut app, "drawing").unwrap();
+        app.run("drawing.create", json!({})).unwrap();
+        for (label, id, provider) in [
+            ("Base View", "drawing.view.base.planned", "drawing.view.base"),
+            ("Projected View", "drawing.view.projected.planned", "drawing.view.projected"),
+        ] {
+            assert_eq!(search(&app, label).first().map(|row| row.0), Some(id), "the exact interactive tool leads without recent history");
+            // A previously used JSON provider must not bring back the duplicate search row.
+            app.sbox.used(provider);
+            for query in [label, provider, ""] {
+                let rows = search(&app, query);
+                let matches: Vec<_> = rows.iter().filter(|row| row.1 == label).map(|row| row.0).collect();
+                assert_eq!(matches, [id], "{query:?}");
+                assert!(can_start(&app, id), "search opens the existing interactive tool");
+            }
+            assert!(solidcraft_engine::find_command(provider).is_some(), "the JSON provider stays registered");
+        }
+        for query in ["Views", "Drawing Layout"] {
+            let rows = search(&app, query);
+            let base = rows.iter().find(|row| row.0 == "drawing.view.base.planned").unwrap();
+            assert_eq!(base.2, "drawing_base_view");
+            assert_eq!(base.3, Some(("Layout", "VIEWS")));
+        }
+    }
+
+    #[test]
     fn solve_sketch_is_not_offered_but_the_command_remains() {
         let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         for q in ["solve", "sketch.solve", ""] {
@@ -1227,5 +1277,40 @@ mod tests {
         assert!(h.app.sbox.recent.is_empty());
         assert!(crate::scenario::rect_of("menu:solid.extrude").is_some());
         assert_eq!(crate::scenario::handles("menu:").len(), 1);
+    }
+
+    #[test]
+    fn saved_drawing_view_alias_pins_keep_one_visible_search_entry() {
+        for (id, provider) in [("drawing.view.base.planned", "drawing.view.base"), ("drawing.view.projected.planned", "drawing.view.projected")] {
+            for saved in [id, provider] {
+                for imported in [false, true] {
+                    let mut h = crate::scenario::Harness::new();
+                    h.app.home.open = false;
+                    crate::workspace::enter(&mut h.app, "drawing").unwrap();
+                    if imported {
+                        crate::toolbar_custom::import(&mut h.app, &json!({"format":"solidcraft-shortcuts/1","favourites":[saved]})).unwrap();
+                    } else {
+                        h.app.sbox.load(&json!({"pinned":[saved],"recent":[saved]}));
+                    }
+                    h.call("ui.palette", json!({}));
+                    h.frames(3);
+                    assert!(crate::scenario::rect_of(&format!("menu:{id}")).is_some());
+                    assert!(crate::scenario::rect_of(&format!("menu:{provider}")).is_none());
+                    assert_eq!(crate::scenario::handles("menu:").len(), 1);
+                    if !imported {
+                        assert!(
+                            h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "RECENT  1")),
+                            "saved provider history stays in the Recent group"
+                        );
+                    }
+                    for command in [id, provider] {
+                        let items = crate::toolbar_custom::command_items(&h.app, command);
+                        assert_eq!(items.iter().find(|item| item.id == "ui.shortcutPin").unwrap().label, "Unpin from Shortcuts");
+                    }
+                    h.app.sbox.toggle_pin(provider);
+                    assert!(h.app.sbox.pinned.is_empty(), "the retained pin can be removed from either entry");
+                }
+            }
+        }
     }
 }
