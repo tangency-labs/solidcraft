@@ -3728,6 +3728,31 @@ mod tests {
         }
     }
 
+    // The certification #21524 asks for, on the partner: the untrimmed curve over the edge's
+    // interval, which on the unit plane `z = 0` is the UV curve's edge. The trimmed curve keeps
+    // the partner's exact restriction to the kept part (the callers compare control points). The
+    // partner's dropped part `[from, to]` lies in the hull of its control points, as the curve is
+    // not rational. So each of those points within `bound` of the trimmed curve's end `end` puts
+    // the whole dropped image within `bound` of the trimmed curve: a closed bound, no samples.
+    // Points at the same parameter are not compared: the kept knots are mapped linearly onto the
+    // interval, as upstream's removal maps them, and the edge/face gap is measured from the edge
+    // to the surface, without the pcurve (`docs/validity-and-tolerances.md` §5).
+    fn assert_dropped_part_within(
+        original: &BSplineCurve,
+        trimmed: &BSplineCurve,
+        (from, to): (f64, f64),
+        end: f64,
+        bound: f64,
+        label: &str,
+    ) {
+        let dropped = crv_trim(original.nurb.as_ref().unwrap(), from, to).unwrap();
+        let at = trimmed.evaluate_point(end).unwrap();
+        for c in dropped.cpts() {
+            let gap = (c.x - at.x).hypot(c.y - at.y);
+            assert!(gap <= bound, "{label}: dropped control point {gap:e} from the end");
+        }
+    }
+
     // A quadratic UV curve whose first span [0, 1e-4] is a pole (its three control points
     // coincide), with interior knots at 0.5 and 0.75; `reversed` gives the same curve run
     // backwards, its pole span at the end.
@@ -3808,6 +3833,15 @@ mod tests {
                 let gap = trimmed.evaluate_point(t).unwrap() - original.evaluate_point(t).unwrap();
                 assert!(gap.length() <= 4.0 * f64::EPSILON, "reversed {reversed}");
             }
+            // the dropped pole span stays within the pole tolerance of that end
+            let (dropped, end) = if reversed {
+                ((kept.1, ivl.max()), ivl.max())
+            } else {
+                ((ivl.min(), kept.0), ivl.min())
+            };
+            let label = format!("reversed {reversed}");
+            let pole_tol = ZONE_TOL_3D / 10.0;
+            assert_dropped_part_within(&original, &trimmed, dropped, end, pole_tol, &label);
             // and check test #15 finds no pole
             assert!(!trimmed.has_internal_pole(&k, ZONE_TOL_3D / 10.0).unwrap());
         }
@@ -3872,6 +3906,11 @@ mod tests {
                 !trimmed.has_internal_pole(&k, pole_tol).unwrap(),
                 "case {at}"
             );
+            // the two dropped pole spans stay within twice the pole tolerance each of the
+            // trimmed curve's start
+            let label = format!("case {at}");
+            let bound = 4.0 * pole_tol;
+            assert_dropped_part_within(&original, &trimmed, (0.0, kept), 0.0, bound, &label);
         }
     }
 
