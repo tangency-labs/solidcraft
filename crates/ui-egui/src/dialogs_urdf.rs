@@ -1,5 +1,5 @@
-//! Export URDF: the options of `file.export` for a robot description (docs/urdf.md), with the
-//! motion-link choice remembered.
+//! Export URDF with Options: the options of `file.export` for a robot description
+//! (docs/urdf.md), with the motion-link and mesh-placement choices remembered.
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use serde_json::{Value, json};
@@ -20,15 +20,11 @@ fn remembered(app: &SolveApp) -> UrdfExport {
     UrdfExport { mimic: app.preferences.urdf_mimic, place_meshes: app.preferences.urdf_place_meshes, ..Default::default() }
 }
 
-/// File › Export URDF…: the options dialog, or with `urdf_export_dialog` off straight to the
-/// save picker as before, with the options last chosen.
+/// File › Export URDF with Options… (`file.export_urdf_options`): the options dialog, with the
+/// choices last made. File › Export URDF… goes straight to the save picker, as it always has.
 pub fn open(app: &mut SolveApp) {
     let form = remembered(app);
-    if app.preferences.urdf_export_dialog {
-        app.dialog = Some(Dialog::new(Kind::UrdfExport(form), Vec::new()));
-    } else if let Err(e) = run(app, &form) {
-        app.set_status(e, true);
-    }
+    app.dialog = Some(Dialog::new(Kind::UrdfExport(form), Vec::new()));
 }
 
 pub fn rows(ui: &mut egui::Ui, f: &mut UrdfExport) -> bool {
@@ -132,13 +128,16 @@ mod tests {
         }
     }
 
+    /// Export URDF with Options, its own command, opens the dialog with the choices last made.
     #[test]
-    fn export_urdf_opens_the_dialog_with_the_preference() {
+    fn the_options_command_opens_the_dialog_with_the_choices_last_made() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.urdf_export_dialog = true;
-        h.app.preferences.urdf_mimic = false;
-        open(&mut h.app);
-        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::UrdfExport(UrdfExport { mimic: false, .. }))));
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.preferences.urdf_mimic = true;
+        h.app.preferences.urdf_place_meshes = true;
+        h.app.start("file.export_urdf_options");
+        let open = h.app.dialog.as_ref().map(|d| &d.kind);
+        assert!(matches!(open, Some(Kind::UrdfExport(UrdfExport { mimic: true, place_meshes: true, .. }))), "{open:?}");
     }
 
     /// Two boxes on revolute joints to a grounded one, the second driven by the first.
@@ -160,14 +159,14 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         let fresh = SolveApp::new(Default::default(), Default::default());
         let defaults = &fresh.preferences;
-        assert!(!defaults.urdf_export_dialog && !defaults.urdf_mimic && !defaults.urdf_place_meshes);
-        h.app.preferences.urdf_export_dialog = defaults.urdf_export_dialog;
-        h.app.preferences.urdf_mimic = defaults.urdf_mimic;
-        h.app.preferences.urdf_place_meshes = defaults.urdf_place_meshes;
+        assert!(!defaults.urdf_mimic && !defaults.urdf_place_meshes);
+        // Even with the dialog's choices on, File › Export URDF… writes the plain URDF.
+        h.app.preferences.urdf_mimic = true;
+        h.app.preferences.urdf_place_meshes = true;
         coupled(&mut h);
         let dir = h.dir.clone();
         h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(dir.join("r.urdf").to_string_lossy().into_owned())))));
-        open(&mut h.app);
+        crate::toolbar::export(&mut h.app, "urdf");
         assert!(h.app.dialog.is_none());
         h.settle();
         assert!(h.dir.join("r-H.stl").exists(), "meshes beside the URDF");

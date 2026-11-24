@@ -236,6 +236,18 @@ pub static COMMANDS: &[CommandSpec] = &[
             "velocity? (default 10): for joints with none saved; mimic? (default false; true: motion links as <mimic>); images?: bool (default false) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; ",
             "docs/urdf.md",
         )),
+    CommandSpec::new("file.export_urdf_options", "Export URDF with Options", crate::checked!("file.export_urdf_options", export_urdf_options_cmd))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_URDF_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
+        .params(concat!(
+            "path; ",
+            "mesh_prefix? (before each mesh file name); place_meshes? (default false: the meshes next to the .urdf; true: where mesh_prefix points, its folder made); ",
+            "effort? (default 1000), ",
+            "velocity? (default 10): for joints with none saved; mimic? (default false; true: motion links as <mimic>); images?: bool (default false) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; ",
+            "called from a script or MCP it exports as file.export_urdf does; in the app it opens the export's options (mesh prefix, limits, mimic, where the meshes go) first; docs/urdf.md",
+        )),
     CommandSpec::new("file.export_sdf", "Export SDF Model", crate::checked!("file.export_sdf", export_sdf_cmd))
         .icon("export")
         .noundo()
@@ -3159,6 +3171,11 @@ fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_urdf";
+    export_urdf(s, cmd, path_arg(p, cmd)?, p)
+}
+
+fn export_urdf_options_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_urdf_options";
     export_urdf(s, cmd, path_arg(p, cmd)?, p)
 }
 

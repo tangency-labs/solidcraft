@@ -1618,6 +1618,24 @@ fn a_web_prefix_keeps_the_meshes_beside_the_urdf_and_says_so() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Called from a script or MCP, Export URDF with Options exports as Export URDF does: only the
+/// app opens its dialog.
+#[test]
+fn the_options_command_exports_as_export_urdf_does() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    let dir = temp("export-urdf-options");
+    s.param_check = crate::schema::ParamCheck::Strict;
+    for (id, name) in [("file.export_urdf", "a.urdf"), ("file.export_urdf_options", "b.urdf")] {
+        run(&mut s, id, json!({"path": dir.join(name).to_string_lossy(), "mimic": true}));
+    }
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap_or_default().replace("b-", "a-").replace("\"b\"", "\"a\"");
+    let (a, b) = (read("a.urdf"), read("b.urdf"));
+    assert!(a.contains("<mimic") && !a.is_empty(), "{a}");
+    assert_eq!(a, b);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn file_export_urdf_takes_the_mimic_choice() {
     let mut s = fan(&["revolute", "revolute"]);

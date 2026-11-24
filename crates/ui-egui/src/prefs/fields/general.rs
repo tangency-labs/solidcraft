@@ -82,12 +82,6 @@ macro_rules! general_preferences {
             show_home_on_startup: bool = true, PAGE_GENERAL;
             /// Slicers that can load a file into the window that is already open do so (default on).
             slicer_single_instance: bool = true, 0;
-            /// File › Export URDF… asks for its options first. Default false: straight to the save
-            /// picker, as before, exporting with the options last chosen.
-            urdf_export_dialog: bool = false, PAGE_GENERAL => check_tr("prefs.urdf_export_dialog");
-            /// URDF export writes the meshes where the mesh prefix points, making its folder. Default
-            /// false: next to the URDF whatever the prefix says, as before.
-            urdf_place_meshes: bool = false, PAGE_GENERAL => check_tr("prefs.urdf_place_meshes");
         }
     };
 }
