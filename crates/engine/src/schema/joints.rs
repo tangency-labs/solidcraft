@@ -153,10 +153,10 @@ pub struct EditJointParams {
     /// The distance from a's frame to b's along z: a length, or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset: Option<LengthExpr>,
-    /// The lateral offset along a's frame x, in mm or a length expression evaluated once.
+    /// The lateral offset along a's frame x, in mm or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset_x: Option<LengthExpr>,
-    /// The lateral offset along a's frame y, in mm or a length expression evaluated once.
+    /// The lateral offset along a's frame y, in mm or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset_y: Option<LengthExpr>,
     /// The turn about that distance: an angle, or an expression the joint follows.
@@ -605,11 +605,11 @@ pub struct CreateJointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset: Option<JointValue>,
-    /// The lateral offset along a's frame x, in mm or an expression evaluated once. Default: 0.
+    /// The lateral offset along a's frame x, in mm or an expression the joint follows. Default: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset_x: Option<JointValue>,
-    /// The lateral offset along a's frame y, in mm or an expression evaluated once. Default: 0.
+    /// The lateral offset along a's frame y, in mm or an expression the joint follows. Default: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset_y: Option<JointValue>,
@@ -1125,6 +1125,12 @@ pub enum JointKindName {
 /// The expressions a joint's numbers follow, over the design's parameters.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct JointExpressions {
+    /// The lateral x offset's expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_x: Option<String>,
+    /// The lateral y offset's expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_y: Option<String>,
     /// The offset's expression.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<String>,

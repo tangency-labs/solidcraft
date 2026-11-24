@@ -360,5 +360,5 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         validate(declarations(result), runtime)
     })();
     host = store.into_data().host;
-    (host, outcome.map_err(|error| with_limits(error, limits)))
+    (host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }
