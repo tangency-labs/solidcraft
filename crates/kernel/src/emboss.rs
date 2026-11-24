@@ -2537,4 +2537,32 @@ mod tests {
             assert!(e.contains(if depth > 0. { "runs into another part" } else { "breaks through another face" }), "{e}");
         }
     }
+
+    fn refused_for_overlap(result: Result<Body>) {
+        let e = result.unwrap_err().to_string();
+        let named = ["earlier emboss or opening", "runs into another part", "breaks through another face"];
+        assert!(named.iter().any(|n| e.contains(n)), "{e}");
+    }
+
+    #[test]
+    fn a_raised_emboss_over_an_earlier_sunk_one_is_refused() {
+        let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        let one = emboss_cylinder(&body, &plane(), &[rect(12., 16.)], -1.).unwrap();
+        refused_for_overlap(emboss_cylinder(&one, &plane(), &[rect(10., 14.)], 1.));
+    }
+
+    #[test]
+    fn a_sunk_emboss_over_an_earlier_raised_one_is_refused() {
+        let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        let one = emboss_cylinder(&body, &plane(), &[rect(12., 16.)], 1.).unwrap();
+        refused_for_overlap(emboss_cylinder(&one, &plane(), &[rect(10., 14.)], -1.));
+    }
+
+    #[test]
+    fn a_raised_emboss_over_a_hole_in_the_wall_is_refused() {
+        let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        let hole = crate::cylinder(Vec3::new(0., 0., 10.), Vec3::Y, 1., 12.).unwrap();
+        let holed = crate::boolean(&body, &hole, crate::BoolOp::Cut).unwrap().unwrap();
+        refused_for_overlap(emboss_cylinder(&holed, &plane(), &[rect(8., 12.)], 1.));
+    }
 }
