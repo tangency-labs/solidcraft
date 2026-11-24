@@ -2258,6 +2258,7 @@ pub fn fill_hole_to(
         orders,
         tol,
         None,
+        true,
         &mut FillStats::default(),
     )
 }
@@ -2273,13 +2274,23 @@ pub fn fill_hole_counted(
     rounds: &[Round<'_>],
     order: usize,
     tol: f64,
+    certify_convexity: bool,
     stats: &mut FillStats,
 ) -> core::result::Result<Fill, Refusal> {
     let orders = FillOrders {
         rounds: order,
         faces: order,
     };
-    fill_hole_with(kernel, faces, rounds, orders, tol, None, stats)
+    fill_hole_with(
+        kernel,
+        faces,
+        rounds,
+        orders,
+        tol,
+        None,
+        certify_convexity,
+        stats,
+    )
 }
 
 /// `SmBlendSetback::Probe` (the fork's 250cb3f, f1d81f4): [`certified_scale`]'s probe of a
@@ -2359,7 +2370,21 @@ pub fn fill_hole_probe(
         rounds: 1,
         faces: 1,
     };
-    fill_hole_with(kernel, faces, rounds, g1, tol, Some(probe), stats)
+    fill_hole_probe_orders(kernel, faces, rounds, g1, tol, probe, stats)
+}
+
+/// [`fill_hole_probe`] to `orders` (a corner's growth tries its own fill's order, not only
+/// the G1's, #13775).
+pub fn fill_hole_probe_orders(
+    kernel: &Kernel,
+    faces: &[Face],
+    rounds: &[Round<'_>],
+    orders: FillOrders,
+    tol: f64,
+    probe: &mut Probe,
+    stats: &mut FillStats,
+) -> core::result::Result<Fill, Refusal> {
+    fill_hole_with(kernel, faces, rounds, orders, tol, Some(probe), true, stats)
 }
 
 /// `sm_SbFillHole`: [`fill_hole`] with the probe and the statistics.
@@ -2370,6 +2395,7 @@ fn fill_hole_with(
     orders: FillOrders,
     tol: f64,
     probe: Option<&mut Probe>,
+    certify_convexity: bool,
     stats: &mut FillStats,
 ) -> core::result::Result<Fill, Refusal> {
     *stats = FillStats::default();
@@ -2647,6 +2673,40 @@ fn fill_hole_with(
             round_rows.push(rows);
         }
     }
+
+    // the corner's convexity and the certificate's axis e (the graph fill's rule): each
+    // round's section midpoint against its faces, e into the material at a convex corner
+    // and out of it at a concave one; a corner of mixed convexity has its own ruling (the
+    // lifted normal field) and is not certified here
+    let mut sum_axis = Vec3::ZERO;
+    let mut convex = 0i32;
+    for m in 0..n {
+        let face = face_of(m)?;
+        sum_axis += face.normal;
+        let rows_m = el_ref(&round_rows, m)?;
+        let h0 = el_ref(rows_m, 0)?;
+        let q = h0.len() - 1;
+        let mut mh = HOM_ZERO;
+        for (c, hc) in h0.iter().enumerate() {
+            mh = axpy(&mh, binomial(q, c)? / 2.0_f64.powf(q as f64), hc);
+        }
+        let mid = Point3::new(mh[0] / mh[3], mh[1] / mh[3], mh[2] / mh[3]);
+        let side = if (mid - face.point).dot(face.normal) < 0.0 {
+            1i32
+        } else {
+            -1i32
+        };
+        if convex != 0 && side != convex {
+            convex = 0;
+            break;
+        }
+        convex = side;
+    }
+    let cert_axis = if convex != 0 {
+        Some((sum_axis * if convex > 0 { -1.0 } else { 1.0 }).unitize()?)
+    } else {
+        None
+    };
 
     // the interior map's degree: the least from 2k + 1 at which its conditions can be met
     // and no patch's control net turns back
@@ -2996,6 +3056,21 @@ fn fill_hole_with(
             }
         }
 
+        // the fill's convexity certified (the issue's ask), as the G1 fill's is: every
+        // patch's curvature forms positive semidefinite to the certificate's tolerance.
+        // A degree that does not certify leaves the next to try; none does and the
+        // refusal below names it. A corner of mixed convexity keeps the fold certificate
+        // above (its ruling is the lifted normal field's, not this one).
+        if let Some(e_axis) = cert_axis
+            .filter(|_| certify_convexity && order == 2 && faces.iter().all(|f| !f.is_curved()))
+        {
+            let marks = certify::sides_on_planes(&fill_nets, n, faces, &cycle_face);
+            if certify::certified_convex(&fill_nets, &marks, e_axis, 6)?.is_err() {
+                stats.uncertified = true;
+                continue;
+            }
+        }
+
         // the surfaces
         let mut patches = Vec::with_capacity(2 * n);
         for net in &fill_nets {
@@ -3051,6 +3126,11 @@ fn fill_hole_with(
     }
     Err(if turned_back {
         Refusal::unbuildable(CornerStep::SetbackG2NetTurnsBack, SETBACK_G2_NET_TURNS_BACK)
+    } else if stats.uncertified {
+        Refusal::unbuildable(
+            CornerStep::SetbackNoInteriorMap,
+            "SmBlendSetback: no G2 fill up to degree 9 is certified convex at these setbacks",
+        )
     } else {
         Refusal::unbuildable(
             CornerStep::SetbackNoInteriorMap,
@@ -3802,6 +3882,30 @@ mod tests {
                 for x in &mut setbacks {
                     *x *= scale;
                 }
+            } else {
+                // the G2 fill is certified convex only past the least scale of the
+                // setbacks that certifies it (about five radii, #13775): the first on
+                // this grid that does
+                for scale in [4.0f64, 5.0, 5.5, 6.0, 8.0, 12.0] {
+                    let grown: Vec<f64> = setbacks.iter().map(|&x| x * scale).collect();
+                    let probe_rounds: Vec<Surface> = (0..3)
+                        .map(|a| box_corner_round(a, r, grown[a], 10.0, order, 1, 1.0))
+                        .collect();
+                    let input: Vec<Round<'_>> = probe_rounds
+                        .iter()
+                        .zip(&grown)
+                        .map(|(surface, &end)| Round {
+                            surface,
+                            along: SurfParamType::U,
+                            end,
+                            corner_above: false,
+                        })
+                        .collect();
+                    if fill_hole(&k, &faces, &input, order, 1e-9).is_ok() {
+                        setbacks = grown;
+                        break;
+                    }
+                }
             }
             let rounds: Vec<Surface> = (0..3)
                 .map(|a| box_corner_round(a, r, setbacks[a], 10.0, order, 1, 1.0))
@@ -3933,6 +4037,42 @@ mod tests {
         };
         let jets = round_jets(&k, &round, 1).unwrap();
         assert!(geometric_rows(&jets.h, jets.q, 1).is_err());
+    }
+
+    /// A certified fill's definition, refilled with its own certificate, rebuilds the
+    /// fill's own patches (the certified degree is kept, not a lower one the certificate
+    /// would have skipped past, #13775).
+    #[test]
+    fn a_certified_fill_s_refill_keeps_its_degree() {
+        let k = Kernel::default();
+        let faces = box_corner_faces();
+        let r = 2.0;
+        // the least setback whose fill certifies convex (bisection, the fork's harness)
+        let setback = 10.347_656_25;
+        let rounds: Vec<Surface> = (0..3)
+            .map(|a| box_corner_round(a, r, setback, 10.0, 2, 1, 1.0))
+            .collect();
+        let input: Vec<Round<'_>> = rounds
+            .iter()
+            .zip([setback; 3])
+            .map(|(surface, end)| Round {
+                surface,
+                along: SurfParamType::U,
+                end,
+                corner_above: false,
+            })
+            .collect();
+        let fill = fill_hole(&k, &faces, &input, 2, 1e-9).unwrap();
+        assert!(!fill.patches.is_empty());
+        let definition = crate::surface::procedural_blend::corner::SetbackFill::create(
+            &k, &faces, &input, 2, 1e-9, true, 0.0, true,
+        )
+        .unwrap();
+        // the refill with the certificate the definition carries rebuilds the same patches
+        assert!(
+            definition.is_fill(&definition.refill(&k, true).unwrap(), &fill.patches),
+            "the certified refill must keep the fill's own degree"
+        );
     }
 
     #[test]
