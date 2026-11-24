@@ -587,6 +587,10 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list the bodies to move"));
     }
+    let mut seen = std::collections::BTreeSet::new();
+    if let Some(b) = bodies.iter().find(|b| !seen.insert(b.as_str())) {
+        return Err(bad(cmd, format!("`bodies` lists `{b}` twice")));
+    }
     {
         let st = s.model.state();
         if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
