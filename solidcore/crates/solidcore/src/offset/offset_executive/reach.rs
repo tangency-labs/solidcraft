@@ -4087,7 +4087,10 @@ mod tests {
         };
         assert_eq!(past_extent(at(0.0), at(8.00002), &tipped, 1e-6), None);
         let room = past_extent(at(0.0), at(9.0), &tipped, 1e-6);
-        assert!(room.is_some_and(|r| (8.00005..8.0001).contains(&r)), "{room:?}");
+        assert!(
+            room.is_some_and(|r| (8.00005..8.0001).contains(&r)),
+            "{room:?}"
+        );
     }
 
     fn plane_at_x(x: f64) -> Surface {
