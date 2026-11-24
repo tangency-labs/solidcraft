@@ -1048,7 +1048,9 @@ fn desktop_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, flow:
     });
     let (top_height, outcome, remaining) = {
         let column = interaction.as_mut().unwrap_or(&mut *ui);
-        let top_height = top_controls(chat, view, column, state, shared);
+        // Side by side, the conversation has a column of its own and needs no room from above.
+        let card = if wide { None } else { waiting_card_height(column.ctx()) };
+        let top_height = top_controls(chat, view, column, state, shared, card);
         let outcome = composer(chat, view, column, state, prefs);
         (top_height, outcome, column.available_rect_before_wrap())
     };
@@ -1087,8 +1089,32 @@ fn new_chat_confirmation(chat: &mut AgentChat, ui: &mut egui::Ui) {
     }
 }
 
+/// Where the conversation keeps the height of its waiting Allow / Deny cards between frames.
 #[cfg(not(target_arch = "wasm32"))]
-fn top_controls(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: State, shared: bool) -> f32 {
+fn waiting_card_id() -> Id {
+    Id::unique("sc_agent_chat_waiting_card")
+}
+
+/// The height from the first card that waits for an answer to the end of the conversation, as
+/// last drawn; `None` when no card waits.
+#[cfg(not(target_arch = "wasm32"))]
+fn waiting_card_height(ctx: &egui::Context) -> Option<f32> {
+    ctx.data(|d| d.get_temp::<f32>(waiting_card_id())).filter(|h| h.is_finite() && *h > 0.0)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn set_waiting_card_height(ctx: &egui::Context, height: Option<f32>) {
+    ctx.data_mut(|d| {
+        if let Some(h) = height {
+            d.insert_temp(waiting_card_id(), h);
+        } else {
+            d.remove::<f32>(waiting_card_id());
+        }
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn top_controls(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: State, shared: bool, card: Option<f32>) -> f32 {
     let top = ui.cursor().top();
     let reveal_confirmation = shared && {
         let id = ui.scope_id().with("assistant-confirm-visible");
@@ -1107,12 +1133,18 @@ fn top_controls(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state
     // sign-in box scrolls in the same place in either layout (#15087), and may use
     // everything above the composer: there is no conversation to show until it is done.
     let needs_auth = state == State::NeedsAuth;
-    let picker_max = if shared || needs_auth {
-        let t = Tokens::get();
-        let composer = view.composer_height.unwrap_or(48.0 + t.control_height * 3.0 + t.space_8 * 2.0 + t.space_6 * 3.0);
-        (ui.available_height() - composer - ui.spacing().item_spacing.y).max(0.0)
-    } else {
-        ui.available_height() / 3.0
+    let t = Tokens::get();
+    let composer = view.composer_height.unwrap_or(48.0 + t.control_height * 3.0 + t.space_8 * 2.0 + t.space_6 * 3.0);
+    let picker_max =
+        if shared || needs_auth { (ui.available_height() - composer - ui.spacing().item_spacing.y).max(0.0) } else { ui.available_height() / 3.0 };
+    // A card that waits for Allow or Deny is the last item of the conversation: the area above
+    // gives up height first, so the conversation keeps the card in view above the composer (#21643).
+    let picker_max = match card {
+        Some(card) => {
+            let keep = card + 2.0 * t.space_12 + ui.spacing().item_spacing.y * 2.0 + 1.0;
+            picker_max.min((ui.available_height() - composer - keep).max(0.0))
+        }
+        None => picker_max,
     };
     let provider_scroll = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_picker_scroll")
@@ -2033,6 +2065,9 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
     let all_selected = chat.all_selected;
     let now = crate::now_ms();
     let busy = chat.state() == State::Busy;
+    // The top of the first card still waiting for an answer: the next frame keeps room from
+    // there to the end of the conversation (#21643).
+    let mut waiting: Option<f32> = None;
     for (n, item) in chat.items.iter().enumerate() {
         let stamp = chat.stamp(n);
         match item {
@@ -2166,7 +2201,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                 }
             }
             Item::Permission { title, options, answer: given, .. } => {
-                ui_kit::assistant_approval(
+                let card = ui_kit::assistant_approval(
                     ui,
                     &trf("ui.agent_chat_permission", &[("title", &crate::agent_label::card_title(solidcraft_ui_text::locale(), title))]),
                     |ui| match given {
@@ -2200,9 +2235,12 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                         }
                     },
                 );
+                if given.is_none() {
+                    waiting = waiting.or(Some(card.response.rect.top()));
+                }
             }
             Item::Approval { id, title, tool, answer: given } => {
-                ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
+                let card = ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
                         super::markdown_view::selectable(
                             ui,
@@ -2244,6 +2282,9 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                         }
                     }
                 });
+                if given.is_none() {
+                    waiting = waiting.or(Some(card.response.rect.top()));
+                }
             }
             Item::Changes { steps, revision, history, undone } => {
                 ui.horizontal(|ui| {
@@ -2415,6 +2456,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
     if hovered.is_some() {
         chat.hovered = hovered;
     }
+    set_waiting_card_height(ui.ctx(), waiting.map(|top| ui.min_rect().bottom() - top));
     if let Some((n, o)) = answer {
         chat.actions.push(PanelAction::AnswerPermission(n, o));
     }

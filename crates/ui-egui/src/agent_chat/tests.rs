@@ -5902,6 +5902,57 @@ fn a_long_sign_in_box_scrolls_inside_a_short_docked_assistant() {
     assert!(providers.contains(at), "scrolling the sign-in box brings I've signed in: connect again {at:?} into view {providers:?}");
 }
 
+/// #21643: in a short docked Assistant, the card that waits for Allow or Deny stays in view
+/// above the message box, with its buttons: the agent list above gives up its room first.
+#[test]
+fn a_waiting_allow_card_stays_in_view_in_a_short_docked_assistant() {
+    use solidcraft_ui_registry::{handle_at, rect_of};
+    let (mut h, _script) = shared_assistant_harness();
+    h.app.ui.show_browser = true;
+    h.app.ui.show_timeline = true;
+    h.app.agent_chat.state = Some(State::Busy);
+    h.app.agent_chat.items.push(Item::Approval {
+        id: 1,
+        title: "Save a copy of the design to /tmp/copy.solidcraft".into(),
+        tool: "file.save".into(),
+        answer: None,
+    });
+    // The report's 1280x720 and 1000x625 at 125 %, and 800x500 at 100 %. Its 800x500 at 125 %
+    // (640x400 points) leaves the docked Assistant less height than the message box needs.
+    for (width, height) in [(1280.0, 720.0), (1024.0, 576.0), (800.0, 500.0)] {
+        h.call("ui.resize", json!({"width": width, "height": height}));
+        h.frames(8);
+        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height));
+        let body = shared_assistant_body(&h);
+        let composer = rect_of("agent_chat:composer_footer").expect("the message box");
+        let conversation = rect_of("agent_chat:conversation").expect("the conversation");
+        assert!(window.expand(1.0).contains_rect(body), "{width}x{height}: the Assistant {body:?} fits the window");
+        assert!(body.expand(1.0).contains_rect(composer), "{width}x{height}: the message box {composer:?} stays inside {body:?}");
+        assert!(
+            conversation.bottom() <= composer.top() + 1.0,
+            "{width}x{height}: the conversation {conversation:?} ends above the message box {composer:?}"
+        );
+        for button in ["agent_chat:allow", "agent_chat:always", "agent_chat:deny"] {
+            let at = handle_at(button).expect("the card's buttons are drawn");
+            assert!(conversation.contains(at), "{width}x{height}: {button} {at:?} shows in the conversation {conversation:?}");
+        }
+    }
+    // Answered, the card no longer claims room: the agent list gets its share back.
+    if let Some(Item::Approval { answer, .. }) = h.app.agent_chat.items.last_mut() {
+        *answer = Some(false);
+    }
+    h.frames(8);
+    let free = rect_of("agent_chat:providers").expect("the agent list").height();
+    h.app.agent_chat.items.push(Item::Approval { id: 2, title: "Save again".into(), tool: "file.save".into(), answer: None });
+    h.frames(8);
+    let waiting = rect_of("agent_chat:providers").expect("the agent list").height();
+    h.app.agent_chat.items.pop();
+    h.frames(8);
+    let back = rect_of("agent_chat:providers").expect("the agent list").height();
+    assert!(waiting < free, "a waiting card takes room from the agent list ({waiting} vs {free})");
+    assert!((back - free).abs() < 1.0, "with no card waiting the agent list has its room back ({back} vs {free})");
+}
+
 #[test]
 fn shared_assistant_wide_and_compact_present_real_regions_without_losing_the_composer_selection() {
     use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, SectionId, SectionLocation, Size, Zone};
