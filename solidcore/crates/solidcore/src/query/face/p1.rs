@@ -642,6 +642,138 @@ pub fn calculate_bounding_box_in(
     Ok(face_box)
 }
 
+/// Not upstream: a box that provably holds every point of the face within its zone
+/// tolerance, or `None` when none is known; for ruling out pairs of faces that cannot meet
+/// (the boolean's face pairs). [`calculate_bounding_box`]'s box of a curved face is its
+/// surface's whole control net whatever the face's domain, so a sliver of a whole turn of a
+/// revolution is boxed as the whole ring.
+///
+/// The box is the certified box of the surface ([`Surface::certified_bounding_box`]) over
+/// the face's UV domain R, grown by the zone tolerance of the largest face, edge and vertex
+/// tolerance (a point within an edge's tolerance of the face is on it). R is narrowed to
+/// R ∩ D, D the certified box of the face's existing UV trim curves
+/// ([`crate::topology::face::p1::certified_uv_trim_domain`]), when that is proved to hold the
+/// face: every loop lies in D, so whether a point is on the face cannot change across a strip
+/// of R outside D (no loop crosses it), and each such strip whose centre classifies outside
+/// the face ([`super::p2::point_classify_prepared`]: `Unknown`) lies outside it. A face whose
+/// trims leave its UV domain or the surface's natural domain (a periodic trim past the seam),
+/// or whose strip classifies any other way, keeps R; so does a face an edge use of which has
+/// no UV trim curve. No trim is made; the surface's NURB is, where it is missing (as every
+/// evaluation of it makes it).
+///
+/// # Errors
+///
+/// Cancellation only: any other failure gives `None` or keeps R.
+pub fn proved_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Extent3d>> {
+    // a box is only ever a saving: every failure but a cancellation gives none
+    fn probe<T>(r: Result<T>) -> Result<Option<T>> {
+        match r {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.is_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+    let Some(Some(surface)) = probe(fp2::surface(b, f))? else {
+        return Ok(None);
+    };
+    if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+        // a plane has no certified box here; its loose box is its edges' already
+        return Ok(None);
+    }
+    let Some(stored) = probe(fp2::uv_domain(b, f))? else {
+        return Ok(None);
+    };
+    let mut domain = stored;
+    if let (Some(Some(trims)), Some(natural)) = (
+        probe(crate::topology::face::p1::certified_uv_trim_domain(k, b, f))?,
+        probe(surface.natural_uv_domain_with_nurb(k))?,
+    ) {
+        // a margin far below any face's size, so a strip a rounding wide is no strip
+        let margin = 1e-9 * natural.max_dimension().max(1.0);
+        let mut grown = trims;
+        grown.expand_absolute(margin);
+        if trims.is_contained_by(&natural, margin) && trims.is_contained_by(&stored, margin) {
+            if let Ok(narrowed) = grown.intersect(&stored) {
+                if trim_strips_outside(k, b, f, &stored, &narrowed)? {
+                    domain = narrowed;
+                }
+            }
+        }
+    }
+    let Some(Some(mut bx)) = probe(surface.certified_bounding_box(k, &domain))? else {
+        return Ok(None);
+    };
+    let Some(mut tol) = probe(fp2::tolerance(b, f))? else {
+        return Ok(None);
+    };
+    let Some(edges) = probe(topology_traverser::face_edges(b, f))? else {
+        return Ok(None);
+    };
+    for e in edges {
+        let Some(t) = probe(edge::tolerance(b, e))? else {
+            return Ok(None);
+        };
+        tol = tol.max(t);
+    }
+    let Some(vertices) = probe(super::p2::face_vertices(b, f, false, None))? else {
+        return Ok(None);
+    };
+    for v in vertices {
+        let Some(t) = probe(vertex::tolerance(b, v))? else {
+            return Ok(None);
+        };
+        tol = tol.max(t);
+    }
+    bx.expand_absolute(zone_tol3d(k, tol));
+    Ok(Some(bx))
+}
+
+/// Whether every strip of `stored` outside `inner` (left, right, below and above it, each a
+/// rectangle no loop of face `f` crosses when every loop lies in `inner`) classifies outside
+/// the face at its centre; `true` when there is no strip.
+fn trim_strips_outside(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    stored: &crate::geom::extent2d::Extent2d,
+    inner: &crate::geom::extent2d::Extent2d,
+) -> Result<bool> {
+    let (s0, s1, i0, i1) = (stored.min(), stored.max(), inner.min(), inner.max());
+    let mid_v = 0.5 * (s0.y + s1.y);
+    let mut centres = Vec::new();
+    if i0.x > s0.x {
+        centres.push(Point2::new(0.5 * (s0.x + i0.x), mid_v));
+    }
+    if i1.x < s1.x {
+        centres.push(Point2::new(0.5 * (i1.x + s1.x), mid_v));
+    }
+    // below and above, across the inner box's width (the side strips cover the rest)
+    let mid_u = 0.5 * (i0.x + i1.x);
+    if i0.y > s0.y {
+        centres.push(Point2::new(mid_u, 0.5 * (s0.y + i0.y)));
+    }
+    if i1.y < s1.y {
+        centres.push(Point2::new(mid_u, 0.5 * (i1.y + s1.y)));
+    }
+    for uv in centres {
+        let mut pc = PointClassification::new(0.0);
+        let r = super::p2::point_classify_prepared(
+            k,
+            b,
+            f,
+            uv,
+            &mut pc,
+            super::p2::PointClassifyOptions::default(),
+        );
+        match r {
+            Ok(()) if pc.point_class() == PointClassType::Unknown => {}
+            Err(e) if e.is_cancelled() => return Err(e),
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
 /// `pSurface->CalculateBoundingBox(GetUVDomain(), &box)` of a face's surface (expanded by
 /// the zone tolerance, the default): the B-spline override (also that of planes, cones,
 /// spheres, tori and surfaces of revolution) expands its normal box by the face tolerance as its last

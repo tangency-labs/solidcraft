@@ -432,6 +432,9 @@ pub use solidcore_ops::member_turn::parallel_turn;
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
+/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
+/// stops with it (a sketch solve).
+pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
@@ -516,11 +519,13 @@ pub use surfaces::extend;
 pub use surfaces::extrude_sheet;
 pub use surfaces::loft_sheet;
 pub use surfaces::loft_sheet_with_rails;
+pub use surfaces::loft_sheet_with_rails_legacy_sides;
 pub use surfaces::patch_edges;
 pub use surfaces::patch_region;
 pub use surfaces::remove_faces;
 pub use surfaces::reverse_faces;
 pub use surfaces::revolve_sheet;
+pub use surfaces::revolve_sheet_legacy_sides;
 pub use surfaces::stitch;
 pub use surfaces::sweep_sheet;
 pub use surfaces::sweep_sheet_point_path_with;

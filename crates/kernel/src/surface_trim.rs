@@ -548,4 +548,26 @@ mod tests {
         let e = mutual_trim(&a, &two, TrimKeep::Side(Vec3::ZERO), TrimKeep::Side(Vec3::ZERO), true).unwrap_err().to_string();
         assert!(e.contains("not supported yet"), "{e}");
     }
+
+    /// The normal of each face of `b`, from its display triangles' winding (each face is flat).
+    fn normals(b: &Body) -> Vec<Vec3> {
+        b.faces(0.01).unwrap().iter().map(|f| f.plane_normal.unwrap()).collect()
+    }
+
+    /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) turned over with Reverse Normal
+    /// trims at x = 5 as the wall does, keeping half its 100 (#13640), and the half kept faces as
+    /// the turned wall did. Its normal is ±y, the other way from the wall's.
+    #[test]
+    fn a_turned_wall_trims_and_keeps_its_side() {
+        let wall = extrude_sheet(&Plane::XY, &[vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }]], 0.0, 10.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let [n] = normals(&turned)[..] else { panic!("one face") };
+        let [m] = normals(&wall)[..] else { panic!("one face") };
+        assert!(n.dot(m) < -1.0 + 1e-9 && n.y.abs() > 1.0 - 1e-9, "{n:?} vs {m:?}");
+        let cut = SplitTool::Plane(Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        let half = trim(&turned, &cut, Vec3::new(1.0, 0.0, 5.0)).unwrap();
+        assert!(rel(area(&half), 50.0) < 1e-9, "{}", area(&half));
+        assert!(normals(&half).iter().all(|k| k.dot(n) > 1.0 - 1e-9), "{:?} vs {n:?}", normals(&half));
+        assert!(measure(&half).unwrap().bbox.max.x < 5.0 + 1e-9);
+    }
 }
