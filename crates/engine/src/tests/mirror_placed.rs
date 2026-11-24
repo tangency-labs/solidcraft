@@ -537,6 +537,36 @@ fn an_adopted_model_mirrors_at_the_designs_own_pose() {
     assert_model_as_evaluated_afresh(&s);
 }
 
+/// A saved model opened at the pose it was saved at is taken as it is: the pose-only mirror and
+/// every feature after it keep their saved results. Before, opening evaluated the mirror again and
+/// every feature after it, so a design with a mirror of a placed part early in its timeline
+/// took as long to open as without a saved model. A model saved without the pose (an older file)
+/// still evaluates the mirror again.
+#[test]
+fn an_adopted_model_at_the_saved_pose_evaluates_nothing() {
+    let mut s = Session::default();
+    moved_arm(&mut s);
+    let copy = created(&run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"})));
+    run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
+    run(&mut s, "solid.hole", json!({"position": [5, -95, 10], "diameter": 4, "depth": 5}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    s.model = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    assert_eq!(s.model.last_recomputed, 0, "opening evaluated features again");
+    assert!(s.model.is_current(&s.doc));
+    assert_box(world_box(&s, &copy), mirrored_yz(&s, "ArmBody"));
+    let before = s.model.recomputed;
+    s.model.evaluate(&s.doc);
+    assert_eq!(s.model.recomputed, before, "the adopted model is current");
+
+    let mut older = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+    for f in older.records["features"].as_array_mut().unwrap() {
+        f.as_object_mut().unwrap().remove("pose");
+    }
+    s.model = solidcraft_doc::Model::adopt(&s.doc, &older).unwrap();
+    assert!(s.model.last_recomputed > 0, "a model saved without the pose evaluates the mirror again");
+    assert_model_as_evaluated_afresh(&s);
+}
+
 /// A cut revolved about an edge of a mirrored copy turns about it where the copy now is, when
 /// a joint drive moves the copy: the axis is a pick of the model, not a body by name (#12139).
 /// (Not checked against a fresh evaluation: one without the cache finds no edge at the pick.)

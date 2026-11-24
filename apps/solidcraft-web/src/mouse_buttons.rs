@@ -20,11 +20,20 @@
 //! they miss.)
 
 use egui::{Event, Modifiers, NUM_POINTER_BUTTONS, PointerButton, Pos2};
+use solidcraft_ui_egui::context_menu::BrowserMenu;
 
 /// egui's buttons by their bit in the browser's `buttons` bitmask: bit 0 primary, 1 secondary,
-/// 2 auxiliary (middle), 3 back, 4 forward. egui numbers its buttons in the same order.
-const BUTTONS: [PointerButton; NUM_POINTER_BUTTONS] =
+/// 2 auxiliary (middle), 3 back, 4 forward. egui numbers its buttons in the same order. The
+/// bitmask has no bit for a further button (6 and up), so eframe's own press and release events
+/// are all egui hears of one.
+const BUTTONS: [PointerButton; 5] =
     [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle, PointerButton::Extra1, PointerButton::Extra2];
+
+/// The browser's `buttons` bitmask bit for the secondary (right) button.
+const SECONDARY: u16 = 1 << (PointerButton::Secondary as usize);
+
+/// The browser's `buttons` bitmask bit for the primary (left) button.
+const PRIMARY: u16 = 1 << (PointerButton::Primary as usize);
 
 /// What the browser last said about the mouse buttons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +43,9 @@ pub struct Observed {
     /// The buttons went down on the canvas, so a press egui missed may be added. A drag that
     /// started elsewhere on the page and came over the canvas must not become a press in the app.
     pub on_canvas: bool,
+    /// The pointer was cancelled or the window lost the focus since the last frame: every button
+    /// egui holds is let go, the further ones (6 and up) too, which the bitmask has no bit for.
+    pub lost: bool,
 }
 
 /// What happened to the pointer, as the page's listeners see it.
@@ -70,6 +82,9 @@ pub struct Tracker {
     /// Touches the browser names a stylus's (`touchType: "stylus"`, an Apple Pencil in Safari),
     /// noted from `touchstart` before eframe turns the touch into egui's, for the next frame.
     stylus: Vec<egui::TouchId>,
+    /// What the browser did with the last right-click (#20011): a browser may take a right-click
+    /// for itself and never offer the page its context menu event.
+    browser_menu: BrowserMenu,
 }
 
 /// The most stylus touches waiting for a frame.
@@ -136,12 +151,25 @@ impl Tracker {
         let buttons = match happened {
             Happened::Pointer { buttons, down_on_canvas } => {
                 self.on_canvas |= down_on_canvas;
+                if down_on_canvas {
+                    // A left press starts over: the browser's menu is gone by then, so what it
+                    // did with an earlier right-click is the app's business no more (#20011).
+                    if buttons & PRIMARY != 0 {
+                        self.browser_menu = BrowserMenu::Offered;
+                    }
+                    // A right-click that starts on the canvas: the browser may take it for itself
+                    // (#20011). Until it offers the page its context menu event, it may have.
+                    if buttons & SECONDARY != 0 {
+                        self.browser_menu = BrowserMenu::Taken;
+                    }
+                }
                 buttons
             }
             Happened::Lost | Happened::Blur { of_window: true } => 0,
             Happened::Blur { of_window: false } => return false,
         };
-        let observed = Observed { buttons, on_canvas: self.on_canvas };
+        let lost = matches!(happened, Happened::Lost | Happened::Blur { of_window: true }) || self.pending.is_some_and(|o| o.lost);
+        let observed = Observed { buttons, on_canvas: self.on_canvas, lost };
         if buttons == 0 {
             self.on_canvas = false;
         }
@@ -152,6 +180,18 @@ impl Tracker {
     /// The observation for this frame, once.
     pub fn take(&mut self) -> Option<Observed> {
         self.pending.take()
+    }
+
+    /// What the browser did with the last right-click (#20011): `Taken` when the browser took
+    /// the click for itself and opened its own menu.
+    pub fn menu(&self) -> BrowserMenu {
+        self.browser_menu
+    }
+
+    /// The browser offered the page its context menu event: the click is the page's, and the app
+    /// may open its own menu (#20011).
+    pub fn note_menu(&mut self) {
+        self.browser_menu = BrowserMenu::Offered;
     }
 }
 
@@ -172,6 +212,14 @@ pub fn corrections(down: [bool; NUM_POINTER_BUTTONS], events: &[Event], observed
         }
     }
     let mut out = Vec::new();
+    if observed.lost {
+        // A further button egui holds is let go too: no release of it will come.
+        for button in PointerButton::ALL.into_iter().skip(BUTTONS.len()) {
+            if down[button as usize] {
+                out.push(Event::PointerButton { pos, button, pressed: false, modifiers });
+            }
+        }
+    }
     for (bit, button) in BUTTONS.into_iter().enumerate() {
         let held = observed.buttons & (1 << bit) != 0;
         let pressed = match (down[bit], held) {
@@ -187,7 +235,7 @@ pub fn corrections(down: [bool; NUM_POINTER_BUTTONS], events: &[Event], observed
 #[cfg(target_arch = "wasm32")]
 /// egui's buttons held at the end of the last frame.
 pub fn egui_down(ctx: &egui::Context) -> [bool; NUM_POINTER_BUTTONS] {
-    ctx.input(|i| BUTTONS.map(|b| i.pointer.button_down(b)))
+    ctx.input(|i| PointerButton::ALL.map(|b| i.pointer.button_down(b)))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -272,6 +320,18 @@ mod web {
                     if tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas }) {
                         ctx.request_repaint();
                     }
+                }),
+            );
+        }
+        // The browser's context menu event: the browser offers the page its menu, and the page may
+        // stop it. Firefox takes a Shift+right-click for itself and never offers it (#20011), so
+        // the app knows the browser's menu is the one that opened.
+        {
+            let tracker = tracker.clone();
+            listen(
+                "contextmenu",
+                Box::new(move |_e: web_sys::Event| {
+                    tracker.borrow_mut().note_menu();
                 }),
             );
         }
@@ -554,6 +614,22 @@ mod tests {
         assert_eq!(down, NONE);
     }
 
+    /// A further button (6 and up) has no bit in the browser's bitmask: moves that report none
+    /// held leave it held, and a cancelled pointer lets go of it with the rest.
+    #[test]
+    fn a_further_button_is_held_until_released_or_lost() {
+        let mut t = Tracker::default();
+        let (down, fixes) = frame(&mut t, NONE, &[press(PointerButton::Extra3, true)], pointer(0, true));
+        assert!(fixes.is_empty(), "{fixes:?}");
+        assert_eq!(down, held(&[PointerButton::Extra3]));
+        let (down, fixes) = frame(&mut t, down, &[Event::PointerMoved(Pos2::new(30.0, 40.0))], pointer(0, false));
+        assert!(fixes.is_empty(), "a move with no bit for it keeps it held: {fixes:?}");
+        let (down, _) = frame(&mut t, down, &[press(PointerButton::Primary, true)], pointer(0b01, true));
+        let (down, fixes) = frame(&mut t, down, &[], Happened::Lost);
+        assert_eq!(fixes, vec![press(PointerButton::Extra3, false), press(PointerButton::Primary, false)]);
+        assert_eq!(down, NONE);
+    }
+
     /// A drag that started elsewhere on the page and came over the canvas isn't a press in the app.
     #[test]
     fn a_drag_from_outside_the_canvas_presses_nothing() {
@@ -578,7 +654,7 @@ mod tests {
         assert!(fixes.is_empty() && down == NONE, "{fixes:?}");
         assert_eq!(t.take(), None, "an observation is used once");
         let touch_held = held(&[PointerButton::Primary]);
-        assert!(corrections(touch_held, &[], Observed { buttons: 1, on_canvas: false }, P, Modifiers::NONE).is_empty());
+        assert!(corrections(touch_held, &[], Observed { buttons: 1, on_canvas: false, lost: false }, P, Modifiers::NONE).is_empty());
     }
 
     /// The tracker asks for a frame only when the held buttons change.
@@ -590,5 +666,48 @@ mod tests {
         assert!(t.note(pointer(0b10, true)));
         assert!(!t.note(pointer(0b10, false)));
         assert!(t.note(Happened::Lost));
+    }
+
+    /// #20011: Firefox takes a Shift+right-click for itself: it opens its own menu and never
+    /// offers the page its context menu event, which no page can stop. The app has to know the
+    /// difference, so it opens no menu of its own under the browser's.
+    #[test]
+    fn a_right_click_the_browser_took_is_reported_as_taken() {
+        let mut t = Tracker::default();
+        assert_eq!(t.menu(), BrowserMenu::Offered, "no click yet: the page may open its menu");
+        // The right button goes down: the browser has not offered the page its context menu
+        // event yet (it comes with the press, and only when the browser lets the page have it).
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Taken);
+        // The browser offers it, as Chrome, Edge and Safari do: the click is the page's.
+        t.note_menu();
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+    }
+
+    /// A right-click the browser took stays taken while the pointer moves with the button held,
+    /// and the next right-click starts over.
+    #[test]
+    fn a_move_keeps_the_browser_having_taken_the_click() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Taken);
+        t.note(pointer(0b10, false));
+        assert_eq!(t.menu(), BrowserMenu::Taken, "the pointer moved with the button held");
+        t.note(pointer(0, false));
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Taken, "the next right-click starts over");
+    }
+
+    /// #20011: the browser's menu is gone once the user clicks with the left button, so what the
+    /// browser did with the last right-click must not hold the app's own menus back any more.
+    #[test]
+    fn a_left_click_starts_over() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Taken);
+        t.note(pointer(0b01, true));
+        assert_eq!(t.menu(), BrowserMenu::Offered, "the browser's menu is gone by then");
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Taken, "and the next right-click asks again");
     }
 }

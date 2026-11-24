@@ -365,8 +365,9 @@ impl Bernstein2 {
     /// The value at `(u, v)` (de Casteljau).
     #[must_use]
     pub fn eval(&self, u: f64, v: f64) -> f64 {
-        let column: Vec<f64> = self.rows().map(|r| eval_1d(r, v)).collect();
-        eval_1d(&column, u)
+        let mut scratch = Vec::new();
+        let column: Vec<f64> = self.rows().map(|r| eval_1d(r, v, &mut scratch)).collect();
+        eval_1d(&column, u, &mut scratch)
     }
 }
 
@@ -393,17 +394,25 @@ fn split_1d(c: &[f64], t: f64) -> (Vec<f64>, Vec<f64>) {
     (left, right)
 }
 
-/// The value at `t` of the Bernstein coefficients `c` (de Casteljau).
-fn eval_1d(c: &[f64], t: f64) -> f64 {
-    let mut cur = c.to_vec();
-    while cur.len() > 1 {
-        cur = cur
-            .windows(2)
-            .map(|w| match *w {
-                [a, b] => (1.0 - t) * a + t * b,
-                _ => 0.0,
-            })
-            .collect();
+/// The value at `t` of the Bernstein coefficients `c` (de Casteljau), reduced in place in
+/// `cur` (its contents are replaced; passed in so one buffer serves many calls). Each level
+/// replaces `cur[i]` by `(1 - t) cur[i] + t cur[i + 1]`, walking down from the end so each
+/// right neighbour is still the previous level's.
+fn eval_1d(c: &[f64], t: f64, cur: &mut Vec<f64>) -> f64 {
+    cur.clear();
+    cur.extend_from_slice(c);
+    let mut len = cur.len();
+    while len > 1 {
+        len -= 1;
+        let Some((last, head)) = cur.get_mut(..=len).and_then(<[f64]>::split_last_mut) else {
+            break;
+        };
+        let mut right = *last;
+        for x in head.iter_mut().rev() {
+            let a = *x;
+            *x = (1.0 - t) * a + t * right;
+            right = a;
+        }
     }
     cur.first().copied().unwrap_or(0.0)
 }

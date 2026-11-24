@@ -15,7 +15,7 @@
 //! ("Unimplemented Tangent Rollover Case", [`FilletSolver::process_full_roll_over`]). Here the
 //! full tangent rollover is decided before the trace, in the round's section, where it is exact
 //! ([`tangent_rollover_supports`]), and the solver rolls the ball on the face beyond from the
-//! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports. The same
+//! start. The same
 //! section decides a lone round along a straight edge between faces each a plane or a circular
 //! cylinder parallel to the edge (#15767: two joined cylinders, the ball rolling over one's
 //! seam), whose section is the same all along the edge (`cylinder_rollover_supports`). It decides
@@ -37,7 +37,8 @@
 //! [`FilletSolver::process_full_roll_over`]: crate::blend::fillet_solver::p1::FilletSolver::process_full_roll_over
 
 use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolver};
-use crate::error::{Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR};
 use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
@@ -48,6 +49,15 @@ use crate::topology::face::p4 as face_p4;
 use crate::topology::{edge, Brep, EdgeId, FaceId};
 
 const OP: &str = "blend::fillet_tangent_rollover";
+
+/// A face of the caller's body the roll-over reads without a surface
+/// ([`BlendFailure::FaceHasNoSurface`] at the face, with the fork's status `SM_ERR`).
+fn face_without_surface(face: FaceId) -> SolidError {
+    Failure::new(OP, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
 
 /// The tolerance the edges' curves are recognised as lines within.
 const CURVE_TOL: f64 = 1.0e-8;
@@ -258,7 +268,7 @@ pub(crate) fn planar_section(
     let mut normals = [Vec3::UNDEF; 2];
     for (normal, &face) in normals.iter_mut().zip(&faces) {
         let surface = crate::topology::face::p2::surface(target, face)?
-            .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
+            .ok_or_else(|| face_without_surface(face))?
             .clone_for_evaluation()?;
         if !surface.is_planar(k, tol)?.is_planar {
             return Ok(None);
@@ -1082,7 +1092,7 @@ fn offset_folds(
     offset: f64,
 ) -> Result<bool> {
     let surface = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(|| SolidError::blend_failed(OP, "the face has no surface"))?
+        .ok_or_else(|| face_without_surface(face))?
         .clone_for_evaluation()?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;

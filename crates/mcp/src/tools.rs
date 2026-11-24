@@ -133,7 +133,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 json!({
                     "command": string("Command id (see list_commands)"),
                     "params": {"type": "object", "description": "The command's parameters"},
-                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count`. A `created` list of more than 20 ids (a drawing of many curves) is left out and counted instead: `curve_count`, `constraint_count`, `dimension_count` (and `point_count`); `sketch.inspect` lists every id. An export's repeated mesh warnings become one line per kind with their count and the worst (`warning_count`: how many lines there were), and `timeline.export_script` with a `path` leaves the script out (`bytes` gives the file's size) (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count`. A `created` list of more than 20 ids (a drawing of many curves) is left out and counted instead: `curve_count`, `constraint_count`, `dimension_count` (and `point_count`); `sketch.inspect` lists every id. An export's repeated mesh warnings become one line per kind with their count and the worst, and `warning_count` then gives how many lines there were (it is absent when no two warnings were of one kind: use the length of `warnings`). `timeline.export_script` with a `path` leaves the script out when the reply has `bytes` (the file's size); a reply without `bytes`, from an older app, keeps the script (default true)"},
                     "expect": expect_schema(),
                 }),
                 &["command"],
@@ -171,7 +171,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
-                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends; a `created` list of more than 20 ids is left out and counted instead (`curve_count` and the like); `sketch.inspect` lists every id. An export's repeated mesh warnings become one line per kind with their count and the worst (`warning_count`: how many lines there were), and `timeline.export_script` with a `path` leaves the script out (`bytes` gives the file's size) (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends; a `created` list of more than 20 ids is left out and counted instead (`curve_count` and the like); `sketch.inspect` lists every id. An export's repeated mesh warnings become one line per kind with their count and the worst, and `warning_count` then gives how many lines there were (it is absent when no two warnings were of one kind: use the length of `warnings`). `timeline.export_script` with a `path` leaves the script out when the reply has `bytes` (the file's size); a reply without `bytes`, from an older app, keeps the script (default true)"},
                     "expect": expect_schema(),
                 }),
                 &[],
@@ -328,21 +328,36 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "export",
             "Export",
             "Export bodies to STEP (.step/.stp), IGES (.iges/.igs), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla), OBJ or GLB (.glb: binary glTF \
-             in metres with Y up, with each body's colours, metallic and roughness, and each occurrence a named node holding its part's bodies; \
-             transparent bodies are refused) or OpenUSD (.usda text, .usdc or .usd binary, .usdz package: in metres with Z up, \
-             each part's exact B-rep and a mesh of it, with colours, and the assembly as prims, a part placed twice written once). \
+             in metres with Y up, with each body's colours, metallic, roughness and opacity, render-setup Glass as glTF transmission, and each \
+             occurrence a named node holding its part's bodies) or OpenUSD (.usda text, .usdc or .usd binary, .usdz package: in metres with Z up, \
+             each body, named, as its exact B-rep and its mesh, with its looks' colour, opacity, metallic and roughness, \
+             and the assembly as prims named after the occurrences, a part placed twice written once) or Rhino (.3dm, Rhino 8: \
+             each body where the design shows it, as its exact shape, named and in its colour, when every face is planar and every \
+             edge straight, else as its mesh, without its name or colour; warnings say what the file left out; FreeCAD .FCStd cannot be written yet). \
              The format comes from the extension unless given; for OpenUSD the path's extension picks text, binary or package, and a \
              format naming another encoding is refused. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
-             next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/.",
+             next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
+             model folder at the path (a .sdf ending dropped): model.config, model.sdf, an STL per body and each decal's image \
+             on a textured quad, the image also its visual's albedo map (docs/sdf.md).",
             object(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "urdf"]},
+                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "sdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
+                    "writer": {"type": "string", "enum": ["solidcraft", "cadmpeg"], "description": "STEP and IGES only: SolidCraft's own writer (default), or cadmpeg's, which writes STEP AP242 with the components and colours but no solid names, and IGES 5.3 with each body where the design shows it; refused for other formats"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
                     "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
+                    "hierarchy": {"type": "boolean", "description": "glb: false writes every body flat under the root in world coordinates, as SolidCraft 0.40 did (default true: a named node per occurrence)"},
+                    "images": {"type": "boolean", "description": "urdf and usd: also write each picture shown on the model as a textured visual; usd writes it only in a .usdz package (default false)"},
+                    "physics": {"type": "boolean", "description": "usd: also write the joints, grounded parts and each component's mass as OpenUSD physics, for a simulator (default false)"},
+                    "render_setup": string("usd: the saved render setup whose image textures a .usdz package holds (default: none)"),
+                    "purpose": {"type": "string", "enum": ["interchange", "distribution"], "description": "usd: what the file is for: interchange (exact shapes beside meshes, for CAD) or distribution (meshes only with the pictures shown on the model, for viewers and game engines); exact_brep and images override it (default interchange)"},
+                    "exact_brep": {"type": "boolean", "description": "usd: write each body's exact shape beside its mesh (default: true for interchange, false for distribution)"},
+                    "name": string("sdf: the model's name (default: the folder's name)"),
+                    "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
+                    "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
                 }),
                 &["path"],
             ),
@@ -364,6 +379,64 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 &[],
             ),
             Effect::ReadOnly,
+        ),
+        tool(
+            "documents",
+            "Design tabs",
+            "The desktop app's open design tabs: their names, which is active, which have unsaved changes, and any prompt waiting on a person. \
+             With no action, lists them. `action` `switch` and `index` turn to that tab; `close` closes the tab at `index` (the active one when \
+             omitted); `new` opens a new empty design. Closing a tab that has unsaved changes is refused, naming the design, unless `force: true` \
+             says to discard them. Programmatic calls never open a \"save changes?\" dialog. External MCP clients only; not available in the in-app Assistant. Needs the desktop app: headless returns an error.",
+            object(
+                json!({
+                    "action": {"type": "string", "enum": ["new", "switch", "close"], "description": "new, switch or close (default: just list the tabs)"},
+                    "index": {"type": "integer", "description": "Which tab (switch and close; close: the active one when omitted)"},
+                    "force": {"type": "boolean", "description": "close: discard unsaved changes in the closed tab (refused otherwise, naming the design)"},
+                }),
+                &[],
+            ),
+            Effect::Replaces,
+        ),
+        tool(
+            "quit_app",
+            "Quit the app",
+            "Quit the desktop app cleanly (so the next start does not offer crash recovery). `force: true` quits even with unsaved designs; \
+             otherwise a design with unsaved changes is refused and named. Programmatic calls never open a \"save changes?\" dialog. Needs the \
+             desktop app: headless returns an error. External MCP clients only; not available in the in-app Assistant.",
+            object(json!({"force": {"type": "boolean", "description": "Quit even with unsaved designs (refused otherwise, naming them)"}}), &[]),
+            Effect::Replaces,
+        ),
+        tool(
+            "preferences",
+            "Read or set preferences",
+            "The desktop app's display and unit preferences: default_units, theme, language, up_axis, ui_scale, zoom_to_cursor, \
+             smooth_wheel_zoom and show_frame_rate. With no arguments, reads them back. With arguments, sets the named ones and returns \
+             them. Kept between runs. Any other key is refused, so this tool cannot change plugin access, graphics, file limits, signing or \
+             file paths, open dialogs or change the current design. Needs the desktop app: headless returns an error. External MCP clients \
+             only; not available in the in-app Assistant.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+            }),
+            Effect::Edits,
+        ),
+        tool(
+            "agent_cursor",
+            "Show the agent's cursor",
+            "The desktop app's agent cursor, where commands the agent runs visibly glide and land. `show` turns it on or off; `speed` is a \
+             multiplier from 1 to 5 (5 is fastest) or \"instant\" (no animation: each command runs at once and the pointer jumps to where it \
+             acted); `follow_camera` keeps the cursor with the camera as it moves. All are optional; with none, reads the current settings. \
+             External MCP clients only; not available in the in-app Assistant. Needs the desktop app: headless returns an error.",
+            object(
+                json!({
+                    "show": {"type": "boolean", "description": "Show (true) or hide (false) the cursor"},
+                    "speed": {"anyOf": [{"type": "number"}, {"type": "string"}], "description": "1-5 (times the normal speed) or \"instant\" (no animation)"},
+                    "follow_camera": {"type": "boolean", "description": "Keep the cursor with the camera as it moves"},
+                }),
+                &[],
+            ),
+            Effect::Edits,
         ),
         tool(
             "running",
@@ -403,8 +476,16 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
         tool(
             "new_design",
             "New design",
-            "Start a new, empty design (unsaved changes to the current one are discarded).",
-            object(json!({"name": string("Design name (default Untitled)")}), &[]),
+            "Start a new, empty design (unsaved changes to the current one are discarded). With `new_tab: true` in the desktop app it opens in a \
+             tab of its own and the current design stays open; every later call acts on the new design, and `document_id` in the reply \
+             names it (`document.list` and `document.activate` list and switch between the open designs, through `execute`).",
+            object(
+                json!({
+                    "name": string("Design name (default Untitled)"),
+                    "new_tab": {"type": "boolean", "description": "Open the new design in a tab of its own, after the active one, and show it, instead of replacing the active design. Desktop app only. Default: false"},
+                }),
+                &[],
+            ),
             Effect::Replaces,
         ),
         tool(
@@ -417,12 +498,16 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
              so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful. \
+             An OpenUSD file (.usd/.usda/.usdc/.usdz) opens as meshes, turned to Z up when the stage says Y is up; `geometry: \"exact\"` brings its exact B-rep \
+             where it has one (as SolidCraft's own OpenUSD exports carry) as B-rep bodies of an Import feature instead. \
              A file of another kind opens with an installed importer plugin that claims its extension (the `<plugin>.<entry>` tools \
              titled \"Open .ext files with …\" list them).",
             object(
                 json!({
-                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
-                    "up": {"type": "string", "enum": ["z", "y"], "description": "STEP and glTF only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF"},
+                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf or OpenUSD (.usd, .usda, .usdc, .usdz) file"),
+                    "up": {"type": "string", "enum": ["z", "y"], "description": "STEP, glTF and OpenUSD only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF, the stage's own up axis for OpenUSD"},
+                    "geometry": {"type": "string", "enum": ["meshes", "exact"], "description": "OpenUSD only. meshes (default): its meshes as mesh bodies; exact: its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies"},
+                    "new_tab": {"type": "boolean", "description": "Open the file in a tab of its own, after the active one, and show it, even when the active design is empty, so the design that was open stays open. Desktop app only. Default: false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
                 }),
                 &["path"],
@@ -437,7 +522,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              SolidCraft's recovery folder, or a folder this server was started with `--allow-path DIR`. For a folder outside them, ask the user \
              to add `--allow-path` and that folder to this server's arguments in their MCP client configuration.",
             object(
-                json!({"path": string("Path to save to, e.g. part.sc (default: the current file)"), "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"}}),
+                json!({
+                    "path": string("Path to save to, e.g. part.sc (default: the current file)"),
+                    "format": {"type": "string", "enum": ["container", "json"], "description": "Design encoding (default: JSON for .json, container otherwise)"},
+                    "overwrite": {"type": "boolean", "description": "Replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused (default false)"}
+                }),
                 &[],
             ),
             Effect::Files,
@@ -446,7 +535,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "skill_reference",
             "Skill reference",
             "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-mechanisms, \
-             solidcraft-editing, solidcraft-checking) from the copy built into SolidCraft. `file` defaults to reference.md; \
+             solidcraft-editing, solidcraft-checking, solidcraft-sheetmetal) from the copy built into SolidCraft. `file` defaults to reference.md; \
              each skill also has SKILL.md. Unknown skills or files are refused with the available ones.",
             object(
                 json!({
@@ -575,6 +664,12 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
 
 /// Run a tool, as the server does by default. Failures are tool results with `isError: true`
 /// (the model sees the message); nothing here panics on hostile arguments.
+/// The preferences an external AI client may read and set through the `preferences` tool (#3704): display and unit
+/// settings only. Everything else `ui.prefs` knows (plugin grants, graphics, file limits, the signing key, file paths)
+/// stays with the person.
+const AGENT_PREFERENCES: &[&str] =
+    &["default_units", "theme", "language", "up_axis", "ui_scale", "zoom_to_cursor", "smooth_wheel_zoom", "show_frame_rate"];
+
 pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     call_tool_with(b, name, args, Options::default())
 }
@@ -998,7 +1093,31 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             p["expression"] = parameter_value(a)?;
             exec(b, "parameters.change", p)
         }
-        "export" => exec(b, "file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity"])),
+        "export" => exec(
+            b,
+            "file.export",
+            pick(
+                a,
+                &[
+                    "path",
+                    "format",
+                    "bodies",
+                    "writer",
+                    "mesh_prefix",
+                    "effort",
+                    "velocity",
+                    "hierarchy",
+                    "images",
+                    "physics",
+                    "render_setup",
+                    "purpose",
+                    "exact_brep",
+                    "name",
+                    "static",
+                    "model_uris",
+                ],
+            ),
+        ),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
             None => exec(b, "diagnostics.crash_reports", pick(a, &["limit"])),
@@ -1006,11 +1125,70 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "skill_reference" => crate::skill_reference::read(a),
         "running" => b.call("control.running", json!({})),
         "cancel" => b.call("control.cancel", json!({})),
+        "documents" => {
+            if !b.has_ui() {
+                return Err("documents: needs the desktop app (headless has no design tabs)".into());
+            }
+            let mut params = json!({});
+            if let Some(action) = str_arg(a, "action") {
+                params["action"] = json!(action);
+            }
+            if let Some(index) = a.get("index") {
+                params["index"] = index.clone();
+            }
+            if let Some(force) = a.get("force") {
+                params["force"] = force.clone();
+            }
+            if str_arg(a, "action") == Some("close") {
+                params["ask"] = json!(false);
+            }
+            b.call("ui.documents", params)
+        }
+        "quit_app" => {
+            if !b.has_ui() {
+                return Err("quit_app: needs the desktop app (headless has no app window to quit)".into());
+            }
+            let mut params = json!({});
+            if let Some(force) = a.get("force") {
+                params["force"] = force.clone();
+            }
+            params["ask"] = json!(false);
+            b.call("app.quit", params)
+        }
+        "preferences" => {
+            if !b.has_ui() {
+                return Err("preferences: needs the desktop app (headless has no preferences window)".into());
+            }
+            if let Some(key) = a.keys().find(|key| !AGENT_PREFERENCES.contains(&key.as_str())) {
+                return Err(format!(
+                    "preferences: `{key}` cannot be read or set from an AI client; the preferences this tool can set are {}",
+                    AGENT_PREFERENCES.join(", ")
+                ));
+            }
+            let mut reply = b.call("ui.prefs", Value::Object(a.clone()))?;
+            // Read back only the same settings: the full reply also names plugin grants, file paths and the signing key.
+            if let Some(all) = reply.as_object_mut() {
+                all.retain(|key, _| AGENT_PREFERENCES.contains(&key.as_str()));
+            }
+            Ok(reply)
+        }
+        "agent_cursor" => {
+            if !b.has_ui() {
+                return Err("agent_cursor: needs the desktop app (headless has no window to show a cursor in)".into());
+            }
+            let mut params = json!({});
+            for key in ["show", "speed", "follow_camera"] {
+                if let Some(value) = a.get(key) {
+                    params[key] = value.clone();
+                }
+            }
+            b.call("ui.agent_cursor", params)
+        }
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
-        "new_design" => exec(b, "file.new", pick(a, &["name"])),
-        "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
-        "save" => exec(b, "file.save", pick(a, &["path", "format"])),
+        "new_design" => exec(b, "file.new", pick(a, &["name", "new_tab"])),
+        "open" => exec(b, "doc.open", pick(a, &["path", "new_tab", "up", "names", "geometry"])),
+        "save" => exec(b, "file.save", pick(a, &["path", "format", "overwrite"])),
         other => Err(format!("unknown tool `{other}`")),
     }
 }
@@ -1196,13 +1374,9 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             Some(items) => mapped("inspect.measure", json!({"items": items})),
             None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
+        // A batch step gets the numbers; the overlay picture is the `compare_picture` tool's.
         "compare_picture" => {
-            // A batch step gets the numbers; the overlay PNG would be a base64 blob in text.
-            let mut p = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
-            if let Some(obj) = p.as_object_mut() {
-                obj.entry("overlay".to_string()).or_insert(json!(false));
-            }
-            mapped("inspect.compare_picture", p)
+            mapped("inspect.compare_picture", pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]))
         }
         "inspect_design" => {
             let keys: &[&str] = if a.get("bodies").is_some_and(Value::is_array) { &["timeline"] } else { &["timeline", "bodies"] };
@@ -1210,10 +1384,33 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         }
         "undo" => mapped("edit.undo", json!({})),
         "redo" => mapped("edit.redo", json!({})),
-        "export" => mapped("file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity"])),
-        "save" => mapped("file.save", pick(a, &["path", "format"])),
-        "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
-        "new_design" => mapped("file.new", pick(a, &["name"])),
+        "export" => mapped(
+            "file.export",
+            pick(
+                a,
+                &[
+                    "path",
+                    "format",
+                    "bodies",
+                    "writer",
+                    "mesh_prefix",
+                    "effort",
+                    "velocity",
+                    "hierarchy",
+                    "images",
+                    "physics",
+                    "render_setup",
+                    "purpose",
+                    "exact_brep",
+                    "name",
+                    "static",
+                    "model_uris",
+                ],
+            ),
+        ),
+        "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
+        "open" => mapped("doc.open", pick(a, &["path", "new_tab", "up", "names", "geometry"])),
+        "new_design" => mapped("file.new", pick(a, &["name", "new_tab"])),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),
             None => mapped("diagnostics.crash_reports", pick(a, &["limit"])),
@@ -1226,6 +1423,10 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "running" => Err("`running` is a tool, not a command: call it on its own".into()),
         "skill_reference" => Err("`skill_reference` is a tool, not a command: call it on its own".into()),
         "cancel" => Err("`cancel` is a tool, not a command: call it on its own".into()),
+        "documents" => Err("`documents` is a tool, not a command: call it on its own".into()),
+        "quit_app" => Err("`quit_app` is a tool, not a command: call it on its own".into()),
+        "preferences" => Err("`preferences` is a tool, not a command: call it on its own".into()),
+        "agent_cursor" => Err("`agent_cursor` is a tool, not a command: call it on its own".into()),
         "version" => Err("`version` is a tool, not a command: call it on its own".into()),
         // An engine command: the step goes as it is.
         _ => Ok((String::new(), Value::Null, None)),
@@ -1234,6 +1435,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
 
 /// The tool names a `batch` step may not be (or is mapped from): `execute` must not wrap them.
 const TOOL_STEPS: &[&str] = &[
+    "agent_cursor",
     "batch",
     "body_topology",
     "cancel",
@@ -1241,6 +1443,7 @@ const TOOL_STEPS: &[&str] = &[
     "compare_picture",
     "crash_reports",
     "describe_command",
+    "documents",
     "execute",
     "export",
     "inspect_design",
@@ -1249,6 +1452,8 @@ const TOOL_STEPS: &[&str] = &[
     "new_design",
     "open",
     "pending",
+    "preferences",
+    "quit_app",
     "redo",
     "running",
     "save",
@@ -2342,23 +2547,30 @@ fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     }
 }
 
-/// `compare_picture`: run the engine comparison and hand the overlay PNG back as an MCP
-/// image block, the numbers as text — an agent sees the picture, not a base64 blob.
+/// `compare_picture`: run the engine comparison, which writes the overlay PNG to a scratch file
+/// (as a screenshot is), and hand the picture back as an MCP image block, the numbers as text: an
+/// agent sees the picture, and no command reply carries it as text.
 fn compare_picture(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
+    let n = SHOT.fetch_add(1, Ordering::Relaxed);
+    let dir = crate::scratch_dir().unwrap_or_else(vfs::temp_dir);
+    let path = dir.join(format!("compare-{n}.png")).to_string_lossy().to_string();
     let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
-    params["overlay"] = json!(true);
-    match exec(b, "inspect.compare_picture", params) {
-        Ok(v) => {
-            let overlay = v.get("overlay_png").and_then(Value::as_str).unwrap_or_default().to_string();
-            let mut info = v;
+    params["overlay"] = json!(path);
+    let ran = exec(b, "inspect.compare_picture", params);
+    let png = vfs::read(&path, MAX_IMAGE_BYTES);
+    let _ = vfs::remove(&path);
+    match ran {
+        Ok(mut info) => {
             if let Some(obj) = info.as_object_mut() {
-                obj.remove("overlay_png");
+                obj.remove("overlay");
             }
-            let mut content = vec![json!({"type": "text", "text": info.to_string()})];
-            if !overlay.is_empty() {
-                content.insert(0, json!({"type": "image", "data": overlay, "mimeType": "image/png"}));
+            match png {
+                Ok(png) => solidcraft_mcp_server::image_result(&png, "image/png", info.to_string()),
+                Err(e) => {
+                    info["overlay_error"] = json!(format!("{path}: {e} (is the app on another machine?)"));
+                    json!({"content": [{"type": "text", "text": info.to_string()}]})
+                }
             }
-            json!({"content": content})
         }
         Err(e) => text_result(&Value::String(e), true, opts),
     }

@@ -112,6 +112,12 @@
 //!   allocated `rpNewPE` through the out-parameter; the port returns `None` there (the
 //!   failing paths are not reachable from the callers ported so far).
 //! - The `SM_DEBUG_CODE` blocks are not ported.
+//! - **Circles in contact** (not upstream): `FindOrCreateProtoVertex(PC, PC)` with no curve
+//!   takes a point classified onto an edge of each B-rep, where the two edges are circles in
+//!   one plane that touch by the contact rule (`circle_coplanar_circle_intersect_in_contact`
+//!   at `contact_tol_3d`), for their touching point (`touch_of_edges`): the surface
+//!   intersection met their lens at its two crossings, which became vertices beside the
+//!   touch (docs/booleans.md §6).
 //! - **Vertex identity** (not upstream): `FindOrCreateProtoVertex(PC, PC)` makes no proto
 //!   vertex for two classifications onto vertices farther apart than the intersection
 //!   tolerance of the two (a distance upstream's `sm_FindPositionFromPCs` only reports and
@@ -135,18 +141,22 @@
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::CurveKind;
-use crate::error::{passed_on, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{passed_on, EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::geom_utility::p1::{circle_coplanar_circle_intersect_in_contact, CircleCircle};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
-use crate::geom::tol::{xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT};
+use crate::geom::tol::{
+    contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT,
+};
 use crate::intersect::curve_class::p5::ExtractOptions;
 use crate::intersect::curve_class::{ClassificationInit, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::knots::Side;
 use crate::query::face::p2 as face_p2;
@@ -326,9 +336,9 @@ impl<O> Mates<O> for NoMates {
     }
 
     fn remove_relationship(&mut self, _brep_entity: O, _other_entity: O) -> Result<()> {
-        Err(SolidError::topology_failed(
+        Err(SolidError::topology(
             "topology::proto_topology::p3::remove_relationship",
-            "the two are not a mated pair",
+            TopologyFailure::NotAMatedPair,
         ))
     }
 }
@@ -399,6 +409,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
 
+        // Not upstream: with no curve, two classifications onto edges are the crossing of
+        // those two edges, and two coplanar circles a hair less than tangent cross nowhere
+        // but touch at one point (docs/booleans.md §6, "Circles a hair less than tangent"):
+        // a point the surface intersection found where their lens meets the other face, one
+        // of the two crossings `2√(2δ r1 r2 / (r1 ± r2))` apart, is that touching point.
+        if crossing.is_none() {
+            touch_of_edges(k, geometry, pc1, pc2)?;
+        }
+
         // sm_FindPositionFromPCs, status ignored; the position stays SM_UNDEF on failure
         // (passed on with `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
         let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
@@ -458,10 +477,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         )?;
         let within = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
         let found = self.find_proto_vertex_holding(k, geometry, position, pc1, pc2, within)?;
+        // Not upstream: a point classified on a vertex is that vertex's point, whatever the
+        // position found for the pair (the average of the two objects' points), so the proto
+        // vertex also holds the ball of each vertex's own point: a later point on the vertex
+        // (within the coincidence rule of it) is at the proto vertex, as the vertex says, though
+        // it may lie farther from the average (docs/booleans.md, "One point or two").
+        let mut held = Vec::new();
+        for pc in [&*pc1, &*pc2] {
+            if pc.point_class() == PointClassType::Vertex {
+                let mut v = *pc;
+                v.set_class_object(PointClassType::Vertex, pc.object());
+                if let Some(at) = ignore_soft(v.find_obj_point_3d(k, geometry))? {
+                    held.push(DeclaredContact::of_point(at, point_tol));
+                }
+            }
+        }
 
         // when nearby PV exists
         if let Some(pv) = found {
             self.note_region(pv, region);
+            for r in held {
+                self.note_region(pv, r);
+            }
             // AddVertexDefinition(rPC1, rPC2, pNewVD): status ignored (passed on with the
             // flag)
             ignore_soft(passed_on(
@@ -475,6 +512,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let created = self.create_proto_vertex(k, geometry, pc1, pc2)?;
         if let Some(pv) = created {
             self.note_region(pv, region);
+            for r in held {
+                self.note_region(pv, r);
+            }
         }
         Ok((created, created.is_some()))
     }
@@ -732,14 +772,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         let mid_pv = mid_pv.ok_or(dangling("mid proto vertex is null"))?;
-        let (new_vd, created) = ignore_soft(passed_on(
+        // The definition's failure, which upstream reads only as a null result, is the
+        // cause; the errors that cannot be ignored pass on as they are.
+        let (new_vd, created) = match passed_on(
             self.add_vertex_definition_from_pcs(k, &*geometry, mid_pv, &mut pc1, &mut pc2),
             k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?
-        .map_or((None, false), |(vd, created)| (Some(vd), created));
-        let new_vd = new_vd.ok_or_else(|| {
-            SolidError::topology_missing(OP_ED_SPLIT, "the vertex definition at the split")
-        })?;
+        )? {
+            Ok(added) => added,
+            Err(e) => {
+                ignore_soft(Err::<(), _>(e.clone()))?;
+                return Err(
+                    Failure::new(OP_ED_SPLIT, TopologyFailure::SplitDefinitionNotAdded)
+                        .caused_by(e)
+                        .into_error(),
+                );
+            }
+        };
 
         // For cleanup object: don't do it if it was 'found' (vs. created).
         let clean_vd = created.then_some(new_vd);
@@ -898,16 +946,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let c3 = d.xsect_curve_3d();
         let uvs = [d.xsect_uv_curve(1), d.xsect_uv_curve(2)];
         let copy = curve_of(&*geometry, c3)?.copy(k)?;
-        let handle = geometry.insert_curve(copy).ok_or_else(|| {
-            SolidError::topology_missing(OP_ED_SPLIT, "the copied 3D curve's handle")
-        })?;
+        let full = || SolidError::topology(OP_ED_SPLIT, TopologyFailure::CurveStoreFull);
+        let handle = geometry.insert_curve(copy).ok_or_else(full)?;
         self.set_ed_curve_3d(new_ed, Some(handle))?;
         for (which, uv) in [1, 2].into_iter().zip(uvs) {
             if uv.is_some() {
                 let copy = curve_of(&*geometry, uv)?.copy(k)?;
-                let handle = geometry.insert_curve(copy).ok_or_else(|| {
-                    SolidError::topology_missing(OP_ED_SPLIT, "the copied UV curve's handle")
-                })?;
+                let handle = geometry.insert_curve(copy).ok_or_else(full)?;
                 self.edge_def_mut(new_ed)
                     .ok_or(dangling("edge definition is deleted"))?
                     .set_xsect_curve_uv(which, Some(handle));
@@ -1152,7 +1197,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when a proto edge has no definition; [`SolidError::InvalidInput`] for a
+    /// [`TopologyFailure::IntersectingProtoEdgeEmpty`] (`SM_ERR`) when a proto edge has no
+    /// definition; [`TopologyFailure::OverlapBelowSplitResolution`] for an overlap shorter
+    /// than a split; [`SolidError::InvalidInput`] for a
     /// deleted object or missing curve; [`SolidError::Unported`] for the callees
     /// listed in the module header.
     pub fn split_intersecting_proto_edges(
@@ -1186,9 +1233,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let (Some(&first1), Some(&first2)) =
             (e1.edge_definitions().first(), e2.edge_definitions().first())
         else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_SPLIT_INT,
-                "a proto edge has no edge definitions",
+                TopologyFailure::IntersectingProtoEdgeEmpty,
             )); // [Reg_091215_simon_closed]
         };
 
@@ -1280,9 +1327,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 if self.overlap_collapses_to_an_end(k, &*geometry, pe1, t11, t12)?
                     || self.overlap_collapses_to_an_end(k, &*geometry, pe2, t21, t22)?
                 {
-                    return Err(SolidError::topology_failed(
+                    return Err(SolidError::topology(
                         OP_SPLIT_INT,
-                        "two proto edges overlap along less than their definitions can split",
+                        TopologyFailure::OverlapBelowSplitResolution,
                     ));
                 }
 
@@ -1542,7 +1589,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     if dist > xs {
                         continue;
                     }
-                    // `seam_vertex_stays_on_seam` (not upstream): the vertex that stays is
+                    // Not upstream (#18274): the vertex that stays is
                     // the first definition's, unless only the other is the operand's own
                     // vertex at the end of a seam edge (its definition found it on that
                     // vertex): a seam's vertex keeps its place on the seam
@@ -1557,9 +1604,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 && ends_seam(&*brep, v)?,
                         )
                     };
-                    let keep_second = k.fixes.seam_vertex_stays_on_seam
-                        && on_seam(self, vd2, v2)?
-                        && !on_seam(self, vd1, v1)?;
+                    let keep_second = on_seam(self, vd2, v2)? && !on_seam(self, vd1, v1)?;
                     let (keep, gone) = if keep_second { (v2, v1) } else { (v1, v2) };
                     let merge_away = |s: &mut Self, deleted_v: &mut [Option<O>]| -> Result<()> {
                         set_slot(deleted_v, jj, gone);
@@ -2781,11 +2826,81 @@ fn crossing_sine<O: ClassObject>(
     Ok(sine1.min(sine2))
 }
 
+/// Not upstream: moves `pc1` and `pc2`, a point classified onto an edge of each B-rep, to
+/// where those two edges touch when they are circles in one plane that the contact rule
+/// takes for touching (`circle_coplanar_circle_intersect_in_contact` at `contact_tol_3d`,
+/// as the edge/curve intersections of the boolean read them), and the touching point lies
+/// on both edges within their intersection tolerance. Any other pair is left as it is.
+///
+/// # Errors
+///
+/// Those of the circles' intersection; an unported or cancelled drop of the touching point.
+fn touch_of_edges<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    pc1: &mut PointClassification<O>,
+    pc2: &mut PointClassification<O>,
+) -> Result<()> {
+    if pc1.point_class() != PointClassType::Edge || pc2.point_class() != PointClassType::Edge {
+        return Ok(());
+    }
+    // an edge's circle: centre, unit normal, radius
+    let circle = |pc: &PointClassification<O>| -> Result<Option<(Point3, Vec3, f64)>> {
+        let Some((b, EntityRef::Edge(e))) = pc.object().and_then(|o| geometry.topology_entity(o))
+        else {
+            return Ok(None);
+        };
+        let Some(curve) = b.edge(e)?.curve.as_ref() else {
+            return Ok(None);
+        };
+        let CurveKind::Ellipse(c) = curve.kind() else {
+            return Ok(None);
+        };
+        if !c.is_circle() {
+            return Ok(None);
+        }
+        let place = c.position();
+        Ok(Some((place.origin(), place.z_axis(), c.x_radius())))
+    };
+    let (Some((c1, n1, r1)), Some((c2, n2, r2))) = (circle(pc1)?, circle(pc2)?) else {
+        return Ok(());
+    };
+    let tol = xsect_tol_3d_from_zones(
+        k,
+        pc1.obj_zone_tol_3d(k, geometry)?,
+        pc2.obj_zone_tol_3d(k, geometry)?,
+    );
+    // one plane: parallel normals (the angle test of the circles' own intersection) and
+    // the second centre on the first plane within the tolerance
+    if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
+        return Ok(());
+    }
+    let CircleCircle::Tangent(touch) =
+        circle_coplanar_circle_intersect_in_contact(n1, c1, r1, c2, r2, tol, contact_tol_3d(k))?
+    else {
+        return Ok(());
+    };
+    // the touching point on both edges' arcs: dropped onto each edge's interval within
+    // their tolerance (a drop that fails leaves the point where it was)
+    let (mut q1, mut q2) = (*pc1, *pc2);
+    for q in [&mut q1, &mut q2] {
+        match q.compute_point_parameters(k, geometry, touch) {
+            Ok(()) if q.deviation() <= tol => {}
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Ok(()) | Err(_) => return Ok(()),
+        }
+    }
+    *pc1 = q1;
+    *pc2 = q2;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::p1::proto::{EdgeDefinition, ProtoGeometry, ProtoTopology, VertexDefinition};
     use super::*;
     use crate::curve::line::Line;
+    use crate::error::SM_ERR;
     use crate::geom::extent2d::Extent2d;
     use crate::intersect::point_class::PointClassType;
     use crate::math::{Point2, Point3};
@@ -2798,13 +2913,9 @@ mod tests {
     #[test]
     fn no_mates_has_no_relationship_to_remove() {
         let e = Mates::<H>::remove_relationship(&mut NoMates, vtx(0), vtx(1)).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
-        assert_eq!(
-            e.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the two are not a mated pair"
-            ))
-        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotAMatedPair));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
     }
 
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3210,6 +3321,14 @@ mod tests {
         let (mut unset, mut set) = (on(6, false), on(4, true));
         let found = find_position_from_pcs(&k, &pool, &mut unset, &mut set).unwrap();
         assert_eq!(found.deviation, 0.0);
+        // with neither set there is no point to place the position at: the caller's input
+        let e =
+            find_position_from_pcs(&k, &pool, &mut on(6, false), &mut on(4, false)).unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::ClassificationParametersUnset)
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         for (a, c) in [(false, true), (true, false)] {
             let (pv, created) = m
                 .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4, a), &mut on(6, c))
@@ -3312,9 +3431,14 @@ mod tests {
         let (pe1, ed1, ivl1) = edge(&mut m, 0, 0.0, 10.0);
         let (pe2, ed2, ivl2) = edge(&mut m, 1, b0, 20.0);
 
-        assert!(m
+        let e = m
             .split_intersecting_proto_edges(&k, &mut pool, pe1, pe2)
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::OverlapBelowSplitResolution)
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(m.proto_edges(), [pe1, pe2]);
         for (pe, ed, ivl, from, to) in [(pe1, ed1, ivl1, 0.0, 10.0), (pe2, ed2, ivl2, b0, 20.0)] {
             let p = m.proto_edge(pe).unwrap();
@@ -3324,6 +3448,17 @@ mod tests {
             assert_eq!(at(p.start_proto_vertex()), Point3::new(from, 0.0, 0.0));
             assert_eq!(at(p.end_proto_vertex()), Point3::new(to, 0.0, 0.0));
         }
+        // a proto edge that an earlier split left without definitions stops the pair's split
+        m.proto_edge_mut(pe2).unwrap().clear_edge_definitions();
+        let e = m
+            .split_intersecting_proto_edges(&k, &mut pool, pe1, pe2)
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::IntersectingProtoEdgeEmpty)
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
     }
 
     /// An `n`-sided prism of circumradius 30 from `z0` up `h`.

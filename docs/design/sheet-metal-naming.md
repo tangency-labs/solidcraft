@@ -8,15 +8,10 @@ its place among the faces made for that part), and `lineage::sheet_lineage` with
 `history_names.rs` names the face from that; edges are the engine's (`sheet::sheet_edge_names`),
 and panels are keyed by their recipes (`tag_panels`: `F15/F12/side.l2`, never
 `F<feature>.<k>`). The `sheet:<body>:<panel>:<side>` face names designs saved before keep are
-still read (`sheet::split_sheet_face_name`), but `body_sheet_face_names` gives `None` for every
-face, so such a name finds no face and a sketch attached by one reports a lost attachment. Two
-things do not follow this document yet:
-
-- a relief wall is `F<f>:relief`, with nothing after it that tells one corner's relief from
-  another's (`lineage::sheet_role`), not the row in the table below;
-- `SurfaceSheet::rims` still keeps a sheet-local name for each straight rim (`rim_names`: the
-  sketch line's id, `far`, `side0`, `side1`, `ext0`, `ext1`, else `edge<k>`, its place in the
-  outline), saved with the design; no lookup reads it.
+still read (`sheet::split_sheet_face_name`), but no sheet names a face so now, so such a name
+finds no face and a sketch attached by one reports a lost attachment. One thing does not follow
+this document yet: a relief wall is `F<f>:relief`, with nothing after it that tells one corner's
+relief from another's (`lineage::sheet_role`), not the row in the table below.
 
 ## The rule
 

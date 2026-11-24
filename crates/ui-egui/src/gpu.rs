@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
-    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer,
-    SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width,
-    lit_line_style, placement_scale, runs_within, supersampled_size,
+    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_MOTIONS, MAX_PALETTE, Material, MotionRows, Motions, MovingLayer, PBR_SIZE, Palette,
+    PaletteIndex, PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UNMOVED_SLOT, UploadError,
+    extend_runs, level_for, lifted_width, lit_line_style, placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -25,7 +25,9 @@ fn background_uv(image: egui::Vec2, rect: egui::Rect, window: egui::Rect) -> egu
 
 /// A picture's pixels, at most `limit` on a side (what the GPU takes).
 fn decode_background(bytes: &[u8], limit: u32) -> Result<egui::ColorImage, String> {
-    let mut image = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    // Upright, as every viewer shows it: a photo stored turned by its EXIF orientation (#19138).
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
+    let (mut image, _) = solidcraft_engine::upright_image::decode_upright(reader).map_err(|e| e.to_string())?;
     if image.width().max(image.height()) > limit {
         image = image.resize(limit, limit, image::imageops::FilterType::Triangle);
     }
@@ -276,6 +278,19 @@ mod test_support {
         queue: &super::wgpu::Queue,
         output: &super::wgpu::Texture,
     ) -> usize {
+        paint_egui_output_in(egui::ViewportId::ROOT, ctx, out, renderer, device, queue, output)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn paint_egui_output_in(
+        viewport: egui::ViewportId,
+        ctx: &egui::Context,
+        out: &mut egui::FullOutput,
+        renderer: &std::sync::Arc<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
+        device: &super::wgpu::Device,
+        queue: &super::wgpu::Queue,
+        output: &super::wgpu::Texture,
+    ) -> usize {
         use super::*;
         let jobs = ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
         let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [output.width(), output.height()], pixels_per_point: out.pixels_per_point };
@@ -287,7 +302,7 @@ mod test_support {
             }
         }
         if let Some(effect) = &renderer.frame_compositor {
-            effect.begin_viewport(egui::ViewportId::ROOT.0.value());
+            effect.begin_viewport(viewport.0.value());
         }
         let extra = renderer.update_buffers(device, queue, &mut encoder, &jobs, &screen);
         let target = output.create_view(&Default::default());
@@ -763,12 +778,15 @@ fn offscreen(
         eye,
         ao_radius,
         ao_samples,
+        edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         ssaa,
         sky: [0.0; 4],
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
         moving: moving.map(|(scene, transform)| MovingLayer { key: 1, slot: Arc::new(Mutex::new(Some(scene))), transform }),
+        motions: Default::default(),
+        ground: None,
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {
@@ -1226,8 +1244,8 @@ mod tests {
             started.elapsed().as_secs_f64() * 1000.0
         }
 
-        fn pixels(&self, source: bool) -> Vec<u8> {
-            let texture = if source { self.app.blur.source_texture().unwrap() } else { self.output.clone() };
+        fn pixels(&self) -> Vec<u8> {
+            let texture = self.output.clone();
             super::test_support::read_egui_pixels(&self.device, &self.queue, &texture)
         }
 
@@ -1237,7 +1255,7 @@ mod tests {
             if directory.is_none() && goldens.is_none() {
                 return;
             }
-            let image = image::RgbaImage::from_raw(self.size[0], self.size[1], self.pixels(false)).unwrap();
+            let image = image::RgbaImage::from_raw(self.size[0], self.size[1], self.pixels()).unwrap();
             if let Some(dir) = directory {
                 let path = std::path::PathBuf::from(dir);
                 std::fs::create_dir_all(&path).unwrap();
@@ -1275,7 +1293,6 @@ mod tests {
         assert_eq!((counts.textures_created, counts.buffers_created, counts.bind_groups_created, counts.pipelines_created), (0, 0, 0, 0));
         assert_eq!((counts.markers_emitted, counts.markers_drawn), (0, 0));
         assert_eq!(counts.live_bytes, 0);
-        assert!(f.app.blur.source_texture().is_none());
         assert!(f.renderer.read().frame_compositor.is_none());
     }
 
@@ -1316,7 +1333,7 @@ mod tests {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.radius(18.0);
         f.frame();
-        let _scope = f.app.blur.begin(&f.ctx, true);
+        let _scope = f.app.blur.begin(&f.ctx);
         assert!(crate::blur::enabled());
         let fill = egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180);
         let frame = egui::Frame::NONE.fill(fill);
@@ -1376,7 +1393,7 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        let _blur = f.app.blur.begin(ui.ctx(), true);
+                        let _blur = f.app.blur.begin(ui.ctx());
                         ui.set_width(300.0);
                         crate::ui_kit::scope(ui, |ui| {
                             let result = crate::ui_kit::search_picker(
@@ -1453,7 +1470,46 @@ mod tests {
     fn assert_backdrop_passes(before: crate::blur::Counters, after: crate::blur::Counters, steps: usize) {
         let markers = after.markers_drawn - before.markers_drawn;
         assert!(markers > 0, "the fixture must paint a visible backing boundary");
-        assert_eq!(after.blur_passes - before.blur_passes, 2 * steps as u64 * markers, "each backing boundary filters the preceding UI");
+        let runs = after.blur_runs - before.blur_runs;
+        assert!((1..=markers).contains(&runs), "markers that share a snapshot share one blur: {runs} runs for {markers} markers");
+        assert_eq!(after.blur_passes - before.blur_passes, 2 * steps as u64 * runs, "each run filters the preceding UI once");
+    }
+
+    /// The blur of a marker's padded region is the whole-frame blur inside the marker (#19213).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_region_matches_whole_frame_blur() {
+        for srgb in [false, true] {
+            let Some(mut f) = BlurFixture::new(srgb, crate::blur::FixturePolicy::Rendering) else { return };
+            f.app.blur.set_surface_alpha(Some(180));
+            for radius in [8.0, 18.0, 40.0] {
+                f.radius(radius);
+                f.app.blur.set_whole_frame_blur(false);
+                for _ in 0..4 {
+                    f.frame();
+                }
+                let before = f.app.blur.counters();
+                f.frame();
+                let regions = f.app.blur.counters();
+                let region_pixels = f.pixels();
+                f.app.blur.set_whole_frame_blur(true);
+                for _ in 0..4 {
+                    f.frame();
+                }
+                let before_whole = f.app.blur.counters();
+                f.frame();
+                let whole = f.app.blur.counters();
+                let whole_pixels = f.pixels();
+                let worst = region_pixels.iter().zip(&whole_pixels).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+                assert!(worst <= 1, "srgb {srgb} radius {radius}: region blur differs from whole-frame blur by {worst}/255");
+                assert_eq!(regions.markers_drawn - before.markers_drawn, whole.markers_drawn - before_whole.markers_drawn);
+                let (region_work, whole_work) = (regions.blur_pixels - before.blur_pixels, whole.blur_pixels - before_whole.blur_pixels);
+                assert!(
+                    region_work > 0 && region_work < whole_work,
+                    "radius {radius}: {region_work} pixels in regions, {whole_work} for the whole frame"
+                );
+            }
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1465,7 +1521,7 @@ mod tests {
                 f.frame();
             }
             assert_eq!(f.app.blur.capability(), crate::blur::Capability::Available);
-            let plain = f.pixels(false);
+            let plain = f.pixels();
             let plain_jobs = f.jobs;
             let original_camera = f.app.cam;
             let original_background = f.app.preferences.viewport_background;
@@ -1483,9 +1539,9 @@ mod tests {
                     f.frame();
                 }
                 // The zero reference uses the same camera, view settings and panel alpha.
-                let zero_reference = f.pixels(false);
+                let zero_reference = f.pixels();
                 f.frame();
-                assert_eq!(zero_reference, f.pixels(false), "stable zero reference");
+                assert_eq!(zero_reference, f.pixels(), "stable zero reference");
                 f.evidence(&format!("blur-{}-0-{}", if dark { "dark" } else { "light" }, if srgb { "srgb" } else { "unorm" }));
                 for radius in [8.0, 18.0, 40.0] {
                     f.app.cam = original_camera;
@@ -1505,23 +1561,16 @@ mod tests {
                     assert!(!panels.is_empty());
                     assert!(panels.iter().all(|panel| panel.paint_alpha == Some(180)), "the shared panels keep the ribbon's blur tint alpha");
                     assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
-                    let source = f.pixels(true);
-                    let resting = f.pixels(false);
+                    let resting = f.pixels();
                     f.frame();
                     let after = f.app.blur.counters();
-                    assert_eq!(before.source_passes, after.source_passes, "resting source");
                     assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
-                    assert!(after.cache_hits > before.cache_hits);
-                    assert_eq!(f.pixels(true), source);
-                    assert_eq!(f.pixels(false), resting, "resting ordered composition is stable");
-                    // Change panels only: the immutable source must be byte-identical.
+                    assert_eq!(f.pixels(), resting, "resting ordered composition is stable");
                     f.app.blur.set_surface_alpha(Some(120));
                     f.frame();
-                    assert_eq!(f.pixels(true), source);
-                    assert_eq!(f.app.blur.counters().source_passes, after.source_passes);
                     f.app.blur.set_surface_alpha(Some(180));
                     f.frame();
-                    let positive = f.pixels(false);
+                    let positive = f.pixels();
                     let changed_pixels = zero_reference
                         .as_chunks::<4>()
                         .0
@@ -1532,19 +1581,19 @@ mod tests {
                     assert!(changed_pixels > 0, "radius {radius} must change RGB pixels with the same camera, alpha and theme");
                     let name = format!("blur-{}-{}-{}", if dark { "dark" } else { "light" }, radius as u32, if srgb { "srgb" } else { "unorm" });
                     f.evidence(&name);
+                    // There is no source to rebuild: a moved camera is only another frame to blur.
                     let before = f.app.blur.counters();
                     f.app.cam.yaw += 0.2;
                     f.frame();
                     let after = f.app.blur.counters();
-                    assert_eq!(after.source_passes, before.source_passes + 1);
                     assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
+                    assert_eq!(after.textures_created, before.textures_created, "a moved camera reuses storage");
                     f.app.cam = original_camera;
                     f.frame();
                     f.app.preferences.viewport_background = Some([3, 37, 93]);
                     let before = f.app.blur.counters();
                     f.frame();
                     let after = f.app.blur.counters();
-                    assert_eq!(after.source_passes, before.source_passes + 1, "background invalidation");
                     assert_eq!(after.textures_created, before.textures_created, "background changes reuse storage");
                     f.app.preferences.viewport_background = original_background;
                     f.frame();
@@ -1554,11 +1603,9 @@ mod tests {
                 f.frame();
                 let reduced = f.app.blur.counters();
                 assert_eq!(f.app.blur.radius(), 40.0);
-                assert_eq!(reduced.source_passes, before.source_passes + 1, "tier change invalidates the source cache");
                 assert_backdrop_passes(before, reduced, 3);
                 f.frame();
                 let cached = f.app.blur.counters();
-                assert_eq!(cached.source_passes, reduced.source_passes, "reduced tier has its own stable source cache");
                 assert_backdrop_passes(reduced, cached, 3);
                 f.app.blur_session.guard.cap = 5;
                 f.frame();
@@ -1567,7 +1614,7 @@ mod tests {
                 for _ in 0..2 {
                     f.frame();
                 }
-                assert_eq!(zero_reference, f.pixels(false), "on -> off preserves the fixed scene and tint");
+                assert_eq!(zero_reference, f.pixels(), "on -> off preserves the fixed scene and tint");
             }
             f.app.blur.set_surface_alpha(None);
             f.app.cam = original_camera;
@@ -1577,17 +1624,16 @@ mod tests {
             for _ in 0..3 {
                 f.frame();
             }
-            let zero = f.pixels(false);
+            let zero = f.pixels();
             let before = f.app.blur.counters();
             for _ in 0..3 {
                 f.frame();
             }
-            assert_eq!(zero, f.pixels(false));
+            assert_eq!(zero, f.pixels());
             assert_eq!(plain, zero, "on -> off restores the original decoded pixels");
             assert_eq!(plain_jobs, f.jobs, "plain primitive count is restored");
             assert_eq!(before.textures_created, f.app.blur.counters().textures_created);
             assert_eq!(before.markers_emitted, f.app.blur.counters().markers_emitted);
-            assert_eq!(before.source_passes, f.app.blur.counters().source_passes);
             assert_eq!(f.app.blur.counters().live_bytes, 0);
             assert!(f.renderer.read().frame_compositor.is_none());
             assert!(plain.iter().any(|v| *v != 0));
@@ -1595,99 +1641,141 @@ mod tests {
         }
     }
 
+    /// A frame with only egui-painted content (no viewport callback anywhere): stripes under an
+    /// optional panel with a translucent fill, drawn as window `viewport`.
     #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn blur_steady_frame_benchmark() {
-        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
-        f.app.blur.set_surface_alpha(Some(180));
-        let mut rows = Vec::new();
-        for radius in [0.0, 18.0, 0.0] {
-            f.radius(radius);
-            for _ in 0..6 {
-                f.frame();
+    fn plain_frame(f: &mut BlurFixture, ctx: &egui::Context, viewport: egui::ViewportId, translucent: bool) {
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(f.size[0] as f32, f.size[1] as f32))),
+            time: Some(1.0),
+            focused: true,
+            viewport_id: viewport,
+            ..Default::default()
+        };
+        raw.viewports.insert(viewport, Default::default());
+        let app = &mut f.app;
+        let mut out = ctx.run_ui(raw, |ui| {
+            let _blur = app.blur.begin(ui.ctx());
+            for i in 0..40 {
+                let x = i as f32 * 20.0;
+                let color = if i % 2 == 0 { egui::Color32::from_rgb(230, 230, 230) } else { egui::Color32::from_rgb(20, 20, 20) };
+                ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(20.0, 600.0)), 0.0, color);
             }
-            let before = f.app.blur.counters();
-            let mut times: Vec<f64> = (0..30).map(|_| f.frame()).collect();
-            times.sort_by(f64::total_cmp);
-            let after = f.app.blur.counters();
-            assert_eq!(after.source_passes, before.source_passes);
-            if radius == 0.0 {
-                assert_eq!(after.blur_passes, before.blur_passes);
-                assert_eq!(after.markers_drawn, before.markers_drawn);
-            } else {
-                assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
-                assert_eq!(after.cache_hits - before.cache_hits, 30, "all resting sources are cached");
-            }
-            assert_eq!(after.textures_created, before.textures_created);
-            assert_eq!(after.buffers_created, before.buffers_created);
-            assert_eq!(after.bind_groups_created, before.bind_groups_created);
-            assert_eq!(after.pipelines_created, before.pipelines_created);
-            rows.push(serde_json::json!({"radius_px":radius, "samples":times.len(), "min_ms":times[0],
-                "median_ms":(times[14] + times[15]) / 2.0, "max_ms":times[29], "before":before, "after":after}));
-        }
-        if let Some(dir) = std::env::var_os("SOLIDCRAFT_BLUR_EVIDENCE") {
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(std::path::PathBuf::from(dir).join("fixture-frame-timings.json"), serde_json::to_vec_pretty(&rows).unwrap()).unwrap();
-        }
-        eprintln!("full egui UI/encode/GPU-completion milliseconds: {rows:?}");
+            let alpha = if translucent { 120 } else { 255 };
+            let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(20, 30, 60, alpha)).corner_radius(8).inner_margin(12);
+            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
+                ui.set_min_size(egui::vec2(300.0, 200.0));
+            });
+        });
+        super::test_support::paint_egui_output_in(viewport, ctx, &mut out, &f.renderer, &f.device, &f.queue, &f.output);
     }
 
+    /// With nothing to blur, a frame is the ordinary pass: no marker, no texture, no extra pass,
+    /// and the pixels of blur off (#19213).
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn blur_suspend_releases_targets() {
+    fn blur_frame_without_a_marker_takes_the_ordinary_pass() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
-        f.app.blur.set_surface_alpha(Some(180));
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            plain_frame(&mut f, &ctx, egui::ViewportId::ROOT, false);
+        }
+        let plain = f.pixels();
+        // Radius on, but the only panel is opaque: nothing asks for a backdrop.
         f.radius(18.0);
         for _ in 0..3 {
-            f.frame();
+            plain_frame(&mut f, &ctx, egui::ViewportId::ROOT, false);
         }
-        assert!(f.app.blur.counters().live_textures > 0);
-        f.renderer.read().frame_compositor.as_ref().unwrap().suspend();
-        assert_eq!(f.app.blur.counters().live_bytes, 0);
-        f.frame();
-        assert!(f.app.blur.counters().live_textures > 0);
-        f.radius(0.0);
-        assert_eq!(f.app.blur.counters().live_textures, 0);
-        assert_eq!(f.app.blur.counters().live_bind_groups, 0);
-        assert_eq!(f.app.blur.counters().live_pipelines, 0);
-        assert_eq!(f.app.blur.counters().live_buffers, 0);
+        let counters = f.app.blur.counters();
+        assert_eq!((counters.markers_emitted, counters.markers_drawn), (0, 0), "no surface is translucent");
+        assert_eq!((counters.composition_passes, counters.present_passes, counters.blur_passes, counters.blur_pixels), (0, 0, 0, 0));
+        assert_eq!((counters.textures_created, counters.pipelines_created, counters.live_bytes), (0, 0, 0));
+        assert_eq!(f.pixels(), plain, "the ordinary pass draws the frame as with blur off");
     }
 
+    /// The blur needs nothing from any view: a translucent panel over plain egui painting, with no
+    /// viewport callback in the frame, blurs what is under it (#19213).
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn blur_late_layer_transform_moves_source_and_invalidates_cache() {
+    fn blur_works_with_no_viewport_callback_in_the_frame() {
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            plain_frame(&mut f, &ctx, egui::ViewportId::ROOT, true);
+        }
+        let zero = f.pixels();
+        f.evidence("no-viewport-panel-0");
+        f.radius(18.0);
+        for _ in 0..3 {
+            plain_frame(&mut f, &ctx, egui::ViewportId::ROOT, true);
+        }
+        f.evidence("no-viewport-panel-18");
+        let counters = f.app.blur.counters();
+        assert!(counters.markers_drawn > 0 && counters.blur_runs > 0, "the panel asked for and drew a backdrop");
+        assert_eq!(f.app.blur.capability(), crate::blur::Capability::Available);
+        assert_ne!(f.pixels(), zero, "the stripes under the translucent panel are blurred");
+    }
+
+    /// A native pop-out window blurs behind its own translucent panels (#19213).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_pop_out_window_blurs_its_own_panels() {
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
+        f.radius(18.0);
+        let popout = egui::ViewportId::from_hash_of("blur_popout_fixture");
+        let ctx = crate::fonts::test_context();
+        for _ in 0..4 {
+            let mut raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(f.size[0] as f32, f.size[1] as f32))),
+                time: Some(1.0),
+                focused: true,
+                viewport_id: popout,
+                ..Default::default()
+            };
+            raw.viewports.insert(popout, Default::default());
+            let app = &mut f.app;
+            let mut out = ctx.run_ui(raw, |ui| {
+                let _blur = app.blur.begin(ui.ctx());
+                ui.painter().rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(200, 40, 40));
+                let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(20, 30, 60, 120)).corner_radius(8).inner_margin(12);
+                crate::ui_kit::Container::show_backing(ui, frame, |ui| {
+                    ui.label("pop-out panel");
+                });
+                // A surface that is not a container host asks for its own backdrop.
+                let own = egui::Rect::from_min_size(egui::pos2(300.0, 300.0), egui::vec2(120.0, 80.0));
+                ui.painter().add(crate::blur::Backdrop::new(own).corners(6).shape(ui.painter()));
+            });
+            super::test_support::paint_egui_output_in(popout, &ctx, &mut out, &f.renderer, &f.device, &f.queue, &f.output);
+        }
+        f.evidence("pop-out-panel-18");
+        let counters = f.app.blur.counters();
+        assert!(counters.markers_drawn > 0, "the pop-out panel drew its backdrop");
+        assert!(counters.blur_runs > 0);
+        assert!(counters.markers_emitted >= 8, "the container panel and the Backdrop each emitted a marker per frame");
+        f.radius(0.0);
+        let ctx = crate::fonts::test_context();
+        let shape = crate::blur::Backdrop::new(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(10.0, 10.0)))
+            .shape(&ctx.layer_painter(egui::LayerId::background()));
+        assert!(matches!(shape, egui::Shape::Noop), "blur off: a Backdrop is nothing");
+        assert_eq!(f.app.blur.capability_for(popout), crate::blur::Capability::Available);
+    }
+
+    /// A layer transform applied after the UI was emitted moves the markers with it: the blur
+    /// follows the transformed pixels (#19213).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_late_layer_transform_keeps_blurring_placed_panels() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.radius(18.0);
         f.app.blur.set_surface_alpha(Some(180));
-        for _ in 0..6 {
+        for _ in 0..4 {
             f.frame();
         }
-        let local = f.app.blur.source_geometry().unwrap();
+        f.root_transform = egui::emath::TSTransform { translation: egui::vec2(-23.0, 17.0), scaling: 0.75 };
+        f.frame();
         let before = f.app.blur.counters();
-        let original = f.pixels(true);
-        let x = (local[2].right() - 4.0).clamp(0.0, (f.size[0] - 1) as f32) as usize;
-        let y = local[2].center().y.clamp(0.0, (f.size[1] - 1) as f32) as usize;
-        let offset = (y * f.size[0] as usize + x) * 4;
-        let outside = solidcraft_theme::Tokens::get().app_bar.to_array();
-        assert_ne!(&original[offset..offset + 4], &outside, "probe starts in the viewport background");
-        // Same local geometry/camera; applied after app.ui has emitted the callback.
-        let transform = egui::emath::TSTransform { translation: egui::vec2(-23.0, 17.0), scaling: 0.75 };
-        f.root_transform = transform;
         f.frame();
-        assert_eq!(f.app.blur.source_geometry().unwrap(), local.map(|r| transform.mul_rect(r)), "viewport, clip and background all transform once");
-        let after = f.app.blur.counters();
-        assert_eq!(after.source_passes, before.source_passes + 1);
-        assert_backdrop_passes(before, after, 3);
-        assert_eq!(after.textures_created, before.textures_created, "placement changes reuse storage");
-        assert_eq!(&f.pixels(true)[offset..offset + 4], &outside, "old location is outside the transformed clip");
-        f.frame();
-        assert_eq!(f.app.blur.counters().source_passes, after.source_passes, "unchanged transformed placement is cached");
-        assert_backdrop_passes(after, f.app.blur.counters(), 3);
-        // A forced miss must still paint at the transformed location, not merely hash it.
-        f.app.cam.yaw += 0.1;
-        f.frame();
-        assert_eq!(f.app.blur.counters().source_passes, after.source_passes + 1);
-        assert_eq!(&f.pixels(true)[offset..offset + 4], &outside);
+        assert_backdrop_passes(before, f.app.blur.counters(), 3);
     }
 
     /// Bodies are drawn from their plans on the GPU from the frame the evaluation shader has
@@ -1949,5 +2037,14 @@ mod background_picture_tests {
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbaImage::new(40, 20).write_to(&mut png, image::ImageFormat::Png).unwrap();
         assert_eq!(super::decode_background(png.get_ref(), 10).unwrap().size, [10, 5]);
+    }
+
+    /// #19138: a photo stored turned (EXIF orientation 6) is the background picture upright: a
+    /// 60 x 40 file is shown 40 x 60, as it is when it carries no tag.
+    #[test]
+    fn a_background_photo_with_an_exif_orientation_stands_upright() {
+        let plain = super::decode_background(&crate::test_pictures::jpeg(40, 60, None), 8192).unwrap();
+        let turned = super::decode_background(&crate::test_pictures::jpeg(60, 40, Some(6)), 8192).unwrap();
+        assert_eq!((plain.size, turned.size), ([40, 60], [40, 60]));
     }
 }

@@ -1327,6 +1327,65 @@ fn rust_edgeuse_body(
     Ok(v)
 }
 
+/// The edge-use op's B-rep and the selected edge use, before its body (`body` false) or
+/// after it, what the case's row reports (`None` where the op refuses before its body or
+/// its body reports `null_deref`, as the row does, so only states the row has are seen). For
+/// the WR-493 trim certificate (`refit::replay`).
+#[cfg(test)]
+pub(crate) fn eu_case(case: &Case, body: bool) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    let Inputs::CrEu {
+        brep,
+        eu,
+        tol,
+        ang,
+        tan,
+        r,
+        r2,
+        fu,
+        fv,
+    } = case.parse::<Inputs>()?
+    else {
+        return Ok(None);
+    };
+    let Ok(mut s) = eu_setup(&brep, eu)? else {
+        return Ok(None);
+    };
+    // the op's own order: its refusals before the body, then the body's own status
+    if edgeuse_refusal(&s)?.is_some() {
+        return Ok(None);
+    }
+    if body {
+        let out = rust_edgeuse_body(&mut s.brep, s.eu, tol, ang, tan, r, r2, fu, fv)
+            .map_err(|e| he(&e))?;
+        if out.first() == Some(&-2.0) {
+            return Ok(None);
+        }
+    }
+    Ok(Some((s.brep, s.eu)))
+}
+
+/// The refusal the edge-use op reports before its body: inexact geometry at the selected
+/// edge use, or at its radial's face and edge.
+fn edgeuse_refusal(s: &Setup) -> Result<Option<Output>, HarnessError> {
+    if let Some(o) = inexact_geometry(s) {
+        return Ok(Some(o));
+    }
+    // the radial's face and edge too
+    if has_prim(&s.brep, s.eu).map_err(|e| he(&e))? {
+        if let Some(radial) = eu1::radial(&s.brep, s.eu).map_err(|e| he(&e))? {
+            let probe = Setup {
+                brep: s.brep.clone_standing_for_self().map_err(|e| he(&e))?,
+                eu: radial,
+                types: s.types.clone(),
+            };
+            if let Some(o) = inexact_geometry(&probe) {
+                return Ok(Some(o));
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
     let Inputs::CrEu {
         brep,
@@ -1346,21 +1405,8 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
-    if let Some(o) = inexact_geometry(&s) {
+    if let Some(o) = edgeuse_refusal(&s)? {
         return Ok(o);
-    }
-    // the radial's face and edge too
-    if has_prim(&s.brep, s.eu).map_err(|e| he(&e))? {
-        if let Some(radial) = eu1::radial(&s.brep, s.eu).map_err(|e| he(&e))? {
-            let probe = Setup {
-                brep: s.brep.clone_standing_for_self().map_err(|e| he(&e))?,
-                eu: radial,
-                types: s.types.clone(),
-            };
-            if let Some(o) = inexact_geometry(&probe) {
-                return Ok(o);
-            }
-        }
     }
     match rust_edgeuse_body(&mut s.brep, s.eu, *tol, *ang, *tan, *r, *r2, *fu, *fv) {
         Ok(body) => Ok(eu_output(&body)),

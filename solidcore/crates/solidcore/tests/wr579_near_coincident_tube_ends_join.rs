@@ -487,15 +487,12 @@ fn wr575_every_fix_at_1e_6_adds_no_check_failure() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// SolidCraft's profile, every fix on but `fillet_refuse_rounds_breaking_through` (its
-/// `HELD_BACK`).
+/// SolidCraft's profile: every fix on.
 fn solidcraft() -> Kernel {
-    let mut k = Kernel {
+    Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
-    };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
-    k
+    }
 }
 
 /// `b` checks clean at Level 2.
