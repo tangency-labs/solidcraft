@@ -1218,7 +1218,6 @@ fn trim_other_uv_curves(
     });
     tk.seed = k.seed;
     tk.cancel.clone_from(&k.cancel);
-    tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
         if x == this {
             continue;
@@ -4001,9 +4000,8 @@ mod tests {
         use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
         use crate::nurbs::b_spline_curve::BSplineCurve;
 
-        for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+        {
+            let k = Kernel::default();
             let uv = BSplineCurve::create_circle_segment(
                 2,
                 &Axis2Placement::default(),
@@ -4049,29 +4047,23 @@ mod tests {
                     gap
                 })
                 .fold(0.0, f64::max);
-            if enabled {
-                assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
-            } else {
-                // the circle segment is rational: WR-575 keeps its short end span, so the
-                // trimmed curve is the original's sub-arc with or without the UV fix
-                assert!(gap < 1e-12, "rational end span was lost: gap {gap}");
-            }
+            // the circle segment is rational: WR-575 keeps its short end span, and a UV
+            // curve keeps it anyway (WR-441), so the trimmed curve is the original's sub-arc
+            assert!(gap < 1e-12, "short UV end span was lost: gap {gap}");
         }
     }
 
     /// As [`uv_trim_fix_survives_edge_zone_kernel`] on a polynomial UV curve (weights
-    /// 1), whose short end span upstream's cleanup still removes by default: the UV fix
-    /// must reach the edge-zone kernel the trim runs in, or the span goes and the curve
-    /// moves.
+    /// 1), whose short end span upstream's cleanup removes: the edge-zone kernel the
+    /// trim runs in keeps it (WR-441), so the curve does not move.
     #[test]
     fn uv_trim_fix_survives_edge_zone_kernel_on_a_polynomial_curve() {
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 
-        for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+        {
+            let k = Kernel::default();
             let r = 0.14;
             let mut nurb = allocate_nurb_curve(4, 2, 7).unwrap();
             nurb.cpts_mut().copy_from_slice(&[
@@ -4113,11 +4105,7 @@ mod tests {
                     .length()
                 })
                 .fold(0.0, f64::max);
-            if enabled {
-                assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
-            } else {
-                assert!(gap > 1e-9, "default gap {gap}");
-            }
+            assert!(gap < 1e-12, "short UV end span was lost: gap {gap}");
         }
     }
 

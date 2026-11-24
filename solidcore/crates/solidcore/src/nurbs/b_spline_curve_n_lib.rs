@@ -96,13 +96,11 @@
 //!   (the `SmCurve.h` default), computed by [`BSplineCurve::evaluate`].
 //!   `sm_CrvTrim` returns the non-`NL_YES` flag `NL_INP_ERR` for `ur <= ul` and
 //!   upstream then dereferences its `NULL` result; the port returns `InvalidInput`.
-//! - **Opt-in UV trimming (#1114).** With
-//!   [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`], degenerate
-//!   end-span removal applies only to dimension-3 model curves. UV spans are in
-//!   surface parameter units and must not be removed using a 3D zone tolerance.
-//!   A short UV end span that collapses to a pole (its control points within check
-//!   test #15's tolerance `SM_ZONE_TOL_3D / 10`) is still removed as upstream does
-//!   (#2129). The default retains pinned SMLib behavior.
+//! - **UV trimming (WR-441, #1114).** Degenerate end-span removal applies only to
+//!   dimension-3 model curves. UV spans are in surface parameter units and must not
+//!   be removed using a 3D zone tolerance. A short UV end span that collapses to a
+//!   pole (its control points within check test #15's tolerance `SM_ZONE_TOL_3D / 10`)
+//!   is still removed as upstream does (#2129).
 //! - **Rational end spans (WR-575, #1529).** A rational trimmed curve (a conic's NURB)
 //!   keeps its short end spans: upstream's removal stretches the rest of the curve and
 //!   moves it off its conic. A model curve's trim end whose span to an end of the knot
@@ -2630,10 +2628,9 @@ impl BSplineCurve {
     /// of the natural interval or of a knot snap to it, and `trim_interval` is
     /// updated to the snapped values; an interval containing the natural interval
     /// changes nothing. Degenerate end segments created by the trim (shorter than the
-    /// zone tolerance mapped to parameter space) are removed. With
-    /// [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`] enabled,
-    /// that removal applies only to dimension-3 model curves, preserving UV spans
-    /// exactly, except a short UV end span that collapses to a pole (#2129). A
+    /// zone tolerance mapped to parameter space) are removed from dimension-3 model
+    /// curves only (WR-441), preserving UV spans exactly, except a short UV end span
+    /// that collapses to a pole (#2129). A
     /// rational curve keeps its short end spans, and a model curve's end within a pole
     /// of an interior knot of the knot span holding it snaps to that knot, unless the
     /// curve is degenerate at the zone tolerance (WR-575, #2424). With
@@ -2824,11 +2821,10 @@ impl BSplineCurve {
             // model curve's ends are at the knot then (above), and a UV curve, whose
             // ends are its edge's, is cleaned as upstream
             let keeps_rational = keeps_rational && cur1.is_rational() && !pole_end;
-            // `fixes.bspline_trim_preserves_uv_spans` (WR-441): a UV curve keeps its
-            // short end spans, unless one collapses to a pole that check test #15 would
-            // report (`SM_ZONE_TOL_3D / 10`); that curve is cleaned as upstream (#2129)
-            let cleans_spans =
-                !k.fixes.bspline_trim_preserves_uv_spans || self.dim == 3 || pole_end;
+            // (WR-441) a UV curve keeps its short end spans, unless one collapses to a
+            // pole that check test #15 would report (`SM_ZONE_TOL_3D / 10`); that curve
+            // is cleaned as upstream (#2129)
+            let cleans_spans = self.dim == 3 || pole_end;
             if cleans_spans
                 && !keeps_rational
                 && ((head < zone_tol_1d_min && knots.len() > 2)
@@ -3626,8 +3622,7 @@ mod tests {
 
     #[test]
     fn uv_trim_keeps_short_head_and_tail_spans() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_trim_preserves_uv_spans = true;
+        let k = Kernel::default();
         for mode in [TrimMode::Notify, TrimMode::Silent] {
             for (min, max) in [(0.5 - 3.5e-6, 0.9), (0.1, 0.5 + 3.5e-6)] {
                 let original = short_span_arc(2);
@@ -3645,38 +3640,25 @@ mod tests {
     }
 
     #[test]
-    fn uv_trim_fix_preserves_default_and_model_space_cleanup() {
-        let default = Kernel::default();
-        assert!(!default.fixes.bspline_trim_preserves_uv_spans);
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_preserves_uv_spans = true;
-        for dim in [2, 3] {
-            for (min, max) in [(0.5 - 3.5e-6, 0.9), (0.1, 0.5 + 3.5e-6)] {
-                let original = short_span_arc(dim);
-                let ivl = Extent1d::from_min_max(min, max);
-                let mut old = original.clone();
-                let mut old_ivl = ivl;
-                old.trim(&default, &mut old_ivl, TrimMode::Notify).unwrap();
-                // This is the defect reproduced by the pinned reference: the
-                // removed UV piece becomes a gap larger than the edge tolerance.
-                let gap = lifted_trim_gap(&original, &old, ivl);
-                assert!(gap > default.tolerances.zone_tol_3d, "gap {gap}");
-                if dim == 3 {
-                    let mut model = original.clone();
-                    let mut model_ivl = ivl;
-                    model
-                        .trim(&fixed, &mut model_ivl, TrimMode::Notify)
-                        .unwrap();
-                    assert_eq!(old.nurb, model.nurb);
-                }
-            }
+    fn model_space_trim_still_removes_short_end_spans() {
+        let k = Kernel::default();
+        for (min, max) in [(0.5 - 3.5e-6, 0.9), (0.1, 0.5 + 3.5e-6)] {
+            let original = short_span_arc(3);
+            let ivl = Extent1d::from_min_max(min, max);
+            let mut model = original.clone();
+            let mut model_ivl = ivl;
+            model.trim(&k, &mut model_ivl, TrimMode::Notify).unwrap();
+            // upstream's `N_CrvRemoveDegenSegs` still runs on a model curve: the short
+            // span at the interior knot is gone (a UV curve keeps it, above)
+            assert_eq!(model.knots(None).unwrap().0, vec![min, max]);
+            let gap = lifted_trim_gap(&original, &model, ivl);
+            assert!(gap > k.tolerances.zone_tol_3d, "gap {gap}");
         }
     }
 
     #[test]
     fn uv_trim_fix_preserves_interval_only_and_curve_dispatch() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_trim_preserves_uv_spans = true;
+        let k = Kernel::default();
         let original = short_span_arc(2);
         let mut untouched = original.clone();
         let mut ivl = Extent1d::from_min_max(0.5 - 3.5e-6, 0.9);
