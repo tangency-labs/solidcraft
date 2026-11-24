@@ -250,8 +250,11 @@ enum Role {
 impl Builder {
     fn add(&mut self, kind: FeatureKind, name: &str) -> Result<u64, String> {
         // Two sketches (or planes) may not share a name; FreeCAD labels can repeat, so number it.
-        let free =
-            if self.doc.name_clash(&kind, name) { solidcraft_doc::copy_name(name, |n| self.doc.name_clash(&kind, n)) } else { name.to_string() };
+        let free = if self.doc.name_clash(&kind, name, 0) {
+            solidcraft_doc::copy_name(name, |n| self.doc.name_clash(&kind, n, 0))
+        } else {
+            name.to_string()
+        };
         self.doc.add_feature(kind, Some(&free)).map_err(|e| format!("{name}: {e}"))
     }
 

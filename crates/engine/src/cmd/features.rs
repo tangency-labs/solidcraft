@@ -1191,7 +1191,8 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         check_plane_name(n, "construct.plane")?;
     }
     let profile_frame = cross_component_profile_frame(s, &kind);
-    let id = s.doc_mut().add_feature(kind, name)?;
+    let comp = s.active_component;
+    let id = s.doc_mut().add_feature_in(kind, name, comp)?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.participants = participants;
         f.touching = touching;
@@ -1201,12 +1202,6 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         f.profile_frame = profile_frame;
     }
     s.doc_mut().name_feature_inputs(id);
-    let comp = s.active_component;
-    if comp != 0
-        && let Some(f) = s.doc_mut().feature_mut(id)
-    {
-        f.component = comp;
-    }
     let mut names = string_list(UNKNOWN_COMMAND, p, "body_names")?;
     if let Some(b) = str_(p, "body_name") {
         names.insert(0, b.to_string());
@@ -3204,7 +3199,12 @@ fn source_features(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidcraft_d
     }
     // Names stay input only: the feature stores its seeds by id (#1134), resolved the way
     // evaluation used to resolve them (a shared sketch name does not win over the geometry).
-    names.iter().map(|n| s.doc.seed_feature(n).map(|f| f.id.into()).ok_or_else(|| bad(cmd, format!("no feature `{n}`")))).collect()
+    // The seed is found in the component that asks for it, since a name belongs to the
+    // component that holds the feature (#11258).
+    names
+        .iter()
+        .map(|n| s.doc.seed_feature_in(n, s.active_component).map(|f| f.id.into()).ok_or_else(|| bad(cmd, format!("no feature `{n}`"))))
+        .collect()
 }
 
 /// An axis line from its parameter, with what it follows: an edge or round face of the model
@@ -3833,14 +3833,14 @@ pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcore_record
 pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::PlaneRef;
     const WANT: &str = PLANE_FORMS;
-    let construction = |r: &str| match s.doc.find_feature(r) {
+    let construction = |r: &str| match s.doc.find_feature_in(r, s.active_component) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into(), placement: None }),
         Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
         None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
     };
     match v {
         Some(Value::String(n)) if solidcore_record::Plane::named(n.trim()).is_some() => {
-            if let Some(f) = s.doc.find_feature(n.trim())
+            if let Some(f) = s.doc.find_feature_in(n.trim(), s.active_component)
                 && matches!(f.kind, FeatureKind::ConstructionPlane { .. })
             {
                 return Err(bad(
@@ -3859,7 +3859,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             // A construction plane feature by name first, so a name that looks like a datum key
             // still reaches it; a component origin plane is saved as its datum, so it follows
             // the placement instead of staying where it was picked.
-            if s.doc.find_feature(n.trim()).is_some() {
+            if s.doc.find_feature_in(n.trim(), s.active_component).is_some() {
                 return construction(n.trim());
             }
             match crate::origins::datum(n).filter(|d| matches!(d.item, DatumItem::XY | DatumItem::XZ | DatumItem::YZ)) {

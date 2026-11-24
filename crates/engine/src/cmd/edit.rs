@@ -536,7 +536,7 @@ fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
 pub(super) fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
     match v {
         Some(Value::Number(n)) => n.as_u64().and_then(|id| s.doc.feature(id)).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{n}`"))),
-        Some(Value::String(name)) => s.doc.resolve_feature_name(name).map(|f| f.id).map_err(|e| bad(cmd, e.to_string())),
+        Some(Value::String(name)) => s.doc.resolve_feature_name_in(name, s.active_component).map(|f| f.id).map_err(|e| bad(cmd, e.to_string())),
         _ => Err(bad(cmd, "`feature` must be an id or name")),
     }
 }
@@ -603,7 +603,10 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
         .filter(|n| !n.is_empty() && n.chars().count() <= 128)
         .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     let old = s.doc.feature(id).map(|f| f.name.clone()).ok_or_else(|| bad(cmd, "feature"))?;
-    if s.doc.features.iter().any(|f| f.name == name && f.id != id) {
+    // A name belongs to the component that holds the feature (#11258): the name another
+    // component holds is free here, and the name this component holds is refused.
+    let component = s.doc.feature(id).map(|f| f.component).unwrap_or(0);
+    if s.doc.features.iter().any(|f| f.name == name && f.id != id && f.component == component) {
         return Err(bad(cmd, format!("another feature is called `{name}`")));
     }
     if s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. })) {
@@ -612,7 +615,10 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     if name == old {
         return reply(cmd, TimelineRenameResult { feature: id, name: name.to_string(), param_warnings: Vec::new() });
     }
-    let names = BTreeMap::from([(old.clone(), name.to_string())]);
+    // A name that more than one feature holds cannot be resolved to one of them: the references
+    // that name it are left as they are, so they keep reading the feature that kept the name.
+    let held_by_one = s.doc.features.iter().filter(|f| f.name == old).count() == 1;
+    let names = if held_by_one { BTreeMap::from([(old.clone(), name.to_string())]) } else { BTreeMap::new() };
     let sketches = BTreeMap::new();
     let doc = s.doc_mut();
     if let Some(f) = doc.feature_mut(id) {
@@ -621,7 +627,9 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     for f in doc.features.iter_mut() {
         f.kind.remap_refs(&sketches, &names);
     }
-    doc.rename_feature_keys(&old, name);
+    if held_by_one {
+        doc.rename_feature_keys(&old, name);
+    }
     // The hidden list follows in `Session::refresh_from` (undo and redo too).
     for sel in &mut s.selection {
         if let Sel::Plane { name: n } = sel
@@ -1462,14 +1470,14 @@ const NOT_EDITABLE: &[&str] = &["id", "type", "name", "suppressed", "param_names
 /// timeline.edit keeps accepting names for pattern and mirror seeds and for construction planes
 /// (#1134): each name in the merged definition resolves to the feature's id, refused when it
 /// finds no feature, as the commands that take names refuse it.
-fn resolve_feature_names(v: &mut Value, doc: &solidcraft_doc::Document, cmd: &str) -> Result<()> {
+fn resolve_feature_names(v: &mut Value, doc: &solidcraft_doc::Document, component: u64, cmd: &str) -> Result<()> {
     match v {
         Value::Object(o) => {
             if o.get("type").and_then(Value::as_str) == Some("construction") {
                 // Only a construction plane's name becomes an id: a revolve axis with the same
                 // shape names a construction axis, which is still keyed by name.
                 if let Some(name) = o.get("name").and_then(Value::as_str)
-                    && let Some(f) = doc.find_feature(name).filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }))
+                    && let Some(f) = doc.find_feature_in(name, component).filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }))
                 {
                     o.remove("name");
                     o.insert("feature".into(), json!(f.id));
@@ -1477,20 +1485,20 @@ fn resolve_feature_names(v: &mut Value, doc: &solidcraft_doc::Document, cmd: &st
                 return Ok(());
             }
             for (_, x) in o.iter_mut() {
-                resolve_feature_names(x, doc, cmd)?;
+                resolve_feature_names(x, doc, component, cmd)?;
             }
             if let Some(Value::Array(seeds)) = o.get_mut("features") {
                 for s in seeds.iter_mut() {
                     if let Value::String(name) = s {
                         let name = name.clone();
-                        let id = doc.seed_feature(&name).ok_or_else(|| bad(cmd, format!("no feature `{name}`")))?;
+                        let id = doc.seed_feature_in(&name, component).ok_or_else(|| bad(cmd, format!("no feature `{name}`")))?;
                         *s = json!(id.id);
                     }
                 }
             }
             Ok(())
         }
-        Value::Array(a) => a.iter_mut().try_for_each(|x| resolve_feature_names(x, doc, cmd)),
+        Value::Array(a) => a.iter_mut().try_for_each(|x| resolve_feature_names(x, doc, component, cmd)),
         _ => Ok(()),
     }
 }
@@ -1616,7 +1624,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let set = &set;
     let mut v = before.clone();
     merge(&mut v, set, 0);
-    resolve_feature_names(&mut v, &s.doc, cmd)?;
+    resolve_feature_names(&mut v, &s.doc, f.component, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
     // An older script's `coped_butt` is Butt with the frame's Coped ticked, as `frame.member` reads it. A corner's

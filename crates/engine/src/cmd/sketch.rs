@@ -1434,11 +1434,8 @@ fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_bod
     if !face::is_face(p) {
         super::component::to_active_frame(s, &mut kind);
     }
-    let id = s.doc_mut().add_feature(kind, name)?;
     let comp = s.active_component;
-    if let Some(f) = s.doc_mut().feature_mut(id) {
-        f.component = comp;
-    }
+    let id = s.doc_mut().add_feature_in(kind, name, comp)?;
     s.active_sketch = Some(id);
     s.sketching_view = Some(sketching_view);
     s.sketch_entry = Some(SketchEntry { sketch: id, ..before });

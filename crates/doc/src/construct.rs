@@ -294,8 +294,16 @@ fn bodies(st: &ModelState) -> impl Iterator<Item = &ModelBody> {
     st.bodies.iter().filter(|b| !b.body.is_mesh())
 }
 
-fn construct<'a>(st: &'a ModelState, name: &str) -> Result<&'a ConstructGeom> {
-    st.construct.iter().find(|c| c.name == name).map(|c| &c.geom).ok_or_else(|| DocError::Unknown(format!("construction `{name}`")))
+/// The construction geometry called `name` that `wanted` reads: an axis reference finds the axis
+/// and a point reference the point, so a plane that shares the name with an axis does not shadow
+/// it (#11258). A name that only the wrong kind has keeps the message the caller gives.
+fn construct_of<'a>(st: &'a ModelState, name: &str, wanted: impl Fn(&ConstructGeom) -> bool) -> Result<&'a ConstructGeom> {
+    st.construct
+        .iter()
+        .find(|c| c.name == name && wanted(&c.geom))
+        .or_else(|| st.construct.iter().find(|c| c.name == name))
+        .map(|c| &c.geom)
+        .ok_or_else(|| DocError::Unknown(format!("construction `{name}`")))
 }
 
 /// The face picked: (body, face index, point on it). A face picked with a name is the face the
@@ -541,7 +549,7 @@ pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
             }
             best.map(|(_, v)| v).ok_or_else(|| bad("there is no vertex"))
         }
-        GeoRef::ConstructPoint { name } => match construct(ctx.st, name)? {
+        GeoRef::ConstructPoint { name } => match construct_of(ctx.st, name, |g| matches!(g, ConstructGeom::Point(_)))? {
             ConstructGeom::Point(p) => Ok(*p),
             _ => Err(bad(format!("`{name}` is not a point"))),
         },
@@ -809,7 +817,7 @@ pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
             };
             Ok((Vec3::ZERO, d))
         }
-        GeoRef::Axis { name } => match construct(ctx.st, name)? {
+        GeoRef::Axis { name } => match construct_of(ctx.st, name, |g| matches!(g, ConstructGeom::Axis { .. }))? {
             ConstructGeom::Axis { origin, dir } => Ok((*origin, *dir)),
             _ => Err(bad(format!("`{name}` is not an axis"))),
         },

@@ -1655,6 +1655,31 @@ fn a_second_sketch_cannot_take_an_existing_sketch_name() {
     assert!(doc.add_feature(plane("XY"), Some("Angled X")).is_err());
 }
 
+/// #11258: a feature name belongs to the component that holds the feature. Two components may
+/// hold features with the same name, and a name the same component holds is refused.
+#[test]
+fn a_feature_name_is_unique_inside_its_component() {
+    let plane = || FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } };
+    let mut doc = Document::new("names");
+    let left = doc.add_component(Some("Left"), 0).unwrap();
+    let right = doc.add_component(Some("Right"), 0).unwrap();
+    let mid = doc.add_feature_in(plane(), Some("Mid"), left).unwrap();
+    // The same name in another component is free.
+    let other = doc.add_feature_in(plane(), Some("Mid"), right).unwrap();
+    assert_eq!(doc.feature(mid).unwrap().name, "Mid");
+    assert_eq!(doc.feature(other).unwrap().name, "Mid");
+    // The name is found in the component that asks for it.
+    assert_eq!(doc.resolve_feature_name_in("Mid", left).unwrap().id, mid);
+    assert_eq!(doc.resolve_feature_name_in("Mid", right).unwrap().id, other);
+    // Inside the component that holds it, the name is refused.
+    let error = doc.add_feature_in(plane(), Some("Mid"), right).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `Mid`"), "{error}");
+    // A plane's name is the component's: another kind of feature may not take it there.
+    let sketch = || FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() };
+    let error = doc.add_feature_in(sketch(), Some("Mid"), right).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `Mid`"), "{error}");
+}
+
 #[test]
 fn empty_boolean_targets_name_overlapping_component() {
     for (operation, offset) in [(Operation::Cut, 0.0), (Operation::Intersect, 0.0), (Operation::Cut, 40.0)] {
