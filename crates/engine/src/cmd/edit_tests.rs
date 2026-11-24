@@ -3011,7 +3011,11 @@ fn remove_history_keeps_references_to_the_body_faces() {
     run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 10]}, "name": "On Top"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [4, 4]}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.extrude", json!({"profiles": [{"point": [3, 3]}], "distance": 5, "operation": "new_body", "body_name": "Peg", "name": "Peg Pad"}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"profiles": [{"point": [3, 3]}], "distance": 5, "operation": "new_body", "body_name": "Peg", "name": "Peg Pad"}),
+    );
     run(&mut s, "appearance.assign", json!({"faces": [[5, 5, 10]], "color": "#ff0000"}));
     let (block, peg) = (body_shape(&s, "Block"), body_shape(&s, "Peg"));
     assert!((peg.3 - 20.0).abs() < 1e-6, "{peg:?}");
