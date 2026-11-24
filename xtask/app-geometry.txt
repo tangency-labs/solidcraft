@@ -649,6 +649,7 @@ crates/engine/src/mesh_lines/scene.rs:Shared::new triangles
 crates/engine/src/mesh_lines/scene.rs:drawing triangles
 crates/engine/src/mesh_lines/scene.rs:edge_on dot,triangles
 crates/engine/src/mesh_lines/scene.rs:triangle triangles
+crates/engine/src/pick_pieces.rs:grouped_selection_in triangles
 crates/engine/src/point_cloud_pick.rs:pick_cloud_ray dot,normalized
 crates/engine/src/point_cloud_pick.rs:pick_cloud_screen dot,normalized
 crates/engine/src/render_lights.rs:patch cross
@@ -1173,7 +1174,7 @@ crates/kernel/src/surfaces.rs:imp::cutting_planes cross,normalized
 crates/kernel/src/surfaces.rs:imp::mitre dot,normalized
 crates/kernel/src/surfaces.rs:imp::turn_of atan2,cross,dot
 crates/kernel/src/surfaces.rs:nearest_face triangles
-crates/kernel/src/surfaces.rs:revolve_sheet cross,dot,normalized
+crates/kernel/src/surfaces.rs:revolved_sheet cross,dot,normalized
 crates/kernel/src/surfaces.rs:smooth_runs dot
 crates/kernel/src/surfaces.rs:swept_from dot
 crates/kernel/src/sweep_path.rs:controlled_stations cross,dot,normalized
@@ -1501,7 +1502,6 @@ crates/ui-egui/src/viewport.rs:current_face dot
 crates/ui-egui/src/viewport.rs:edge_normals dot
 crates/ui-egui/src/viewport.rs:first_triangle_point triangles
 crates/ui-egui/src/viewport.rs:grid_centre dot
-crates/ui-egui/src/viewport.rs:grouped_selection_in triangles
 crates/ui-egui/src/viewport.rs:keeps_distances dot
 crates/ui-egui/src/viewport.rs:lies_on_section cross,dot,normalized
 crates/ui-egui/src/viewport.rs:look_part triangles

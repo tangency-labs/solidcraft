@@ -852,6 +852,40 @@ pub struct RevisionResult {
     pub param_warnings: Vec<String>,
 }
 
+/// `doc.info` reads no keys.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DocInfoParams {}
+
+/// A design file's size and time when the design was opened from it or last saved to it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct DiskStamp {
+    /// The file's size in bytes.
+    pub len: u64,
+    /// Its modification time in nanoseconds since the Unix epoch, as a decimal string (larger than a
+    /// JSON number holds exactly); null where the file system keeps no time.
+    pub modified_ns: Option<String>,
+}
+
+/// What `doc.info` returns. In a plugin run: the design the run started on, as it was before the run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct DocInfoResult {
+    /// The design's file; null until it is first saved.
+    pub path: Option<String>,
+    /// Opened read-only: a save to its own file is refused.
+    pub read_only: bool,
+    /// It has changes its file does not hold (as `document.inspect`'s `dirty`).
+    pub unsaved: bool,
+    /// The file's size and time when the design was opened or last saved; null without a file, in
+    /// the browser, or when they could not be read then.
+    pub disk: Option<DiskStamp>,
+    /// This open design's id, as `document.revision` gives it.
+    pub document_id: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// How `inspect.measure` selects: bodies, or one or two picked items. With `items`, `bodies` and
 /// `names_only` are not read, so the check leaves them alone.
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -139,7 +139,10 @@ fn replay(unit_id: &str) -> usize {
             failures.push(format!("{name}: {refit:?}"));
         }
         if hash(&line) != old_hash {
-            failures.push(format!("{name}: refit row is not main's row"));
+            failures.push(format!(
+                "{name}: refit row is not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if golden.get(name) != Some(&line) {
