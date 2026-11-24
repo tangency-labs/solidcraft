@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.agent_chat_context_full_new_chat": "This message alone is too long for the model. Shorten it, or start a new chat.",
+    "ui.agent_chat_context_trimmed": "The conversation no longer fit the model's context window: its oldest messages were removed."
+  },
+  "ar": {
+    "ui.agent_chat_context_full_new_chat": "هذه الرسالة وحدها أطول من أن يقبلها النموذج. اختصرها، أو ابدأ محادثة جديدة.",
+    "ui.agent_chat_context_trimmed": "لم تعد المحادثة تتسع في نافذة سياق النموذج: أُزيلت أقدم رسائلها."
+  },
+  "de": {
+    "ui.agent_chat_context_full_new_chat": "Diese Nachricht allein ist für das Modell zu lang. Kürzen Sie sie oder beginnen Sie einen neuen Chat.",
+    "ui.agent_chat_context_trimmed": "Die Unterhaltung passte nicht mehr in das Kontextfenster des Modells: Ihre ältesten Nachrichten wurden entfernt."
+  },
+  "he": {
+    "ui.agent_chat_context_full_new_chat": "ההודעה הזו לבדה ארוכה מדי עבור המודל. קצרו אותה, או התחילו שיחה חדשה.",
+    "ui.agent_chat_context_trimmed": "השיחה כבר לא נכנסה לחלון ההקשר של המודל: ההודעות הישנות ביותר שלה הוסרו."
+  },
+  "ja": {
+    "ui.agent_chat_context_full_new_chat": "このメッセージだけでモデルには長すぎます。短くするか、新しいチャットを始めてください。",
+    "ui.agent_chat_context_trimmed": "会話がモデルのコンテキストウィンドウに収まらなくなったため、最も古いメッセージを削除しました。"
+  },
+  "ko": {
+    "ui.agent_chat_context_full_new_chat": "이 메시지만으로도 모델에 너무 깁니다. 줄이거나 새 채팅을 시작하세요.",
+    "ui.agent_chat_context_trimmed": "대화가 모델의 컨텍스트 창에 더 이상 들어가지 않아 가장 오래된 메시지를 제거했습니다."
+  },
+  "vi": {
+    "ui.agent_chat_context_full_new_chat": "Riêng tin nhắn này đã quá dài với mô hình. Hãy rút ngắn hoặc bắt đầu cuộc trò chuyện mới.",
+    "ui.agent_chat_context_trimmed": "Cuộc trò chuyện không còn vừa cửa sổ ngữ cảnh của mô hình: các tin nhắn cũ nhất đã bị xóa."
+  },
+  "zh": {
+    "ui.agent_chat_context_full_new_chat": "仅这条消息对模型来说就太长了。请缩短它，或开始新的聊天。",
+    "ui.agent_chat_context_trimmed": "对话已超出模型的上下文窗口：已删除最早的消息。"
+  }
+}
