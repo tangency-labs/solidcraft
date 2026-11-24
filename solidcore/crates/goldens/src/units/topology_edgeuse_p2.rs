@@ -176,7 +176,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
 /// The scene a case's op runs on: the B-rep exactly as the Rust side builds it, and the
 /// selected edge use, before the op; `None` when the build fails or selects no edge use.
 /// For certificate tests that must check a premise on the replayed model rather than on a
-/// dump of it (`tests/issue_18325_moved_rows.rs`).
+/// dump of it (`trim_bounds`).
 ///
 /// # Errors
 ///
