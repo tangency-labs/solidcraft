@@ -161,8 +161,12 @@ pub fn round_directions(axis: Vec3, along: Vec3) -> Result<Vec<Vec3>> {
         });
     }
     let u = axis.unitize()?;
+    // The unit direction, so neither the projection overflows nor the remainder underflows.
+    let Some((_, along)) = along.length_and_unit() else {
+        return Ok(vec![u, -u]);
+    };
     let round = along - (u * along.dot(u));
-    if round.length() <= along.length() * 1e-9 {
+    if round.length() <= 1e-9 {
         return Ok(vec![u, -u]);
     }
     let round = round.unitize()?;
@@ -359,6 +363,15 @@ mod tests {
         let h = round_directions(v(0.0, 0.0, 1.0), v(0.0, 3.0, 4.0)).unwrap();
         assert_eq!(h[2], v(0.0, 1.0, 0.0));
         assert_eq!(h[3], v(0.0, -1.0, 0.0));
+        // The direction alone counts, not its length: along (0, M, M) with M = f64::MAX (its
+        // length past f64::MAX) and along (0, 1e-200, 0) (its square under the smallest f64) both
+        // head off the axis z, so both give +y and -y round it, as along (0, 1, 1) and (0, 1, 0) do.
+        let huge = round_directions(v(0.0, 0.0, 1.0), v(0.0, f64::MAX, f64::MAX)).unwrap();
+        assert_eq!(huge.len(), 4, "{huge:?}");
+        assert!((huge[2] - v(0.0, 1.0, 0.0)).length() < 1e-15, "{huge:?}");
+        let tiny = round_directions(v(0.0, 0.0, 1.0), v(0.0, 1e-200, 0.0)).unwrap();
+        assert_eq!(tiny.len(), 4, "{tiny:?}");
+        assert!((tiny[2] - v(0.0, 1.0, 0.0)).length() < 1e-15, "{tiny:?}");
         // An edge along the axis (a straight seam), or within a billionth of it, or no direction:
         // only the two along the axis.
         let z2 = vec![v(0.0, 0.0, 1.0), v(0.0, 0.0, -1.0)];
