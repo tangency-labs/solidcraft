@@ -24,7 +24,8 @@
 //!   its ends are E's own two vertices;
 //!
 //! and on face B the run is not vertex/edge/vertex, its middle is classified as the other
-//! curve's interval there (same class and object; or to nothing, or unknown), and every
+//! curve's interval there (same class and object, or to nothing; an unknown middle is
+//! undecided and keeps the run), and every
 //! end of it classified to an edge or a vertex of B is an end of that interval or of its
 //! two neighbours with the same object that is the same point: for a vertex, the vertex
 //! itself; for an edge G, a point within G's zone tolerance of the run's, or an end that
@@ -36,7 +37,13 @@
 //! the run's ends and middle are on E within the classification tolerance, and C1 is E
 //! from vertex to vertex, so the run lies within the tolerance of a part of C1 wherever
 //! the run's classification samples it; between samples it rests on the curve staying
-//! within the tolerance of E, which the classification does not check pointwise. On B,
+//! within the tolerance of E, which the classification does not check pointwise. No
+//! certified bound covers it today: `coincidence_bound` bounds only two lines or two
+//! B-splines, comparing them at equal parameter values and refusing rational ones, and in
+//! #18166 the whole-edge curve is a rational B-spline parametrised apart from the run (it
+//! gives no bound). Without the
+//! drop that case fails with `RelateConflict`, so a gate on that bound would refuse valid
+//! input again. On B,
 //! C1's interval covers the same part of 3D space up to the tolerance, so B keeps E's
 //! imprint from C1. The interval is removed from both faces' classifications; C2's
 //! other intervals (where it leaves E) stay, with the end they share with the run.
@@ -182,7 +189,7 @@ fn point_of<O: ClassObject>(
 /// make. `run_a` and `whole_a` are the same two curves' classifications on face A (each
 /// interval of one curve is the same parameter range on both faces):
 /// - the run's middle is classified as `whole`'s interval `m` (same class and object), or
-///   to nothing, or is unknown (no imprint);
+///   to nothing (no imprint); an unknown middle is undecided and keeps the run;
 /// - every end of the run classified to a vertex is an end of interval `m - 1`, `m` or
 ///   `m + 1` of `whole` classified to the same vertex;
 /// - every end of the run classified to an edge G is such an end classified to G that is
@@ -203,7 +210,7 @@ fn kept_by<O: ClassObject>(
     let mate = whole.at(m)?;
     let mid = run.mid.point_class();
     let differs = mid != mate.mid.point_class() || run.mid.object() != mate.mid.object();
-    if differs && !matches!(mid, PointClassType::Nothing | PointClassType::Unknown) {
+    if differs && mid != PointClassType::Nothing {
         return Ok(false);
     }
     for (end, end_a, t) in [

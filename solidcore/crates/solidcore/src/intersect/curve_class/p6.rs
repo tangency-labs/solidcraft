@@ -77,6 +77,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p9::EdgeInFaceInput;
 use crate::topology::face::p4::FindVertexSectorArgs;
@@ -244,6 +245,117 @@ impl<O: ClassObject> CurveClassification<O> {
         }
     }
 
+    /// Whether this classification's curve over `[lo, hi]` lies on the edge or face that
+    /// `on` is classified to (not upstream, WR-647), as far as the curve's midpoint and its
+    /// point at the far end `far` (`lo` or `hi`) show: each drops onto the edge's curve
+    /// over the edge's interval (the face's surface) within the intersection tolerance of
+    /// the two zones, as the coincident-edge branch of `MergeInterval` tests an interval's
+    /// midpoint against its edge, and, for a face, also classifies inside the face's trims
+    /// (`sm_ComputeFacePointClass`: Face, or an Edge or Vertex of its boundary).
+    ///
+    /// The test is sampled (two points), not a certificate. It is used only to narrow
+    /// upstream's label, never to widen it: upstream labels the whole part with the input
+    /// unconditionally, and a part this test finds off is split away instead. The default is
+    /// the split, because the input (a range solution) claims only its own extent; the
+    /// part beyond keeps upstream's label only when the samples agree with it. So any
+    /// other class, an edge without a curve, an object the adapter does not resolve to
+    /// topology (a stand-in adapter without B-reps), and a failed drop or classification
+    /// are "not on" (the split), except a defect (`InvalidInput`, `PortInvariant`) and an
+    /// unported, cancelled or uncertified call, which propagate.
+    fn part_lies_on(
+        &self,
+        a: &mut impl Imprint<O>,
+        on: &PointClassification<O>,
+        lo: f64,
+        hi: f64,
+        far: f64,
+    ) -> Result<bool> {
+        let r: Result<bool> = (|| {
+            let part = Extent1d::from_min_max(lo, hi);
+            for t in [part.evaluate(0.5), far] {
+                if !self.point_lies_on(a, on, t)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })();
+        match r {
+            Ok(on) => Ok(on),
+            Err(e)
+                if e.is_unported_or_cancelled()
+                    || matches!(
+                        e,
+                        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+                    ) =>
+            {
+                Err(e)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
+    /// One point of [`Self::part_lies_on`]: the curve's point at parameter `t`.
+    fn point_lies_on(
+        &self,
+        a: &mut impl Imprint<O>,
+        on: &PointClassification<O>,
+        t: f64,
+    ) -> Result<bool> {
+        let (k, g) = (a.kernel(), a.geometry());
+        if on.object().and_then(|o| g.topology_entity(o)).is_none() {
+            return Ok(false);
+        }
+        let src_zone_tol_3d = src_zone_tol_3d_of(k, Some(self));
+        let point = self.curve_geometry(g)?.evaluate_point(k, t)?;
+        match on.point_class() {
+            Pc::Edge => {
+                let e = edge_object(on)?;
+                let Some(curve) = super::p3::edge_curve(g, e)? else {
+                    return Ok(false);
+                };
+                let xsect_tol_3d =
+                    xsect_tol_3d_from_zones(k, src_zone_tol_3d, object_zone_tol_3d(k, g, Some(e))?);
+                let drop = curve.drop_point(
+                    k,
+                    &super::p3::edge_interval(g, e)?,
+                    point,
+                    None,
+                    xsect_tol_3d,
+                    None,
+                    SolverOperation::Normalize,
+                )?;
+                Ok(drop.success && drop.distance < xsect_tol_3d)
+            }
+            Pc::Face => {
+                let f = face_object(on)?;
+                let surface = face_surface(g, f)?;
+                let xsect_tol_3d =
+                    xsect_tol_3d_from_zones(k, object_zone_tol_3d(k, g, Some(f))?, src_zone_tol_3d);
+                let opts = DropPointOptions {
+                    guess_uv: None,
+                    operation: SolverOperation::Minimize,
+                    tgt_seam_side: None,
+                    want_solutions: false,
+                };
+                let drop = surface.drop_point::<crate::surface::surface::p4::NoObject>(
+                    k,
+                    point,
+                    &surface.natural_uv_domain_with_nurb(k)?,
+                    &opts,
+                )?;
+                if !(drop.success && drop.gap < xsect_tol_3d) {
+                    return Ok(false);
+                }
+                // inside the face's trims, not only on its surface
+                let mut pc = PointClassification::new(src_zone_tol_3d);
+                let r = a.compute_face_point_class(point, src_zone_tol_3d, f, &mut pc);
+                Ok(face_point_classified(r)?
+                    && matches!(pc.point_class(), Pc::Face | Pc::Edge | Pc::Vertex))
+            }
+            _ => Ok(false),
+        }
+    }
+
     // true means upstream's tail-recursive restart after removal of an interval, or (not
     // upstream) after splitting an interval an E-E-E or F-F-F input ends inside of;
     // `split` records the splits made at the input's start and end.
@@ -298,8 +410,12 @@ impl<O: ClassObject> CurveClassification<O> {
                 // interval i) would label the rest of that interval, where the curve may
                 // have left the edge or face, as on it. Such an interval is split at the
                 // input's end first (once per end), so the combined intervals are the
-                // input's extent; an end whose split is refused (an interior
-                // classification there conflicts) keeps the part beyond it unlabelled.
+                // input's extent, unless the part beyond the end lies on the input's edge
+                // or face at its midpoint and far end (`part_lies_on`): that part is then
+                // labelled with the input, as upstream labels it. An end whose split is
+                // refused (an interior classification there conflicts) was tested off, so
+                // its interval gets the input only at its other end, if that end is a
+                // boundary; its middle stays as it was, over the input's part too.
                 for (at, inside, done, end, param) in [
                     (
                         1,
@@ -320,14 +436,37 @@ impl<O: ClassObject> CurveClassification<O> {
                         if let Some(flag) = split.get_mut(at) {
                             *flag = true;
                         }
-                        if self.insert_point_class_in(a, end, param, BIG_DOUBLE, false)? {
+                        // the part of the interval beyond the input's end
+                        let (lo, hi) = if at == 1 {
+                            (param, self.at(j)?.interval.max())
+                        } else {
+                            (self.at(i)?.interval.min(), param)
+                        };
+                        let far = if at == 1 { hi } else { lo };
+                        if !self.part_lies_on(a, &input.mid, lo, hi, far)?
+                            && self.insert_point_class_in(a, end, param, BIG_DOUBLE, false)?
+                        {
                             return Ok(true);
                         }
                     }
                 }
+                // An end left inside its interval (its part beyond the input lies on the
+                // input's edge or face, or its split was refused) leaves the part of
+                // interval i before the input's start (of interval j after its end) not
+                // covered by the input. That part is labelled with the input, as upstream
+                // labels it, only when the samples of `part_lies_on` (its midpoint and far
+                // end) lie on the input's edge or face.
+                let beyond_start = pa == IntervalPosition::Inside && {
+                    let lo = self.at(i)?.interval.min();
+                    self.part_lies_on(a, &input.mid, lo, input.min(), lo)?
+                };
+                let beyond_end = pb == IntervalPosition::Inside && {
+                    let hi = self.at(j)?.interval.max();
+                    self.part_lies_on(a, &input.mid, input.max(), hi, hi)?
+                };
                 for index in i..=j {
-                    let reaches_start = index > i || pa != IntervalPosition::Inside;
-                    let reaches_end = index < j || pb != IntervalPosition::Inside;
+                    let reaches_start = index > i || pa != IntervalPosition::Inside || beyond_start;
+                    let reaches_end = index < j || pb != IntervalPosition::Inside || beyond_end;
                     let ivl = self.at_mut(index)?;
                     if reaches_start {
                         combine_in(a, &mut ivl.start, &input.start)?;
