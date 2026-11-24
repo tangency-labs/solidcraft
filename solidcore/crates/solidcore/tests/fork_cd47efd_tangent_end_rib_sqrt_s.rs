@@ -106,8 +106,7 @@ fn front_top(b: &Brep) -> EdgeId {
 /// (WR-685), and that was enough to turn it up. The fork, with d2757e1 built in, passes
 /// Level 2 at every commit from 7102bc5 to 729f893.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 /// Quadrature volume (composite Simpson's rule) of the peg after cutting the order-`n` section

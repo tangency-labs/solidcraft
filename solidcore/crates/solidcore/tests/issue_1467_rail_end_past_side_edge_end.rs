@@ -38,8 +38,7 @@ use solidcore::Kernel;
 
 /// The flags the fork's cliff overflow (#960) runs with here.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 /// The area of the section a round of radius `r` removes between perpendicular faces `w`

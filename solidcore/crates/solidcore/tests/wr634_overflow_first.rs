@@ -25,8 +25,7 @@ use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

@@ -58,8 +58,7 @@ const BLOCK: f64 = (40.0 * 10.0 + 20.0 * 2.0) * DEPTH;
 
 /// The cliff overflow's flags, as SolidCraft runs them (the trim at creases is unconditional).
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 fn stepped_block(k: &mut Kernel, profile: &[[f64; 2]]) -> Brep {

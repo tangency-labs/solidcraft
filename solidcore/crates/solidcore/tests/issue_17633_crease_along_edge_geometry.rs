@@ -30,8 +30,7 @@ use solidcore::{Brep, Kernel};
 
 /// The cliff overflow trimmed at its creases, with WR-717's creases along edges.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

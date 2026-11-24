@@ -101,8 +101,7 @@ fn front_top(b: &Brep) -> EdgeId {
 /// `SmBSplineCurve` would clamp); and the fork's fixes the blends' other parts need (the
 /// concave chamfer's cone and round's torus about the disc's axis, the cap's cover).
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 /// Fillet the front top edge or the concave arc with `xsect` (0 chamfer, 1 round) of

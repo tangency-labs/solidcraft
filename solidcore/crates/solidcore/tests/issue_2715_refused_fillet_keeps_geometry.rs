@@ -130,8 +130,7 @@ fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> EdgeId {
 
 /// The cliff overflow's flags (as `wr631_cliff_overflow_construction`).
 fn cliff_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 /// The session's refusal of `e` of `body` blended `r` (`chamfer`: a linear section), with

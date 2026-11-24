@@ -44,8 +44,7 @@ fn expected() -> f64 {
 
 /// SolidCraft's fillet flag set.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 fn ends(b: &Brep, e: EdgeId) -> (Point3, Point3) {

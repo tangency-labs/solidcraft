@@ -2284,7 +2284,6 @@ mod tests_c3 {
     use crate::curve::line::Line;
     use crate::intersect::surface_intersector::p1::IntersectionPointType;
     use crate::nurbs::b_spline_surface::BSplineSurface;
-    use crate::surface::offset_surface;
 
     fn bilinear(p: [[f64; 3]; 4]) -> Surface {
         let [a, b, c, d] = p.map(Vec3::from);

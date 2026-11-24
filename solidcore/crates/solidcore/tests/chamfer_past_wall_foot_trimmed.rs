@@ -47,8 +47,7 @@ const LENGTH: f64 = 20.0;
 const BAR: f64 = (10.0 * 5.0 + 7.0 * 5.0) * LENGTH;
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 fn stepped_bar(k: &mut Kernel) -> Brep {
