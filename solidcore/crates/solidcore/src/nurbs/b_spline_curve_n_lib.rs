@@ -3761,6 +3761,19 @@ mod tests {
         }
     }
 
+    // The knots of `of` (with their multiplicities) that `into` lacks, for a refinement of
+    // `into` onto the union of the two knot vectors.
+    fn knots_lacking(of: &[f64], into: &[f64]) -> Vec<f64> {
+        let mut lacking = Vec::new();
+        for (at, &u) in of.iter().enumerate() {
+            let rank = of[..at].iter().filter(|&&v| v == u).count();
+            if into.iter().filter(|&&v| v == u).count() <= rank {
+                lacking.push(u);
+            }
+        }
+        lacking
+    }
+
     // The partner #21524 certifies the trimmed UV curve on: the same curve as the edge's model
     // curve on the plane z = 0, trimmed with the same kernel to the same interval. A model
     // curve's trim takes out every span shorter than the zone tolerance (upstream's
@@ -3769,11 +3782,14 @@ mod tests {
     // the parameterisation: the UV knots are the partner's, bit for bit, plus that one. Without
     // a short span the two curves are one (same knot vector, same control points). With one,
     // the partner stretches a neighbour over the short span's parameters, which bends the
-    // spans that share its knots, so at every partner knot and span middle the two stay within
-    // the zone tolerance of each other, the bound an edge's curves meet at one parameter.
-    // An affine remap of the kept knots onto the interval (the first version of this fix)
-    // moved every interior knot, and a shell's loop then kept a gap
-    // (issue_1818_mated_shell_wall).
+    // spans that share its knots. The gap between the two at one parameter is then bounded
+    // over the whole interval, in closed form: refined onto the union of their knot vectors
+    // (knot insertion leaves a curve as it is), both have one basis, and the difference curve
+    // lies in the hull of the differences of their control points (no weights). That bound,
+    // rounded up for the refinement's arithmetic, stays within the zone tolerance, the
+    // bound an edge's curves meet at one parameter. An affine remap of the kept knots onto the
+    // interval (the first version of this fix) moved every interior knot, and a shell's loop
+    // then kept a gap (`issue_1818_mated_shell_wall`).
     fn assert_runs_with_partner(
         k: &Kernel,
         original: &BSplineCurve,
@@ -3795,31 +3811,40 @@ mod tests {
             .filter(|u| !partner_knots.contains(u))
             .collect();
         assert_eq!(uv_knots.len(), partner_knots.len() + extra.len(), "{label}");
-        let bound = match (short_near, extra.as_slice()) {
+        let (uv, other) = (
+            trimmed.nurb.as_ref().unwrap(),
+            partner.nurb.as_ref().unwrap(),
+        );
+        match (short_near, extra.as_slice()) {
             (None, []) => {
-                let (uv, other) = (
-                    trimmed.nurb.as_ref().unwrap(),
-                    partner.nurb.as_ref().unwrap(),
-                );
                 assert_eq!(uv.knots(), other.knots(), "{label}");
                 assert_eq!(uv.cpts().len(), other.cpts().len(), "{label}");
                 for (p, q) in uv.cpts().iter().zip(other.cpts()) {
                     let gap = (p.x - q.x).hypot(p.y - q.y);
                     assert!(gap <= 8.0 * f64::EPSILON, "{label}: control point {gap:e}");
                 }
-                8.0 * f64::EPSILON
             }
-            (Some(near), &[s]) if (s - near).abs() < 1e-3 => ZONE_TOL_3D,
+            (Some(near), &[s]) if (s - near).abs() < 1e-3 => {
+                assert!(!uv.is_rational() && !other.is_rational(), "{label}");
+                let refined = |c: &Curve, of: &Curve| {
+                    let lacking = knots_lacking(of.knots(), c.knots());
+                    if lacking.is_empty() {
+                        c.clone()
+                    } else {
+                        c.refine(&lacking).unwrap()
+                    }
+                };
+                let (uv, other) = (refined(uv, other), refined(other, uv));
+                assert_eq!(uv.knots(), other.knots(), "{label}");
+                let (mut gap, mut scale) = (0.0_f64, 0.0_f64);
+                for (p, q) in uv.cpts().iter().zip(other.cpts()) {
+                    gap = gap.max((p.x - q.x).hypot(p.y - q.y));
+                    scale = scale.max(p.x.abs()).max(p.y.abs());
+                }
+                let bound = gap + 64.0 * f64::EPSILON * scale;
+                assert!(bound <= ZONE_TOL_3D, "{label}: gap bound {bound:e}");
+            }
             _ => panic!("{label}: UV knots {uv_knots:?}, the partner's {partner_knots:?}"),
-        };
-        for pair in partner_knots.windows(2) {
-            let (a, b) = (pair[0], pair[1]);
-            for t in [a, 0.5 * (a + b), b] {
-                let p = partner.evaluate_point(t).unwrap();
-                let q = trimmed.evaluate_point(t).unwrap();
-                let gap = (p.x - q.x).hypot(p.y - q.y);
-                assert!(gap <= bound, "{label}: {gap:e} at {t}");
-            }
         }
     }
 
