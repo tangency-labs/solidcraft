@@ -801,6 +801,19 @@ mod tests {
         assert!(h.app.session.visibility.hidden_origin.is_empty());
     }
 
+    /// A construction plane's Features row has the eye its Construction folder row has, on that
+    /// row (#15843).
+    #[test]
+    fn a_construction_feature_rows_eye_is_on_its_row() {
+        let mut h = Harness::new();
+        let id = h.app.run("construct.plane.offset", json!({"base":"XY","offset":5,"name":"Lid"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{id}")).unwrap();
+        let eye = crate::scenario::handle_at("eye:Lid").expect("the plane's Features row has an eye");
+        assert!((eye.y - row.y).abs() < 2.0, "the eye is on the plane's Features row");
+    }
+
     #[test]
     fn browser_feature_rows_stay_listed_after_manual_rollback() {
         let mut h = Harness::new();

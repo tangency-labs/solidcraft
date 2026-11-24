@@ -405,16 +405,12 @@ pub fn shared(policy: crate::select::Policy) -> std::result::Result<&'static Cap
     SHARED.get_or_init(|| Capturer::headless(policy)).as_ref()
 }
 
-/// For a process about to exit on Linux with NVIDIA's own driver: close the device of [`shared`],
-/// if one was opened ([`Capturer::close`]). Without a display that driver's Vulkan runs on its EGL
-/// library, whose exit handler unloads `libnvidia-eglcore` while an open device's threads still
-/// run in it, and the process then ends with a segmentation fault after its work is done (#19431).
-/// Every other system and driver exits with the device open, as before.
+/// For a process about to exit: close the device of [`shared`], if one was opened
+/// ([`Capturer::close`]), so no driver's exit handler runs while the device's threads still do.
+/// One such handler ended a process with a segmentation fault after its work was done (#19431).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn close_shared_before_exit() {
-    if crate::select::nvidia_linux_driver()
-        && let Some(Ok(capturer)) = SHARED.get()
-    {
+    if let Some(Ok(capturer)) = SHARED.get() {
         capturer.close();
     }
 }
@@ -512,6 +508,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         eye: [eye[0], eye[1], eye[2], if cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: crate::view::AO_SAMPLES,
+        occlusion: false,
         edge_px: crate::view::EDGE_PX,
         sky: [0.0; 4],
         ssaa: 1.0,
@@ -814,8 +811,8 @@ mod tests {
     }
 
     /// A closed capturer has dropped its device and everything it drew with, and a picture asked
-    /// of it afterwards fails and says so. A host on NVIDIA's Linux driver closes the shared
-    /// capturer before it exits ([`close_shared_before_exit`]).
+    /// of it afterwards fails and says so. A host closes the shared capturer before it exits
+    /// ([`close_shared_before_exit`]).
     #[test]
     fn a_closed_capturer_drops_its_device_and_draws_no_more_pictures() {
         let Ok(capturer) = Capturer::headless(crate::test_env::policy()) else {

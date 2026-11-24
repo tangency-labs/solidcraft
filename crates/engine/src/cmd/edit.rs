@@ -18,7 +18,7 @@ use crate::schema::edit::{
     TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
     TimelineMovedToGroup, TimelineRedefineParams, TimelineRedefined, TimelineRenameGroupParams, TimelineRenameParams, TimelineRenameResult,
     TimelineReorderManyParams, TimelineReorderParams, TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams,
-    TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
+    TimelineStepParams, TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
     PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectInvertParams,
@@ -180,6 +180,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ROLL_TO_CONTRACT)
         .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
+    CommandSpec::new("timeline.step_back", "Step History Back", crate::checked!("timeline.step_back", step_back))
+        .icon("rollback")
+        .contract(&STEP_BACK_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: one step back, the marker rolling one feature back (the features after it are rebuilt); at the start of the history the marker stays"),
+    CommandSpec::new("timeline.step_forward", "Step History Forward", crate::checked!("timeline.step_forward", step_forward))
+        .icon("rollback")
+        .contract(&STEP_FORWARD_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: one step forward, the marker rolling one feature forward; at the end of the history the marker stays"),
+    CommandSpec::new("timeline.roll_to_start", "Roll History to Start", crate::checked!("timeline.roll_to_start", roll_to_start))
+        .icon("rollback")
+        .contract(&ROLL_TO_START_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: the marker to the start of the history, every feature rolled back; at the start of the history the marker stays"),
+    CommandSpec::new("timeline.roll_to_end", "Roll History to End", crate::checked!("timeline.roll_to_end", roll_to_end))
+        .icon("rollback")
+        .contract(&ROLL_TO_END_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: the marker to the end of the history, every feature built; at the end of the history the marker stays"),
     CommandSpec::new("timeline.reorder", "Reorder Feature", crate::checked!("timeline.reorder", reorder))
         .icon("reorder")
         .contract(&REORDER_CONTRACT)
@@ -296,6 +316,10 @@ const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new(
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
 const ROLLBACK_CONTRACT: TypedContract<TimelineRollbackParams> = TypedContract::new();
 const ROLL_TO_CONTRACT: TypedContract<TimelineRollToParams> = TypedContract::new();
+const STEP_BACK_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const STEP_FORWARD_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const ROLL_TO_START_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const ROLL_TO_END_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
 const DEPENDENTS_CONTRACT: TypedContract<TimelineDependentsParams> = TypedContract::new();
 const SUPPRESS_CONTRACT: TypedContract<TimelineSuppressParams> = TypedContract::new();
 const EDIT_CONTRACT: TypedContract<TimelineEditParams> = TypedContract::new();
@@ -1028,6 +1052,46 @@ fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn roll_to(s: &mut Session, p: &Value) -> Result<Value> {
     move_marker(s, p, "timeline.roll_to")
+}
+
+/// One step back: what the History bar's Back control does, as a command, so it can carry a
+/// keyboard shortcut, which a click-only control cannot.
+fn step_back(s: &mut Session, _p: &Value) -> Result<Value> {
+    step_marker(s, "timeline.step_back", -1)
+}
+
+/// One step forward: what the History bar's Forward control does, as a command, so it can carry a
+/// keyboard shortcut, which a click-only control cannot.
+fn step_forward(s: &mut Session, _p: &Value) -> Result<Value> {
+    step_marker(s, "timeline.step_forward", 1)
+}
+
+/// The history marker moved `direction` features from where it is now, bounded at either end of
+/// the history: one step of the History bar's Back and Forward controls, as a command. A step at
+/// an end leaves the marker where it is. Like `timeline.roll_to`, it clears the selection.
+fn step_marker(s: &mut Session, cmd: &str, direction: i32) -> Result<Value> {
+    let n = s.doc.features.len();
+    let at = s.doc.marker.unwrap_or(n);
+    let to = if direction < 0 { at.saturating_sub(1) } else { at.saturating_add(1).min(n) };
+    s.doc_mut().marker = match to {
+        k if k < n => Some(k),
+        _ => None,
+    };
+    s.selection.clear();
+    reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
+}
+
+/// To the start of the history: `timeline.roll_to` with `position: 0`, as a command of its own
+/// because a keybinding carries no parameters (the Keymap binds a command id to keys and nothing
+/// else), so no key could reach the start through `timeline.roll_to`.
+fn roll_to_start(s: &mut Session, _p: &Value) -> Result<Value> {
+    move_marker(s, &json!({"position": 0}), "timeline.roll_to_start")
+}
+
+/// To the end of the history: `timeline.roll_to` with `position: "end"`, as a command of its own,
+/// for the same reason.
+fn roll_to_end(s: &mut Session, _p: &Value) -> Result<Value> {
+    move_marker(s, &json!({"position": "end"}), "timeline.roll_to_end")
 }
 
 /// `timeline.rollback` and `timeline.roll_to`, refusing in the name of the one asked for (#4712).
@@ -2865,6 +2929,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             _ => occurrences.clone(),
         };
         trial.doc_mut().remove_occurrences(&removed.into_iter().collect());
+    }
+    if let (FeatureKind::Hole { points: Some(before), .. }, FeatureKind::Hole { points: Some(after), .. }) = (&old.kind, &mut new.kind) {
+        after.legacy_face_roles = before.legacy_face_roles && before.sketch == after.sketch && before.ids == after.ids;
     }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body
