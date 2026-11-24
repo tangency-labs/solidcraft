@@ -760,6 +760,9 @@ fn line_parameters(
 ///
 /// The rays and face samples run on `b` itself, so the UV trim curves their face
 /// classifications create stay on the B-rep, as upstream's `const` queries leave them.
+/// The samples' dithers come from one generator the call makes from the kernel's seed
+/// ([`Kernel::seeded_rng`]), drawn in the order of `faceuses`, so the answer is a function
+/// of the B-rep, the face uses and the seed.
 pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> Result<bool> {
     if faceuses.is_empty() {
         return Err(SolidError::topology(OP, TopologyFailure::NoFaceUses));
@@ -776,10 +779,13 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
     // each target face surface's cache, built on its first ray (upstream's
     // smsurf_GetSurfaceCache keeps one per surface; the rays do not change surfaces)
     let mut caches: BTreeMap<FaceId, HeldSolveCache<RaySurface>> = BTreeMap::new();
+    // this call's own draws, from the start of the seed's sequence: each face use's sample
+    // dithers take the next draws, in the order of `faceuses`
+    let mut rng = k.seeded_rng();
     for &source in faceuses {
         let source = b.faceuse(source)?;
         let (f, orientation) = (link(source.face, NO_FACE)?, source.orientation);
-        let mut points = face::points_in_face(k, b, f, samples)?.pv;
+        let mut points = face::points_in_face_drawing(k, b, f, samples, &mut rng)?.pv;
         if orientation == OrientType::Opposite {
             for pair in points.chunks_exact_mut(2) {
                 if let Some(normal) = pair.get_mut(1) {

@@ -345,3 +345,45 @@ fn surface_loft_with_body_edges_and_sketch_sections() {
 
     ok(&mut h);
 }
+
+#[test]
+fn a_loft_to_a_point_keeps_the_point_section_when_reopened_for_editing() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"name": "Base", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+
+    h.app.run("sketch.create", json!({"name": "Apex", "plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})).unwrap();
+    h.app.run("sketch.point", json!({"point": [0, 0], "id": "p1"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+
+    let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).unwrap().id;
+    let base = id(&h, "Base");
+    let apex = id(&h, "Apex");
+
+    h.step(&json!({"call": "ui.start", "params": {"command": "solid.loft"}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch: base, index: 0 }, Sel::SketchPoint { id: format!("{apex}:p1") }];
+    ok(&mut h);
+
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    let sections = |h: &Harness| match &h.app.session.doc.find_feature(&name).unwrap().kind {
+        FeatureKind::Loft { sections, .. } => sections.clone(),
+        k => panic!("{k:?}"),
+    };
+    let stored = sections(&h);
+    assert_eq!(stored.len(), 2);
+    assert_eq!(stored[1].point.as_deref(), Some("p1"));
+
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
+    h.frames(8);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        d.inputs[0].items,
+        vec![Sel::Profile { sketch: base, index: 0 }, Sel::SketchPoint { id: format!("{apex}:p1") },],
+        "editing a loft with an apex point preserves the sketch point section"
+    );
+    ok(&mut h);
+    assert_eq!(sections(&h), stored);
+}

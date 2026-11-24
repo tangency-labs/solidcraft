@@ -667,6 +667,40 @@ fn emboss_and_deboss_on_a_face() {
 }
 
 #[test]
+fn overlapping_text_glyphs_deboss_and_emboss() {
+    // #20422: negative letter_spacing crosses curved glyph outlines, leaving vertical self-touching
+    // polynomial spline edges across sequential profile booleans. Both with and without an explicit
+    // face pick, deboss and emboss build one valid closed body with equal removed/added volume.
+    let box_vol = 115.0 * 17.5 * 10.0;
+    for face in [Some([0.0, -8.75, 5.0]), None] {
+        let mut vols = [0.0; 2];
+        for (i, mode) in ["deboss", "emboss"].into_iter().enumerate() {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 115, "width": 17.5, "height": 10, "corner": [-57.5, -8.75, 0], "body_name": "Plate"}));
+            run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -8.75, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+            run(&mut s, "sketch.text", json!({"text": "te", "at": [0, 2], "height": 5, "align": "center", "letter_spacing": -1.2}));
+            run(&mut s, "sketch.finish", json!({}));
+            let mut params = json!({"sketch": "Text", "depth": "1.2", "mode": mode});
+            if let Some(f) = face {
+                params["face"] = json!(f);
+            }
+            run(&mut s, "solid.emboss", params);
+            assert_eq!(measure(&mut s)["body_count"], 1, "{mode} {face:?}");
+            let state = s.model.state();
+            let body = &state.body("Plate").unwrap().body;
+            assert!(body.validity().is_empty(), "{mode} {face:?}: {:?}", body.validity());
+            assert_eq!(body.shell_count(), 1, "{mode} {face:?}");
+            drop(state);
+            vols[i] = volume(&mut s);
+        }
+        let removed = box_vol - vols[0];
+        let added = vols[1] - box_vol;
+        assert!(removed > 0.0, "{face:?}: removed={removed}");
+        assert!(rel(removed, added) < 1e-6, "{face:?}: removed={removed} added={added}");
+    }
+}
+
+#[test]
 fn emboss_on_a_face_refuses_a_profile_off_it_and_leaves_the_design() {
     // Two squares over a 40 x 40 top, one of them beside it: the emboss is refused as a whole
     // rather than raising one square and leaving the other out.
@@ -3008,6 +3042,71 @@ fn coil_from_a_sketch_cuts_a_thread_groove() {
     assert_eq!(measure(&mut s)["body_count"], 1);
 }
 
+/// The flat faces of a d 20, pitch 7 coil of 3.25 turns about Z: each face's normal and the
+/// helix's unit tangent at the end it caps (#20737).
+fn coil_ends(end_cut: Option<&str>, clockwise: bool) -> (Session, Vec<(solidcore_record::Vec3, solidcore_record::Vec3)>) {
+    use solidcore_record::Vec3;
+    use std::f64::consts::TAU;
+    let mut s = Session::default();
+    let mut p = json!({"diameter": 20, "revolutions": 3.25, "pitch": 7, "section_size": 2, "clockwise": clockwise});
+    if let Some(cut) = end_cut {
+        p["end_cut"] = json!(cut);
+    }
+    run(&mut s, "solid.coil", p);
+    let turn = if clockwise { -1.0 } else { 1.0 };
+    let at = |a: f64| Vec3::new(10.0 * a.cos(), turn * 10.0 * a.sin(), 7.0 * a / TAU);
+    let tangent = |a: f64| Vec3::new(-10.0 * a.sin(), turn * 10.0 * a.cos(), 7.0 / TAU).normalized().unwrap_or(Vec3::ZERO);
+    let faces = s.model.state().bodies[0].body.faces(1e-4).unwrap();
+    let ends: Vec<_> = faces
+        .iter()
+        .filter_map(|f| f.plane_normal.map(|n| (f.centroid, n)))
+        .map(|(c, n)| {
+            let a = [0.0, 3.25 * TAU].into_iter().min_by(|a, b| (at(*a) - c).len().total_cmp(&(at(*b) - c).len())).unwrap_or(0.0);
+            assert!((at(a) - c).len() < 1e-2, "an end face off the helix's end: {c:?}");
+            (n, tangent(a))
+        })
+        .collect();
+    assert_eq!(ends.len(), 2, "{faces:?}");
+    (s, ends)
+}
+
+#[test]
+fn a_coil_cut_square_ends_its_wire_square_to_the_helix() {
+    use std::f64::consts::{PI, TAU};
+    for clockwise in [false, true] {
+        let (mut s, ends) = coil_ends(Some("square"), clockwise);
+        for (n, t) in ends {
+            assert!(n.dot(t).abs() > 1.0 - 1e-6, "clockwise {clockwise}: normal {n:?}, tangent {t:?}");
+        }
+        // A wire of round section 2 as long as the helix.
+        let length = 3.25 * (TAU * 10.0).hypot(7.0);
+        assert!(rel(volume(&mut s), PI * length) < 1e-3, "{}", volume(&mut s));
+    }
+}
+
+#[test]
+fn a_coil_keeps_its_ends_through_the_axis_by_default() {
+    use solidcore_record::Vec3;
+    for end_cut in [None, Some("axial")] {
+        let (s, ends) = coil_ends(end_cut, false);
+        let faces = s.model.state().bodies[0].body.faces(1e-4).unwrap();
+        for ((n, _), f) in ends.iter().zip(faces.iter().filter(|f| f.plane_normal.is_some())) {
+            let radial = Vec3::new(f.centroid.x, f.centroid.y, 0.0).normalized().unwrap_or(Vec3::ZERO);
+            assert!(n.dot(Vec3::Z).abs() < 1e-9 && n.dot(radial).abs() < 1e-6, "{end_cut:?}: normal {n:?} at {:?}", f.centroid);
+        }
+    }
+}
+
+#[test]
+fn a_square_ended_coil_refuses_turns_that_overlap() {
+    // Square to the wire, a side-2 square section spans more than 2 mm along the axis.
+    let coil = |pitch: f64| json!({"diameter": 20, "revolutions": 3, "pitch": pitch, "section": "square", "section_size": 2, "end_cut": "square"});
+    let mut s = Session::default();
+    let e = s.execute("solid.coil", &coil(2.0005)).unwrap_err().to_string();
+    assert!(e.contains("runs into itself"), "{e}");
+    run(&mut s, "solid.coil", coil(2.002));
+}
+
 fn clockwise_coil_bbox(clockwise: bool) -> Value {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
@@ -3072,6 +3171,7 @@ fn a_sketch_coil_refuses_contradictory_parameters() {
         ("section", json!("square")),
         ("section_position", json!("outside")),
         ("start_angle", json!(0)),
+        ("end_cut", json!("square")),
     ] {
         let mut p = json!({"sketch": "Section", "revolutions": 3, "pitch": 8});
         p[k] = v;
@@ -3109,7 +3209,7 @@ fn a_loaded_sketch_coil_cannot_also_set_the_primitive_section() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
-    for (field, value) in [("section", json!("square")), ("position", json!(1)), ("start_angle", json!("45 deg"))] {
+    for (field, value) in [("section", json!("square")), ("position", json!(1)), ("start_angle", json!("45 deg")), ("end_cut", json!("square"))] {
         let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
         let coil = v["features"].as_array_mut().unwrap().iter_mut().find(|f| f["type"] == "coil").unwrap();
         coil[field] = value;
@@ -3933,4 +4033,29 @@ fn a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status() {
         }
         Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
     }
+}
+
+/// #18541: a 3° draft of the side of an extruded closed spline outline is refused, and the
+/// refusal says what about the face it cannot handle: the side is neither a plane nor a cone or
+/// cylinder. It used to read "not supported yet: SMLib draft for this geometry". The body is
+/// left as it was.
+#[test]
+fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    let outline = [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [0.0, -22.0], [19.7, -13.1]];
+    run(&mut s, "sketch.spline.fit_point", json!({"points": outline, "periodic": true}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 25, "operation": "new", "body_name": "Base"}));
+    let shape = |s: &Session| {
+        let state = s.model.state();
+        let b = &state.body("Base").unwrap().body;
+        [b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()]
+    };
+    let (before, volume) = (shape(&s), body_volume(&s, "Base"));
+    let draft = json!({"faces": [[-30, 0, 12.5]], "angle": "3 deg", "neutral": "XY", "body": "Base"});
+    let e = s.execute("solid.draft", &draft).unwrap_err().to_string();
+    assert!(e.contains("a drafted face is neither a plane nor a cone or cylinder"), "{e}");
+    assert!(!e.contains("for this geometry"), "{e}");
+    assert_eq!(shape(&s), before);
+    assert_eq!(body_volume(&s, "Base"), volume);
 }

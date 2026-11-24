@@ -1023,6 +1023,9 @@ fn global_point_solve(
     use crate::intersect::point_class::{PointClassType, PointClassification};
     use crate::query::face::p2::{face_surface_cache, point_classify, PointClassifyOptions};
 
+    // a face without loop uses has no trim boundaries: no test (asked of the face,
+    // not of when its cache was built)
+    let has_loopuses = crate::topology::face::p4::has_loopuses(b, f)?;
     let surface = face_surface(b, f)?.clone_for_evaluation()?;
     let lease = if surface.trim_cache_in_use() {
         None
@@ -1030,6 +1033,7 @@ fn global_point_solve(
         Some(face_surface_cache(k, b, f)?)
     };
     let test_on = point_test
+        && has_loopuses
         && lease.as_ref().is_some_and(|l| {
             l.trimmed && l.cache.base().point_test_enabled && !l.cache.base().face_was_modified
         });
@@ -1197,8 +1201,21 @@ fn uv_point_in<B: SectorBrep>(
         let r = b.vertex(v)?;
         (r.point, r.tolerance)
     };
+    // `GetFaceuse` (as [`faceuse`]), keeping the edge use it reads: only an edge vertex
+    // use with its edge use carries one
+    let (fu, eu) = match b.vertexuse(vu)?.owner {
+        // no face for shell vertices; NERN of a null edge use; unknown
+        // m_tVertexuseType (SE only)
+        VertexuseOwner::Shell(_) | VertexuseOwner::Edgeuse(None) | VertexuseOwner::Unknown => {
+            (None, None)
+        }
+        // for Edgeuse_type - return vertexuse->edgeuse->faceuse
+        VertexuseOwner::Edgeuse(Some(eu)) => (eu1::faceuse(b, eu)?, Some(eu)),
+        // for Loopuse_type - return vertexuse->loopuse->faceuse
+        VertexuseOwner::Loopuse(lu) => (loopuse_faceuse(b, lu)?, None),
+    };
     // a shell or wire vertex use has no face use: the caller's vertex use is not on a face
-    let fu = faceuse(b, vu)?.ok_or_else(|| {
+    let fu = fu.ok_or_else(|| {
         Failure::new(OP, TopologyFailure::VertexUseNotOnFace)
             .at(EntityRef::Vertexuse(vu))
             .into_error()
@@ -1224,21 +1241,8 @@ fn uv_point_in<B: SectorBrep>(
     let uv_domain = face_uv_domain(b, f)?;
     let nat_domain = or_give_up!(b.surface(f))?.natural_uv_domain_with_nurb(k)?;
 
-    let sol = if is_edge_vertexuse(b, vu)? {
+    let sol = if let Some(eu) = eu {
         // Edgeuse locals - thisEdgeuse->StartPt == CWEdgeuse->EndPt (with tolerances)
-        let eu = edgeuse(b, vu)?.ok_or_else(|| {
-            Failure::new(
-                OP,
-                TopologyFailure::Defect {
-                    why: "an edge vertex use whose face use was just read through its \
-                        edge use names no edge use; the face use lookup above returns \
-                        none for one without",
-                },
-            )
-            .at(EntityRef::Vertexuse(vu))
-            .with_status(SM_ERR_NULL_POINTER)
-            .into_error()
-        })?;
         let prev = b.edgeuse(eu)?.cw.ok_or_else(|| {
             Failure::new(
                 OP,
@@ -1456,7 +1460,10 @@ fn uv_point_in<B: SectorBrep>(
         let wrap = crate::topology::face::p1::seam_wrap_of_gap(gap, periods);
         // a projection distance larger than the tolerance is only reported (SE)
         Point2::new(s.uv.x + wrap.x, s.uv.y + wrap.y)
-    } else if is_loop_vertexuse(b, vu)? {
+    } else {
+        // a loop vertex use: the owner match above gave a face use only to it and to an
+        // edge vertex use with its edge use, so the shell vertex use upstream's default
+        // case expects never gets here
         // project point down to face's surface
         let face_tol = face_tolerance(b, f)?;
 
@@ -1491,19 +1498,6 @@ fn uv_point_in<B: SectorBrep>(
                     .into_error()
             })?
             .uv
-    } else {
-        // default case: must be a ShellVertexuse
-        return Err(Failure::new(
-            OP,
-            TopologyFailure::Defect {
-                why: "a vertex use with a face use is neither on an edge use nor on \
-                    a loop use; the face use lookup above returns none for a shell \
-                    vertex use and for one of unknown kind, so this branch is \
-                    never taken",
-            },
-        )
-        .at(EntityRef::Vertexuse(vu))
-        .into_error());
     };
 
     Ok(Some(sol))

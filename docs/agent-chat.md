@@ -54,6 +54,9 @@ The Assistant’s own native window keeps its existing layout.
 Assistant fills the available side height. The compass and navigation bar use the
 remaining viewport space. Clicks and scrolling over the panel stay in the chat.
 
+A new chat shows a short introduction at the bottom of the conversation, just above the message
+box, ending with the hint to type a request there (#11256).
+
 After clicking in Assistant, keyboard input stays in the chat, including when selecting text
 in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the
 pointer back over the model does not change this: click outside Assistant to return the
@@ -337,6 +340,10 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
   `https://api.cheaperinference.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
+  For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
+  in the agent's settings. This routes requests to `/responses` and lets the model continue
+  reasoning after a tool call. Keep the base URL at `https://api.openai.com/v1` and choose a
+  reasoning effort the model supports. Turn the option off for endpoints that use Chat Completions.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
   each conversation request carrying the session header Go asks for, so one
@@ -446,7 +453,10 @@ Whatever you typed before signing in is sent once the agent is ready.
 The agent reaches the open design only through SolidCraft's own tools (the
 [MCP server](mcp.md)), which SolidCraft hands it when the chat starts. That server is named
 `solidcraft-app`, so an MCP server you set up yourself under the name `solidcraft` (as in
-[client configuration](mcp.md#client-configuration)) doesn't take its place:
+[client configuration](mcp.md#client-configuration)) doesn't take its place. Claude Code gets no
+other MCP server in the chat: not the connectors of your claude.ai account (Google Drive and
+the like), nor the servers in your own Claude Code configuration. Other coding agents may still
+load servers you configured for them:
 
 - **Read the design:** list commands, inspect features, sketches and parameters, measure,
   take pictures of the view.
@@ -536,8 +546,8 @@ follow the agent's own mode, which you pick in the panel's header. When an agent
 using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
 (`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
 and notes it in the chat as *Auto-allowed*. Any other question appears in the panel, including
-a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to the agent
-yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
+a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to an agent
+other than Claude Code yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
 same way and noted too.
 
 What counts as "a command given a file name": a parameter that holds a file or folder (`file`,
@@ -562,7 +572,9 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
   chat itself.
 - **Its own tools stay off where we can turn them off.** SolidCraft declares no file system and
   no terminal to the agent, runs it in an empty working folder of its own, and asks the Claude
-  Code adapter to turn off its shell, file and web tools for the session.
+  Code adapter for a session with none of its own tools but the one that ends plan mode, and with
+  SolidCraft's MCP server as its only one. Your claude.ai connectors, your own MCP servers, and
+  Claude Code's shell, file, web, scheduling and messaging tools aren't there.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.
