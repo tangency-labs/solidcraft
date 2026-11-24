@@ -336,10 +336,10 @@ crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curv
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	windows	2	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	with_capacity	1	open	Vec::with_capacity(st.len())	
 crates/solidcore/src/blend/fillet_geom/surface_plane_curve.rs	surface_plane_curve	with_capacity	2	open	Vec::with_capacity(st.len() + off.len())	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	1	open	insert(at, 0.5 * (t0 + t1))	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	2	open	insert(at, alpha)	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	3	open	insert(at, uv)	
-crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	Vec::insert	4	open	insert(at, exact)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib_with	Vec::insert	1	open	insert(at, 0.5 * (t0 + t1))	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib_with	Vec::insert	2	open	insert(at, alpha)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib_with	Vec::insert	3	open	insert(at, uv)	
+crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib_with	Vec::insert	4	open	insert(at, exact)	
 crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	rib_of	int-rem	1	proven	order % 2	constant non-zero divisor
 crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	1	proven	insert(j + 1, split_knot)	j + 1 < knots.len() by the loop condition
 crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	2	proven	insert(j + 1, mid_pnt)	pnts.get(j + 1) succeeded just above, so j + 1 < pnts.len()
