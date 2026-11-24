@@ -2918,6 +2918,12 @@ impl Session {
         self.model.settle_import_checks();
         if live.is_none() {
             self.live_links = None;
+            // A command that reads the model reads it checked: the checks the window's last
+            // refresh left running end first, and a refusal among them leaves the model stale,
+            // evaluated just below ([`Session::set_background_checks`]).
+            if reads_model {
+                self.model.settle_feature_checks(true);
+            }
             if reads_model && (self.model.is_stale() || self.sketch_finish_pending) {
                 self.refresh();
             }
