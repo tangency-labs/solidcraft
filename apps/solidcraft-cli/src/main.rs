@@ -12,7 +12,7 @@
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
 //!                                 [--timeout-s 300] [--json out.json] [--markdown out.md]
 //!                                                             the standard Assistant model test (#4851) on a running app
-//! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes] [--quality LEVEL]
+//! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes] [--transparent] [--quality LEVEL]
 //!                                                             [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]
 //! solidcraft-cli exec <command> [json-params]                 run one command on an empty design
 //! solidcraft-cli commands                                     the command registry as JSON
@@ -74,7 +74,7 @@ struct Command {
 /// `run`'s lines in the usage.
 const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n                     [--param NAME=EXPR]... [--params-file FILE.json]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (a step of the script that fails stops the run, with --allow-errors too: nothing is written, and --results\n       gives {results: those of the steps before it, error: {step, command, error}}, to --json-out FILE as well)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--param NAME=EXPR sets an existing parameter as parameters.change does, before the script's own commands run and without\n       touching the file; repeat it to set several, applied in the order given. --params-file FILE.json holds {\"NAME\": \"EXPR\", ...},\n       applied before any --param. Needs a design (the positional one, or --in); an unknown name, a missing `=` or a bad\n       expression fails the run. Also taken by eval)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
-const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
+const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--quiet] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run; --quiet prints no report to stdout, as for run: the exit status\n       still says whether a feature failed, and a --json-out file is still written)\n";
 /// `check`'s lines in the usage.
 const USAGE_CHECK: &str = "  solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE]\n      (Check Drawing, drawing.check, on each drawing of the design, or the one --drawing names, by id or name: prints\n       {drawings: [{id, name, check: drawing.check's reply}], findings: the total}, or writes it to --json-out FILE;\n       --sheet checks that sheet only; exits with 1 when anything is found, after the report, and on an error, with none)\n";
 /// `script`'s lines in the usage.
@@ -88,13 +88,13 @@ const USAGE_BENCH_AGENT: &str = "  solidcraft-cli bench-agent [--scale F] [--sav
 /// `bench-assistant`'s lines in the usage.
 const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N] [--timeout-s 300] [--json out.json] [--markdown out.md]\n";
 /// `snapshot`'s lines in the usage.
-const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.sc|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.sc|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
+const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.sc|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes] [--transparent]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.sc|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --transparent: a transparent background instead of the gradient: alpha 0 where nothing is drawn,\n         the model opaque, its anti-aliased edges and see-through bodies partly so; drawn twice (over black\n         and over white), so it takes about twice as long; the grid and the axes stay unless left out;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
 /// `render`'s lines in the usage.
 const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted] [--legacy-memory-admission]\n      --legacy-memory-admission skips available-RAM checks; fixed shared/host budgets and allocation limits still apply.\n";
 /// `exec`'s lines in the usage.
 const USAGE_EXEC: &str = "  solidcraft-cli exec <command> [json-params]\n";
 /// `commands`'s lines in the usage.
-const USAGE_COMMANDS: &str = "  solidcraft-cli commands\n";
+const USAGE_COMMANDS: &str = "  solidcraft-cli commands [FILTER | --id COMMAND]\n      (the command registry as JSON; FILTER keeps the commands whose id contains it, in any case, e.g. `commands config`;\n       --id COMMAND prints that one command's documentation and its input and output schemas, as MCP's describe_command does)\n";
 /// `recipe`'s lines in the usage.
 const USAGE_RECIPE: &str = "  solidcraft-cli recipe <recipe.json>\n";
 /// `oracle`'s lines in the usage.
@@ -206,6 +206,8 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
+    // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
+    solidcraft_engine::plugin::configure_compile_cache();
     let r = match args.first().map(String::as_str) {
         // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
@@ -223,19 +225,7 @@ fn main() -> ExitCode {
         Some("render") => render::run(&args[1..]),
         Some("exec") => cmd_exec(&args[1..]),
         Some("gpu") => cmd_gpu(&args[1..]),
-        Some("commands") => {
-            use std::io::Write as _;
-            let mut s = Session::default();
-            s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()).and_then(|v| {
-                // A pipeline consumer may stop early (e.g. `commands | head`).
-                // Unlike println!, writing explicitly lets us handle that without a panic.
-                match writeln!(std::io::stdout().lock(), "{}", pretty(&v)) {
-                    Ok(()) => Ok(()),
-                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-                    Err(e) => Err(format!("stdout: {e}")),
-                }
-            })
-        }
+        Some("commands") => cmd_commands(&args[1..]),
         Some("recipe") => args.get(1).ok_or_else(usage).and_then(|p| {
             let v = read_json(p)?;
             recipe::to_script(&v).map(|s| println!("{}", pretty(&s)))
@@ -585,7 +575,15 @@ fn positional_index(args: &[String]) -> Option<usize> {
         if a.starts_with("--") {
             i += if matches!(
                 a.as_str(),
-                "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes" | "--script-relative"
+                "--quiet"
+                    | "--results"
+                    | "--timings"
+                    | "--profile"
+                    | "--allow-errors"
+                    | "--no-grid"
+                    | "--no-axes"
+                    | "--script-relative"
+                    | "--transparent"
             ) {
                 1
             } else {
@@ -728,9 +726,16 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         // What the export noted (a mesh that is not a clean closed surface, a face short of its
         // shape) goes to stderr, as a newer file's warnings do, unless --quiet: the file is
         // written, but not silently.
-        if !args.iter().any(|a| a == "--quiet") {
+        let quiet = args.iter().any(|a| a == "--quiet");
+        // A body left out of the file is said whatever --quiet says: a part is missing from it.
+        for line in skipped_body_lines(out, &reply) {
+            eprintln!("{line}");
+        }
+        if !quiet {
             for w in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
-                eprintln!("{out}: warning: {w}");
+                if !w.contains(SKIPPED_NOTE) {
+                    eprintln!("{out}: warning: {w}");
+                }
             }
         }
     }
@@ -746,6 +751,23 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         print_json(&m, json_out)?;
     }
     Ok(())
+}
+
+/// What an export's note for a body it could not mesh has after the body's name.
+const SKIPPED_NOTE: &str = ": skipped: meshing failed";
+
+/// One line for each body the export of `out` left out because it could not be meshed, naming the
+/// body and why: `reply` is `file.export`'s.
+fn skipped_body_lines(out: &str, reply: &Value) -> Vec<String> {
+    let notes = reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str);
+    notes
+        .filter_map(|w| w.split_once(SKIPPED_NOTE))
+        .map(|(body, why)| {
+            let why = why.trim().trim_start_matches('(').trim_end_matches(')');
+            let because = if why.is_empty() { String::new() } else { format!(": {why}") };
+            format!("{out}: warning: body {body} is NOT in this file, it could not be meshed{because}")
+        })
+        .collect()
 }
 
 /// Only this standalone CLI invocation changes directory, before the renderer or session starts.
@@ -960,6 +982,54 @@ fn timeline_ok(s: &Session, skip_newer_features: bool, what_now: &str) -> Result
     Err(format!("{} timeline feature(s) failed, {what_now}:\n{}", failed.len(), failed.join("\n")))
 }
 
+/// `commands`: the command registry, whole by default. A word narrows it to the commands whose id
+/// contains it (any case); `--id COMMAND` prints that one command's documentation and schemas
+/// instead, as the MCP server's `describe_command` does (#20923).
+fn cmd_commands(args: &[String]) -> Result<(), String> {
+    use std::io::Write as _;
+    known_args("commands", args, &["--id"], &[], true)?;
+    let ids = args.iter().filter(|a| *a == "--id").count();
+    if ids > 1 {
+        return Err("commands takes one --id".into());
+    }
+    if args.len().saturating_sub(2 * ids) > 1 {
+        return Err("commands takes one filter word".into());
+    }
+    let filter = positional(args);
+    let id = flag(args, "--id");
+    if filter.is_some() && id.is_some() {
+        return Err("commands: give a filter or --id, not both".into());
+    }
+    let mut s = Session::default();
+    let v = match id {
+        Some(id) => s.execute("engine.describe", &json!({"command": id})).map_err(|e| e.to_string())?,
+        None => {
+            let all = s.execute("engine.commands", &json!({})).map_err(|e| e.to_string())?;
+            match filter {
+                Some(word) => {
+                    let word = word.to_lowercase();
+                    let kept: Vec<Value> = all
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|c| c["id"].as_str().is_some_and(|id| id.to_lowercase().contains(&word)))
+                        .cloned()
+                        .collect();
+                    Value::Array(kept)
+                }
+                None => all,
+            }
+        }
+    };
+    // A pipeline consumer may stop early (e.g. `commands | head`).
+    // Unlike println!, writing explicitly lets us handle that without a panic.
+    match writeln!(std::io::stdout().lock(), "{}", pretty(&v)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(format!("stdout: {e}")),
+    }
+}
+
 /// Runs `solidcraft-cli eval` (and its `inspect` alias), opening the input design or script with the requested `--validation` mode and reporting both `inspect.measure` and `document.inspect`.
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
@@ -967,7 +1037,7 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
         "eval",
         args,
         &["--in", "--json-out", "--profile-out", "--validation", "--param", "--params-file"],
-        &["--profile", "--allow-errors"],
+        &["--profile", "--allow-errors", "--quiet"],
         true,
     )?;
     let validation = validation_flag("eval", args)?;
@@ -987,7 +1057,10 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
         out["newer_file"] = file.report();
         out["warnings"] = json!(file.warnings());
     }
-    print_json(&out, json_out)?;
+    // `--quiet` silences stdout, as for `run`; a report that was asked for in a file is still written.
+    if json_out.is_some() || !args.iter().any(|a| a == "--quiet") {
+        print_json(&out, json_out)?;
+    }
     // The report shows a failing feature in `timeline[].error`; the exit status says so too, as
     // `run`'s does, so a script that checks only the status doesn't take a broken rebuild for a
     // good one. `--allow-errors` keeps status 0 for a design inspected on purpose. A newer
@@ -1066,7 +1139,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         "snapshot",
         args,
         &["--in", "--out", "--width", "--height", "--view", "--camera", "--body", "--tool", "--section", "--quality"],
-        &["--no-grid", "--no-axes"],
+        &["--no-grid", "--no-axes", "--transparent"],
         true,
     )?;
     // A snapshot writes one picture. Only the body and tool options take several values.
@@ -1118,8 +1191,13 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         None => solidcraft_engine::view::home_camera(&s).map_err(|e| e.to_string())?,
     };
     let guides = Guides { grid: !args.iter().any(|a| a == "--no-grid"), axes: !args.iter().any(|a| a == "--no-axes") };
-    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
-    let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
+    let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
+    // `--transparent`: drawn over black and over white and the alpha recovered; else once, as before.
+    let png = if args.iter().any(|a| a == "--transparent") {
+        solidcraft_engine::capture::png_transparent(&mut scene, &cam, w, h)?
+    } else {
+        solidcraft_engine::capture::png(&scene, &cam, w, h)?
+    };
     std::fs::write(out, &png.bytes).map_err(|e| format!("{out}: {e}"))?;
     let mut reply = json!({"path": out, "width": w, "height": h, "bytes": png.bytes.len(), "renderer": png.renderer});
     if let Some(w) = solidcraft_engine::capture::warning(png.renderer) {
@@ -1397,6 +1475,12 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
     let t = std::time::Instant::now();
     let step = solidcraft_engine::io::is_step_path(path);
     let kind = if step { solidcraft_engine::io::limits::Kind::Step } else { solidcraft_engine::io::limits::Kind::Design };
+    // As `doc.open` does: warned about, and read all the same, when it may need more memory than there is.
+    if let Ok(size) = std::fs::metadata(path).map(|m| m.len())
+        && let Some(warning) = solidcraft_engine::io::limits::memory_warning(path, size)
+    {
+        eprintln!("warning: {path}: {warning}");
+    }
     let bytes = solidcraft_engine::io::limits::read(path, kind).map_err(|e| format!("{path}: {e}"))?;
     let read_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("{}", json!({"step": "read", "ms": read_ms, "bytes": bytes.len()}));
@@ -1520,7 +1604,7 @@ mod tests {
     use serde_json::json;
     use solidcraft_engine::Session;
 
-    use super::read_session;
+    use super::{read_session, skipped_body_lines};
 
     /// A file removed when the test ends, failed or not.
     struct Temp(std::path::PathBuf);
@@ -1562,5 +1646,21 @@ mod tests {
             .unwrap();
         assert!(s.model.last_recomputed > 0, "evaluated while profiling");
         assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
+    }
+
+    /// A body left out of an export is named on its own line, with why, and the line is the same
+    /// whether or not the file's other notes are shown.
+    #[test]
+    fn a_body_left_out_of_an_export_is_named_on_stderr() {
+        let reply = json!({
+            "path": "out.stl",
+            "skipped": ["BrokenSliver"],
+            "warnings": ["Bolt: face 3 is short of its chord tolerance", "BrokenSliver: skipped: meshing failed (BrokenSliver: tessellation: face 7 (cylinder))"]
+        });
+        let lines = skipped_body_lines("out.stl", &reply);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].starts_with("out.stl: warning: body BrokenSliver is NOT in this file"), "{lines:?}");
+        assert!(lines[0].contains("face 7"), "{lines:?}");
+        assert!(skipped_body_lines("out.stl", &json!({"path": "out.stl", "warnings": ["Bolt: a note"]})).is_empty());
     }
 }

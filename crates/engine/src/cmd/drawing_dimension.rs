@@ -491,7 +491,7 @@ fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag, cmd: &str) -> Re
         .read_on(d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
         .map_err(|e| bad(cmd, e.to_string()))?;
     let r = read.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
-    let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, cmd).map_err(|why| bad(cmd, why))?;
+    let on = crate::drawing_view::dimension_view_on_sheet(s, d, dimension, cmd).map_err(|why| bad(cmd, why))?;
     let lettering = PaperFonts::new(&d.font, &d.language, false);
     dragged(dimension, &r, &on.frame, &lettering, drag.seen_from(on.centre)).map_err(|why| {
         let words = match why {
@@ -784,7 +784,7 @@ fn alone_on_sheet(
 ) -> std::result::Result<(crate::drawing_dimension_paper::OnPaper, Vec2, Scene), Option<String>> {
     // The view draws from where the design places its parts, as the sheet does; a dimension reads the
     // same either way, as it reads the model, not the session's moves.
-    let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, INSPECT).map_err(|why| Some(why.to_string()))?;
+    let on = crate::drawing_view::dimension_view_on_sheet(s, d, dimension, INSPECT).map_err(|why| Some(why.to_string()))?;
     let centre = on.centre;
     // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
     let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
