@@ -1254,6 +1254,23 @@ fn press_pull_dialog_is_titled_press_pull() {
     assert!(label_in(&h, "dialog:header", "Extrude"), "a plain Extrude header is Extrude");
 }
 
+/// The Q shortcut starts Press Pull, so Press Pull is the command the app shows as running: the
+/// ribbon does not show Extrude pressed, and Repeat repeats a Press Pull (#14359).
+#[test]
+fn press_pull_leaves_press_pull_as_the_running_command() {
+    let mut app = boxed();
+    crate::keymap::press(&mut app, "Q", false);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.press_pull), "Q opens the Press Pull panel");
+    assert_eq!(app.last_command.as_ref().map(|c| c.0.as_str()), Some("solid.press_pull"), "Q leaves Press Pull as the running command");
+    assert!(crate::toolbar::shows_pressed(&app, "solid.press_pull"), "the Press Pull button is pressed");
+    assert!(!crate::toolbar::shows_pressed(&app, "solid.extrude"), "the Extrude button is not pressed");
+
+    // A plain Extrude still leaves the Extrude running.
+    let mut app = boxed();
+    crate::keymap::press(&mut app, "E", false);
+    assert_eq!(app.last_command.as_ref().map(|c| c.0.as_str()), Some("solid.extrude"), "E leaves Extrude running");
+}
+
 /// Press Pull on a fillet's round face reopens the fillet to change its radius, as the
 /// command does, rather than an Offset Face that refuses it (#1932): picked first, or picked
 /// with Press Pull already open.
@@ -5260,6 +5277,37 @@ fn split_face_dialog_keeps_a_sketch_split_and_its_loops() {
     assert_eq!(p["loops"], json!(true));
     let (_, p) = commands_for("ByPlane");
     assert!(p.get("sketch").is_none() && p.get("loops").is_none(), "{p}");
+}
+
+/// #17555: Split Face takes a sketch as its splitting tool, so a sketch's curves divide a face,
+/// the way the command does from the command line.
+#[test]
+fn split_face_dialog_takes_a_sketch_as_its_splitting_tool() {
+    let mut app = app_with(json!([
+        {"command":"solid.box", "params":{"length":40,"width":30,"height":20,"body_name":"B"}},
+        {"command":"sketch.create", "params":{"plane":"XY","name":"Loop"}},
+        {"command":"sketch.line", "params":{"points":[[10,5],[30,5],[20,25]],"closed":true}},
+        {"command":"sketch.finish", "params":{}}
+    ]));
+    let sketch = app.session.doc.find_feature("Loop").unwrap().id;
+    let mut d = crate::dialogs::Dialog::for_command(&app, "solid.split_face").unwrap();
+    // The splitting tool takes a sketch: a curve of it, picked in the viewport.
+    assert!(
+        crate::dialogs::fits(d.inputs[1].accept, &Sel::ExternalSketchCurve { sketch, id: "l1".into() }),
+        "the splitting tool does not take a sketch"
+    );
+    // The face to split, and the sketch that divides it.
+    let face = crate::dialogs::face_sel(&app.session, Vec3::new(20.0, 12.0, 20.0)).expect("the top face");
+    d.pick(&app.session, face);
+    d.active = 1;
+    d.pick(&app.session, Sel::ExternalSketchCurve { sketch, id: "l1".into() });
+    let (command, params) = crate::dialogs::apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(command, "solid.split_face");
+    assert_eq!(params["sketch"], json!(sketch), "{params}");
+    // The face is divided: the triangle is cut out of the top of the box.
+    app.session.execute(&command, &params).unwrap();
+    let measured = app.run("inspect.measure", json!({"bodies": ["B"]})).unwrap();
+    assert_eq!(measured["bodies"][0]["kernel"]["faces"], json!(7), "{measured}");
 }
 
 /// #16400: Plane Through Three Points takes a point on a mesh body's surface, the exact point of
