@@ -33,14 +33,10 @@ struct Piece {
     arc: Option<Arc>,
 }
 
-/// An arc's circle: its centre, the angle it turns through, and the x axis of the rim edge's
-/// circle it comes from (the walls are laid on that axis, so a rim edge and the wall above it share
-/// one parameterisation of the circle).
 #[derive(Clone, Copy)]
 struct Arc {
     centre: Vec3,
     sweep: f64,
-    x: Vec3,
 }
 
 impl Piece {
@@ -48,7 +44,7 @@ impl Piece {
     fn at(&self, n: Vec3, f: f64) -> Vec3 {
         match self.arc {
             None => self.a + (self.b - self.a) * f,
-            Some(Arc { centre, sweep, .. }) => {
+            Some(Arc { centre, sweep }) => {
                 let x = self.a - centre;
                 let (s, c) = (f * sweep).sin_cos();
                 centre + x * c + n.cross(x) * s
@@ -147,8 +143,7 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
                 // An arc at the corner: the moved line and circle (or the two moved circles)
                 // cross nearest the old corner, and both pieces end there.
                 let corner = pieces.get(j).map(|p| p.a).ok_or_else(|| fail("piece"))?;
-                let x = carriers_cross(&pi, &pj, n, corner)
-                    .ok_or_else(|| fail("an arc meeting another edge at a corner the band's edge can't go round"))?;
+                let x = carriers_cross(&pi, &pj, n, corner).ok_or_else(|| fail("an arc meeting another edge at a corner the band's edge can't go round"))?;
                 if let Some(e) = out.get_mut(i) {
                     e.b = x;
                 }
@@ -238,7 +233,7 @@ fn pieces(asm: &Assembly, lp: &[AUse], n: Vec3) -> Result<Vec<Piece>> {
                     }
                     let along = if u.forward { 1.0 } else { -1.0 };
                     let sweep = (t1 - t0) * along * z.dot(n).signum();
-                    Ok(Piece { a, b, arc: Some(Arc { centre: Vec3::from(frame.origin), sweep, x: Vec3::from(frame.x_axis) }) })
+                    Ok(Piece { a, b, arc: Some(Arc { centre: Vec3::from(frame.origin), sweep }) })
                 }
                 Curve::Ellipse { .. } => Err(LipRefusal::RimCurve("an ellipse").into()),
                 Curve::Polyline { .. } => Err(LipRefusal::RimCurve("a polyline").into()),
@@ -369,9 +364,7 @@ fn wall(p: &Piece, n: Vec3, bottom: &AUse, top: &AUse, up_a: u32, up_b: u32, rig
             (Surface::Plane { origin: arr(p.a), u_axis: arr(d), v_axis: arr(n) }, right)
         }
         Some(arc) => {
-            // On the rim edge's own axis: the forms of a circle and of the cylinder through it
-            // agree along it only when they start their quarters from the same axis.
-            let x = (arc.x - n * arc.x.dot(n)).normalized().ok_or_else(|| fail("arc"))?;
+            let x = (p.a - arc.centre).normalized().ok_or_else(|| fail("arc"))?;
             let surface =
                 Surface::Cylinder { frame: Frame { origin: arr(arc.centre), x_axis: arr(x), y_axis: arr(n.cross(x)) }, radius: arc.centre.dist(p.a) };
             // Right of an arc turning counter-clockwise about n is away from its axis.
