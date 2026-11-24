@@ -2833,7 +2833,7 @@
   "prefs.sketch.click_selects": "클릭으로 선택",
   "prefs.sketch.conflict_colour": "충돌 색상",
   "prefs.sketch.cursor_coordinates": "스케치에서 커서 좌표 표시",
-  "prefs.sketch.cursor_coordinates_note": "도구를 실행하지 않을 때도 포인터 옆에 스케치 원점 기준 X와 Y를 표시합니다. 끄기: 도구로 점을 배치하는 동안에만 표시합니다.",
+  "prefs.sketch.cursor_coordinates_note": "스케치에서 그리기 도구 사용 여부와 관계없이 포인터 옆에 X와 Y를 표시합니다. 끄면 읽기 표시가 숨겨지며, 치수와 좌표 입력은 계속 사용할 수 있습니다.",
   "prefs.sketch.drawing": "그리기",
   "prefs.sketch.ellipse_axes": "타원을 축과 함께 그리기",
   "prefs.sketch.ellipse_axes_note": "장축과 단축을 구성선으로 그려 반축과 축에 치수를 지정할 수 있습니다. 끄면: 타원만 그리며, D는 값을 어디로 끌든 단반경을 주며, 이전처럼 R로 표시되어 그려집니다.",

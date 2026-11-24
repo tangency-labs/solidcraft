@@ -3693,7 +3693,7 @@
   "prefs.sketch.click_selects": "לחיצה בוחרת",
   "prefs.sketch.conflict_colour": "צבע התנגשות",
   "prefs.sketch.cursor_coordinates": "הצגת קואורדינטות הסמן בסקיצה",
-  "prefs.sketch.cursor_coordinates_note": "ליד הסמן, ערכי X ו-Y שלו מראשית הסקיצה, גם כשאין כלי פעיל. כבוי: רק בזמן שכלי ממקם נקודה.",
+  "prefs.sketch.cursor_coordinates_note": "מציג את X ו-Y לצד הסמן בסקיצה, עם כלי ציור פעיל או בלעדיו. כיבוי מסתיר את התצוגה; אפשר עדיין להזין מידות וקואורדינטות.",
   "prefs.sketch.drawing": "שרטוט",
   "prefs.sketch.ellipse_axes": "שרטוט אליפסות עם הצירים שלהן",
   "prefs.sketch.ellipse_axes_note": "הציר הראשי והציר המשני כקווי עזר, כדי שאפשר יהיה לתת מידות לחצאי הצירים ולצירים. כבוי: האליפסה בלבד, ו-D עליה נותן את הרדיוס המשני שלה בכל מקום שאליו נגרר הערך, משורטט ומסומן R כמו קודם.",

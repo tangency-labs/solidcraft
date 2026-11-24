@@ -3693,7 +3693,7 @@
   "prefs.sketch.click_selects": "Click selects",
   "prefs.sketch.conflict_colour": "Conflict color",
   "prefs.sketch.cursor_coordinates": "Show the cursor's coordinates in a sketch",
-  "prefs.sketch.cursor_coordinates_note": "Beside the pointer, its X and Y from the sketch origin, also with no tool running. Off: only while a tool places a point.",
+  "prefs.sketch.cursor_coordinates_note": "Show X and Y beside the pointer in a sketch, with or without a drawing tool. Off hides this readout; dimension and coordinate entry remain available.",
   "prefs.sketch.drawing": "Drawing",
   "prefs.sketch.ellipse_axes": "Draw ellipses with their axes",
   "prefs.sketch.ellipse_axes_note": "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its minor radius wherever the value is pulled, drawn and labeled R as before.",

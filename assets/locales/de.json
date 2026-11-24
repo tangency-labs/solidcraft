@@ -3326,7 +3326,7 @@
   "prefs.sketch.click_selects": "Klick wählt",
   "prefs.sketch.conflict_colour": "Konfliktfarbe",
   "prefs.sketch.cursor_coordinates": "Cursorkoordinaten in der Skizze anzeigen",
-  "prefs.sketch.cursor_coordinates_note": "Neben dem Zeiger seine X- und Y-Werte vom Skizzenursprung, auch ohne aktives Werkzeug. Aus: nur während ein Werkzeug einen Punkt setzt.",
+  "prefs.sketch.cursor_coordinates_note": "Zeigt X und Y neben dem Zeiger in der Skizze, mit oder ohne aktives Zeichenwerkzeug. Aus blendet die Anzeige aus; Maß- und Koordinateneingabe bleiben verfügbar.",
   "prefs.sketch.drawing": "Zeichnen",
   "prefs.sketch.ellipse_axes": "Ellipsen mit ihren Achsen zeichnen",
   "prefs.sketch.ellipse_axes_note": "Haupt- und Nebenachse als Konstruktionslinien, damit Halbachsen und Achsen bemaßt werden können. Aus: nur die Ellipse, und D darauf ergibt ihren Nebenradius, wohin der Wert auch gezogen wird, gezeichnet und mit R beschriftet wie bisher.",

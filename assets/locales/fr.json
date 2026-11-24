@@ -3680,7 +3680,7 @@
   "prefs.sketch.click_selects": "Le clic sélectionne",
   "prefs.sketch.conflict_colour": "Couleur de conflit",
   "prefs.sketch.cursor_coordinates": "Afficher les coordonnées du curseur dans une esquisse",
-  "prefs.sketch.cursor_coordinates_note": "À côté du pointeur, ses X et Y depuis l'origine de l'esquisse, même sans outil actif. Désactivé : seulement pendant qu'un outil place un point.",
+  "prefs.sketch.cursor_coordinates_note": "Affiche X et Y près du pointeur dans une esquisse, avec ou sans outil de dessin actif. Désactivé, le relevé disparaît ; la saisie des cotes et coordonnées reste disponible.",
   "prefs.sketch.drawing": "Dessin",
   "prefs.sketch.ellipse_axes": "Dessiner les ellipses avec leurs axes",
   "prefs.sketch.ellipse_axes_note": "Les grands et petits axes sont représentés par des lignes de construction afin de pouvoir coter les demi-axes et les axes. Désactivé : seule l’ellipse est affichée ; la touche D indique son petit rayon, quel que soit l’endroit où la cote est placée, tracée et étiquetée R comme auparavant.",

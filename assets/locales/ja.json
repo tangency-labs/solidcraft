@@ -3693,7 +3693,7 @@
   "prefs.sketch.click_selects": "クリックで選択",
   "prefs.sketch.conflict_colour": "競合色",
   "prefs.sketch.cursor_coordinates": "スケッチでカーソル座標を表示",
-  "prefs.sketch.cursor_coordinates_note": "ツールを実行していないときも、ポインターの横にスケッチ原点からの X と Y を表示します。オフ: ツールで点を配置している間だけ表示します。",
+  "prefs.sketch.cursor_coordinates_note": "スケッチ中、描画ツールの使用中かどうかにかかわらず、ポインターの横に X と Y を表示します。オフにすると表示を隠します。寸法と座標の入力は引き続き利用できます。",
   "prefs.sketch.drawing": "作図",
   "prefs.sketch.ellipse_axes": "楕円を軸と一緒に描く",
   "prefs.sketch.ellipse_axes_note": "長軸と短軸をコンストラクション線として描き、半軸と軸に寸法を付けられるようにします。オフ: 楕円のみを描き、D で短半径を寸法にします。値をどこへ引いても、これまでどおり R 付きで描かれます。",

@@ -3678,7 +3678,7 @@
   "prefs.sketch.click_selects": "El clic selecciona",
   "prefs.sketch.conflict_colour": "Color de conflicto",
   "prefs.sketch.cursor_coordinates": "Mostrar las coordenadas del cursor en un boceto",
-  "prefs.sketch.cursor_coordinates_note": "Junto al puntero, su X e Y desde el origen del boceto, también sin ninguna herramienta activa. Desactivado: solo mientras una herramienta coloca un punto.",
+  "prefs.sketch.cursor_coordinates_note": "Muestra X e Y junto al puntero en un boceto, con o sin herramienta de dibujo activa. Desactivado oculta la lectura; se pueden seguir introduciendo cotas y coordenadas.",
   "prefs.sketch.drawing": "Dibujo",
   "prefs.sketch.ellipse_axes": "Dibujar elipses con sus ejes",
   "prefs.sketch.ellipse_axes_note": "Los ejes mayor y menor como líneas de construcción, para poder acotar los semiejes y los ejes. Desactivado: solo la elipse, y al pulsar D sobre ella se da su radio menor allí donde se arrastre el valor, dibujado y etiquetado como R, como antes.",

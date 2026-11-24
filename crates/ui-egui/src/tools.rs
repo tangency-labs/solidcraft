@@ -1359,8 +1359,8 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         if snap.as_deref() == Some("Midpoint") && t.kind == Kind::HorizontalVertical {
             painter.circle_stroke(sp, 8.0, Stroke::new(2.0, tk.accent));
         }
-        // The design's coordinates: not while a value is typed and the sketch is drawn at it.
-        if crate::dim_view::preview_world(app).is_none() {
+        // The design's coordinates: not when hidden in Preferences or while a value is typed.
+        if app.preferences.sketch_cursor_coordinates && crate::dim_view::preview_world(app).is_none() {
             let readout = painter.text(
                 crate::tool_cursor::readout_at(painter, proj.rect, sp),
                 egui::Align2::LEFT_TOP,

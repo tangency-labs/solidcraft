@@ -3693,7 +3693,7 @@
   "prefs.sketch.click_selects": "Nhấp để chọn",
   "prefs.sketch.conflict_colour": "Màu xung đột",
   "prefs.sketch.cursor_coordinates": "Hiển thị tọa độ con trỏ trong bản phác thảo",
-  "prefs.sketch.cursor_coordinates_note": "Bên cạnh con trỏ, X và Y của nó tính từ gốc bản phác thảo, kể cả khi không có công cụ nào chạy. Tắt: chỉ khi một công cụ đang đặt điểm.",
+  "prefs.sketch.cursor_coordinates_note": "Hiển thị X và Y cạnh con trỏ trong bản phác thảo, dù có dùng công cụ vẽ hay không. Tắt để ẩn tọa độ; vẫn có thể nhập kích thước và tọa độ.",
   "prefs.sketch.drawing": "Vẽ",
   "prefs.sketch.ellipse_axes": "Vẽ hình elip kèm các trục",
   "prefs.sketch.ellipse_axes_note": "Trục lớn và trục nhỏ dưới dạng đường gióng dựng hình, để có thể ghi kích thước bán trục và trục. Tắt: chỉ vẽ hình elip, và D trên nó cho bán kính nhỏ dù kéo giá trị đến đâu, được vẽ và ghi nhãn R như trước.",

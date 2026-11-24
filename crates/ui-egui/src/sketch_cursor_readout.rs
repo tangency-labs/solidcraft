@@ -3,8 +3,8 @@
 //! where the pointer meets the sketch plane, in the sketch's own X and Y from its origin, so the
 //! position can be read while just looking around. Over a sketch point it reads that point's
 //! exact place. Preferences › Sketch ("Show the cursor's coordinates in a sketch",
-//! `sketch_cursor_coordinates`) turns it off, leaving the readout to the tools as before.
-//! It is UI only: drawing it runs no command and changes nothing in the design.
+//! `sketch_cursor_coordinates`) turns it off, whether a tool is running or not. Numeric
+//! dimension and coordinate input fields remain available. Drawing changes no model state.
 
 use egui::Pos2;
 use solidcore_record::{Plane, Vec2, Vec3};
@@ -34,8 +34,8 @@ pub(crate) fn text(app: &SolveApp, p: Vec2) -> String {
 
 /// The sketch coordinates to show for a pointer at `pointer` in the open sketch with no tool
 /// running: the hovered point of the sketch, else where the pointer's ray meets the sketch plane.
-/// None when the preference is off, a tool runs (it shows its own), or no 2D sketch is open
-/// (none, or a 3D sketch).
+/// None when the preference is off, a tool runs (it may show its own), or no 2D
+/// sketch is open (none, or a 3D sketch).
 pub(crate) fn idle_point(app: &SolveApp, proj: &Proj, pointer: Pos2) -> Option<Vec2> {
     if !app.preferences.sketch_cursor_coordinates || app.tool.is_some() {
         return None;
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_sketch_shows_the_cursor_coordinates_and_the_preference_restores_tools_only() {
+    fn sketch_cursor_preference_hides_idle_and_active_tool_readouts() {
         let (mut h, at) = idle_sketch();
         assert!(h.app.tool.is_none());
         let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
@@ -157,6 +157,12 @@ mod tests {
         h.frames(2);
         assert!(rect_of("viewport:cursor_readout").is_none(), "one readout at a time");
         assert!(rect_of("viewport:readout").is_some(), "the tool's readout is drawn");
+        h.call("ui.prefs", json!({"sketch_cursor_coordinates": false}));
+        h.frames(2);
+        assert!(rect_of("viewport:readout").is_none(), "the preference also hides the active tool's readout");
+        h.call("ui.prefs", json!({"sketch_cursor_coordinates": true}));
+        h.frames(2);
+        assert!(rect_of("viewport:readout").is_some(), "turning the setting back on restores the readout");
     }
 
     /// Over a sketch point the readout gives the point's exact place, also with sketch points
