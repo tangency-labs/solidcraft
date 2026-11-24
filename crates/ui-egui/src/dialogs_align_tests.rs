@@ -68,3 +68,63 @@ fn round_edges_align_as_circles_and_flip_turns_the_body_over() {
         assert_on_hole_axis(b, z, &format!("flip {flip}"));
     }
 }
+
+/// Clicks the edge at `at` into the input the dialog has active.
+fn click_edge(h: &mut Harness, at: Vec3) {
+    let active = h.app.dialog.as_ref().unwrap().active;
+    pick_edge(h, active, at);
+}
+
+/// No Bodies step: the dialog opens on From and goes on to To, and with Bodies left empty what the
+/// From pick is on moves. Bodies, when given, overrides it.
+#[test]
+fn the_body_the_from_pick_is_on_moves_without_picking_bodies() {
+    let mut h = plate_and_peg();
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "opens on From");
+    click_edge(&mut h, Vec3::new(104.0, 20.0, 0.0));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 2, "goes on to To, not back to Bodies");
+    click_edge(&mut h, Vec3::new(49.0, 20.0, 10.0));
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["bodies"], json!(["Peg"]), "{}", commands[0].1);
+    let (_, b) = apply_and_bound(&mut h, "Peg");
+    assert_on_hole_axis(b, [10.0, 16.0], "the peg the From edge is on");
+    // An override moves what it names, From still on the peg.
+    let mut h = plate_and_peg();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [120, 0, 0], "body_name": "Cap"})).unwrap();
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Peg".into() }, Sel::Body { name: "Cap".into() }];
+    pick_edge(&mut h, 1, Vec3::new(104.0, 20.0, 0.0));
+    pick_edge(&mut h, 2, Vec3::new(49.0, 20.0, 10.0));
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["bodies"], json!(["Peg", "Cap"]), "{}", commands[0].1);
+    // A To pick on what moves is no frame (the command takes none there): it stays as picked, and
+    // as a joint origin it is refused in the dialog's words.
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items.clear();
+    pick_edge(&mut h, 2, Vec3::new(104.0, 20.0, 6.0));
+    let (_, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert!(p.get("to_frame").is_none() && p["to"]["snap"] == json!("edge_mid"), "{p}");
+    h.app.dialog.as_mut().unwrap().extra.insert("to_snap".into(), json!("origin"));
+    let refused = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_err();
+    assert!(refused.contains("the To pick is on a body that moves"), "{refused}");
+}
+
+/// In Components mode the component the From pick is on moves when none is picked.
+#[test]
+fn the_component_the_from_pick_is_on_moves_without_picking_components() {
+    let mut h = Harness::new();
+    let comp = h.app.run("component.create", json!({"name": "Extrusion"})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 60, "body_name": "Beam"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let second = h.app.run("occurrence.copy", json!({"component": comp, "translate": [40, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.start("solid.align");
+    h.frames(2);
+    let from = crate::dialogs::face_sel(&h.app.session, Vec3::new(45.0, 5.0, 0.0)).unwrap();
+    let to = crate::dialogs::face_sel(&h.app.session, Vec3::new(10.0, 5.0, 30.0)).unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = Kind::Align { flip: false, components: true, axes: [true; 3], angle: String::new() };
+    d.inputs[0].label = "Components";
+    d.inputs[1].items = vec![from];
+    d.inputs[2].items = vec![to];
+    let (cmd, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!((cmd.as_str(), &p["paths"]), ("occurrence.align", &json!([[second]])), "{p}");
+}
