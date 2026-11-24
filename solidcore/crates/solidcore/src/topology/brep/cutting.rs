@@ -539,8 +539,12 @@ impl PlaneCutter {
 /// # Errors
 ///
 /// Those of [`PlaneCutter::merge_intersection`] and
-/// [`PlaneCutter::classification`]; [`SolidError::Unported`] from the deletions and the
-/// stitching (whose other statuses are ignored, as upstream).
+/// [`PlaneCutter::classification`]; [`SolidError::Unported`] from the deletions (whose
+/// other statuses are ignored, as upstream); those of the stitching and orientation
+/// ([`p5::stitch_and_orient`]). Upstream ignores the stitch's status too; the port's
+/// stitch passes a failed first pass on before the second pass and the orientation
+/// (WR-658), so a cut that went on would hand back an unstitched, unoriented body.
+/// `b` may be partly edited (cut but not stitched or oriented) when this returns `Err`.
 #[allow(clippy::too_many_arguments)]
 pub fn do_cut(
     k: &mut Kernel,
@@ -551,6 +555,38 @@ pub fn do_cut(
     tolerance_3d: f64,
     remove_cut_portions: bool,
     subset_faces: Option<&[FaceId]>,
+) -> Result<()> {
+    do_cut_with(
+        k,
+        b,
+        env,
+        curve_ref,
+        cutter,
+        tolerance_3d,
+        remove_cut_portions,
+        subset_faces,
+        stitch_cut,
+    )
+}
+
+/// [`do_cut`] with the closing stitch and orientation `stitch` (a test seam: production
+/// passes [`stitch_cut`]).
+#[allow(clippy::too_many_arguments)]
+fn do_cut_with(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+    cutter: &mut PlaneCutter,
+    tolerance_3d: f64,
+    remove_cut_portions: bool,
+    subset_faces: Option<&[FaceId]>,
+    stitch: impl FnOnce(
+        &mut Kernel,
+        &mut Brep,
+        &mut NotifyEnv<'_>,
+        &dyn Fn(EdgeId, i64) -> ObjectRef,
+    ) -> Result<()>,
 ) -> Result<()> {
     // set m_pBrepToCut EditingEnabled flag to TRUE for upcoming boolean
     let editing = b.editing_enabled();
@@ -566,6 +602,7 @@ pub fn do_cut(
         tolerance_3d,
         remove_cut_portions,
         subset_faces,
+        stitch,
     );
     k.context.set_doing_boolean(doing_boolean);
     b.set_editing_enabled(editing);
@@ -583,6 +620,12 @@ fn do_cut_body(
     tolerance_3d: f64,
     remove_cut_portions: bool,
     subset_faces: Option<&[FaceId]>,
+    stitch: impl FnOnce(
+        &mut Kernel,
+        &mut Brep,
+        &mut NotifyEnv<'_>,
+        &dyn Fn(EdgeId, i64) -> ObjectRef,
+    ) -> Result<()>,
 ) -> Result<()> {
     // Do intersection of cutter with brep
     cutter.merge_intersection(k, b, env, curve_ref, tolerance_3d, subset_faces)?;
@@ -633,26 +676,33 @@ fn do_cut_body(
         ignore_status(bp4::delete_vertex(k, b, &mut d, v))?;
     }
 
-    // Inside an edit that has lent the kernel context's callbacks (a caller under
-    // `with_kernel_callbacks`), `StitchAndOrient`'s own edits would be refused as nested,
-    // and the refusal ignored with the status: it stitches and orients through this
-    // cut's environment there, naming new curves by `curve_ref`.
+    // (not upstream, which ignores the status) a failed stitch or orientation is the
+    // cut's failure: the stitch returns at a failed first pass, before its second pass
+    // and the orientation, so the body is not one to hand back as cut.
+    stitch(k, b, env, curve_ref)
+}
+
+/// The cut's closing `StitchAndOrient`. Inside an edit that has lent the kernel context's
+/// callbacks (a caller under `with_kernel_callbacks`), `StitchAndOrient`'s own edits
+/// would be refused as nested: it stitches and orients through this cut's environment
+/// there, naming new curves by `curve_ref`.
+fn stitch_cut(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+) -> Result<()> {
     if k.context.notify_lent() {
-        ignore_status(p5::stitch_and_orient_notified(
+        p5::stitch_and_orient_notified(
             k,
             b,
             &StitchAndOrientOptions::default(),
             env,
             p9::CurveIdentity::Legacy(curve_ref),
-        ))?;
+        )
     } else {
-        ignore_status(p5::stitch_and_orient(
-            k,
-            b,
-            &StitchAndOrientOptions::default(),
-        ))?;
+        p5::stitch_and_orient(k, b, &StitchAndOrientOptions::default())
     }
-    Ok(())
 }
 
 /// `SmApiCut(pBrep, rPlanePt, rPlaneNormal)` under the caller's notification
@@ -663,7 +713,8 @@ fn do_cut_body(
 /// # Errors
 ///
 /// `SM_ERR_INVALID_INPUT` (a [`TopologyFailure`](crate::error::topology::TopologyFailure)) for a normal `Unitize` rejects,
-/// before `b` is touched; those of [`do_cut`].
+/// before `b` is touched; those of [`do_cut`]. `b` may be partly edited (cut but not
+/// stitched or oriented) when this returns `Err`.
 pub fn cut_notified(
     k: &mut Kernel,
     b: &mut Brep,
@@ -695,4 +746,80 @@ pub fn cut(k: &mut Kernel, b: &mut Brep, plane_point: Point3, plane_normal: Vec3
     let curve_ref =
         |e: EdgeId, _type_code: i64| crate::topology::loopuse::notify_ref(EntityRef::Edge(e));
     cut_notified(k, b, &mut env, &curve_ref, plane_point, plane_normal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::extent2d::Extent2d;
+    use crate::math::Point2;
+    use crate::surface::plane::Plane;
+    use crate::surface::surface::Surface;
+    use crate::topology::brep::p3::new_brep;
+    use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+    use crate::topology::brep_cache::{arena_identity, CacheObject};
+
+    /// The six faces of the cube -5..5, each a separate face with edges and vertices of
+    /// its own (nothing stitched), as `tests/cut_stitch_under_kernel_callbacks.rs` builds.
+    fn loose_cube(k: &mut Kernel) -> Brep {
+        let mut b = new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT).unwrap();
+        let h = 5.0;
+        for a in [Vec3::X, Vec3::Y, Vec3::Z] {
+            for s in [1.0, -1.0] {
+                let n = a * s;
+                let surface = Surface::from(Plane::from_normal(n * h, n));
+                let mut state = ArenaNotifyState::new(&b);
+                let mut env = state.env(None);
+                let mut marks = Marks::default();
+                let this_face = |face| arena_identity(CacheObject::Face(face));
+                let mut fenv = FaceBuildEnv {
+                    env: &mut env,
+                    marks: &mut marks,
+                    this_face: &this_face,
+                };
+                let domain = Extent2d::from_points(Point2::new(-h, -h), Point2::new(h, h));
+                create_face_from_surface(k, &mut b, Some(surface), &domain, &mut fenv).unwrap();
+            }
+        }
+        b
+    }
+
+    /// A failed closing stitch is the cut's failure (review of #16956): the port's
+    /// `StitchAndOrient` returns at a failed first pass, before its second pass and the
+    /// orientation, so a cut that dropped the status (as upstream does) handed back an
+    /// unstitched, unoriented body as success. The flags the cut sets are restored.
+    #[test]
+    fn a_failed_stitch_fails_the_cut() {
+        let mut k = Kernel::default();
+        let mut b = loose_cube(&mut k);
+        let editing = b.editing_enabled();
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let curve_ref =
+            |e: EdgeId, _type_code: i64| crate::topology::loopuse::notify_ref(EntityRef::Edge(e));
+        let mut cutter = PlaneCutter::new(Point3::new(0.0, 0.0, 1.0), Vec3::Z);
+        let tolerance = b.tolerance();
+        let mut stitched = false;
+        let r = do_cut_with(
+            &mut k,
+            &mut b,
+            &mut env,
+            &curve_ref,
+            &mut cutter,
+            tolerance,
+            true,
+            None,
+            |_, _, _, _| {
+                stitched = true;
+                Err(SolidError::sm_err("test::stitch"))
+            },
+        );
+        assert!(stitched, "the cut reached its stitch");
+        assert!(
+            matches!(&r, Err(e) if e.to_string().contains("test::stitch")),
+            "{r:?}"
+        );
+        assert!(!k.context.doing_boolean());
+        assert_eq!(b.editing_enabled(), editing);
+    }
 }

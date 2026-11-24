@@ -43,7 +43,8 @@
 
 use super::sides::{ExtendedSides, SideExtension};
 use super::{below_resolution, keeps, Continuity, ExtendRefusal, Local};
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
@@ -70,6 +71,32 @@ const MEET: f64 = 1e-12;
 /// The angle between `a` and `b`, in radians.
 fn angle(a: Vec3, b: Vec3) -> f64 {
     a.cross(b).length().atan2(a.dot(b))
+}
+
+/// The largest angle (radians) from the pole direction `p` to a point of the great-circle
+/// arc from `a` to `b` (the short way round, normal `m = a x b`): the larger of its ends'
+/// angles, and the angle of the circle's farthest point from `p` where that point lies on
+/// the arc.
+///
+/// The farthest point is the direction of `foot = m (m . p) - p (m . m)` (minus the part of
+/// `p` in the arc's plane), at the angle `pi - atan2(|p . m|, |p x m|)` from `p` (pi less
+/// the angle between `p` and the plane). The angle is taken in that closed form, not as
+/// `angle(p, foot)`: where `p` is (nearly) normal to the plane, every point of the circle
+/// is (nearly) a quarter turn from it, `foot` is the difference of two (nearly) equal terms
+/// and its direction is rounding, so `angle(p, foot)` lands anywhere in `[0, pi]` (pi at the
+/// corner of a rounded box centred on a coordinate plane), while the closed form gives the
+/// quarter turn its arguments say. Whether the point is on the arc is still decided on
+/// `foot`; where its direction is rounding, every point of the circle is within that same
+/// rounding of a quarter turn from `p`, so either answer gives the same angle to it. A
+/// `foot` of exactly zero (`p` normal to the plane) is on the arc: the quarter turn.
+fn farthest_from_pole(p: Vec3, a: Vec3, b: Vec3) -> f64 {
+    let m = a.cross(b);
+    let mut theta = angle(p, a).max(angle(p, b));
+    let foot = m * m.dot(p) - p * m.dot(m);
+    if a.cross(foot).dot(m) >= 0.0 && foot.cross(b).dot(m) >= 0.0 {
+        theta = theta.max(PI - m.dot(p).abs().atan2(p.cross(m).length()));
+    }
+    theta
 }
 
 fn refused(refusal: ExtendRefusal, distance: Option<f64>) -> SolidError {
@@ -106,6 +133,13 @@ pub(super) fn ball_extended_sides(
             "the distance is not finite and positive",
         ));
     }
+    // the caller's patch: `BallPatch::create` reads its net's control net, but the public
+    // `net_mut` can replace the net with one that has no NURB
+    if patch.net().gw_nurb().is_none() {
+        return Err(Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error());
+    }
     // the net's knot box: the extension is past the net's ends, whatever box the patch keeps
     let dom = knot_box(patch.net())?;
     let mut pole_side = None;
@@ -139,12 +173,7 @@ pub(super) fn ball_extended_sides(
     }
     // the turn round the pole the patch spans, and the third side's farthest point from it
     let lambda = angle(ax, bx);
-    let m = a.cross(b);
-    let foot = m * m.dot(p) - p * m.dot(m);
-    let mut theta = angle(p, a).max(angle(p, b));
-    if foot.length() > 0.0 && a.cross(foot).dot(m) >= 0.0 && foot.cross(b).dot(m) >= 0.0 {
-        theta = theta.max(angle(p, foot));
-    }
+    let theta = farthest_from_pole(p, a, b);
     if !(lambda > 0.0 && lambda < PI && theta > 0.0 && theta < PI) {
         return Err(SolidError::invalid_input(
             OP,
@@ -201,15 +230,22 @@ pub(super) fn ball_extended_sides(
 
 /// The box of `s`'s knots (its B-spline form's ends).
 pub(super) fn knot_box(s: &BSplineSurface) -> Result<Extent2d> {
-    let net = s
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = s.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the knot box was asked of a net with no NURB, though every caller passes a ball patch's net (whose NURB the entry checked), an analytic's form `AnalyticSupport::check` proved on its NURB, or an extension built from a NURB",
+            },
+        )
+    })?;
     let (u, v) = (net.u_knots(), net.v_knots());
     match (u.first(), u.last(), v.first(), v.last()) {
         (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) => Ok(Extent2d::from_bounds(u0, v0, u1, v1)),
-        _ => Err(SolidError::surface_failed(
+        _ => Err(SolidError::surface(
             OP,
-            "the B-spline surface has an empty knot vector",
+            SurfaceFailure::Defect {
+                why: "the net's NURB has an empty knot vector, though a NURB's knot vectors hold degree + 1 knots at each end",
+            },
         )),
     }
 }
@@ -292,9 +328,14 @@ fn extend_side_world(
     cap: Cap,
     distance: f64,
 ) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
-    let net = cur
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = cur.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the net continued past the side has no NURB, though it is the ball patch's net (whose NURB the entry checked) or an extension built from a NURB",
+            },
+        )
+    })?;
     let source = Local::of(net, side)?;
     let dom = knot_box(cur)?;
     let middle = side.point(&dom, 0.5);
@@ -335,10 +376,7 @@ fn extend_side_world(
         let n = (x_half - x_far).cross(x_side - x_half);
         let len = n.length();
         if len.is_nan() || len <= 0.0 {
-            return Err(SolidError::surface_failed(
-                OP,
-                "the side's normal has no direction",
-            ));
+            return Err(SolidError::surface(OP, SurfaceFailure::IsoCircleUndefined));
         }
         n * (1.0 / len)
     };
@@ -414,9 +452,11 @@ fn extend_side_world(
                 Reach::At(e_turn) => Some((
                     e_turn,
                     value(e_turn, false)?.ok_or_else(|| {
-                        SolidError::surface_failed(
+                        SolidError::surface(
                             OP,
-                            "the extension at the turn could not be made",
+                            SurfaceFailure::Defect {
+                                why: "the extension at the turn the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+                            },
                         )
                     })?,
                 )),
@@ -434,9 +474,11 @@ fn extend_side_world(
         }
     };
     let (grown, bound) = made(e)?.ok_or_else(|| {
-        SolidError::surface_failed(
+        SolidError::surface(
             OP,
-            "the extension at the reached distance could not be made",
+            SurfaceFailure::Defect {
+                why: "the extension at the distance the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+            },
         )
     })?;
     let across = across_of(&grown, bound)?;
@@ -460,9 +502,14 @@ fn extend_side_local(
     cap: Cap,
     distance: f64,
 ) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
-    let net = cur
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = cur.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the net continued past the side has no NURB, though it is the ball patch's net (whose NURB the entry checked) or an extension built from a NURB",
+            },
+        )
+    })?;
     let source = Local::of(net, side)?;
     let dom = knot_box(cur)?;
     let middle = side.point(&dom, 0.5);
@@ -608,9 +655,11 @@ fn extend_side_local(
                 Reach::At(e_turn) => Some((
                     e_turn,
                     value(e_turn, false)?.ok_or_else(|| {
-                        SolidError::surface_failed(
+                        SolidError::surface(
                             OP,
-                            "the extension at the turn could not be made",
+                            SurfaceFailure::Defect {
+                                why: "the extension at the turn the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+                            },
                         )
                     })?,
                 )),
@@ -628,9 +677,11 @@ fn extend_side_local(
         }
     };
     let g = made(e)?.ok_or_else(|| {
-        SolidError::surface_failed(
+        SolidError::surface(
             OP,
-            "the extension at the reached distance could not be made",
+            SurfaceFailure::Defect {
+                why: "the extension at the distance the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+            },
         )
     })?;
     let across = across_of(&g)?;
@@ -768,9 +819,8 @@ fn bisect(
         if !(m > lo && m < hi) {
             break;
         }
-        let v = f(m)?.ok_or_else(|| {
-            SolidError::surface_failed(OP, "the extension could not be measured inside the bracket")
-        })?;
+        let v = f(m)?
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::ExtensionNotMadeInBracket))?;
         if (v - target).abs() <= MEET * target {
             return Ok(m);
         }
@@ -794,9 +844,14 @@ fn certify_circle(
     c: Vec3,
     size: f64,
 ) -> Result<()> {
-    let net = s
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = s.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the extension certified on its circle has no NURB, though the extension built it from a NURB",
+            },
+        )
+    })?;
     // the iso along the side's across direction: a u-curve across a u side
     let (t, dir) = if side.is_u() {
         (middle.y, Direction::U)
@@ -813,10 +868,20 @@ fn certify_circle(
     }
     let n = rows.len();
     let (Some(&r0), Some(&rm), Some(&rl)) = (rows.first(), rows.get(n / 2), rows.last()) else {
-        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso across the side has no control points, though an extracted iso has degree + 1 or more",
+            },
+        ));
     };
     let (Some(&m0), Some(&mm), Some(&ml)) = (mags.first(), mags.get(n / 2), mags.last()) else {
-        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso's magnitudes are fewer than its rows, though one is pushed with each row",
+            },
+        ));
     };
     let g = |row: [f64; 4], x: usize| row.get(x).copied().unwrap_or(0.0);
     // the 3 x 3 minor of the three spread rows on columns i, j, l
@@ -854,9 +919,14 @@ fn certify_circle(
 /// separate from the local determinant's arithmetic, so a far-away, perfectly spread
 /// plane is not read as rank-deficient.
 fn certify_circle_local(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Vec3) -> Result<()> {
-    let net = s
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = s.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the extension certified on its circle has no NURB, though the extension built it from a NURB",
+            },
+        )
+    })?;
     // the iso along the side's across direction: a u-curve across a u side
     let (t, dir) = if side.is_u() {
         (middle.y, Direction::U)
@@ -897,10 +967,20 @@ fn certify_circle_local(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Ve
     }
     let n = rows.len();
     let (Some(&r0), Some(&rm), Some(&rl)) = (rows.first(), rows.get(n / 2), rows.last()) else {
-        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso across the side has no control points, though an extracted iso has degree + 1 or more",
+            },
+        ));
     };
     let (Some(&m0), Some(&mm), Some(&ml)) = (mags.first(), mags.get(n / 2), mags.last()) else {
-        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso's magnitudes are fewer than its rows, though one is pushed with each row",
+            },
+        ));
     };
     let g = |row: [f64; 4], x: usize| row.get(x).copied().unwrap_or(0.0);
     // the 3 x 3 minor of the three spread rows on columns i, j, l
@@ -940,4 +1020,56 @@ fn certify_circle_local(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Ve
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #15108: the corner patch of a rounded box centred on `y = 0`, its pole one ulp-ish off
+    /// the normal of its third side's plane. Every point of that side is a quarter turn from
+    /// the pole; `angle(p, foot)` on the rounded `foot` gave pi and the patch was refused.
+    #[test]
+    fn a_pole_normal_to_the_third_side_is_a_quarter_turn_from_it() {
+        let a = Vec3::new(0.0, 0.0, 3.0);
+        let b = Vec3::new(-3.0, 0.0, 0.0);
+        for p in [
+            Vec3::new(0.0, 3.000_000_000_000_001_8, 0.0),
+            Vec3::new(0.0, 3.0, 0.0),
+            Vec3::new(1e-15, 3.0, -2e-15),
+        ] {
+            let theta = farthest_from_pole(p, a, b);
+            assert!((theta - 0.5 * PI).abs() <= 1e-14, "{p:?}: {theta}");
+        }
+    }
+
+    /// A pole tilted a resolved amount off the normal: the closed form, pi/2 plus the tilt
+    /// (the farthest point on the arc lies away from the tilt).
+    #[test]
+    fn a_tilted_pole_is_the_tilt_past_a_quarter_turn() {
+        let a = Vec3::new(0.0, 0.0, 3.0);
+        let b = Vec3::new(-3.0, 0.0, 0.0);
+        for t in [1e-9_f64, 1e-6, 1e-3, 0.3] {
+            // tilted towards (1, 0, -1): the farthest point is (-1, 0, 1) / sqrt 2, inside the arc
+            let p = Vec3::new(t.sin() / 2f64.sqrt(), t.cos(), -t.sin() / 2f64.sqrt()) * 3.0;
+            let theta = farthest_from_pole(p, a, b);
+            assert!((theta - (0.5 * PI + t)).abs() <= 1e-14, "{t}: {theta}");
+        }
+    }
+
+    /// Real defects are still caught: a pole on the third side's great circle, across from a
+    /// point of the side, is a half turn from it (the patch is refused: not under a half
+    /// turn), and a pole whose farthest point is off the arc takes the arc's end.
+    #[test]
+    fn a_pole_on_the_third_sides_circle_is_still_a_half_turn() {
+        let a = Vec3::new(1.0, 0.0, 0.0);
+        let b = Vec3::new(0.0, 1.0, 0.0);
+        let p = Vec3::new(-1.0, -1.0, 0.0);
+        let theta = farthest_from_pole(p, a, b);
+        assert!(theta >= PI, "{theta}");
+        // its farthest point (1, -1, 0) / sqrt 2 is off the arc: the end a, 3/4 of a half turn
+        let q = Vec3::new(-1.0, 1.0, 0.0);
+        let theta = farthest_from_pole(q, a, b);
+        assert!((theta - 0.75 * PI).abs() <= 1e-15, "{theta}");
+    }
 }

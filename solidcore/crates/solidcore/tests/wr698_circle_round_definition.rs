@@ -1,7 +1,7 @@
 //! WR-698 (#2273, the fork's cc08236): the order-1 section, the ball's exact circle, is
 //! built by `SmGnSectionFSG::Build` as the rational quadratic arc between the rails, its
 //! rows Hermite curves along s, the arc's rows certified span by span (`sm_ArcRows`,
-//! `sm_ArcRowTermsOver`), and with `fillet_round_as_definition` the round is the blend of
+//! `sm_ArcRowTermsOver`), and the round is the blend of
 //! order 1 by its definition on that net.
 //!
 //! The geometry: a ball of radius 2 at the root of a cylinder of radius 8 (about the z
@@ -26,7 +26,15 @@
 //! levels stop at the first whose bound is under the target, which the tighter terms reach
 //! a level coarser, so the root round's bound is 7.88e-5 (a coarser level's, still under
 //! its target and above the net's distance at every point checked), and the square corner's
-//! 1.04e-26 (rounding either way). The spans and points are the fork's, bit for bit.
+//! 1.04e-26 (rounding either way). Since #16652 the offset point is enclosed as one
+//! expansion and the root round's bound is 7.42e-5 (the square corner's still 1.04e-26).
+//! Since #19306 it is so only near a focal distance, which neither case comes near (the
+//! ball rolls away from the cylinder's axis, and a plane has none): the sum's bounds, 7.88e-5
+//! and 1.04e-26, again. Since a span whose least values are over the target is left at its
+//! first piece for its halves (`SpanReuse::over_is_halved`, #13692), the halves take their
+//! own levels, not its finest interval pieces: the root round's bound is another level's,
+//! 1.49e-5, still under its target and above the net's distance at every point checked. The
+//! spans and points are the fork's, bit for bit.
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -40,10 +48,8 @@ use solidcore::nurbs::b_spline_surface::{
 };
 use solidcore::surface::surface::{Surface, SurfaceKind};
 
-fn kernel(definition: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = definition;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn exact_circle() -> GnSectionFsg {
@@ -225,7 +231,7 @@ fn dump_for_the_fork() {
     if std::env::var("DUMP").is_err() {
         return;
     }
-    let k = kernel(true);
+    let k = kernel();
     let (s, b, n) = root_round(&k);
     dump("root", &k, &s, b, n);
     let (s, b, n) = corner_round(&k);
@@ -241,12 +247,15 @@ fn assert_pt(got: Point3, want: [f64; 3], what: &str) {
 /// compared by `dump_for_the_fork` against the fork driver's output).
 #[test]
 fn the_root_round_is_the_fork_s_order_1_definition() {
-    let k = kernel(true);
+    let k = kernel();
     let (s, bound, spans) = root_round(&k);
     assert!(matches!(s.kind(), SurfaceKind::ProceduralBlend(_)));
     assert_eq!(spans, 16);
-    // the fork's 9.034_561_390_963_572e-5; tighter here (module docs, #13984, #14405)
-    assert_eq!(bound, 7.884_813_700_446_398e-5);
+    // the fork's 9.034_561_390_963_572e-5; tighter here (module docs, #13984, #14405; the
+    // offset point enclosed as one expansion, #16652: 7.424_961_576_754_573e-5, and as the
+    // sum again away from a focal distance since #19306: 7.884_813_700_446_398e-5; the
+    // halves' own levels, #13692)
+    assert_eq!(bound, 1.490_752_459_228_076e-5);
     let net = net_of(&s);
     assert_pt(
         net.evaluate_point(Point2::new(0.37, 0.5)).unwrap(),
@@ -289,11 +298,12 @@ fn the_root_round_is_the_fork_s_order_1_definition() {
 /// rounding, the net the quarter circle of radius 3 about (3, y, 3) (the fork's values).
 #[test]
 fn the_square_corner_s_circle_is_one_span() {
-    let k = kernel(true);
+    let k = kernel();
     let (s, bound, spans) = corner_round(&k);
     assert_eq!(spans, 1);
     // the fork's 1.036_985_213_585_547_6e-24, at rounding either way (module docs, #13984,
-    // #14405)
+    // #14405; #16652: 1.043_738_376_444_446_8e-26, the offset's own expansion rounded in
+    // more operations, and the sum's again between two planes since #19306)
     assert_eq!(bound, 1.042_849_477_921_199_5e-26);
     assert_pt(
         net_of(&s).evaluate_point(Point2::new(1.0, 0.25)).unwrap(),
@@ -315,19 +325,10 @@ fn the_square_corner_s_circle_is_one_span() {
     );
 }
 
-/// Without `fillet_round_as_definition` the same build returns its net as a B-spline.
-#[test]
-fn flag_off_returns_the_net() {
-    let k = kernel(false);
-    let (s, bound, spans) = root_round(&k);
-    assert!(matches!(s.kind(), SurfaceKind::BSpline(_)));
-    assert_eq!((spans, bound), (16, 7.884_813_700_446_398e-5));
-}
-
 /// An approximated, mirrored or larger arc is not the order-1 section `Build` takes.
 #[test]
 fn only_the_exact_circle_is_built() {
-    let k = kernel(true);
+    let k = kernel();
     let (f1, f2) = (plate(), cylinder());
     for arcs in [
         ArcSection::default(),
@@ -374,7 +375,7 @@ fn a_rebuilt_round_is_certified_again_and_a_moved_net_refused() {
     use solidcore::geom::extent2d::Extent2d;
     use solidcore::nurbs::b_spline_surface::SurfParamType;
     use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
-    let k = kernel(true);
+    let k = kernel();
     let blend = |s: &Surface| match s.kind() {
         SurfaceKind::ProceduralBlend(pb) => (**pb).clone(),
         other => panic!("not a blend: {other:?}"),
@@ -430,7 +431,7 @@ fn a_rebuilt_round_is_certified_again_and_a_moved_net_refused() {
 /// rounding, and its bound grows by the motion's rounding only.
 #[test]
 fn the_bound_s_floor_is_a_forward_error_bound() {
-    let k = kernel(true);
+    let k = kernel();
     for (name, (s, certified, _)) in [("root", root_round(&k)), ("corner", corner_round(&k))] {
         let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
             panic!("not a blend")
@@ -481,7 +482,7 @@ fn moved_root_round(
 /// the original one with the motion's rounding added.
 #[test]
 fn a_moved_round_is_certified_again() {
-    let k = kernel(true);
+    let k = kernel();
     let (s, _, _) = root_round(&k);
     let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
         panic!("not a blend")
@@ -512,7 +513,7 @@ fn a_moved_round_is_certified_again() {
 fn an_analytic_support_stays_its_kind_through_the_record() {
     use solidcore::surface::procedural_blend::convert::{from_record, rebuild, to_record};
     use solidcore::surface::procedural_blend::record::{SupportKindRecord, SupportRecord};
-    let k = kernel(true);
+    let k = kernel();
     let (s, _, _) = corner_round(&k);
     let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
         panic!("not a blend")
@@ -623,21 +624,20 @@ fn evaluate_section_measure(k: &Kernel, s: &Surface) -> Vec<u64> {
 fn a_rebuilt_round_shared_between_threads_gives_one_thread_s_results() {
     use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
     use std::sync::Arc;
-    let k = kernel(true);
+    let k = kernel();
     let (s, _, _) = root_round(&k);
     let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
         panic!("not a blend")
     };
     let rec = to_record(&k, pb).unwrap();
     // one thread, on a round of its own rebuilt from the same record
-    let serial =
-        evaluate_section_measure(&kernel(true), &Surface::from(rebuild(&k, &rec).unwrap()));
+    let serial = evaluate_section_measure(&kernel(), &Surface::from(rebuild(&k, &rec).unwrap()));
     let shared = Arc::new(Surface::from(rebuild(&k, &rec).unwrap()));
     let parallel: Vec<Vec<u64>> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..2)
             .map(|_| {
                 let s = Arc::clone(&shared);
-                scope.spawn(move || evaluate_section_measure(&kernel(true), &s))
+                scope.spawn(move || evaluate_section_measure(&kernel(), &s))
             })
             .collect();
         handles.into_iter().map(|h| h.join().unwrap()).collect()

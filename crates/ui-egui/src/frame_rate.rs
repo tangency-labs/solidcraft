@@ -129,6 +129,13 @@ fn grouped(n: u64) -> String {
     out
 }
 
+/// The GPU time row: the span of the view's passes and the longest of them, by the label the
+/// pass carries in GPU profilers.
+fn gpu_time(gpu: &solidcraft_viewport_gpu::view::PassTimes) -> String {
+    let ms = |us: u32| f64::from(us) / 1000.0;
+    format!("{:.1} ms · {} {:.1}", ms(gpu.span_us), gpu.slowest, ms(gpu.slowest_us))
+}
+
 /// A frame time's colour: within 60 FPS, within 30 FPS, slower (with the buckets' allowance for
 /// jitter).
 fn budget_colour(t: &Tokens, ms: f32) -> Color32 {
@@ -140,6 +147,9 @@ fn budget_colour(t: &Tokens, ms: f32) -> Color32 {
         t.error
     }
 }
+
+/// The widest text the readout shows, which sets the width of its box.
+const WIDEST: &str = "999 FPS · 999.9 ms";
 
 /// The readout's distance from the view's edges and from the panes beside it.
 const MARGIN: f32 = 12.0;
@@ -166,26 +176,46 @@ pub(crate) fn beside_panes(mut readout: Rect, view: Rect, panes: &[Rect]) -> Rec
 /// view idle.
 pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, rect: Rect) {
     app.frame_rate.top = None;
-    if !app.preferences.show_frame_rate {
+    // The renderer times its passes on the GPU only while the readout is shown.
+    let on = app.preferences.show_frame_rate;
+    if let Some(mut s) = app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok()) {
+        s.time_passes = on;
+    }
+    if !on {
         app.frame_rate = FrameRate::default();
         return;
     }
     let ctx = ui.ctx();
     let drawn = app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok().map(|s| *s)).unwrap_or_default();
-    if app.frame_rate.record(f64::from(ctx.input(|i| i.unstable_dt))) {
-        let ms = ctx.input(|i| i.unstable_dt) * 1000.0;
+    let dt = f64::from(ctx.input(|i| i.unstable_dt));
+    // Only the pass that counted a frame may ask for the next one: egui runs a frame over more
+    // than one pass, and a later pass of the same frame has no gap at all (`unstable_dt` 0),
+    // which `record` leaves out without touching the mean. Arming from such a pass would keep
+    // the window drawing with the mean of the frames before it, one wake per idle gap, forever.
+    // The frame before this one was an idle gap: something else woke the window (a plugin
+    // discovery scan's 50 ms collection frame is the one the app bar asks for), and this frame
+    // counts only because of it. Arming here would wake the window once more, and that frame
+    // would be another such maintenance frame, forever: the readout must let it go.
+    let was_idle = app.frame_rate.idle;
+    let counted = app.frame_rate.record(dt);
+    if counted {
         let rebuilt = app.frame_rate.scene_key != app.viewport.key;
-        app.frame_rate.push(Sample { ms, triangles: drawn.triangles, rebuilt });
+        app.frame_rate.push(Sample { ms: (dt * 1000.0) as f32, triangles: drawn.triangles, rebuilt });
     }
     app.frame_rate.scene_key = app.viewport.key;
-    if app.frame_rate.fps().is_some() {
+    if counted && !was_idle && app.frame_rate.fps().is_some() {
+        // Past IDLE_AFTER, so the frame it brings is read as idle ("0 FPS"): a wake inside the
+        // threshold would count as one more frame, which would arm the next one in turn.
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(IDLE_AFTER + 0.1));
     }
     let Some(text) = app.frame_rate.label() else { return };
     let t = Tokens::get();
     let font = FontId::monospace(t.font_body);
     let galley = painter.layout_no_wrap(text, font.clone(), t.text);
-    let size = galley.size() + vec2(16.0, 8.0);
+    // The box keeps the width of the widest reading, so it neither jumps with the digits nor
+    // shrinks to "0 FPS" when the view goes idle (#20134).
+    let widest = painter.layout_no_wrap(WIDEST.to_string(), font.clone(), t.text).size().x;
+    let size = vec2(galley.size().x.max(widest), galley.size().y) + vec2(16.0, 8.0);
     let r = Rect::from_min_size(pos2(rect.right() - MARGIN - size.x, rect.bottom() - MARGIN - size.y), size);
     // Just left of a pane over the view's right side (the Assistant, a dialog), not under it (#6755).
     let mut r = beside_panes(r, rect, &crate::shell::covered_rects(app));
@@ -216,7 +246,8 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
 fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, drawn: crate::gpu::DrawStats, font: &FontId) -> Option<Rect> {
     let t = Tokens::get();
     let (pad, row, label_h, graph_h, hist_h) = (8.0, 16.0, 12.0, 56.0, 40.0);
-    let lines = 7.0 + 0.8; // seven rows and the adapter's name
+    // Seven rows (eight with the GPU time) and the adapter's name.
+    let lines = if drawn.gpu.is_some() { 8.0 } else { 7.0 } + 0.8;
     let w = 300.0_f32.min(below.right() - view.left() - MARGIN);
     let h = pad * 2.0 + row + label_h + graph_h + 6.0 + hist_h + row + lines * row;
     if w < 160.0 || h > view.height() - below.height() - 30.0 {
@@ -314,6 +345,10 @@ fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, dra
     kv(tr("perf.viewport"), format!("{:.0}×{:.0} · MSAA {msaa}×{ss}", px.x, px.y));
     kv(tr("perf.ui_time"), format!("{:.1} ms", app.frame_ms));
     kv(tr("perf.scene_build"), format!("{:.1} ms", app.viewport.build_ms));
+    // The view's own passes on the GPU (start of the first to end of the last), and the longest.
+    if let Some(gpu) = drawn.gpu {
+        kv(tr("perf.gpu_time"), gpu_time(&gpu));
+    }
     // The adapter's name can be long: on a line of its own, cut to the panel's width.
     let (backend, adapter) = app.viewport.adapter.split_once(" · ").unwrap_or(("CPU", ""));
     kv(tr("perf.renderer"), backend.to_string());
@@ -382,6 +417,75 @@ mod tests {
         let idle = frame(2.0);
         assert!(idle.is_some_and(|d| d.as_secs_f64() > 3600.0), "an idle readout asked for a frame after {idle:?}");
         assert_eq!(app.frame_rate.label().as_deref(), Some("0 FPS"));
+    }
+
+    /// The readout keeps one width whatever it reads (60 FPS, 9 FPS, 120 FPS, idle 0 FPS), so its
+    /// box does not jump about while the number moves (#20134).
+    #[test]
+    fn the_readout_keeps_its_width_whatever_it_reads() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.show_frame_rate = true;
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        let mut width_after = |app: &mut crate::SolveApp, dt: f64, frames: usize| {
+            for _ in 0..frames {
+                time += dt;
+                let raw = egui::RawInput { time: Some(time), ..Default::default() };
+                let _ = ctx.run_ui(raw, |ui| {
+                    let rect = ui.max_rect();
+                    let painter = ui.painter().clone();
+                    super::paint(app, ui, &painter, rect);
+                });
+            }
+            let label = app.frame_rate.label();
+            (crate::scenario::rect_of("viewport:frame_rate").map(|r| r.width()), label)
+        };
+        let (steady, l60) = width_after(&mut app, 1.0 / 60.0, 30);
+        let (slow, l9) = width_after(&mut app, 1.0 / 9.0, 60);
+        let (fast, l125) = width_after(&mut app, 1.0 / 125.0, 400);
+        let (idle, l0) = width_after(&mut app, 3.0, 1);
+        assert_eq!((l60.as_deref(), l125.as_deref(), l0.as_deref()), (Some("60 FPS · 16.7 ms"), Some("125 FPS · 8.0 ms"), Some("0 FPS")));
+        assert!(l9.is_some_and(|l| l.starts_with("9 FPS")));
+        assert!(steady.is_some());
+        assert_eq!([slow, fast, idle], [steady; 3], "the readout's width changed with its text");
+    }
+
+    /// A pass that counted no frame asks for no wake. egui may run a frame over several passes,
+    /// and a later pass of it sees a zero gap, which `record` leaves out: arming there would
+    /// keep the window drawing with the mean an earlier frame left, once per idle gap, forever.
+    #[test]
+    fn a_pass_that_counted_no_frame_arms_no_wake() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.show_frame_rate = true;
+        let ctx = crate::fonts::test_context();
+        // `app` is passed in rather than captured, so a test can read it between frames.
+        let frame = |app: &mut crate::SolveApp, time: f64| -> Option<std::time::Duration> {
+            let raw = egui::RawInput { time: Some(time), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = ui.max_rect();
+                let painter = ui.painter().clone();
+                super::paint(app, ui, &painter, rect);
+            });
+            out.textures_delta.clear();
+            out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay)
+        };
+        for i in 0..10 {
+            frame(&mut app, f64::from(i) / 60.0);
+        }
+        // A second pass of the frame just drawn: no gap at all, while the frames before left a
+        // running mean to arm from (`fps()` is still Some here).
+        let repeat = frame(&mut app, 9.0 / 60.0);
+        assert!(repeat.is_some_and(|d| d.as_secs_f64() > 3600.0), "a pass that counted no frame asked for a frame after {repeat:?}");
+        // The pass that sees the pause: the view is idle, and it asks for none either.
+        let idle = frame(&mut app, 9.0 / 60.0 + 1.102);
+        assert!(idle.is_some_and(|d| d.as_secs_f64() > 3600.0), "the idle frame asked for a frame after {idle:?}");
+        assert_eq!(app.frame_rate.label().as_deref(), Some("0 FPS"));
+        // And a maintenance frame 50 ms after it — the app bar's plugin discovery collection,
+        // which the window wakes for — counts as a frame, but must not arm the next wake: that
+        // is the 1 Hz loop itself. (It does update the running mean, so the label is no longer
+        // "0 FPS"; what matters is that it asks for nothing.)
+        let maint = frame(&mut app, 9.0 / 60.0 + 1.152);
+        assert!(maint.is_some_and(|d| d.as_secs_f64() > 3600.0), "a maintenance frame after an idle gap asked for a frame after {maint:?}");
     }
 
     #[test]

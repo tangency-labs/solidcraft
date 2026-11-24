@@ -336,8 +336,9 @@ impl ContactGeometry {
                         continue;
                     }
                     for session in [start, end] {
-                        for origin in [&joint.a, &joint.b] {
+                        for (side, origin) in [&joint.a, &joint.b].into_iter().enumerate() {
                             let frame = session.doc.origin_world(&state, origin)?;
+                            let frame = if side == 0 { joint.offset_frame_a(frame) } else { frame };
                             let pivot = apply_point(&frame, Vec3::ZERO);
                             let far = Vec3::new(
                                 (bounds.min.x - pivot.x).abs().max((bounds.max.x - pivot.x).abs()),
@@ -411,7 +412,13 @@ impl ContactGeometry {
                 bad("contact.sweep", format!("whether {} and {} pass into each other could not be decided ({e})", oa.1, ob.1))
             };
             let (pa, pb) = (self.placed_body(*a, &frames, &mut placed)?, self.placed_body(*b, &frames, &mut placed)?);
-            let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).map_err(|e| undecided(&e))? else {
+            // SMLib's check of the shared part runs here: a part it refuses leaves the pair undecided.
+            let Some(shared) = solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+                solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect)
+            })
+            .0
+            .map_err(|e| undecided(&e))?
+            else {
                 continue;
             };
             if solidcraft_kernel::measure_mass(&shared).map_err(|e| undecided(&e))?.volume > 0.0 {

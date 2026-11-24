@@ -419,15 +419,14 @@ pub fn export_icon_palette(palette: Option<Palette>) -> BTreeMap<String, Value> 
     let mut out = BTreeMap::new();
     let Some(palette) = palette else { return out };
     let data = crate::icons::installed().data();
-    let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
     for (name, color) in data.role_names.iter().zip(palette.roles) {
         if let Some(rgb) = color {
-            out.insert((*name).into(), json!(hex(rgb)));
+            out.insert((*name).into(), json!(solidcraft_color::hex::format(rgb)));
         }
     }
     for (name, ramp) in std::iter::once("solid").chain(data.accent_names.iter().copied()).zip(palette.accents) {
         if let Some(colors) = ramp {
-            out.insert(name.into(), json!(colors.map(hex)));
+            out.insert(name.into(), json!(colors.map(solidcraft_color::hex::format)));
         }
     }
     out
@@ -501,18 +500,18 @@ theme_keys! {
         icon, timeline, hover, sel_face, sel_edge, sel_edge_rim, hover_edge, hover_edge_halo, sel_profile,
         sel_profile_edge, hover_profile, hover_profile_edge, sel_vertex, origin_plane, origin_plane_edge, origin_plane_hover,
         origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, isoparm, manipulator, joint_manipulator,
-        joint_axis, preview_add, preview_new, preview_sketch, preview_cut, cube_face, cube_border, cube_text, cube_hover, viewport_top,
+        joint_axis, preview_add, preview_new, preview_sketch, preview_cut, navigator_face, navigator_border, navigator_text, navigator_hover, viewport_top,
         viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_halo, sketch_locked, sketch_conflict, dimension, dimension_driven,
         sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, section_cap,
         profile_fill, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
         timeline_item_error, timeline_marker, field, box_window, box_crossing, sketch_projected, sketch_lost,
-        sketch_construction, sketch_centerline, bend_up, bend_down, interference, comb_envelope, comb_teeth,
+        sketch_construction, sketch_centerline, bend_up, bend_down, paper_white, paper_ink, paper_blueprint, paper_blueprint_ink, paper_prussian_blue, paper_prussian_blue_ink, paper_dark, paper_dark_ink, interference, comb_envelope, comb_teeth,
         sketch_ink, sketch_soft, surface_fill, surface_ink, surface_soft, mesh_fill, mesh_ink, mesh_soft, form_fill, form_tab_ink, form_soft, sheet_fill, sheet_ink, sheet_soft, render_fill, render_ink, render_soft, tab_on_fill_dark,
         app_bar_separator, surface_accent, mesh_accent, form_accent, render_accent, on_accent, agent_ok, agent_busy, app_bar_hover_subtle,
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [continuity, logo, section_hatch],
+    many: [continuity, logo, library_highlights, section_hatch],
     icons: [highlight, agent, marker_halo],
 }
 
@@ -521,21 +520,20 @@ theme_keys! {
 /// `axis_y` and `axis_z`, `triad` over `gizmo` and a file's own `axis_*` keys over both. An
 /// export never writes them.
 const LEGACY_AXES: [&str; 2] = ["gizmo", "triad"];
+/// Colour names older theme files use for the navigator colours: read as the new name, which a
+/// file's own new key wins over. A save writes only the new names.
+const RENAMED_COLORS: [(&str, &str); 4] =
+    [("cube_face", "navigator_face"), ("cube_border", "navigator_border"), ("cube_text", "navigator_text"), ("cube_hover", "navigator_hover")];
 
 /// `#rrggbb` or `#rrggbbaa` (alpha not premultiplied).
 pub fn parse_color(s: &str) -> Option<Color32> {
-    let hex = s.trim().strip_prefix('#')?;
-    if !(hex.len() == 6 || hex.len() == 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let byte = |i: usize| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
-    let a = if hex.len() == 8 { byte(6)? } else { 255 };
-    Some(Color32::from_rgba_unmultiplied(byte(0)?, byte(2)?, byte(4)?, a))
+    let ([r, g, b], a) = solidcraft_color::hex::parse(s.trim())?;
+    Some(Color32::from_rgba_unmultiplied(r, g, b, a.unwrap_or(255)))
 }
 
 fn format_color(c: Color32) -> String {
     let [r, g, b, a] = c.to_srgba_unmultiplied();
-    if a == 255 { format!("#{r:02x}{g:02x}{b:02x}") } else { format!("#{r:02x}{g:02x}{b:02x}{a:02x}") }
+    if a == 255 { solidcraft_color::hex::format([r, g, b]) } else { solidcraft_color::hex::format_alpha([r, g, b], a) }
 }
 
 /// The colours a value gives for a slot of `len` colours, or why not.
@@ -670,6 +668,11 @@ fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
         return Err(format!("`colors` has more than {MAX_COLORS} entries"));
     }
     src.retain(|key, _| !RETIRED_COLORS.contains(&key.as_str()));
+    for (old, new) in RENAMED_COLORS {
+        if let Some(value) = src.remove(old) {
+            src.entry(new).or_insert(value);
+        }
+    }
     let mut probe = Tokens::light();
     let mut bad = Vec::new();
     for (k, c) in &src {
@@ -2247,6 +2250,21 @@ mod tests {
         assert!(!keys().iter().any(|k| LEGACY_AXES.contains(k)), "an export writes axis_x, axis_y and axis_z only");
         let e = parse(r##"{"format":"solidcraft-theme/1","name":"x","base":"dark","colors":{"gizmo":["#000000"]}}"##).unwrap_err();
         assert!(e.contains("`gizmo` must be a list of 3 colours"), "{e}");
+    }
+
+    #[test]
+    fn older_navigator_colour_keys_read_as_the_new_names() {
+        let file = |colors: &str| {
+            resolve(&parse(&format!(r#"{{"format":"solidcraft-theme/1","name":"Old","base":"dark","colors":{{{colors}}}}}"#)).unwrap())
+        };
+        let old = file(r##""cube_face":"#102030","cube_border":"#112233","cube_text":"#223344","cube_hover":"#334455""##);
+        assert_eq!(old.navigator_face, Color32::from_rgb(0x10, 0x20, 0x30));
+        assert_eq!(old.navigator_border, Color32::from_rgb(0x11, 0x22, 0x33));
+        assert_eq!(old.navigator_text, Color32::from_rgb(0x22, 0x33, 0x44));
+        assert_eq!(old.navigator_hover, Color32::from_rgb(0x33, 0x44, 0x55));
+        let both = file(r##""cube_face":"#102030","navigator_face":"#ffffff""##);
+        assert_eq!(both.navigator_face, Color32::WHITE, "a file's own new key wins");
+        assert!(!keys().iter().any(|k| RENAMED_COLORS.iter().any(|(old, _)| old == k)), "an export writes the new names only");
     }
 
     #[test]

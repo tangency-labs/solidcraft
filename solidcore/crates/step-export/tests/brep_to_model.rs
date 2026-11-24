@@ -1226,9 +1226,6 @@ fn same_sense_follows_swapped_and_inside_out_parameterisations() {
     use solidcore::topology::brep::sheet::sheet_on;
     use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
     let mut kernel = Kernel::default();
-    // (without this opt-in fix the torus forgets that its generator runs backwards, and
-    // says it is not inside out)
-    kernel.fixes.torus_keeps_inside_out = true;
     let origin = Point3::new(0.0, 0.0, 0.0);
     let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
     let mut surfaces: Vec<(String, Surface)> = Vec::new();

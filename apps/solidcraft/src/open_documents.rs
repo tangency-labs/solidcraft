@@ -7,7 +7,8 @@
 //! `NSDocument` app. winit 0.30's delegate doesn't implement the method, so [`install`] adds it to
 //! the delegate's class when the app is about to finish launching: after winit set the delegate and
 //! before AppKit delivers the files the app was launched with. The handler queues the paths and
-//! wakes the UI, which opens them with [`take`] like files named on the command line.
+//! brings the window forward, and wakes the UI, which opens them with [`take`] like files named
+//! on the command line.
 //!
 //! Adding a method to another crate's Objective-C class has no safe API, hence the `unsafe_code`
 //! allowance on [`install`] and [`add_open_urls_method`] (winit overrides `sendEvent:` on
@@ -46,10 +47,20 @@ pub fn install() {
     }
 }
 
-/// Wake `ctx` when files arrive while the app runs.
+/// Bring `ctx`'s window forward when files arrive, including files queued during startup.
 pub fn set_ui(ctx: &egui::Context) {
     // Set once; a second call would hand over the same context.
-    let _ = UI.set(ctx.clone());
+    if UI.set(ctx.clone()).is_ok() && !PENDING.lock().unwrap_or_else(PoisonError::into_inner).is_empty() {
+        bring_forward(ctx);
+    }
+}
+
+fn bring_forward(ctx: &egui::Context) {
+    // Focus alone is ignored when AppKit still marks a window on another Space as key.
+    // Showing it also orders it to the front; restore it first so focus can activate the app.
+    for command in [egui::ViewportCommand::Minimized(false), egui::ViewportCommand::Visible(true), egui::ViewportCommand::Focus] {
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, command);
+    }
 }
 
 /// The paths that arrived since the last call.
@@ -86,13 +97,16 @@ extern "C-unwind" fn open_urls(_delegate: &AnyObject, _cmd: Sel, _app: &AnyObjec
     }
 }
 
-/// Queue the files among `urls` and wake the UI.
+/// Queue the files among `urls` and bring the window forward.
 fn queue(urls: &NSArray<NSURL>) {
     // Only file URLs: macOS 27 turns an https URL's path into a file path too.
-    let paths = urls.iter().filter(|u| u.isFileURL()).filter_map(|u| u.to_file_path()).map(|p| p.to_string_lossy().into_owned());
+    let paths: Vec<_> = urls.iter().filter(|u| u.isFileURL()).filter_map(|u| u.to_file_path()).map(|p| p.to_string_lossy().into_owned()).collect();
+    if paths.is_empty() {
+        return;
+    }
     PENDING.lock().unwrap_or_else(PoisonError::into_inner).extend(paths);
     if let Some(ctx) = UI.get() {
-        ctx.request_repaint();
+        bring_forward(ctx);
     }
 }
 
@@ -103,18 +117,58 @@ mod tests {
 
     use super::*;
 
-    /// Files queue until the UI takes them; URLs that aren't files are left out.
+    fn window_commands(ctx: &egui::Context, mut action: impl FnMut()) -> Vec<egui::ViewportCommand> {
+        let mut output = ctx.run_ui(Default::default(), |_| action());
+        // This test has no renderer to consume font textures.
+        output.textures_delta.clear();
+        output
+            .viewport_output
+            .remove(&egui::ViewportId::ROOT)
+            .unwrap()
+            .commands
+            .into_iter()
+            .filter(|command| !matches!(command, egui::ViewportCommand::SetTheme(_)))
+            .collect()
+    }
+
+    /// Finder files wait for the UI and bring its window forward once per file event.
     #[test]
     fn opened_files_wait_for_the_ui() {
         let web = NSURL::URLWithString(&NSString::from_str("https://example.com/a.solidcraft")).unwrap();
         let urls = NSArray::from_retained_slice(&[
             NSURL::from_file_path("/tmp/a b.solidcraft").unwrap(),
-            web,
+            web.clone(),
             NSURL::from_file_path("/tmp/c.step").unwrap(),
         ]);
         let any = NSObject::new();
         open_urls(&any, sel!(application:openURLs:), &any, &urls);
+
+        let ctx = egui::Context::default();
+        let bring_forward = [egui::ViewportCommand::Minimized(false), egui::ViewportCommand::Visible(true), egui::ViewportCommand::Focus];
+        assert_eq!(window_commands(&ctx, || set_ui(&ctx)), bring_forward, "startup files must bring the window forward");
+
+        // Invalid or empty events must not refocus the window, even with files still pending.
+        let web_only = NSArray::from_retained_slice(&[web]);
+        let empty = NSArray::from_retained_slice(&[]);
+        assert!(
+            window_commands(&ctx, || {
+                open_urls(&any, sel!(application:openURLs:), &any, &web_only);
+                open_urls(&any, sel!(application:openURLs:), &any, &empty);
+                set_ui(&ctx);
+            })
+            .is_empty()
+        );
+        assert!(
+            window_commands(&ctx, || {
+                assert_eq!(take(), ["/tmp/a b.solidcraft", "/tmp/c.step"]);
+                assert!(take().is_empty());
+            })
+            .is_empty()
+        );
+
+        assert_eq!(window_commands(&ctx, || open_urls(&any, sel!(application:openURLs:), &any, &urls)), bring_forward);
         assert_eq!(take(), ["/tmp/a b.solidcraft", "/tmp/c.step"]);
+        assert!(window_commands(&ctx, || set_ui(&ctx)).is_empty(), "idle frames must leave focus alone");
         assert!(take().is_empty());
     }
 }

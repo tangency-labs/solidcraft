@@ -121,8 +121,11 @@ pub(crate) struct Candidate<'a> {
     pub body: &'a ModelBody,
     /// The chosen level's screen-space error ([`error_px`]).
     pub err_px: f64,
-    /// Triangles at the chosen level (an estimate of the step-0 count).
-    pub triangles: usize,
+    /// Its id ([`body_id`]).
+    pub id: usize,
+    /// Triangles at the chosen level (an estimate of the step-0 count); `None`: its mesh's,
+    /// counted only if it may be refined.
+    pub triangles: Option<usize>,
 }
 
 struct Entry {
@@ -157,6 +160,8 @@ pub(crate) struct Stats {
     pub planning_ms: f64,
     /// Time the last choice of steps took on the UI thread (ms).
     pub choose_ms: f64,
+    /// Bodies whose edges are drawn simplified ([`crate::edge_detail`]).
+    pub simplified_edges: usize,
 }
 
 /// The refinement state of a viewport.
@@ -172,7 +177,10 @@ pub(crate) struct Lod {
     /// The web plans one refinement per frame: more are waiting.
     #[cfg(target_arch = "wasm32")]
     more: bool,
-    /// Bumped whenever a body's drawn step changes (part of the scene's key).
+    /// The edge tolerance step each body's edges are drawn at, by [`body_id`] (absent: the edges
+    /// as meshed). See [`crate::edge_detail`].
+    edges: HashMap<usize, i8>,
+    /// Bumped whenever a body's drawn step or edge step changes (part of the scene's key).
     pub generation: u64,
     clock: u64,
     pub stats: Stats,
@@ -184,6 +192,44 @@ impl Lod {
         let (id, _) = body_id(b);
         let k = *self.shown.get(&id)?;
         self.cache.get(&(id, q, k))?.refined.clone()
+    }
+
+    /// The tolerance (mm) `b`'s edges are simplified to, or 0 to draw them as meshed.
+    pub fn edge_tolerance(&self, b: &ModelBody) -> f64 {
+        self.edge_tolerance_of(body_id(b).0)
+    }
+
+    /// [`Self::edge_tolerance`] of the body whose [`body_id`] is `id`.
+    pub fn edge_tolerance_of(&self, id: usize) -> f64 {
+        self.edges.get(&id).map_or(0.0, |&step| crate::edge_detail::tolerance(step))
+    }
+
+    /// Choose each body's edge step from the most pixels per millimetre it can come to (`None`:
+    /// as meshed) and the chord its edges were meshed to (mm), with
+    /// [`crate::edge_detail::hysteresis`]. A body whose tolerance would be under half its chord
+    /// keeps its edges as meshed: there is next to nothing to drop. Bodies left out keep no step.
+    /// Choose each body's edge step, with the [`body_id`]s of the bodies whose step changed: the scene
+    /// rebuilds just the blocks those bodies are in ([`super::viewport::patch_edge_steps`]), the
+    /// per-block cache keeping every other block.
+    pub fn update_edges_changed(&mut self, wanted: impl IntoIterator<Item = (usize, Option<f64>, f64)>) -> Vec<usize> {
+        let mut next = HashMap::with_capacity(self.edges.len());
+        for (id, ppm, chord) in wanted {
+            let Some(step) = ppm.and_then(crate::edge_detail::step_for) else { continue };
+            let step = crate::edge_detail::hysteresis(self.edges.get(&id).copied(), step);
+            if crate::edge_detail::tolerance(step) >= chord * 0.5 {
+                next.insert(id, step);
+            }
+        }
+        let mut changed: std::collections::HashSet<usize> =
+            self.edges.iter().filter(|(id, step)| next.get(id) != Some(step)).map(|(id, _)| *id).collect();
+        changed.extend(next.iter().filter(|(id, step)| self.edges.get(id) != Some(step)).map(|(id, _)| *id));
+        let changed: Vec<usize> = changed.into_iter().collect();
+        self.edges = next;
+        self.stats.simplified_edges = self.edges.len();
+        if !changed.is_empty() {
+            self.generation += 1;
+        }
+        changed
     }
 
     /// The step `b` is drawn at.
@@ -205,6 +251,10 @@ impl Lod {
             self.shown.clear();
             changed = true;
         }
+        // A body drawn as chosen that its error leaves there changes nothing (most of a large
+        // assembly, and every body off screen): only the others are ranked.
+        let candidates: Vec<Candidate<'_>> =
+            candidates.into_iter().filter(|c| self.shown.contains_key(&c.id) || refinement_for(c.err_px, 0, MAX_REFINE) > 0).collect();
         // The bodies that need it most first, within the triangle budget.
         let mut order: Vec<usize> = (0..candidates.len()).collect();
         order.sort_by(|&a, &b| candidates[b].err_px.total_cmp(&candidates[a].err_px));
@@ -214,13 +264,16 @@ impl Lod {
         let mut seen = std::collections::HashSet::new();
         for i in order {
             let c = &candidates[i];
-            let (id, _) = body_id(c.body);
+            let id = c.id;
             if !seen.insert(id) {
                 continue;
             }
             let current = self.shown.get(&id).copied().unwrap_or(0);
             let mut k = refinement_for(c.err_px, current, MAX_REFINE);
-            let estimate = |k: u8| self.cache.get(&(id, q, k)).and_then(|e| e.refined.as_ref()).map_or(c.triangles << k, |(_, m)| m.triangles.len());
+            let triangles = std::cell::OnceCell::new();
+            let base = || *triangles.get_or_init(|| c.triangles.unwrap_or_else(|| c.body.mesh_in_place().0.triangles.len()));
+            let estimate =
+                |k: u8| self.cache.get(&(id, q, k)).and_then(|e| e.refined.as_ref()).map_or_else(|| base() << k, |(_, m)| m.triangles.len());
             while k > 0 && estimate(k) > remaining {
                 k -= 1;
             }
@@ -230,7 +283,7 @@ impl Lod {
             wanted.push((i, k));
         }
         for (i, k) in wanted {
-            let (id, holder) = body_id(candidates[i].body);
+            let id = candidates[i].id;
             let current = self.shown.get(&id).copied().unwrap_or(0);
             if k == current {
                 continue;
@@ -247,10 +300,7 @@ impl Lod {
                 }
                 // The planner refused this step: keep what is drawn.
                 Some(_) => {}
-                None => {
-                    let _ = holder;
-                    requests.push((i, k));
-                }
+                None => requests.push((i, k)),
             }
         }
         self.start(q, &candidates, requests);
@@ -457,7 +507,7 @@ mod tests {
         let live: std::collections::HashSet<usize> = [body_id(&b).0].into();
         let base = b.plan_mesh_at(q).unwrap().triangles.len();
         let mut lod = Lod::default();
-        let cand = |err: f64| vec![Candidate { body: &b, err_px: err, triangles: base }];
+        let cand = |err: f64| vec![Candidate { body: &b, id: body_id(&b).0, err_px: err, triangles: Some(base) }];
         assert!(!lod.update(q, cand(0.5), &live));
         assert_eq!(lod.step(&b), 0);
         // 6 px of error: three steps.
@@ -505,7 +555,7 @@ mod tests {
         let fine = DisplayQuality::Fine;
         let fine_err = 6.0 * fine.chord_fraction() / q.chord_fraction();
         for _ in 0..2000 {
-            lod.update(fine, vec![Candidate { body: &b, err_px: fine_err, triangles: base }], &live);
+            lod.update(fine, vec![Candidate { body: &b, id: body_id(&b).0, err_px: fine_err, triangles: Some(base) }], &live);
             if lod.refined(&b, fine).is_some() {
                 break;
             }
@@ -528,8 +578,8 @@ mod tests {
         let mut lod = Lod::default();
         // Each would want four steps at 3M triangles a step-0 count: only the first fits.
         let cands = vec![
-            Candidate { body: &a, err_px: 2.0, triangles: TRIANGLE_BUDGET / 3 },
-            Candidate { body: &b, err_px: 12.0, triangles: TRIANGLE_BUDGET / 3 },
+            Candidate { body: &a, id: body_id(&a).0, err_px: 2.0, triangles: Some(TRIANGLE_BUDGET / 3) },
+            Candidate { body: &b, id: body_id(&b).0, err_px: 12.0, triangles: Some(TRIANGLE_BUDGET / 3) },
         ];
         // Distinct bodies (two ModelBody::new calls), so distinct ids.
         assert_ne!(body_id(&a).0, body_id(&b).0);

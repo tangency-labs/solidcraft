@@ -1,0 +1,105 @@
+{
+  "license_url": "https://github.com/storytold/vectorcraft/blob/v0.24.1/LICENSE-MIT",
+  "release_url": "https://github.com/storytold/vectorcraft/releases/tag/v0.24.1",
+  "release_archive_sha256": "a090514252fde145495ac6fc65d6ff1311d698998e57ba434d5d0896c3d1fbfa",
+  "cli_sha256": "de5a334c0519b7f90fa65965b98a8c2c444bbe4460b937e1902beb84dd47259d",
+  "command": [
+    "nice",
+    "-n",
+    "10",
+    "vectorcraft-0.24.1/vectorcraft-cli",
+    "--safe-mode",
+    "run",
+    "--commands",
+    "wr383-schematic/commands.json"
+  ],
+  "environment": {
+    "VECTORCRAFT_NO_PREFS": "1",
+    "XDG_CONFIG_HOME": "vectorcraft-0.24.1/config",
+    "XDG_CACHE_HOME": "vectorcraft-0.24.1/cache",
+    "RAYON_NUM_THREADS": "2"
+  },
+  "exit": 0,
+  "font_warnings": [
+    "fonts that aren't available are drawn in the fallback font, Source Sans 3: Helvetica (install them, or replace them with Find Font)"
+  ],
+  "source_data_path": "issue948-root-cause.json",
+  "source_data_sha256": "fef71bcbc77a515b22fda28ec9221b9051f28fe6688b3b04042826da7582fce5",
+  "plotted_values": {
+    "start": [
+      0.0,
+      0.7632131633423296
+    ],
+    "end": [
+      0.7372758233088273,
+      0.7617633973585559
+    ],
+    "old_end_deviation": 1.5721731499031345e-05,
+    "candidate": [
+      2.336339553063178e-09,
+      0.7632131633377573
+    ],
+    "candidate_deviation": 3.552713678800501e-14,
+    "at_end": true,
+    "legacy_fractions": [
+      3.1688812778071267e-09,
+      3.15377213233603e-09
+    ],
+    "corrected_fractions": [
+      0.9999999968311187,
+      0.9999999968462279
+    ],
+    "unchanged_shift_limit": 0.002,
+    "legacy_accepted": true,
+    "corrected_accepted": false,
+    "old_end_point": [
+      278.24362300157213,
+      -53.818723003651186,
+      115.08423694358456
+    ],
+    "candidate_point": [
+      278.2538527725873,
+      -53.08152092197427,
+      115.08221735261854
+    ],
+    "old_end_to_candidate_distance_decimal": "0.73727582097304433460176455921446030009797040824847993105111568458243259993166568"
+  },
+  "commands_sha256": "463e62d6abcf0ebaf5b3376c6e9318818f1067e039fbe6dbf239e6104973176b",
+  "rendered_preview_inspected": true,
+  "svg_exported_after_inspection": true,
+  "svg_command": [
+    "nice",
+    "-n",
+    "10",
+    "vectorcraft-0.24.1/vectorcraft-cli",
+    "--safe-mode",
+    "run",
+    "--in",
+    "wr383-schematic/wr383-endpoint-shift.vectorcraft",
+    "--cmd",
+    "document.export",
+    "--params",
+    "{\"path\": \"wr383-schematic/wr383-endpoint-shift.svg\", \"format\": \"svg\", \"artboard\": 0, \"svg\": {\"outlineText\": false, \"decimals\": 7, \"metadata\": true}}"
+  ],
+  "svg_export_exit": 0,
+  "svg_live_text_count": 31,
+  "svg_tspan_count": 31,
+  "svg_font_families": [
+    "Helvetica, sans-serif"
+  ],
+  "svg_outlineText": false,
+  "preview_dimensions": [
+    1920,
+    1170
+  ],
+  "native_generator": "VectorCraft 0.24.1",
+  "asset_sha256": {
+    "wr383-endpoint-shift.vectorcraft": "c38d1a9b82e60fe8fb944b0dc559bb94c0284eaba9b42913675275ac82d81b9e",
+    "wr383-endpoint-shift.svg": "09420c2ec8faabb32f3647b3df2189f584be0bb0754e9f7523da74f0ab329f3d",
+    "wr383-endpoint-shift.png": "0e63cb5a9343ae0a3afd44f950ddd982741e0333b855e2049b10624f43692889"
+  },
+  "font_limit": "The editable source and live SVG retain Helvetica. This Linux machine has no Helvetica; VectorCraft rasterized the PNG preview with its bundled Source Sans 3, as explicitly reported by text.fonts. No font was installed or renamed.",
+  "original_commands_sha256": "6866def7ed51de3cd3b8fc14760eddfca9ec7557533194fc3c9b118a124b3779",
+  "original_source_data_sha256": "4ce940460c5756bfa450bba78a04121b4a275d72176044c41c87882f38474cdb",
+  "archive_note": "Original source/command hashes retained separately; current hashes refer to path-sanitized archived JSON. Asset bytes are unchanged."
+}

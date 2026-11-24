@@ -1,6 +1,5 @@
-//! WR-490 (tangency-labs/solidcore#868; #1954's flag audit, class B):
-//! `Kernel::fixes.ellipse_trim_seam_lines_span_cone_height` on the record's boolean
-//! triggers. A cylinder C r 44.45 along x (-200..200) and two rods r 24.15 at +-45 deg in
+//! WR-490 (tangency-labs/solidcore#868; #1954's flag audit, class B): the ellipse trim on
+//! the record's boolean triggers. A cylinder C r 44.45 along x (-200..200) and two rods r 24.15 at +-45 deg in
 //! the XZ plane whose axes meet at (0, 0, 30), each 240 long from 40 before that point,
 //! every one built as `SmApiCreateCylinder` turned `seam` about its own axis (Z), about Y
 //! onto its axis and moved to its start. At the old pin `(C u A) u B` dropped the half
@@ -9,7 +8,8 @@
 //!
 //! Since v1.0.1 `sm_GetEllipseTrimIntervals` takes the trim circles at the domain's v
 //! limits (the record's 2026-10-27 addendum), and both orders give the right body at every
-//! seam with the flag off and on, as the pinned C++ does
+//! seam with the seam lines on the domain's v range (as upstream, the only path now) and
+//! over the cone's height (the retired opt-in), as the pinned C++ does
 //! (`plan/findings/general--flag-pin-wr490-ellipse-trim-same-since-v1-0-1--addendum-2026-11-02-boolean-triggers.md`).
 //! The expected volumes are closed forms by slices y = const (each section a union of
 //! rectangles in the XZ plane, integrated in y; #868 gives 3137849.373 for the rods).
@@ -85,10 +85,8 @@ fn brace_start(y_deg: f64) -> Vec3 {
 
 const CHORD_START: Vec3 = Vec3::new(-200.0, 0.0, 0.0);
 
-fn kernel(fixed: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.ellipse_trim_seam_lines_span_cone_height = fixed;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
@@ -115,9 +113,9 @@ fn wrong(k: &Kernel, b: &mut Brep, expected: f64) -> Option<String> {
 
 /// `(C u A) u B` when `a_first`, else `(C u B) u A`, of the rods at `seam`: `None` when it
 /// is right (with an `AssertValid` that passes), else what is wrong.
-fn rods(fixed: bool, seam: f64, a_first: bool) -> Option<String> {
-    println!("rods fix {fixed} seam {seam} a_first {a_first}");
-    let mut k = kernel(fixed);
+fn rods(seam: f64, a_first: bool) -> Option<String> {
+    println!("rods seam {seam} a_first {a_first}");
+    let mut k = kernel();
     let c = cylinder(&mut k, 44.45, 400.0, seam, 90.0, CHORD_START);
     let a = cylinder(&mut k, 24.15, 240.0, seam, 45.0, brace_start(45.0));
     let b = cylinder(&mut k, 24.15, 240.0, seam, -45.0, brace_start(-45.0));
@@ -133,22 +131,19 @@ fn rods(fixed: bool, seam: f64, a_first: bool) -> Option<String> {
     (check.assert_valid != Some(true)).then(|| format!("check: {:?}", check.lines()))
 }
 
-/// Both orders at every seam, flag off (SMLib v1.0.1) and on: the whole body, the volume
-/// of #868's closed form.
+/// Both orders at every seam: the whole body, the volume of #868's closed form.
 #[test]
 fn equal_rods_join_in_either_order() {
     let mut failures = Vec::new();
-    for fixed in [false, true] {
-        for seam in SEAMS {
-            for a_first in [true, false] {
-                if let Some(w) = rods(fixed, seam, a_first) {
-                    let order = if a_first {
-                        "(C u A) u B"
-                    } else {
-                        "(C u B) u A"
-                    };
-                    failures.push(format!("fix {fixed} seam {seam} {order}: {w}"));
-                }
+    for seam in SEAMS {
+        for a_first in [true, false] {
+            if let Some(w) = rods(seam, a_first) {
+                let order = if a_first {
+                    "(C u A) u B"
+                } else {
+                    "(C u B) u A"
+                };
+                failures.push(format!("seam {seam} {order}: {w}"));
             }
         }
     }
@@ -158,9 +153,9 @@ fn equal_rods_join_in_either_order() {
 /// The tubes at `seam`: the chord and both braces when `coped` is false (the braces
 /// joined as they are, `(chord + A) + B`), else the braces each minus the chord's solid,
 /// joined, then the chord joined with them. `None` when the result is right.
-fn tubes(fixed: bool, seam: f64, coped: bool) -> Option<String> {
-    println!("tubes fix {fixed} seam {seam} coped {coped}");
-    let mut k = kernel(fixed);
+fn tubes(seam: f64, coped: bool) -> Option<String> {
+    println!("tubes seam {seam} coped {coped}");
+    let mut k = kernel();
     let chord = tube(&mut k, 44.45, 39.45, 400.0, seam, 90.0, CHORD_START);
     let brace = |k: &mut Kernel, y_deg: f64| {
         let b = tube(k, 24.15, 20.15, 240.0, seam, y_deg, brace_start(y_deg));
@@ -182,23 +177,21 @@ fn tubes(fixed: bool, seam: f64, coped: bool) -> Option<String> {
     wrong(&k, &mut r, expected)
 }
 
-/// The steel-026 joint as #868 builds it, at every seam, flag off and on: a manifold
-/// solid of the closed form's volume. (Its check reports `SmBrep` test 12, an inner shell
-/// not inside its outer shell, at every seam, flag off and on, as the C++ does.)
+/// The steel-026 joint as #868 builds it, at every seam: a manifold solid of the closed
+/// form's volume. (Its check reports `SmBrep` test 12, an inner shell not inside its
+/// outer shell, at every seam, as the C++ does.)
 #[test]
 fn steel_026_tubes_join() {
     let mut failures = Vec::new();
-    for fixed in [false, true] {
-        for seam in SEAMS {
-            if let Some(w) = tubes(fixed, seam, false) {
-                failures.push(format!("fix {fixed} seam {seam}: {w}"));
-            }
+    for seam in SEAMS {
+        if let Some(w) = tubes(seam, false) {
+            failures.push(format!("seam {seam}: {w}"));
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// The seams at which the coped joint fails, flag off and on. Seam 35 failed too (a body
+/// The seams at which the coped joint fails. Seam 35 failed too (a body
 /// of volume -4592.38, not a manifold solid, check `SmTrimmingTools` tests 3 and 4, as
 /// the pinned C++ gives) until WR-751 (#2621): with `MergeIntoObject` splitting each edge
 /// where it passes nearest its point (all sixteen splits nearer, by up to 3.5e-7) it is a
@@ -206,16 +199,13 @@ fn steel_026_tubes_join() {
 /// other seams.
 const COPED_FAILING: [f64; 1] = [90.0];
 
-/// The coped joint at the other seams, flag off and on (check as in
-/// [`steel_026_tubes_join`]).
+/// The coped joint at the other seams (check as in [`steel_026_tubes_join`]).
 #[test]
 fn coped_tubes_join() {
     let mut failures = Vec::new();
-    for fixed in [false, true] {
-        for seam in SEAMS.into_iter().filter(|s| !COPED_FAILING.contains(s)) {
-            if let Some(w) = tubes(fixed, seam, true) {
-                failures.push(format!("fix {fixed} seam {seam}: {w}"));
-            }
+    for seam in SEAMS.into_iter().filter(|s| !COPED_FAILING.contains(s)) {
+        if let Some(w) = tubes(seam, true) {
+            failures.push(format!("seam {seam}: {w}"));
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
@@ -223,16 +213,14 @@ fn coped_tubes_join() {
 
 /// At seam 90 deg the last union of the coped joint gives a body of volume -4592.38 that
 /// is not a manifold solid (check: `SmTrimmingTools` tests 3 and 4, `AssertValid`
-/// skipped; before WR-751 `SmBrep` tests 8 and 12), with the flag off and on, and the
-/// pinned C++ gives the same: not WR-490's defect. Fails when it comes out right.
+/// skipped; before WR-751 `SmBrep` tests 8 and 12), with either seam-line range, and
+/// the pinned C++ gives the same: not WR-490's defect. Fails when it comes out right.
 #[test]
 fn coped_tubes_join_known_failing() {
     let mut passing = Vec::new();
-    for fixed in [false, true] {
-        for seam in COPED_FAILING {
-            if tubes(fixed, seam, true).is_none() {
-                passing.push(format!("fix {fixed} seam {seam}"));
-            }
+    for seam in COPED_FAILING {
+        if tubes(seam, true).is_none() {
+            passing.push(format!("seam {seam}"));
         }
     }
     assert!(

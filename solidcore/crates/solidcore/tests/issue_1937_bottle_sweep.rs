@@ -304,6 +304,55 @@ fn near_parallel_generator_returns_invalid_surface() {
     }
 }
 
+/// A stitched whole-B-rep sweep of a 3 x 7 x 2 box along -y (goldens
+/// `whole_stitch_linear_neg_y_flat_box`). One of the stitch's edge glues merges the edges
+/// and joins their shells, and then its region nesting (`TestClosureSplitRegion`) fails.
+/// Upstream ignores that status, and so does the port. The fork returns it, which reported
+/// the committed glue as failed: the stitch (which goes on past failed glues) then skipped
+/// that glue's bookkeeping, and the sweep refused with 1001. The sweep is stitched into
+/// its 14 faces and 28 edges, the body the default kernel built before. (That body fails
+/// the Level 2 edge-geometry check, before and after: not this glue's doing.)
+#[test]
+fn a_stitched_sweep_keeps_a_glue_whose_region_nesting_fails() {
+    let mut k = Kernel::default();
+    let mut b = solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 3.0, 7.0, 2.0)
+        .unwrap();
+    b.set_key(
+        WholeIdentities
+            .topology(id_body(), solidcore::EntityRef::Brep(id_body()))
+            .key,
+    );
+    let mut attributes = AttributeStore::new();
+    let mut records = NotifyRecords::new();
+    let mut next = 0;
+    let mut store = SweepStore::new(&WholeIdentities, &mut records, &mut attributes, &mut next);
+    let context = store.register_kernel(&mut k).unwrap();
+    let id = store.register_brep(context, &mut b).unwrap();
+    let region = store.infinite_region(id).unwrap();
+    let mut sweep = TopologySweep {
+        do_stitching: true,
+        do_merge: false,
+        ..TopologySweep::default()
+    };
+    sweep
+        .do_sweep(
+            &mut store,
+            &SweepGeometry::Translation(TranslationalSweepGeometry::new(Vec3::new(0.0, -4.0, 0.0))),
+            Some(id),
+            Some((id, region)),
+            &mut SweepTargets::default(),
+        )
+        .unwrap();
+    drop(store);
+    assert_eq!(solidcore::topology::brep::p1::num_faces(&b), 14);
+    assert_eq!(
+        solidcore::topology::brep::p1::edges(&b, None)
+            .unwrap()
+            .len(),
+        28
+    );
+}
+
 struct WholeIdentities;
 impl SweepIdentities for WholeIdentities {
     fn topology(

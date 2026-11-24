@@ -1,0 +1,1 @@
+reads a face's corners for a dimension from the display mesh triangles (drawings branch only: clear before landing on main)

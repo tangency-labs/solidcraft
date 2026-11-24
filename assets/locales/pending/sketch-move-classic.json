@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.sketch_move_classic": "Older sketch move handles",
+    "prefs.sketch_move_classic_note": "Move/Copy shows only its X arrow, and a drawn 3D point you click shows its own arrows instead of dragging freely."
+  },
+  "ar": {
+    "prefs.sketch_move_classic": "مقابض تحريك الرسم القديمة",
+    "prefs.sketch_move_classic_note": "يعرض النقل/النسخ سهم X فقط، وتعرض النقطة ثلاثية الأبعاد المرسومة عند النقر عليها أسهمها الخاصة بدلاً من السحب الحر."
+  },
+  "he": {
+    "prefs.sketch_move_classic": "ידיות הזזת סקיצה ישנות",
+    "prefs.sketch_move_classic_note": "הזזה/העתקה מציגה רק את חץ X, ונקודה תלת־ממדית שצוירה מציגה בלחיצה חצים משלה במקום גרירה חופשית."
+  },
+  "ja": {
+    "prefs.sketch_move_classic": "以前のスケッチ移動ハンドル",
+    "prefs.sketch_move_classic_note": "移動/コピーには X 矢印のみを表示し、描画した 3D 点をクリックすると自由にドラッグする代わりに専用の矢印を表示します。"
+  },
+  "vi": {
+    "prefs.sketch_move_classic": "Tay nắm di chuyển bản vẽ kiểu cũ",
+    "prefs.sketch_move_classic_note": "Di chuyển/Sao chép chỉ hiện mũi tên X, và điểm 3D đã vẽ khi nhấp sẽ hiện mũi tên riêng thay vì kéo tự do."
+  },
+  "zh": {
+    "prefs.sketch_move_classic": "旧版草图移动控制柄",
+    "prefs.sketch_move_classic_note": "移动/复制仅显示 X 箭头；单击已绘制的 3D 点时显示其自身的箭头，而不是自由拖动。"
+  }
+}

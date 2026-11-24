@@ -1,5 +1,6 @@
 //! Transient Render view requests and explicit refusals for planned interactions.
 use super::CommandSpec;
+use crate::schema::appearance::{AppearancePaintParams, AppearancePaintResult, AppearancePickUpParams, AppearancePickUpResult};
 use crate::schema::render_jobs::Job;
 use crate::schema::render_lights::{MuteParams, SoloParams};
 use crate::schema::{
@@ -14,6 +15,8 @@ use serde_json::{Value, json};
 
 const SOLO: crate::schema::TypedContract<SoloParams> = crate::schema::TypedContract::new();
 const MUTE: crate::schema::TypedContract<MuteParams> = crate::schema::TypedContract::new();
+const PAINT: TypedContract<AppearancePaintParams> = TypedContract::new();
+const PICK_UP: TypedContract<AppearancePickUpParams> = TypedContract::new();
 
 fn solo(_: &mut crate::Session, params: &serde_json::Value) -> crate::Result<serde_json::Value> {
     let command = "render.lights.solo";
@@ -95,11 +98,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CLOSE_RESULT)
         .output(output_schema_for::<ResultViewResult>)
         .params("No parameters. Return to Model Preview; headless echo only, never cancels a job."),
-    CommandSpec::new("appearance.paint", "Paint Appearance", super::inspect::appearance_gestures::paint)
+    CommandSpec::new("appearance.paint", "Paint Appearance", crate::checked!("appearance.paint", super::inspect::appearance_gestures::paint))
         .icon("appearance").key("B").noundo()
+        .contract(&PAINT).output(output_schema_for::<AppearancePaintResult>)
         .params("appearance or color/name/opacity/pbr: appearance.assign look parameters; validates and returns look for ui.start paint. done?: true ends the UI tool. Programmatic calls never open UI."),
-    CommandSpec::new("appearance.pick_up", "Pick Up Appearance", super::inspect::appearance_gestures::pick_up)
+    CommandSpec::new("appearance.pick_up", "Pick Up Appearance", crate::checked!("appearance.pick_up", super::inspect::appearance_gestures::pick_up))
         .icon("select").key("I").noundo()
+        .contract(&PICK_UP).output(output_schema_for::<AppearancePickUpResult>)
         .params("target?: appearance.chain target; returns its resolved look, or requests the UI sampling tool when omitted. Programmatic calls never open UI."),
 
     CommandSpec::new("render.lights.solo","Solo Light",crate::checked!("render.lights.solo",solo))
