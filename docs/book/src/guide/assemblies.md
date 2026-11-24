@@ -770,6 +770,36 @@ quantity and weighs nothing. It holds nothing: it can't be the active component,
 that would put a body, a sketch or a component into it is refused. An empty component can be
 made virtual with `component.metadata.set {component, virtual: true}`.
 
+## Hole stacks
+
+Parts held together by rivets, bolts or pins have holes that line up through two or more
+touching layers. **Find Hole Stacks** (`inspect.hole_stacks`) lists them:
+
+```json
+{"command": "inspect.hole_stacks", "params": {"diameters": [[4, 6.5]], "touching": 0.05}}
+```
+
+Each stack has its `axis` (a unit vector pointing from `start` into the stack: down for a
+vertical stack, so `start` is on the top face), its `start` and `end` points on that axis,
+`grip_mm` (the clamped thickness from `start` to `end`) and its `layers`, outermost first:
+the `body`, the hole's diameter `d_mm` and its extent `t: [t0, t1]` in mm from `start`. A
+layer through an obround slot carries `slot: {length_mm, along}`, the slot's overall length
+and the direction of its length. Holes in no stack are listed under `lone` with their body,
+diameter, entry point `at`, axis and `depth_mm`.
+
+A layer reaches from face to face of its body: a countersink or chamfer that opens out from a
+hole counts in its extent, so it adds to the grip and closes the gap it would leave against
+the next layer, while `d_mm` stays the narrowest opening. Holes are on one axis when their
+axes are at most `axis_tolerance` apart (default 0.1 mm), either way round; a round hole
+lines up with a slot when its axis passes through the slot's centre line. Slots that no round
+hole passes through line up when they share a centre line, and their stack's axis runs
+through the middle of the length they share. Layers belong to one stack when the gap between
+them is at most `touching` (default 0.05 mm). `bodies` limits the search to some bodies,
+`diameters` to holes and slot widths in the given ranges, and `slots: false` leaves slots
+out. Standard parts already placed (a washer's hole) are left out unless named in `bodies`.
+Walls that are not one cylinder or cone — a hole another feature has cut into, or a tapped
+hole with its threads modelled — are not found.
+
 ## Finding things in the browser
 
 The magnifier in the Browser panel's header (or Ctrl+F with the pointer over the browser, unless you gave Ctrl+F to a command) opens a

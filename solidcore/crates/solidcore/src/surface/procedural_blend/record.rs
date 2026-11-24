@@ -123,6 +123,8 @@ pub enum RadiusRecord {
     },
     /// A ball whose radius is the x of a curve over the leader's parameter.
     Law(NurbsCurveRecord),
+    /// The rolling radius is set by the chamfer's equal setbacks at each pair of feet.
+    EqualSetback,
 }
 
 /// How a chamfer's size was asked for (#2486).
@@ -401,6 +403,17 @@ impl ProceduralBlendRecord {
                 }
             }
             RadiusRecord::Law(law) => law.validate("definition.radius")?,
+            RadiusRecord::EqualSetback => {
+                if d.order != 0
+                    || !matches!(d.chamfer.as_ref().map(|c| c.size),
+                    Some(ChamferSizeRecord::Distances([a, b])) if a == b && a > 0.0)
+                {
+                    return Err(refuse(
+                        "definition.radius",
+                        "a local wedge needs an equal-setback chamfer",
+                    ));
+                }
+            }
         }
         d.leader.validate("definition.leader")?;
         for seed in &d.seeds {
