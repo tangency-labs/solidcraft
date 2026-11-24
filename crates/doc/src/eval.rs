@@ -12557,13 +12557,19 @@ fn eval_feature_kind(
     refuse_ambiguous_targets(doc, st, f, &f.participants)?;
     match &f.kind {
         FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
-        // The surface solver (solidcraft_sketch::surface) is ready; wiring it here needs the
-        // live face resolved to an ops chart, which the attachment pass (a later PR) lands.
-        // Until then, refuse with the first unsupported constraint, or a clear "not wired" error.
-        FeatureKind::SurfaceSketch { sketch, .. } => match solidcraft_sketch::surface::first_refusal(sketch) {
-            Some(refusal) => Err(DocError::Invalid(refusal.message())),
-            None => Err(DocError::Invalid("surface sketches are not solved yet".into())),
-        },
+        // The solver (solidcraft_sketch::surface) and the attachment resolver are both here; what
+        // is missing is a place to keep a solved surface sketch for display (no plane to store in
+        // SolvedSketch). Report the real blocker: a lost face first, then an unsupported
+        // constraint, then the missing display.
+        FeatureKind::SurfaceSketch { surface, sketch } => {
+            if let crate::surface_sketch::SurfaceAttachment::Lost { message } = doc.surface_attachment(surface, st) {
+                return Err(DocError::Invalid(message));
+            }
+            match solidcraft_sketch::surface::first_refusal(sketch) {
+                Some(refusal) => Err(DocError::Invalid(refusal.message())),
+                None => Err(DocError::Invalid("surface sketches are not drawn yet".into())),
+            }
+        }
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
             crate::body_transfer::evaluate(doc, st, &crate::plain(bodies), *from, *to, *transform)
         }
