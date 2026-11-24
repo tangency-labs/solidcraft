@@ -721,8 +721,13 @@ impl RuntimeManifest {
         }
         let mut names = BTreeSet::new();
         for entry in &self.entries {
-            // The name as written, quoted and cut short: it comes from an untrusted manifest.
-            let shown = format!("{:?}", entry.name.chars().take(64).collect::<String>());
+            // The name as written, quoted and cut short: it comes from an untrusted manifest. A cut
+            // name says so and gives its length, as its first 64 characters may be valid alone.
+            let length = entry.name.chars().count();
+            let shown = match length {
+                0..=64 => format!("{:?}", entry.name),
+                _ => format!("{:?}… ({length} characters)", entry.name.chars().take(64).collect::<String>()),
+            };
             if !valid_id(&entry.name) {
                 return Err(invalid(
                     "runtime.entries",

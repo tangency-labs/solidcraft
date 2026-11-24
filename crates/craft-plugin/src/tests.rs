@@ -448,6 +448,9 @@ fn a_refused_entry_list_names_the_entry_and_the_rule() {
     // A hostile name is quoted and cut short, never echoed raw.
     let (_, reason) = refusal(json!([format!("bad\nname{}", "x".repeat(500))]));
     assert!(reason.contains("\\n") && !reason.contains('\n') && reason.len() < 400, "{reason}");
+    // A cut name says it was cut and how long it is: its first 64 characters may be valid alone.
+    let (_, reason) = refusal(json!([format!("{}_", "a".repeat(64))]));
+    assert!(reason.contains(&format!("\"{}\"… (65 characters)", "a".repeat(64))), "{reason}");
 }
 
 #[test]
