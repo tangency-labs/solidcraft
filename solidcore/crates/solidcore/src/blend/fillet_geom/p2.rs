@@ -1723,7 +1723,10 @@ pub fn srf_srf_intersection_with_context(
     // Use two-pts intersector (pOptDir is a required argument of it).
     if curves_3d.is_empty() && !opts.skip_two_pnts_intersection {
         if let (Some(start_pnt), Some(dir)) = (start, opt_dir) {
-            // an error here just means that it couldn't find a solution
+            // A point that drops onto neither surface is no curve here: the call answers
+            // `None`, not an error. Upstream also ignores the call's other statuses (an
+            // error here just means that it couldn't find a solution), so the intersector's
+            // own failures still mean "no curve" and the search goes on below.
             let r = ignore_status(two_pnts_intersection(
                 k,
                 start_pnt,
@@ -1733,7 +1736,8 @@ pub fn srf_srf_intersection_with_context(
                 surf1,
                 surf2,
                 ssi_tol,
-            ))?;
+            ))?
+            .flatten();
             if let Some(pi) = r {
                 // Not upstream: with `closed_by_start_direction`, a curve that does not leave
                 // the start along its heading is passed over

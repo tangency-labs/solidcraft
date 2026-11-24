@@ -133,8 +133,13 @@
           # neither.
           doCheck = false;
 
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          buildInputs = runtimeLibs pkgs;
+          #zstd is used by Freecad and Rhino import crates
+          #and pkg-config is used by zstd to link against the system zstd instead of compiling zstd
+          nativeBuildInputs = [
+            pkgs.makeWrapper
+            pkgs.pkg-config
+          ];
+          buildInputs = (runtimeLibs pkgs) ++ [ pkgs.zstd ];
 
           postInstall = ''
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
