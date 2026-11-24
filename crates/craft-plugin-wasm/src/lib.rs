@@ -12,10 +12,12 @@ mod native;
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeOptions {
     pub stack_bytes: usize,
+    /// How long a long job (an entry with `"job": true`) may run.
+    pub job_deadline_ms: u64,
 }
 impl Default for RuntimeOptions {
     fn default() -> Self {
-        Self { stack_bytes: 512 * 1024 }
+        Self { stack_bytes: 512 * 1024, job_deadline_ms: craft_plugin::JOB_DEADLINE_SECONDS * 1000 }
     }
 }
 
@@ -53,7 +55,9 @@ pub fn run_with_options<H: PluginHost + 'static>(
 ) -> (H, Result<Value>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run(host, manifest, component, entry, params, options)
+        let ran = native::run(host, manifest, component, entry, params, options);
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -73,7 +77,9 @@ pub fn dialog_fields<H: PluginHost + 'static>(
 ) -> (H, Result<String>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::dialog_fields(host, manifest, component, entry, values, ceilings)
+        let ran = native::dialog_fields(host, manifest, component, entry, values, ceilings);
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -129,7 +135,9 @@ pub fn run_import<H: PluginHost + 'static>(
 ) -> (H, Result<Imported>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run_import(host, manifest, component, entry, options, request, RuntimeOptions::default())
+        let ran = native::run_import(host, manifest, component, entry, options, request, RuntimeOptions::default());
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -180,7 +188,9 @@ pub fn run_ui_event<H: PluginHost + 'static>(
 pub fn run_export<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8], slot: &str, options: &Value) -> (H, Result<Vec<u8>>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run_export(host, manifest, component, slot, options, RuntimeOptions::default())
+        let ran = native::run_export(host, manifest, component, slot, options, RuntimeOptions::default());
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {

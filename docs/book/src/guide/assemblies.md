@@ -179,10 +179,10 @@ solve and `joint.solve` gives the reason, instead of placing the part from old n
 plain number, or driving the value, drops that expression.
 
 **Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
-the saved first attachment's axes. Their expressions are evaluated once, as during creation;
-scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
-with X and Y initially zero for additional shifts from those positions. Assembly constraints
-keep their existing controls and reference geometry until changed to a plain joint.
+the saved first attachment's axes, and expressions typed for them follow their parameters just as
+Offset Z does; scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment
+positions, with X and Y initially zero for additional shifts from those positions. Assembly
+constraints keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn
@@ -514,6 +514,16 @@ a checkout. The parts it reads come in as one step, so one **Undo** takes them a
 that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
+
+**Insert STEP** also links `.step` and `.stp` files on disk. Its component shows the same link
+in the Browser, and **Update Links** and **Break Link** (Insert › Links) work on it. Saving the assembly stores
+the source path relative to its folder. Updates replace the imported bodies in one undo step;
+references that still resolve are kept, and references that no longer resolve are reported. Missing
+or corrupt sources keep their previous bodies and are retried next time, without holding up
+other links. The same **Update changed linked designs when a tab comes back** preference controls
+automatic STEP refresh. Use **Break Link** on the
+component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
+copies because uploaded files have no disk source path.
 
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in

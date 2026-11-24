@@ -148,7 +148,8 @@ fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
 }
 
 /// The History controls' menu: shows or hides the Play button, and — when the design marks any
-/// component out of the bar — shows or hides those components' entries (#10393).
+/// component out of the bar — shows or hides those components' entries (#10393); then Clear
+/// History, greyed out while the History shows nothing to delete (#15969).
 pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
     let show = !app.preferences.history_play_button;
     let label = solidcraft_ui_text::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
@@ -158,7 +159,46 @@ pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
         let label = solidcraft_ui_text::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
         items.push(crate::ui_kit::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
     }
+    let (features, groups) = clear_targets(app);
+    items.push(crate::ui_kit::Item::sep());
+    items.push(
+        crate::ui_kit::Item::action("ui.historyClear", solidcraft_ui_text::tr("ui.history_clear"), "delete")
+            .on(!features.is_empty() || !groups.is_empty()),
+    );
     items
+}
+
+/// What Clear History deletes: every feature the History shows, as selecting them all and
+/// pressing Delete would. When the History shows the whole design, its timeline folders go too,
+/// so no empty folder is left behind; a History that shows one component, or leaves out the
+/// components marked out of it, keeps the folders, which can hold features it does not show
+/// (#15969). The features are those the bar draws, not the stepping view ([`transport_view`]),
+/// which with `history_steps_component` off also lists the components marked out of the bar.
+pub(crate) fn clear_targets(app: &SolveApp) -> (Vec<u64>, Vec<u64>) {
+    let doc = &app.session.doc;
+    let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
+    let view = crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden);
+    match view.shown() {
+        None => {
+            let features = doc.features.iter().map(|f| f.id).collect();
+            let groups = doc.timeline_groups.iter().filter(|g| g.parent.is_none()).map(|g| g.id).collect();
+            (features, groups)
+        }
+        Some(shown) => (shown.iter().filter_map(|&i| doc.features.get(i)).map(|f| f.id).collect(), Vec::new()),
+    }
+}
+
+/// Clear History: delete [`clear_targets`] after the same dependents check as Delete, in one
+/// undo step (#15969).
+pub(crate) fn clear_history(app: &mut SolveApp) {
+    if app.close_editor_for_history().is_err() {
+        return;
+    }
+    let (features, groups) = clear_targets(app);
+    if features.is_empty() && groups.is_empty() {
+        return;
+    }
+    delete_folders(app, groups, features);
 }
 
 /// The feature that made a face, edge or vertex of `body` (its world name): a face's own creator,
@@ -300,6 +340,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
             PointDef::Center { .. } => "point_center",
             PointDef::EdgeAndPlane { .. } => "point_edge_plane",
             PointDef::AlongPath { .. } => "point_along_path",
+            PointDef::Average { .. } => "c_midpoint",
         },
         FeatureKind::Hole { .. } => "hole",
         FeatureKind::Loft { .. } => "loft",
@@ -309,6 +350,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
         FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } | FeatureKind::MeshConvert { .. } => "import",
+        FeatureKind::MeshReduce { .. } => "mesh_reduce",
         FeatureKind::BodyTransfer { .. } => "move",
         FeatureKind::Thread { .. } => "thread",
         FeatureKind::SplitFace { .. } => "split_face",
@@ -1692,6 +1734,63 @@ mod tests {
         assert!(menu.iter().any(|i| i.id == "component.show_history"), "the menu flips to Show its History");
     }
 
+    /// Clear History in the History controls' menu deletes every step the History shows, its
+    /// folders too, in one undo step; with nothing left it is greyed out (#15969).
+    #[test]
+    fn clear_history_deletes_every_shown_step_and_undo_brings_them_back() {
+        use crate::context_menu::{self, Target};
+        fn clear(h: &Harness) -> crate::ui_kit::Item {
+            let items = context_menu::items(&h.app, &Target::HistoryControls);
+            items.into_iter().find(|i| i.id == "ui.historyClear").expect("the History menu offers Clear History")
+        }
+        fn run_and_wait(h: &mut Harness, item: &crate::ui_kit::Item) {
+            context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
+            for _ in 0..500 {
+                if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
+                    break;
+                }
+                h.frame();
+            }
+            h.frames(4);
+        }
+        let mut h = two_boxes(false);
+        h.app.run("timeline.group", json!({"name": "Boxes", "features": ["First"]})).unwrap();
+        assert_eq!(clear(&h).label, "Clear History");
+        let item = clear(&h);
+        assert!(item.enabled, "a design with steps can be cleared");
+        run_and_wait(&mut h, &item);
+        assert!(h.app.session.doc.features.is_empty(), "every step is gone");
+        assert!(h.app.session.doc.timeline_groups.is_empty(), "no empty folder is left behind");
+        assert!(h.app.dialog.is_none(), "steps that only depend on each other need no confirmation");
+        assert!(!clear(&h).enabled, "an empty History has nothing to clear");
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(4);
+        let names: Vec<&str> = h.app.session.doc.features.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["First", "Second"], "one Undo brings every step back");
+        assert_eq!(h.app.session.doc.timeline_groups.len(), 1, "and the folder");
+
+        // A component whose History is hidden stays out of the History, so Clear History keeps it,
+        // whether or not the History steps follow one component (the stepping view lists hidden
+        // components when they don't).
+        for steps_component in [true, false] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.history_steps_component = steps_component;
+            h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
+            h.app.run("solid.box", json!({ "length": 10, "width": 10, "height": 10, "name": "CopyBox" })).unwrap();
+            h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+            h.app
+                .run("solid.box", json!({ "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "operation": "new_body", "name": "RootBox" }))
+                .unwrap();
+            h.app.run("component.hide_history", json!({ "component": "Copy" })).unwrap();
+            h.frames(4);
+            let item = clear(&h);
+            run_and_wait(&mut h, &item);
+            let names: Vec<&str> = h.app.session.doc.features.iter().map(|f| f.name.as_str()).collect();
+            assert!(names.contains(&"CopyBox") && !names.contains(&"RootBox"), "only the shown steps go ({steps_component}): {names:?}");
+        }
+    }
+
     #[test]
     fn the_bar_leaves_out_hidden_components_and_their_children() {
         let mut h = Harness::new();
@@ -1883,6 +1982,7 @@ mod tests {
             ("center", PointDef::Center { of: point() }),
             ("edge_plane", PointDef::EdgeAndPlane { edge: point(), plane: point() }),
             ("along_path", PointDef::AlongPath { path: point(), t: "0.5".into() }),
+            ("average", PointDef::Average { points: vec![point(), point()] }),
         ] {
             cases.push((format!("construct.point.{id}"), FeatureKind::ConstructionPoint { def }));
         }
