@@ -2279,7 +2279,7 @@ fn remembering_importer_options_is_a_per_entry_checkbox_off_by_default_not_a_pre
     let loaded = crate::prefs::lenient(&old);
     let memory = &loaded.plugin_importer_options["gears"]["open"];
     assert_eq!((memory.remember, &memory.values), (false, &json!({"teeth":42})));
-    h.app.load_prefs(&serde_json::to_value(&loaded).unwrap());
+    h.app.load_prefs(&serde_json::to_string(&loaded).unwrap());
     open_entry(&mut h.app, 0, 0);
     assert!(!h.app.plugin_menu.dialog().unwrap().remember);
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 20, "checkbox off: the entry's defaults");
