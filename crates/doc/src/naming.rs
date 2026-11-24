@@ -87,6 +87,10 @@ impl NameCell {
     pub(crate) fn depth(&self) -> Option<usize> {
         self.origin.as_ref().map(|o| o.depth).or(self.saved_depth)
     }
+    /// Saved names of a body made again with `depth` features before it now.
+    pub(crate) fn saved_at(&mut self, depth: usize) {
+        self.saved_depth = Some(depth);
+    }
     /// Identity of the names: clones of a cell share them.
     pub(crate) fn id(&self) -> usize {
         Arc::as_ptr(&self.names) as usize

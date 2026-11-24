@@ -1378,6 +1378,9 @@ impl ModelState {
                     // holds no lineage to trace them from again.
                     let saved = b.key == stamped && b.lineage().is_none() && b.names.is_saved();
                     b.key = stamped;
+                    if saved {
+                        b.names.saved_at(depth);
+                    }
                     if !saved && !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
                         b.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
                     }
@@ -2852,6 +2855,12 @@ impl EvalKey {
                 st.sketch_keys.get(id).hash(&mut h);
             }
             st.body_counter.hash(&mut h);
+            // A body numbered from the counter skips the numbers reserved past it.
+            if f.body_names.is_empty() || f.body_names.iter().any(|n| n.is_empty() || st.body(n).is_some()) {
+                for n in st.reserved_body_names.iter().filter(|n| crate::is_counted_body_name(n)) {
+                    n.hash(&mut h);
+                }
+            }
             // A cut drops the threads of bodies it removes.
             serde_json::to_string(&st.threads).unwrap_or_default().hash(&mut h);
             (h.finish(), read)

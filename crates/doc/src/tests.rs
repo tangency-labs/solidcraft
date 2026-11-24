@@ -1058,6 +1058,51 @@ fn rounded_boxes(n: usize) -> Document {
     doc
 }
 
+/// The number of a suppressed feature's stored name is not handed out: a body numbered before the
+/// feature was suppressed is not kept under it.
+#[test]
+fn a_numbered_body_is_not_kept_once_its_number_is_reserved() {
+    let mut doc = Document::new("reserved number");
+    // Makes nothing, so suppressing it changes no body: only its stored name counts.
+    let cut = serde_json::json!({"type": "box", "corner": [100.0, 0.0, 0.0], "length": "5", "width": "5", "height": "5", "operation": "cut"});
+    add_in(&mut doc, 0, "Cut", cut);
+    boxed(&mut doc, 0, "Numbered", 0.0, &[]);
+    let cut = doc.find_feature("Cut").unwrap().id;
+    doc.feature_mut(cut).unwrap().body_names = vec!["Body1".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert!(m.state().body("Body1").is_some());
+    doc.feature_mut(cut).unwrap().suppressed = true;
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "suppressed");
+    assert!(m.state().body("Body2").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// A body taken back from a saved model counts as deep in the chain of names as it is now, so one
+/// feature fewer before it brings the bodies after it back under the limit.
+#[test]
+fn a_reopened_body_counts_in_the_naming_depth_as_it_stands() {
+    let mut doc = Document::new("reopened at the limit");
+    boxed(&mut doc, 0, "Far", -500.0, &["Far"]);
+    for i in 1..397 {
+        add_in(&mut doc, 0, &format!("Far {i}"), serde_json::json!({"type": "move", "bodies": ["Far"], "translate": ["0", "0", "0.01"]}));
+    }
+    boxed(&mut doc, 0, "Near", 0.0, &["Near"]);
+    boxed(&mut doc, 0, "Other", 40.0, &["Other"]);
+    boxed(&mut doc, 0, "Last", 80.0, &["Last"]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let names = |m: &Model| crate::naming::face_names(m.state().body("Last").unwrap()).to_vec();
+    assert!(names(&m).iter().all(|n| n.starts_with("Last:face:")), "{:?}", names(&m));
+    let mut m = Model::adopt(&doc, &m.saved(&doc).unwrap()).unwrap();
+    let id = doc.find_feature("Far 200").unwrap().id;
+    doc.feature_mut(id).unwrap().suppressed = true;
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "one suppressed");
+    assert!(names(&m).iter().all(|n| !n.starts_with("Last:face:")), "{:?}", names(&m));
+}
+
 /// A face of a tool without roles (a coil's end) is named after whatever body it lies on, read or
 /// not: a bevel of its edge, stored by that name, is not kept once another body names the face.
 #[test]
