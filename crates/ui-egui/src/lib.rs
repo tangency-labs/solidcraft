@@ -1367,7 +1367,9 @@ impl SolveApp {
         #[cfg(not(target_arch = "wasm32"))]
         if scene.depth.is_some() && window.depth.is_none() && window.samples == 1 {
             match built.renderer.check_msaa(&rs.device, &rs.queue) {
-                Ok(solidcraft_viewport_gpu::view::MsaaCheck::Passed) => {}
+                Ok(solidcraft_viewport_gpu::view::MsaaCheck::Passed) => {
+                    solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check passed at {}x", scene.samples);
+                }
                 Ok(solidcraft_viewport_gpu::view::MsaaCheck::Fallback) => {
                     built.target.samples = 1;
                     msaa_fallback = true;

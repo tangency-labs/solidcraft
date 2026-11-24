@@ -197,8 +197,16 @@ def probe(gl_saved_four=False):
     statistics = frame_statistics(base64.b64decode(lines[4], validate=True))
     if (capture["result"]["width"], capture["result"]["height"]) != (statistics["width"], statistics["height"]):
         raise ValueError("presented-frame dimensions disagree")
-    if gl_saved_four and "SolidCraft graphics: Gl, MSAA 1x (requested 4x)" not in result.stderr:
-        raise ValueError("forced GL did not apply the safe sample count")
+    # Forced OpenGL with 4x saved: the scene asks for 4x, and the startup anti-aliasing check draws
+    # it before the first frame and keeps 4x only where it is not blank, else falls back to 1x
+    # (#5605: OpenGL multisampling once gave black frames). The presented frame above is not blank.
+    if gl_saved_four:
+        if "SolidCraft graphics: Gl, MSAA 4x (requested 4x)" not in result.stderr:
+            raise ValueError("forced GL did not ask for the saved 4x")
+        decided = ("SolidCraft graphics: anti-aliasing check passed at 4x",
+                   "SolidCraft graphics: anti-aliasing check failed at 4x and passed at 1x")
+        if not any(line in result.stderr for line in decided):
+            raise ValueError("forced GL started without the anti-aliasing check deciding")
     mode = "GL saved 4x" if gl_saved_four else "default backend"
     print(f"Flatpak desktop PASS: {mode}, renderer={renderer}, box=6000 mm³, frame={statistics}")
 
