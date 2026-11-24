@@ -1973,6 +1973,83 @@ fn a_box_with_a_lofted_tunnel_shelled_passes_the_full_check() {
     }
 }
 
+/// #19419: a ruled loft from a circle r 25 at z = 0 to a 100 x 100 square with R5 corners at
+/// z = 100, the sections as SolidCraft splits them (the circle in eight arcs paired with the
+/// square's four sides and four corners). Each side wall meets its corner walls along a ruling
+/// where the two are tangent at both ends and not between them.
+fn circle_to_rounded_square_loft() -> Body {
+    let z = [0.0, 0.0, 1.0];
+    let x = [1.0, 0.0, 0.0];
+    let arc = |center: [f64; 3], radius: f64, start: f64, end: f64| crate::sweep::Curve::Arc {
+        center,
+        axis: z,
+        reference: x,
+        radius,
+        start,
+        end,
+    };
+    let line = |start: [f64; 3], end: [f64; 3]| crate::sweep::Curve::Line { start, end };
+    let cuts = [
+        -2.303_611_428_581_403_3,
+        -0.837_981_225_008_39,
+        -0.732_815_101_786_506_6,
+        0.732_815_101_786_506_6,
+        0.837_981_225_008_39,
+        2.303_611_428_581_403_3,
+        2.408_777_551_803_287,
+        3.874_407_755_376_299_4,
+        3.979_573_878_598_183,
+    ];
+    let circle: Vec<_> = cuts
+        .windows(2)
+        .map(|w| arc([0.0; 3], 25.0, w[0], w[1]))
+        .collect();
+    let h = 100.0;
+    let square = vec![
+        line([-45.0, -50.0, h], [45.0, -50.0, h]),
+        arc([45.0, -45.0, h], 5.0, -PI / 2.0, 0.0),
+        line([50.0, -45.0, h], [50.0, 45.0, h]),
+        arc([45.0, 45.0, h], 5.0, 0.0, PI / 2.0),
+        line([45.0, 50.0, h], [-45.0, 50.0, h]),
+        arc([-45.0, 45.0, h], 5.0, PI / 2.0, PI),
+        line([-50.0, 45.0, h], [-50.0, -45.0, h]),
+        arc([-45.0, -45.0, h], 5.0, PI, 3.0 * PI / 2.0),
+    ];
+    crate::sweep::loft(&[circle, square], 1, true).unwrap()
+}
+
+/// #19419: the loft shelled 2 inward with its top open passes SMLib's full check, as the
+/// shell's own result (SolidCraft checks that) and as the closed, sound solid `shell` gives.
+/// It was refused: the UV curves of the offset rulings' mates had near kinks (Bad
+/// CurveCusp) and coincident interior control points (Bad Repeated CPts).
+#[test]
+fn a_circle_to_rounded_square_loft_shells_open_at_its_top() {
+    all_fixes();
+    let top = [0.0, 0.0, 100.0];
+    let raw = circle_to_rounded_square_loft();
+    let o = order(&raw);
+    let open = through(&raw, &o, top);
+    crate::session::with_body("test", &raw, |k, b| {
+        let faces = super::faces_of(b, &o, &[open]).unwrap();
+        *b = super::shell_brep_full(k, b, -2.0, &faces)?;
+        Ok(Ok::<(), Error>(()))
+    })
+    .unwrap()
+    .unwrap();
+    let report = raw.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+
+    let b = circle_to_rounded_square_loft();
+    let o = order(&b);
+    let outer = volume(&b);
+    shell(&b, &o, &[through(&b, &o, top)], -2.0).unwrap();
+    assert_eq!(b.to_record().unwrap().0.shells.len(), 1);
+    assert!(b.is_manifold_solid().unwrap());
+    b.check_solid().unwrap();
+    let shelled = volume(&b);
+    assert!(shelled > 0.0 && shelled < outer, "{shelled} of {outer}");
+}
+
 /// Drafts against closed forms (SolidCraft's `draft_*` cases, on record face indices), the oblique
 /// neutral plane's, and the refusals.
 mod drafts {

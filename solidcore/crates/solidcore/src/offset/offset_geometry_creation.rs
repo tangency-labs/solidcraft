@@ -4835,8 +4835,33 @@ impl OffsetGeometryCreation {
 
                 // If this has already been mated then we should just grab the point of the vertex
                 let mut found_3d_vertex = false;
+                // Not upstream (#19419): the faces are tangent at the vertex, so the neighbour's
+                // mate meets two nearly tangent offsets there and its end lies off this curve
+                // (1.9e-7 on a loft's ruling): a trim past the face onto its extension, whose
+                // stub kinks the edge's UV curves. Where the UV curve's face is known, the
+                // crossing of the two UV curves is taken instead (below).
+                let crossing_face = match tan_uv {
+                    Some(uv) if !executive.is_local_operation() => {
+                        let side = if Some(uv) == uv_curve_base {
+                            Some(base_edgeuse)
+                        } else if Some(uv) == uv_curve_other_base {
+                            other_base_edgeuse
+                        } else {
+                            None
+                        };
+                        match side.and_then(|eu| executive.offset_edgeuse(eu)) {
+                            Some(off) => match brep.edgeuse_face(off)? {
+                                Some(face) => brep.face_surface(face)?,
+                                None => None,
+                            },
+                            None => None,
+                        }
+                    }
+                    _ => None,
+                };
+                let mated_vertex = crossing_face.is_none();
                 // (the mate is dereferenced only when the edge use is marked)
-                if brep.edgeuse_is_marked(k, tan_eu, mark)? && {
+                if mated_vertex && brep.edgeuse_is_marked(k, tan_eu, mark)? && {
                     let tan_mate = brep
                         .edgeuse_mate(tan_eu)?
                         .ok_or(dangling("edge use without mate"))?;
@@ -4978,8 +5003,40 @@ impl OffsetGeometryCreation {
                         },
                     )?;
 
-                    // save solutions as possible trim Points
-                    solutions.append(&sols2);
+                    match crossing_face {
+                        // (#19419) the crossing as a point of the face's offset, on the face's
+                        // boundary, dropped onto the 3D curve: the UV curve keeps the 3D
+                        // curve's parameter only to the intersection's tolerance (2.5e-6 along
+                        // a loft's rim), and the boundary crosses the curve transversally
+                        Some(surface) => {
+                            let mut crossings = Vec::new();
+                            for sol in sols2.as_slice() {
+                                let uv = curve_of(brep, tan_uv)?.evaluate_point(k, sol.start.param(0)?)?;
+                                crossings.push(Point2::new(uv.x, uv.y));
+                            }
+                            let (extended, _) =
+                                executive.get_create_extended_surface(k, brep, surface)?;
+                            let tol_3d = self.this_approx_tol_3d * 10.0;
+                            for uv in crossings {
+                                let point = surface_of(brep, extended)?.evaluate_point(k, uv)?;
+                                let on_curve = Self::point_solve(
+                                    k,
+                                    brep,
+                                    curve_3d,
+                                    SolverOperation::Minimize,
+                                    point,
+                                    tol_3d,
+                                    Some(tol_3d),
+                                    SolutionRequested::All,
+                                )?;
+                                solutions.append(&on_curve);
+                            }
+                        }
+                        // save solutions as possible trim Points
+                        None => {
+                            solutions.append(&sols2);
+                        }
+                    }
                 }
             } // end iter every sTanEU/sTanUV pair of members
 
