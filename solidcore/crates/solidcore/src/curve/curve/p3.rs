@@ -484,7 +484,8 @@ fn area_normal_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<(
     // the samples' own area reaches SM_EFF_ZERO (an overflow to infinity does)
     let unitizes = area / scale / scale >= EFF_ZERO;
     let direction = |normal: &mut Vec3, a: Vec3| -> Result<()> {
-        if scale == 1.0 {
+        // (a vector whose squared length overflows unitizes to zero: it takes the scaled way)
+        if scale == 1.0 && a.length().is_finite() {
             // SER(crCrvsNormal.Unitize()): SM_ERR_INVALID_INPUT for an area below SM_EFF_ZERO
             *normal = a;
             return unitize_written(normal, |_| {
@@ -593,7 +594,7 @@ fn open_chain_plane_normal(
     if !direction_is_certain(length, error) || !off_line {
         return None;
     }
-    let n = if scale == 1.0 {
+    let n = if scale == 1.0 && c.length().is_finite() {
         c.unitize().ok()?
     } else if length / scale / scale >= EFF_ZERO {
         c.length_and_unit()?.1

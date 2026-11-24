@@ -548,6 +548,80 @@ fn moved(main: &(Vec3, Result<(), SolidError>), own: &(Vec3, Result<(), SolidErr
     }
 }
 
+/// `unit_id`'s expected file `text` with each row the retirement moved (`rows.txt`) put
+/// back to main's line: the case run with main's loop normal substituted at every call,
+/// whose line must hash to main's. Another ledger that digests the whole file against
+/// main ([`crate::certify::trim_tolerance`]) so sees main's lines for these independent
+/// changes; a row it changes itself (`keep`) must not be one of them.
+pub(crate) fn put_back_main_lines(
+    unit_id: &str,
+    text: &str,
+    keep: &[&str],
+) -> Result<String, String> {
+    let mut moved: BTreeMap<&str, u64> = BTreeMap::new();
+    for line in ROWS.lines().filter(|l| !l.trim().is_empty()) {
+        let mut f = line.split_whitespace();
+        let (Some(unit), Some(case), Some(h)) = (f.next(), f.next(), f.next()) else {
+            return Err(format!("rows.txt: a short line {line:?}"));
+        };
+        if unit == unit_id {
+            let h = u64::from_str_radix(h, 16).map_err(|e| format!("rows.txt {case}: {e}"))?;
+            moved.insert(case, h);
+        }
+    }
+    if moved.is_empty() {
+        return Ok(text.to_string());
+    }
+    if let Some(case) = keep.iter().find(|c| moved.contains_key(**c)) {
+        return Err(format!("{unit_id} {case}: changed by both ledgers"));
+    }
+    let unit = crate::registry()
+        .into_iter()
+        .find(|u| u.id() == unit_id)
+        .ok_or_else(|| format!("no unit {unit_id}"))?;
+    let ctx = CaseContext {
+        root: repo_root(),
+        seeds: SEEDS,
+    };
+    let cases: BTreeMap<String, Case> = unit
+        .cases(&ctx)
+        .map_err(|e| format!("{unit_id}: {e:?}"))?
+        .into_iter()
+        .map(|c| (c.name.clone(), c))
+        .collect();
+    let mut out = String::new();
+    let mut found = 0;
+    for line in text.lines() {
+        let v: Value = serde_json::from_str(line).map_err(|e| format!("{unit_id}: {e}"))?;
+        let case = v["case"].as_str().unwrap_or_default();
+        let Some(&main_hash) = moved.get(case) else {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        };
+        let c = cases
+            .get(case)
+            .ok_or_else(|| format!("{unit_id}: no case {case}"))?;
+        let seam = ReplaySeam::loop_normal(Box::new(|k, curves, own| main_normal(k, curves, &own)));
+        let replayed = crate::wr57_replay::with_installed(seam, || unit.run_rust(c))
+            .map_err(|e| format!("{unit_id} {case}: {e:?}"))?;
+        let replayed = encode(case, &replayed);
+        if hash(&replayed) != main_hash {
+            return Err(format!("{unit_id} {case}: the replayed row is not main's"));
+        }
+        out.push_str(&replayed.to_string());
+        out.push('\n');
+        found += 1;
+    }
+    if found != moved.len() {
+        return Err(format!(
+            "{unit_id}: {found} of {} moved rows in the file",
+            moved.len()
+        ));
+    }
+    Ok(out)
+}
+
 fn hash(v: &Value) -> u64 {
     fnv1a64(&serde_json::to_string(v).unwrap())
 }
