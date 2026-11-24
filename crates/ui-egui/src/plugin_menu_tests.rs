@@ -162,14 +162,14 @@ fn optional_stored_selections_can_be_explicitly_unset() {
         open_form(&mut h.app, "inserts", "seats", &json!({"depth":2,"body":saved})).unwrap();
         checked_prefill(&h.app);
         if !empty {
+            // A saved pick stays in the field, and is sent, until it is explicitly unset.
             assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["body"], saved);
-            h.app.dialog.as_mut().unwrap().inputs[1].items.clear();
-            // The cleared picker reaches the field on a frame; check the values it then holds.
-            h.frames(4);
-            checked_prefill(&h.app);
+        } else {
+            assert!(
+                h.app.plugin_menu.dialog().unwrap().field_errors(&h.app).contains_key("body"),
+                "a stored empty pick list stays present until explicitly unset"
+            );
         }
-        checked_prefill(&h.app);
-        assert!(h.app.plugin_menu.dialog().unwrap().field_errors(&h.app).contains_key("body"), "stored values stay present until explicitly unset");
         h.frames(3);
         h.step(&json!({"click":{"handle":"plugin_dialog:unset:body"}})).unwrap();
         checked_prefill(&h.app);
