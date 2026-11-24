@@ -32,5 +32,6 @@ Updates: WR-647
     (solidcore-ops `boolean.rs`), whose flag-off cases the remaining tests run.
   No kept expectation changed, and no golden row moved (283 of 283 units pass unchanged).
 - **Not fixed by the flag either way:** the fitted B-spline-loft variant of #18064 (insert
-  built by a fitted loft, ym 100 and 200) fails `NotSolid` with the flag on and off alike, so
+  built by a fitted loft, ym 100 and 200) failed `NotSolid` with the flag on and off alike in a
+  local probe on this branch before the field was removed (not committed), so
   retiring the flag does not change it. It stays open as its own work.
