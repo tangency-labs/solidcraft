@@ -3047,3 +3047,36 @@ fn sheet_flanges_from_a_sketch_offer_edit_profile_sketch() {
         assert_eq!(edit.params, Some(json!({"sketch": sketch})));
     }
 }
+
+#[test]
+fn select_all_names_every_shown_body_for_the_menus_and_hide_takes_them_all() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    app.run("select.all", json!({})).unwrap();
+    // The menus build their body lists here: a whole-body selection names every shown body.
+    let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    let bodies = context_menu::sel_bodies(&app);
+    assert_eq!(bodies, shown, "every shown body, in the world's order");
+    // Show/Hide then takes them all in one step (this was the "items must list ..." refusal).
+    app.run("browser.visibility", json!({"items": bodies, "visible": false})).unwrap();
+    let hidden = &app.session.visibility.hidden_bodies;
+    for name in &shown {
+        assert!(hidden.iter().any(|h| h == name), "{name} hidden: {hidden:?}");
+    }
+    // A body hidden afterwards leaves the scope, as it left the list before.
+    assert_eq!(app.session.selected_count().unwrap(), 0, "both hidden: nothing shown is selected");
+}
+
+#[test]
+fn select_all_then_appearance_covers_every_shown_body() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    app.run("select.all", json!({})).unwrap();
+    let bodies = context_menu::sel_bodies(&app);
+    app.run("appearance.assign", json!({"bodies": bodies, "color": "#208040"})).unwrap();
+    for name in ["Block", "Spare"] {
+        assert!(app.session.doc.appearances.bodies.contains_key(name), "{name} took the appearance");
+    }
+}

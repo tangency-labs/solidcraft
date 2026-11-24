@@ -285,7 +285,18 @@ fn rename_selected(app: &SolveApp, bodies: &[String]) -> Option<Vec<String>> {
     (selected.len() > 1 && !bodies.is_empty() && bodies.iter().all(|b| selected.contains(b))).then_some(selected)
 }
 
-fn sel_bodies(app: &SolveApp) -> Vec<String> {
+pub(crate) fn sel_bodies(app: &SolveApp) -> Vec<String> {
+    // A whole-body selection names every shown body: resolve it here, once per menu build (about
+    // 5 ms at 56,000 bodies), never per frame.
+    if app.session.selection_all_bodies {
+        return app
+            .session
+            .selected_items()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|s| if let Sel::Body { name } = s { Some(name) } else { None })
+            .collect();
+    }
     let mut v: Vec<String> = Vec::new();
     for s in &app.session.selection {
         if let Sel::Body { name } = s
