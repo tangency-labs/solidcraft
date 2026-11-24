@@ -13192,6 +13192,7 @@ fn eval_feature_kind(
         | FeatureKind::SurfaceNetwork { .. }
         | FeatureKind::SurfaceMatch { .. }
         | FeatureKind::SurfaceFair { .. }
+        | FeatureKind::SurfaceMorph { .. }
         | FeatureKind::SurfaceOffset { .. }
         | FeatureKind::SurfaceRuled { .. }
         | FeatureKind::SurfaceUntrim { .. } => surface::eval(doc, vals, f, st, warning),

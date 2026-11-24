@@ -172,6 +172,7 @@ pub mod surface_analysis;
 pub mod surface_blend;
 pub mod surface_boundary;
 pub mod surface_match;
+pub mod surface_morph;
 pub mod surface_profile;
 pub mod surface_ruled;
 pub mod tab_layouts;

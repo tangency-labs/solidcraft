@@ -95,6 +95,7 @@ mod mesh_convert;
 mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
+mod morph;
 mod native;
 mod numbered;
 mod offset;
@@ -368,6 +369,10 @@ pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::MAX_TRIANGLES;
 pub use meshbody::mesh_body;
 pub use meshbody::mesh_body_with_normals;
+pub use morph::MorphMapMode;
+pub use morph::MorphOptions;
+pub use morph::MorphProjection;
+pub use morph::morph_surface;
 pub use native::body_from_smlib;
 pub use native::brep_record;
 pub use native::decode_native_body;

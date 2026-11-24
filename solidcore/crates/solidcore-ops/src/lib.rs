@@ -70,6 +70,7 @@ pub mod joint_turn;
 pub mod label;
 pub mod measure;
 pub mod member_turn;
+pub mod morph;
 pub mod network;
 pub mod offset;
 pub mod order;

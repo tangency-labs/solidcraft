@@ -243,6 +243,109 @@ fn mirror_in(
     Ok(())
 }
 
+/// Replace mapped vertices, edge curves, and face surfaces on `b`, rebuild UV trim curves
+/// for `rebuild_faces`, and refresh infinite regions when present.
+///
+/// # Errors
+///
+/// Those of the underlying B-rep editing notifications, curve/surface replacements, trim
+/// curve rebuild, and region classification.
+pub(crate) fn apply_deformed_geometry(
+    k: &mut Kernel,
+    b: &mut Brep,
+    mapped_vertices: &std::collections::BTreeMap<crate::topology::VertexId, crate::math::Point3>,
+    mapped_curves: std::collections::BTreeMap<
+        crate::topology::EdgeId,
+        crate::curve::curve::p2::Curve,
+    >,
+    mapped_surfaces: std::collections::BTreeMap<
+        crate::topology::FaceId,
+        crate::surface::surface::p2::Surface,
+    >,
+    rebuild_faces: &std::collections::BTreeSet<crate::topology::FaceId>,
+) -> Result<()> {
+    plain_edit(k, b, |k, b, env| {
+        let mut notifications = Some(env);
+        ignore_status(notify_pre_edit(k, b, notifications.as_deref_mut()))?;
+
+        for (&v, &pt) in mapped_vertices {
+            ignore_status(notify_vertex_pre_edit(
+                k,
+                b,
+                v,
+                notifications.as_deref_mut(),
+            ))?;
+            set_vertex_point(k, b, v, pt, notifications.as_deref_mut())?;
+        }
+
+        for (e, new_curve) in mapped_curves {
+            ignore_status(notify_edge_pre_edit(k, b, e, notifications.as_deref_mut()))?;
+            set_joined_edge_curve(
+                k,
+                b,
+                e,
+                Some(new_curve),
+                false,
+                notifications.as_deref_mut(),
+            )?;
+            set_edge_curve_owner(b, e, notifications.as_deref_mut())?;
+        }
+
+        for (f, new_surface) in mapped_surfaces {
+            ignore_status(notify_face_pre_edit(k, b, f, notifications.as_deref_mut()))?;
+            let mut modified = Vec::new();
+            replace_surface(
+                k,
+                b,
+                f,
+                new_surface,
+                false,
+                Some(&mut modified),
+                true,
+                notifications.as_deref_mut(),
+            )?;
+            for mf in modified {
+                with_notifications(b, notifications.as_deref_mut(), None, |b, env, _| {
+                    crate::topology::face::p1::remove_uv_trim_curves_with_notifications(b, mf, env)
+                })?;
+            }
+        }
+
+        for &f in rebuild_faces {
+            with_notifications(b, notifications.as_deref_mut(), None, |b, env, _| {
+                crate::topology::face::p3::create_uv_trim_curves_notified(
+                    k,
+                    b,
+                    f,
+                    true,
+                    None,
+                    Some(env),
+                )
+                .map(|_| ())
+            })?;
+        }
+
+        if brep_regions(b)?.len() > 1 {
+            make_missing_nurbs(k, b)?;
+            let previous = b.editing_enabled();
+            b.set_editing_enabled(false);
+            let query = BrepQuery::of_brep(b);
+            let result = find_and_set_infinite_region(
+                k,
+                b,
+                &query,
+                None,
+                SetRegionVoidType::InfiniteRegionSwap,
+                None,
+            );
+            b.set_editing_enabled(previous);
+            result?;
+        }
+
+        Ok(())
+    })
+}
+
 /// Makes the NURB of every analytic face surface that has none. Upstream's first
 /// `SmBSplineSurface::CalculateBoundingBox` makes it through the virtual
 /// `GetOrCreateGwNurbPointer` (`FindAndSetInfiniteRegion` calls it); the port's bounding

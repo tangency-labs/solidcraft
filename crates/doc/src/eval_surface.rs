@@ -305,6 +305,70 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
+        FeatureKind::SurfaceMorph {
+            body,
+            faces,
+            base,
+            base_face,
+            control,
+            control_face,
+            projection,
+            map_mode,
+            scale,
+            tolerance,
+            flip_u,
+            flip_v,
+            swap_uv,
+            keep_original,
+        } => {
+            let scale_val = val(vals, scale, Kind::Unitless)?;
+            let tol = val(vals, tolerance, Kind::Length)?;
+            let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let Some(mb) = st.bodies.get(i).cloned() else {
+                return Err(DocError::Invalid("body".into()));
+            };
+            let base_mb = st.body(base).cloned().ok_or_else(|| DocError::Unknown(format!("body `{base}`")))?;
+            let control_mb = st.body(control).cloned().ok_or_else(|| DocError::Unknown(format!("body `{control}`")))?;
+
+            let mut picked_faces: Vec<usize> = Vec::new();
+            for p in faces {
+                let fi =
+                    crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Morph: no face of {body} at {}", p.0)))?;
+                if !picked_faces.contains(&fi) {
+                    picked_faces.push(fi);
+                }
+            }
+
+            let base_fi = match base_face {
+                Some(p) => crate::appearance::face_index_at(&base_mb, p.0)
+                    .ok_or_else(|| DocError::Invalid(format!("Morph: no face of {base} at {}", p.0)))?,
+                None => 0,
+            };
+            let control_fi = match control_face {
+                Some(p) => crate::appearance::face_index_at(&control_mb, p.0)
+                    .ok_or_else(|| DocError::Invalid(format!("Morph: no face of {control} at {}", p.0)))?,
+                None => 0,
+            };
+
+            let opts = kernel::MorphOptions {
+                projection: *projection,
+                map_mode: *map_mode,
+                scale: scale_val,
+                flip_u: *flip_u,
+                flip_v: *flip_v,
+                swap_uv: *swap_uv,
+                tolerance: tol,
+            };
+            let morphed = kernel::morph_surface(&mb.body, &picked_faces, &base_mb.body, base_fi, &control_mb.body, control_fi, &opts)?;
+
+            if *keep_original {
+                let name = new_name(st, f, 0);
+                st.bodies.push(ModelBody::new(name, morphed, f.id));
+            } else if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, morphed, mb.feature);
+            }
+            Ok(())
+        }
         FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
             let ss = constructor_profile_in_frame(
                 doc,

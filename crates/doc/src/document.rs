@@ -2444,6 +2444,36 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
+    /// Morph a solid or sheet body (or selected `faces` of it) by mapping a base reference surface
+    /// (`base`, optional `base_face` pick) onto a target reference surface (`control`, optional
+    /// `control_face` pick) (`surface.morph`).
+    SurfaceMorph {
+        body: BodyName,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        base: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_face: Option<Position>,
+        control: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control_face: Option<Position>,
+        #[serde(default)]
+        projection: solidcraft_kernel::MorphProjection,
+        #[serde(default)]
+        map_mode: solidcraft_kernel::MorphMapMode,
+        #[walk(unitless = "Scale factor")]
+        scale: Expr,
+        #[walk(length = "Tolerance")]
+        tolerance: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_u: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_v: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        swap_uv: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_original: bool,
+    },
     /// A surface body trimmed by a plane, by a face of a body (`tool`, its surface extended) or
     /// by sketch curves swept onto it (`curves`), keeping the side of `keep`; with `keep_more`,
     /// the regions (pieces that hang together once cut) `keep` and those points pick instead.
@@ -3427,6 +3457,7 @@ impl FeatureKind {
             FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "BoundaryFeature",
             FeatureKind::SurfaceMatch { .. } => "MatchFeature",
             FeatureKind::SurfaceFair { .. } => "FairFeature",
+            FeatureKind::SurfaceMorph { .. } => "MorphFeature",
             FeatureKind::Stitch { .. } => "StitchFeature",
             FeatureKind::Thicken { .. } => "ThickenFeature",
             FeatureKind::SurfaceTrim { .. } => "TrimFeature",
@@ -3522,6 +3553,7 @@ impl FeatureKind {
             FeatureKind::SurfaceNetwork { .. } => "surface_network",
             FeatureKind::SurfaceMatch { .. } => "surface_match",
             FeatureKind::SurfaceFair { .. } => "surface_fair",
+            FeatureKind::SurfaceMorph { .. } => "surface_morph",
             FeatureKind::SurfaceTrim { .. } => "surface_trim",
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
@@ -3696,6 +3728,7 @@ impl FeatureKind {
             FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "Boundary",
             FeatureKind::SurfaceMatch { .. } => "Match",
             FeatureKind::SurfaceFair { .. } => "Fair",
+            FeatureKind::SurfaceMorph { .. } => "Morph",
             FeatureKind::Stitch { .. } => "Stitch",
             FeatureKind::Thicken { .. } => "Thicken",
             FeatureKind::SurfaceTrim { .. } => "Trim",

@@ -86,6 +86,7 @@ fn merged_locales() -> Result<(), String> {
         .unwrap_or_default();
     files.sort();
     for file in files {
+        println!("cargo:rerun-if-changed={}", file.display());
         let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
         let map: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> =
             serde_json::from_str(&text).map_err(|e| format!("{}: expected {{\"<locale>\": {{\"<id>\": \"<text>\"}}}}: {e}", file.display()))?;

@@ -84,7 +84,8 @@ impl FeatureKind {
             | FeatureKind::ReplaceFace { .. }
             | FeatureKind::SurfaceOffset { .. }
             | FeatureKind::SurfaceMatch { .. }
-            | FeatureKind::SurfaceFair { .. } => &["faces"],
+            | FeatureKind::SurfaceFair { .. }
+            | FeatureKind::SurfaceMorph { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
             FeatureKind::Split { .. } => &["tool", "tool_faces"],
             FeatureKind::SurfaceTrim { .. } => &["tool"],

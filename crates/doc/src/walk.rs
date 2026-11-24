@@ -55,6 +55,8 @@ impl Walk for Option<std::sync::Arc<solidcraft_kernel::ImportRecords>> {}
 impl Walk for crate::document::Operation {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for solidcraft_kernel::DraftCorner {}
+impl Walk for solidcraft_kernel::MorphMapMode {}
+impl Walk for solidcraft_kernel::MorphProjection {}
 impl Walk for crate::document::Direction {}
 impl Walk for crate::document::CellGridMode {}
 impl Walk for solidcore_record::cell_grid::CellShape {}

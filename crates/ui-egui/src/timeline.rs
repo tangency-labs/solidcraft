@@ -272,6 +272,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "surface_boundary",
         FeatureKind::SurfaceMatch { .. } => "continuity",
         FeatureKind::SurfaceFair { .. } => "surface_fair",
+        FeatureKind::SurfaceMorph { .. } => "surface_morph",
         FeatureKind::Revolve { .. } => "revolve",
         FeatureKind::Fillet { .. } => "fillet",
         FeatureKind::Chamfer { .. } => "chamfer",
