@@ -114,6 +114,33 @@ pub(crate) fn command(app: &SolveApp, d: &Dialog) -> Result<(&'static str, Value
     Ok((if *components { "occurrence.align" } else { "solid.align" }, p))
 }
 
+/// Why Flip is refused, as a message id: as the command decides, a face, a face or circle centre,
+/// a plane or a frame faces a way and a point, a vertex or an edge's middle none, and Flip needs
+/// one side that does. `None` while either side is unpicked or the command cannot be built yet
+/// (it says why).
+pub(crate) fn flip_blocked(app: &SolveApp, d: &Dialog) -> Option<&'static str> {
+    let (_, p) = command(app, d).ok()?;
+    let faces = |key: &str| {
+        ["face", "plane", "frame"].iter().any(|k| p.get(format!("{key}_{k}")).is_some())
+            || matches!(p.get(key).and_then(|v| v.get("snap")).and_then(Value::as_str), Some("face_center" | "circle_center"))
+    };
+    (!faces("from") && !faces("to")).then_some("dialog.align_flip_needs")
+}
+
+/// Align's Options: Flip, disabled with `blocked`'s reason, then `rest`.
+pub(crate) fn options(ui: &mut egui::Ui, flip: &mut bool, rest: &mut [(&str, &mut bool)], blocked: Option<&'static str>) {
+    use crate::ui_kit::{self, BackingTooltipExt as _};
+    ui_kit::section(ui, "feature_options", "Options", true, |ui| {
+        let flip_row = ui.add_enabled_ui(blocked.is_none(), |ui| ui_kit::checkbox_grid(ui, &mut [("Flip", flip)], 2)).response;
+        if let Some(why) = blocked {
+            flip_row.backing_on_disabled_hover_text(solidcraft_ui_text::tr(why));
+        }
+        if !rest.is_empty() {
+            ui_kit::checkbox_grid(ui, rest, 2);
+        }
+    });
+}
+
 /// A round edge or cylindrical face picked for a side of bodies `moved`, as its circle (found
 /// from its exact geometry): a joint origin at its centre whose z is its axis, which the bodies
 /// turn to meet and Flip turns over. `None` for any other pick, or where the command takes no
