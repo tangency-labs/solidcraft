@@ -929,7 +929,7 @@ mod tests {
             Some(&PrimitiveFailure::PathTurnsBack),
             "{e}"
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
     }
 }

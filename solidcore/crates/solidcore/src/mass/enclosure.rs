@@ -2972,7 +2972,7 @@ mod tests {
             Some(&MassFailure::FaceuseWithoutMate),
             "{err}"
         );
-        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(!err.is_defect(), "{err}");
     }
 

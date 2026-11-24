@@ -3436,7 +3436,7 @@ mod tests {
         let k = Kernel::default();
         for r in [0.0, 1e-13, f64::NAN, -1e-13] {
             let e = Sphere::create_canonical(&k, &frame(), r).unwrap_err();
-            assert_eq!(e.upstream_status(), Some(SM_ERR));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR));
             assert_eq!(e.operation(), OP_CANONICAL);
             assert_eq!(
                 e.surface_failure(),
@@ -3453,7 +3453,7 @@ mod tests {
         let k = Kernel::default();
         let mut s = canonical(&k, 2.0);
         let e = s.evaluate_step(Point2::new(0.0, 0.0), 4, 4).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_EVAL_STEP);
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
@@ -3467,12 +3467,12 @@ mod tests {
                 Some(Vec3::new(1.0, 2.0, 1.0)),
             )
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_TRANSFORM);
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         let e = gen_circle(None, OP_NEW).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_NEW);
         assert_eq!(
             e.surface_failure(),
@@ -3558,7 +3558,7 @@ mod tests {
         let e = s
             .inversion_location(&d, frame().origin(), 1e-3)
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_SPHERE_STEP_INV);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert_eq!(

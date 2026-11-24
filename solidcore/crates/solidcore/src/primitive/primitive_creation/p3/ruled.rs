@@ -287,7 +287,7 @@ mod tests {
             error.primitive_failure(),
             Some(&PrimitiveFailure::OffsetFacesMissing)
         );
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
         assert!(missing);
         assert_eq!(unmarried, [false, true]);
         assert_eq!(offset.evaluate_point(0.0)?, Vec3::Y + 2.0 * Vec3::Z);
@@ -328,7 +328,7 @@ mod tests {
             )
             .err()
             .ok_or_else(|| SolidError::sm_err("test"))?;
-            assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
             let cause = error
                 .primitive_failure()
                 .copied()

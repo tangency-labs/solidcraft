@@ -3331,7 +3331,7 @@ mod tests {
     /// The operation of `e`, its typed blend failure and the upstream status it keeps
     /// (#13790).
     fn failure(e: &SolidError) -> (&'static str, Option<&BlendFailure>, Option<i32>) {
-        (e.operation(), e.blend_failure(), e.upstream_status())
+        (e.operation(), e.blend_failure(), e.failed_routine_status())
     }
 
     fn kernel() -> Kernel {
@@ -3496,7 +3496,7 @@ mod tests {
         // no rails: upstream dereferences the missing rail; p1's `rail_vertexuse`
         // (outside this file) refuses it first, keeping the status
         let e = fb.rail_index_of_vertex(g, Some(v)).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -3552,7 +3552,7 @@ mod tests {
             .calc_fillet_int_2_fillets(&k, v[0], CornerLookup::default(), &[], &Brep::new())
             .unwrap_err();
         // a typed blend failure keeps the status of the bare `Upstream` (#13790)
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]

@@ -1067,7 +1067,7 @@ mod tests {
         );
         assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(error.sm_status(), Some(SM_ERR_NULL_POINTER));
-        assert_eq!(error.upstream_status(), error.sm_status());
+        assert_eq!(error.failed_routine_status(), error.sm_status());
         assert_eq!(error.operation(), OP);
     }
 

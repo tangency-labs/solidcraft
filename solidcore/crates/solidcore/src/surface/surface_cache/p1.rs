@@ -4186,7 +4186,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");

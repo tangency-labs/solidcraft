@@ -1017,7 +1017,8 @@ fn native_bounds(
 ) -> Result<crate::geom::extent3d::Extent3d> {
     match status {
         // Native SER returns the box unioned so far.
-        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::Failed(_)) => Ok(bounds),
+        Ok(()) => Ok(bounds),
+        Err(e) if e.failed_routine_status().is_some() || e.is_nurbs_failure() => Ok(bounds),
         // Missing dependencies and safety errors must not become ordinary native
         // status results or disappear into an initialized extent.
         Err(error) => Err(error),
@@ -2182,7 +2183,7 @@ mod tests {
         assert_eq!(faceuse_sibling_links(&brep, b).unwrap(), (Some(c), Some(c)));
         // Remove of a member that is not in the list is upstream's SM_ERR status
         let e = shell_remove_faceuse(&mut brep, s, a).unwrap_err();
-        assert!(e.upstream_status().is_some());
+        assert!(e.failed_routine_status().is_some());
         // PostInsert into an empty shell makes its head; the type is not touched
         shell_post_insert_faceuse(&mut brep, t, a).unwrap();
         assert_eq!(

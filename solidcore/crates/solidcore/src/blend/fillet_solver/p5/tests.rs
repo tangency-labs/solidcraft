@@ -964,7 +964,7 @@ fn public_split_helper_rejects_a_missing_infinite_region_after_partial_edits() {
     let outcome = super::super::super::p1::split_rail(&f.k, &mut f.fb, &mut f.owners, id, rail);
     // a typed blend failure keeps the status of the bare `Upstream` (#13790)
     assert_eq!(
-        outcome.unwrap_err().upstream_status(),
+        outcome.unwrap_err().failed_routine_status(),
         Some(SM_ERR_NULL_POINTER)
     );
     assert_ne!(f.context().end(rail).unwrap(), old_end);
@@ -1138,7 +1138,10 @@ fn rollover_corner_vertex_delegates_to_the_available_geom_port() {
     let r = Missing.corner_vertex(&mut f.context(), start, id);
     // the fixture's corner table is empty: the vertex's corner is not in it
     // a typed blend failure keeps the status of the bare `Upstream` (#13790)
-    assert_eq!(r.unwrap_err().upstream_status(), Some(SM_ERR_NULL_POINTER));
+    assert_eq!(
+        r.unwrap_err().failed_routine_status(),
+        Some(SM_ERR_NULL_POINTER)
+    );
 }
 
 #[test]
@@ -1172,7 +1175,11 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let err = Missing.topology_split(&mut f.context(), id).unwrap_err();
     // a defect with its reason (#15034) that keeps the bare `Upstream`'s status (#13790)
     assert_eq!(
-        (err.operation(), err.blend_failure(), err.upstream_status()),
+        (
+            err.operation(),
+            err.blend_failure(),
+            err.failed_routine_status()
+        ),
         (
             "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
             Some(&BlendFailure::Defect {
@@ -1202,7 +1209,7 @@ fn rollover_recalc_uses_the_real_solver_and_reports_missing_edge_curve() {
         (
             err.operation(),
             err.kind() == crate::error::ErrorKind::StageFailed && err.is_defect(),
-            err.upstream_status()
+            err.failed_routine_status()
         ),
         (
             "blend::fillet_geom::p3::FilletBrep::re_calc_fillet_geom",
@@ -1294,7 +1301,7 @@ fn a_rail_without_classification_is_the_callers_input() {
     );
     assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
     assert!(!error.is_defect(), "{error:?}");
-    assert_eq!(error.upstream_status(), Some(SM_ERR_NULL_POINTER));
+    assert_eq!(error.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     assert!(script.calls.is_empty());
 }
 
@@ -1312,7 +1319,7 @@ fn an_edge_bounding_no_material_has_no_concavity() {
     );
     assert_eq!(error.kind(), crate::error::ErrorKind::Unsupported);
     assert!(!error.is_defect(), "{error:?}");
-    assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
 }
 
 #[test]
@@ -1331,7 +1338,7 @@ fn a_crossing_that_does_not_drop_and_one_too_far_off_keep_one_status_and_split_t
     assert_eq!(far.kind(), crate::error::ErrorKind::NotWithinTolerance);
     for e in [&missed, &far] {
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
     }
     assert_ne!(missed, far);
 }

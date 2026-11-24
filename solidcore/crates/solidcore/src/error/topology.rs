@@ -1965,7 +1965,7 @@ mod tests {
                     entity,
                 };
                 assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-                assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+                assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
                 assert_eq!(super::super::upstream_status(&typed), Some(code));
                 assert_eq!(typed.kind(), before.kind(), "{failure:?}");
                 assert_eq!(typed.operation(), before.operation(), "{failure:?}");
@@ -2015,7 +2015,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), before.kind(), "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
@@ -2158,7 +2158,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -2179,7 +2179,7 @@ mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     /// The named causes of the B-rep edits of `brep/p4` have their status and class.
@@ -2198,7 +2198,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology("topology::op", failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
@@ -2252,7 +2252,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
@@ -2305,7 +2305,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
@@ -2401,7 +2401,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
@@ -2421,7 +2421,7 @@ mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&step));
         assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
     }
 
     /// The named causes of the B-rep cache and the file reads and writes have their status
@@ -2465,7 +2465,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
@@ -2479,7 +2479,7 @@ mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         // a net the proof refuses as input (`recertify`'s `InvalidInput`) reads as no defect
         let cause = SolidError::invalid_input(op, "the net is not within its bound");
         let e = Failure::new(op, T::BlendRecordNotProved)
@@ -2488,7 +2488,7 @@ mod tests {
         assert_eq!(e.cause(), Some(&cause));
         assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.kind(), K::Failed);
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
     }
 
     /// A reviewed defect is of class 127 with its status, and says why.
@@ -2921,7 +2921,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -2934,6 +2934,6 @@ mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
     }
 }

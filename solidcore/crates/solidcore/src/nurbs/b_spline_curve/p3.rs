@@ -2556,7 +2556,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     #[test]
@@ -2583,7 +2583,7 @@ mod tests {
         );
         // the class is the cause's: an argument check, neither a defect nor a refusal
         assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         let cause = e.cause().expect("the join construction's error is kept");
         assert!(
             cause.to_string().contains("segments not end to end"),

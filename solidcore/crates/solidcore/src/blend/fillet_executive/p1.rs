@@ -325,7 +325,7 @@ impl FilletLaw {
 
 /// The `SmStatus` upstream's `SER` returns for a failed callee.
 fn status_of(e: &SolidError) -> i32 {
-    if let Some(code) = e.sm_status() {
+    if let Some(code) = e.failed_routine_status() {
         return code;
     }
     match e {
@@ -2610,7 +2610,7 @@ mod tests {
         );
         assert!(error.is_defect(), "{error:?}");
         assert_eq!(error.sm_status(), Some(1006));
-        assert_eq!(error.upstream_status(), Some(1006));
+        assert_eq!(error.failed_routine_status(), Some(1006));
         executive
             .vertex_corner_map
             .insert(Some(H(2)), VertexEntry::Corner(H(30)));

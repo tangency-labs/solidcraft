@@ -2154,7 +2154,7 @@ mod tests {
         ));
         assert!(matches!(
             line_plane_intersect(Vec3::ZERO, Vec3::X, Vec3::ZERO, Vec3::Z),
-            Err(e) if e.upstream_status() == Some(1001)
+            Err(e) if e.failed_routine_status() == Some(1001)
         ));
         let (t, u, w) =
             line_plane_intersect_uv(v(1., 2., 5.), -Vec3::Z, Vec3::ZERO, Vec3::X, Vec3::Y).unwrap();
@@ -2184,7 +2184,7 @@ mod tests {
                 Point2::new(1., 0.),
                 Point2::new(2., 0.)
             ),
-            Err(e) if e.upstream_status() == Some(0)
+            Err(e) if e.failed_routine_status() == Some(0)
         ));
         let c =
             circle_from_3_points(v(1., 0., 0.), v(0., 1., 0.), v(-1., 0., 0.), 3, false).unwrap();

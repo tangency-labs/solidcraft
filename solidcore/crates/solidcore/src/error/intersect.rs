@@ -896,7 +896,7 @@ pub(super) mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), None, "{failure:?}");
@@ -913,11 +913,11 @@ pub(super) mod tests {
     #[test]
     fn a_typed_cause_keeps_its_status() {
         let e = SolidError::intersect("intersect::op", IntersectFailure::StepTangentTooShort);
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::Failed);
         assert!(!e.is_defect() && e.is_status_answer());
         let e = SolidError::intersect_uv_polygon_not_in_domain("intersect::op");
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::Failed);
         assert!(!e.is_defect() && e.is_status_answer());
         assert_eq!(

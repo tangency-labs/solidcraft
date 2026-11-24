@@ -3944,7 +3944,7 @@ mod tests {
         assert!((b.tolerance() - 4.0e-5).abs() < 1e-18);
         let r = b.transform(&k, &mut env, &id, Some(Vec3::new(1.0e19, 1.0, 1.0)));
         assert!(
-            matches!(&r, Err(e) if e.upstream_status() == Some(1007)),
+            matches!(&r, Err(e) if e.failed_routine_status() == Some(1007)),
             "{r:?}"
         );
         let e = r.unwrap_err();

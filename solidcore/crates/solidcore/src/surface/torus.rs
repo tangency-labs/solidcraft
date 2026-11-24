@@ -2280,7 +2280,7 @@ mod tests {
         for (a, b) in [(0.0, 1.0), (1.0, 0.0), (f64::NAN, 1.0), (-1.0, 0.5)] {
             let e = Torus::create_canonical(&k, &frame, a, b, TorusOptions::default(), None)
                 .unwrap_err();
-            assert_eq!(e.upstream_status(), Some(SM_ERR));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR));
             assert_eq!(e.operation(), OP_CANONICAL);
             assert_eq!(
                 e.surface_failure(),
@@ -2297,7 +2297,7 @@ mod tests {
         let k = Kernel::default();
         let mut t = canonical(&k, false, false);
         let e = t.evaluate_step(Point2::new(0.0, 0.0), 4, 4).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_EVAL_STEP);
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
@@ -2311,12 +2311,12 @@ mod tests {
                 Some(Vec3::new(1.0, 2.0, 1.0)),
             )
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_TRANSFORM);
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         let e = gen_circle(None, OP_NEW).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_NEW);
         assert_eq!(
             e.surface_failure(),
@@ -2331,7 +2331,7 @@ mod tests {
         let mut bare = canonical(&k, false, false);
         bare.base.base.nurb = None.into();
         let e = bare.create_offset_surface(&k, 0.1, 1e-6).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_OFFSET);
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NoNurb));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);

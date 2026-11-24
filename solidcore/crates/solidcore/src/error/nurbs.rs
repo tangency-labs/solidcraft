@@ -988,7 +988,7 @@ mod tests {
             },
         ] {
             let e = SolidError::b_spline("nurbs::op", cause);
-            assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{cause:?}");
             assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
             assert!(!e.is_defect() && e.is_status_answer(), "{cause:?}");
         }
@@ -1106,7 +1106,11 @@ mod tests {
             BSplineFailure::RailIntersectionsMissing,
         ] {
             let e = SolidError::b_spline("nurbs::op", cause);
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{cause:?}");
+            assert_eq!(
+                e.failed_routine_status(),
+                Some(SM_ERR_NULL_POINTER),
+                "{cause:?}"
+            );
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{cause:?}");
         }
         for (causes, kind) in [
@@ -1118,7 +1122,7 @@ mod tests {
         ] {
             for &cause in causes {
                 let e = SolidError::b_spline("nurbs::op", cause);
-                assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+                assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{cause:?}");
                 assert_eq!(e.sm_status(), Some(SM_ERR), "{cause:?}");
                 assert_eq!(e.kind(), kind, "{cause:?}");
                 assert!(!e.is_defect() && !e.is_refusal(), "{cause:?}");

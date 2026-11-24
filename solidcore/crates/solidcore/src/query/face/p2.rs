@@ -2871,7 +2871,7 @@ pub(crate) mod tests {
         let face = EntityRef::Face(FaceId::from_index(3));
         let e = no_loop_classifies(face);
         assert_eq!(e.operation(), OP_CLASSIFY);
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.entity(), Some(face));
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
@@ -3159,7 +3159,7 @@ pub(crate) mod tests {
         b.face_mut(f).unwrap().surface = None;
         let (r, _) = classify(&mut b, f, Point2::new(0.5, 0.5));
         assert!(
-            matches!(&r, Err(e) if e.upstream_status() == Some(crate::error::SM_ERR_NULL_POINTER)),
+            matches!(&r, Err(e) if e.failed_routine_status() == Some(crate::error::SM_ERR_NULL_POINTER)),
             "{r:?}"
         );
         assert_eq!(

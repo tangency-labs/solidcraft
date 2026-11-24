@@ -3629,7 +3629,7 @@ mod tests {
             Some(&MassFailure::FaceuseWithoutMate),
             "{err}"
         );
-        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!err.is_defect(), "{err}");
         // (`face_area` on a face without its face use, or with an edge use without its
@@ -3670,7 +3670,7 @@ mod tests {
         let err = trim_integrand(&k, &iso, &trim, 0.0, 0.5, &mut scratch, &mut dy).unwrap_err();
         assert!(err.to_string().contains("not finite"), "{err}");
         assert_eq!(err.mass_failure(), Some(&MassFailure::TrimNotFinite));
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
     }
     /// A constant integrand is integrated exactly: the piece's width times it, whatever its
     /// size (summed weight by weight, the rounded Kronrod weights' sum `2 + 2^-54` put

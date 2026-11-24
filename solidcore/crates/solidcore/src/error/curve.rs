@@ -853,13 +853,12 @@ impl CurveFailure {
         }
     }
 
-    /// True for a failure that replaced a C++ status the routine returns (every cause but
-    /// the length bracket's refusals and a piece outside its span):
-    /// it answers with that status the way the `Upstream` it replaced did
-    /// ([`crate::error::upstream_status`]). A length bracket's refusal, and a piece outside its
-    /// span, are solidcore's own and replaced none.
+    /// True for a routine's failure, which answers with the status the routine returns
+    /// (`SolidError::failed_routine_status`): every cause but the length
+    /// bracket's refusals and a piece outside its span, which are solidcore's and stand for
+    /// no status.
     #[must_use]
-    pub const fn replaces_upstream_status(&self) -> bool {
+    pub const fn is_failed_routine(&self) -> bool {
         match self {
             Self::AngleHasNoNurbParameter { .. }
             | Self::AngleOutsideArc { .. }
@@ -1253,7 +1252,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(super::super::upstream_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
@@ -1264,7 +1263,7 @@ mod tests {
                 typed.is_unported_or_cancelled(),
                 before.is_unported_or_cancelled()
             );
-            assert!(failure.replaces_upstream_status());
+            assert!(failure.is_failed_routine());
             assert_eq!(typed.curve_failure(), Some(&failure));
         }
         assert_eq!(
@@ -1284,7 +1283,7 @@ mod tests {
             CurveFailure::PointOnCurveWhenMaximising { t: 0.75 },
         ] {
             let e = SolidError::curve("curve::op", cause);
-            assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{cause:?}");
             assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
             assert!(!e.is_defect(), "{cause:?}");
             assert!(e.is_status_answer(), "{cause:?}");
@@ -1318,7 +1317,7 @@ mod tests {
             &format!("curve::op: stage_failed: {why}"),
         );
         assert_eq!(missing.curve_failure(), Some(&defect));
-        assert!(defect.replaces_upstream_status());
+        assert!(defect.is_failed_routine());
     }
 
     /// A length bracket's refusals report what they reported before the curve routines'
@@ -1348,11 +1347,11 @@ mod tests {
             let e = Failure::new("curve::length_bound", refusal).into_error();
             assert_eq!(e.sm_status(), Some(SM_ERR));
             assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
-            assert_eq!(e.upstream_status(), None);
+            assert_eq!(e.failed_routine_status(), None);
             assert_eq!(super::super::upstream_status(&e), None);
             assert_eq!(e.operation(), "curve::length_bound");
             assert_eq!(e.entity(), None);
-            assert!(!refusal.replaces_upstream_status());
+            assert!(!refusal.is_failed_routine());
             assert!(e.is_status_answer());
             assert!(!e.is_port_failure());
             assert_eq!(e.to_string(), text);
@@ -1709,7 +1708,7 @@ mod tests {
             assert_eq!(e.sm_status(), Some(status), "{cause:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status), "{cause:?}");
             assert_eq!(e.kind(), kind, "{cause:?}");
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert!(cause.is_failed_routine(), "{cause:?}");
             assert!(!e.is_defect(), "{cause:?}");
             assert!(e.is_status_answer(), "{cause:?}");
             assert_eq!(e.curve_failure(), Some(&cause));

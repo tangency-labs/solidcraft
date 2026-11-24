@@ -3405,7 +3405,7 @@ mod tests {
         let mut d = square(0);
         d.shells[0].shell_type = 7;
         let e = build(&mut d, MakeTopologyOptions::default()).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(1001));
+        assert_eq!(e.failed_routine_status(), Some(1001));
         assert_eq!(
             e.topology_failure(),
             Some(&TopologyFailure::UnknownShellType { shell_type: 7 })

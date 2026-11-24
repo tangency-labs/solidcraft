@@ -2934,7 +2934,7 @@ pub(crate) mod tests {
         );
         let mut ls = LocalSolver::new(LocalSolverKind::Curve, false, None);
         let e = ls.solve_it(&k, &mut ts, None, None).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e}");
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR), "{e}");
         assert_eq!(
             e.intersect_failure(),
             Some(&IntersectFailure::AbstractLocalSolver),
@@ -2943,7 +2943,7 @@ pub(crate) mod tests {
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported, "{e}");
         let mut ls = LocalSolver::new(LocalSolverKind::FaceFace, false, None);
         let e = ls.solve_it(&k, &mut ts, None, None).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER), "{e}");
         assert_eq!(
             e.intersect_failure(),
             Some(&IntersectFailure::NoObjectToSolve),

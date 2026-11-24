@@ -298,7 +298,7 @@ mod tests {
     }
     fn code<T>(result: &Result<T>) -> Option<i32> {
         match result {
-            Err(e) if e.upstream_status().is_some() => e.upstream_status(),
+            Err(e) if e.failed_routine_status().is_some() => e.failed_routine_status(),
             Err(SolidError::InvalidInput { .. }) => Some(1007),
             _ => None,
         }

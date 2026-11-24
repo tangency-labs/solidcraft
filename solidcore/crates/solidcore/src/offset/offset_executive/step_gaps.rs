@@ -2872,11 +2872,11 @@ mod tests {
             let other = gap_failure(other, site);
             assert_eq!(other.kind(), crate::error::ErrorKind::StageFailed);
             assert!(other.is_defect() && !other.is_refusal(), "{other}");
-            assert_eq!(other.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(other.failed_routine_status(), Some(crate::error::SM_ERR));
         }
         for failure in [&e, &defect] {
             assert_eq!(failure.operation(), OP);
-            assert_eq!(failure.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(failure.failed_routine_status(), Some(crate::error::SM_ERR));
             assert!(failure.is_status_answer());
             let site = failure.site().unwrap();
             assert_eq!(site.edge.map(TargetEdge::id), Some(input_edge));

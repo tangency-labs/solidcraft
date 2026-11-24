@@ -986,8 +986,8 @@ fn open_loop_edge(feature: &Feature) -> Option<EdgeId> {
 /// (#3218), else `SM_ERR`, at its open loop edge.
 pub(crate) fn is_open_base_refusal(error: &SolidError) -> bool {
     match error {
-        // the status, not the variant: any `SM_ERR` this operation reports at an edge
-        e if e.sm_status() == Some(SM_ERR)
+        // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+        e if e.failed_routine_status() == Some(SM_ERR)
             && e.operation() == OP
             && matches!(e.entity(), Some(EntityRef::Edge(_))) =>
         {
@@ -3222,7 +3222,7 @@ mod tests {
         assert_eq!(e.blend_failure(), Some(&BlendFailure::NoFeatureMade));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(e.sm_status(), Some(SM_ERR_ASSERT_FAILURE));
-        assert_eq!(e.upstream_status(), e.sm_status());
+        assert_eq!(e.failed_routine_status(), e.sm_status());
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
     }

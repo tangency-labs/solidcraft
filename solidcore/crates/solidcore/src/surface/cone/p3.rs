@@ -2291,7 +2291,7 @@ mod tests {
                         append_boundary_intersections(&k, &mut out, second, 1e-7).unwrap_err();
                     assert!(
                         error.operation() == OP
-                            && error.upstream_status() == Some(crate::error::SM_ERR),
+                            && error.failed_routine_status() == Some(crate::error::SM_ERR),
                         "first={first} field={field} count={count}: {error}"
                     );
                     // No removals occurred before the contract failure.

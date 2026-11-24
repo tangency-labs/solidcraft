@@ -2368,7 +2368,7 @@ mod tests {
             "blend::fillet_geom::p1::FilletBrep::rail_vertexuse",
             "{e:?}"
         );
-        assert!(e.upstream_status().is_some(), "{e:?}");
+        assert!(e.failed_routine_status().is_some(), "{e:?}");
         assert!(fb.geom(g).unwrap().fillet_surface.is_some());
     }
 
@@ -2393,7 +2393,10 @@ mod tests {
             matches!(e.blend_failure(), Some(BlendFailure::Defect { .. })),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     #[test]
@@ -2431,7 +2434,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(cc.size(), 3);
     }
 
@@ -2453,7 +2456,10 @@ mod tests {
             Some(&BlendFailure::Solver(SolverFailure::SideEdgeNotOnRailFace)),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     #[test]

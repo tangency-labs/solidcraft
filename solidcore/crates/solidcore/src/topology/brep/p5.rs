@@ -4594,7 +4594,7 @@ mod tests {
     #[test]
     fn the_callers_input_is_refused_by_cause_with_upstreams_status() {
         use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
-        let status = |e: &SolidError| (e.topology_failure().copied(), e.upstream_status());
+        let status = |e: &SolidError| (e.topology_failure().copied(), e.failed_routine_status());
         let mut k = Kernel::default();
 
         // no regions to keep given, and a B-rep with no finite region
@@ -4686,7 +4686,7 @@ mod tests {
         assert_eq!(failed.as_ref(), Some(&first));
         let e = caused(TopologyFailure::FaceStitchFailed, failed);
         assert_eq!(e.cause(), Some(&first));
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             e.topology_failure(),
             Some(&TopologyFailure::FaceStitchFailed)

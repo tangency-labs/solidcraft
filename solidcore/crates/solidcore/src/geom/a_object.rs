@@ -1471,7 +1471,7 @@ mod tests {
         );
         assert!(matches!(
             sag_cache_make_or_validate(ObjectCacheType::Brep, REGION_TYPE, Some(id)),
-            Err(e) if e.upstream_status() == Some(SM_ERR)
+            Err(e) if e.failed_routine_status() == Some(SM_ERR)
         ));
         assert!(matches!(
             get(

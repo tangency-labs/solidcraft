@@ -2658,7 +2658,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(e.sm_status(), Some(1));
-        assert_eq!(e.upstream_status(), Some(1));
+        assert_eq!(e.failed_routine_status(), Some(1));
         assert_eq!(e.operation(), OP_GS);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert!(e.curve_failure().is_some());
@@ -2815,7 +2815,7 @@ mod tests {
             single.curve_failure(),
             Some(&CurveFailure::SingleLinearCurve)
         );
-        assert_eq!(single.upstream_status(), Some(SM_ERR));
+        assert_eq!(single.failed_routine_status(), Some(SM_ERR));
         assert!(single.is_status_answer());
     }
 
@@ -3214,7 +3214,7 @@ mod tests {
                 );
                 assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{op:?}");
                 assert!(!e.is_defect(), "{op:?} {option:?}");
-                assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+                assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
                 assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
             }
         }
@@ -3313,7 +3313,7 @@ mod tests {
             infinite.curve_failure(),
             Some(&CurveFailure::InfiniteTangent { t: 0.25 })
         );
-        assert_eq!(infinite.upstream_status(), Some(1001));
+        assert_eq!(infinite.failed_routine_status(), Some(1001));
         let (found, _): (bool, Solution<()>) = c
             .local_point_solve(
                 k,

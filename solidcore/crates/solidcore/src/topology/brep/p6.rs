@@ -651,7 +651,7 @@ pub(crate) fn make_face_topology_attempt_with_state(
         options,
     );
     if let Err(error) = &attempt.status {
-        if error.sm_status().is_none() || error.is_nurbs_failure() {
+        if error.failed_routine_status().is_none() {
             return Err(error.clone());
         }
     }
@@ -1312,7 +1312,7 @@ fn find_sector(
             )?;
         }
         // the status is ignored
-        Err(e) if e.sm_status().is_some() && !e.is_nurbs_failure() => {}
+        Err(e) if e.failed_routine_status().is_some() => {}
         Err(error) => return Err(error),
     }
 
@@ -1481,7 +1481,7 @@ fn finish_split_attempt(
 ) -> Result<RegionSplitAttempt> {
     match status {
         Ok(()) => Ok(attempt),
-        Err(error) if error.sm_status().is_some() && !error.is_nurbs_failure() => {
+        Err(error) if error.failed_routine_status().is_some() => {
             attempt.status = Err(error);
             Ok(attempt)
         }
@@ -2855,7 +2855,7 @@ mod tests {
         )
         .unwrap();
         let e = r.status.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         // a B-rep without an infinite region, and no region given: the caller's body
         assert_eq!(
             e.topology_failure(),
@@ -2881,7 +2881,7 @@ mod tests {
         )
         .unwrap();
         let e = r.status.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoSurfaceGiven));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(r.face, None);

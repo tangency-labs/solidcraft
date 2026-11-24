@@ -2461,7 +2461,7 @@ mod tests {
         let mut db = ascii_reader("Object Type 14001\n");
         assert!(
             read_curve_from_db(&k, 3, 31, &mut attrs, &mut db, true).is_err_and(|e| e
-                .upstream_status()
+                .failed_routine_status()
                 == Some(1001)
                 && e.topology_failure()
                     == Some(&TopologyFailure::RecordTypeUnknown { type_code: 14001 }))
@@ -2484,7 +2484,7 @@ mod tests {
         let mut all3: Vec<Option<AttributeHandle>> = vec![None];
         let mut attrs3 = AttributeSink::new(&mut store3, &mut all3, 0);
         assert!(read_curve_from_db(&k, 3, 31, &mut attrs3, &mut db, true)
-            .is_err_and(|e| e.upstream_status() == Some(1006)
+            .is_err_and(|e| e.failed_routine_status() == Some(1006)
                 && e.topology_failure() == Some(&TopologyFailure::AttributeSlotEmpty)));
     }
 

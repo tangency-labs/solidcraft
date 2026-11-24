@@ -854,13 +854,13 @@ fn null_create_status_is_remapped_by_do_filleting_and_boolean_restores() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.create_fillet_brep(&mut k, &mut access, None),
-        Err(ref e) if e.upstream_status() == Some(1006)
+        Err(ref e) if e.failed_routine_status() == Some(1006)
     ));
     for prior in [false, true] {
         k.context.set_doing_boolean(prior);
         assert!(matches!(
             executive.do_filleting(&mut k, &mut access, None),
-            Err(ref e) if e.upstream_status() == Some(1001)
+            Err(ref e) if e.failed_routine_status() == Some(1001)
         ));
         assert_eq!(k.context.doing_boolean(), prior);
     }
@@ -1023,7 +1023,7 @@ fn final_stitch_failure_sets_bad_merge_and_stops_before_cleanup_postprocess() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.do_filleting(&mut k, &mut access, None),
-        Err(ref e) if e.upstream_status() == Some(1001)
+        Err(ref e) if e.failed_routine_status() == Some(1001)
     ));
     assert_eq!(access.stitch_tolerances.len(), 5);
     assert_eq!(executive.error.code, 7);
@@ -1093,7 +1093,7 @@ fn corner_failure_records_context_and_stops_without_allocating_shell() {
     };
     assert!(matches!(
         executive.create_fillet_brep(&mut Kernel::default(), &mut access, None),
-        Err(ref e) if e.upstream_status() == Some(1001)
+        Err(ref e) if e.failed_routine_status() == Some(1001)
     ));
     assert_eq!(executive.error.code, 3);
     assert_eq!(executive.error.status, 2);
@@ -1137,7 +1137,7 @@ fn corner_error_reporting_preserves_a_null_filleted_vertex() {
     };
     assert!(matches!(
         executive.create_fillet_brep(&mut Kernel::default(), &mut access, None),
-        Err(ref e) if e.upstream_status() == Some(1001)
+        Err(ref e) if e.failed_routine_status() == Some(1001)
     ));
     assert_eq!(executive.error.code, 3);
     assert!(executive.error.vertex.is_none());
@@ -1397,7 +1397,11 @@ fn assert_failure_keeps(e: &SolidError, cause: &SolidError) {
     assert_eq!(e.operation(), OP, "{e:?}");
     assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
     assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
-    assert_eq!(e.upstream_status(), bare.upstream_status(), "{e:?}");
+    assert_eq!(
+        e.failed_routine_status(),
+        bare.failed_routine_status(),
+        "{e:?}"
+    );
     assert_eq!(e.kind(), bare.kind(), "{e:?}");
     assert_eq!(e.entity(), None, "{e:?}");
     assert_eq!(e.cause(), Some(cause), "{e:?}");

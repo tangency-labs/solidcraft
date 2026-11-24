@@ -382,12 +382,11 @@ impl SweepFailure {
         }
     }
 
-    /// True for a failure that replaced a C++ status the routine returns (every cause but
-    /// a loft's own refusals): it answers with that status the way the `Upstream` it
-    /// replaced did ([`crate::error::upstream_status`]). A loft's refusal is solidcore's own
-    /// and replaced none.
+    /// True for a routine's failure, which answers with the status the routine returns
+    /// (`SolidError::failed_routine_status`): every cause but a loft's own
+    /// refusals, which are solidcore's and stand for no status.
     #[must_use]
-    pub const fn replaces_upstream_status(&self) -> bool {
+    pub const fn is_failed_routine(&self) -> bool {
         !matches!(
             self,
             Self::RailPastStationCap { .. }
@@ -834,7 +833,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(super::super::upstream_status(&typed), Some(code));
             assert_eq!(typed.kind(), kind, "{failure:?}");
             assert_eq!(failure.kind(), kind, "{failure:?}");
@@ -847,7 +846,7 @@ mod tests {
                 "{failure:?}"
             );
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
-            assert!(failure.replaces_upstream_status(), "{failure:?}");
+            assert!(failure.is_failed_routine(), "{failure:?}");
             assert_eq!(typed.sweep_failure(), Some(&failure));
         }
         // a site whose status is not its cause's default keeps it
@@ -856,7 +855,7 @@ mod tests {
             SweepFailure::EdgeWithoutCurve { edge },
             SM_ERR,
         );
-        assert_eq!(kept.upstream_status(), Some(SM_ERR));
+        assert_eq!(kept.failed_routine_status(), Some(SM_ERR));
         assert_eq!(kept.kind(), ErrorKind::InvalidInput);
         assert_eq!(
             SolidError::sweep("sweep::op", SweepFailure::EdgeWithoutCurve { edge }).to_string(),
@@ -882,9 +881,9 @@ mod tests {
         let e = SolidError::sweep("sweep::loft_rails", cap);
         assert_eq!(e.sm_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
-        assert_eq!(e.upstream_status(), None);
+        assert_eq!(e.failed_routine_status(), None);
         assert_eq!(super::super::upstream_status(&e), None);
-        assert!(!cap.replaces_upstream_status());
+        assert!(!cap.is_failed_routine());
         assert!(e.is_status_answer());
         assert!(!e.is_port_failure());
     }

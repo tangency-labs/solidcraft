@@ -2526,7 +2526,7 @@ fn apply_point_solution_impl<O, S: Copy>(
         None => return Ok(out),
         Some(Ok(p)) => out.sss_point = p,
         Some(Err(e)) if e.is_unported_or_cancelled() => return Err(e),
-        Some(Err(e)) if e.sm_status() == Some(SM_ERR) && !e.is_nurbs_failure() => return Ok(out),
+        Some(Err(e)) if e.failed_routine_status() == Some(SM_ERR) => return Ok(out),
         Some(Err(_)) => {}
     }
 

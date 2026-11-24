@@ -5543,7 +5543,7 @@ mod tests {
             e.operation(),
             "intersect::topology_solver::p1::TopologyObjects::brep_trees"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -5690,7 +5690,7 @@ mod tests {
             matches!(
                 &r,
                 Err(e) if e.operation() == "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb"
-                    && e.upstream_status() == Some(1001)
+                    && e.failed_routine_status() == Some(1001)
                     && e.nurbs_failure()
                         == Some(&crate::error::nurbs::NurbsFailure::BSpline(
                             crate::error::nurbs::BSplineFailure::NoNurbsForm

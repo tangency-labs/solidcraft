@@ -1017,7 +1017,7 @@ fn make_face_transfer_attempt_with_state(
     out.face = attempt.face;
     let result = (|| {
         if let Err(error) = attempt.status {
-            if error.sm_status().is_some() && !error.is_nurbs_failure() {
+            if error.failed_routine_status().is_some() {
                 out.status = Err(error);
                 return Ok(());
             }
@@ -1899,9 +1899,7 @@ fn make_face_with_curves_transfer_impl(
         let r = face_create_uv_trim_curves(k, b, face, false, uv, orients);
         match r {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(cause)
-                if cause.sm_status() == Some(crate::error::SM_ERR) && !cause.is_nurbs_failure() =>
-            {
+            Err(cause) if cause.failed_routine_status() == Some(crate::error::SM_ERR) => {
                 // delete the edge uses of the face's edges
                 for e in face_edges(b, face)? {
                     for eu in ed::edgeuses(b, e, None, None)? {
@@ -3045,7 +3043,7 @@ mod tests {
             e.topology_failure(),
             Some(&TopologyFailure::FaceListedTwice)
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.operation(), OP_UNSTITCH);
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(p1::faces(&b, None).unwrap(), original);
@@ -3091,7 +3089,7 @@ mod tests {
             e.topology_failure(),
             Some(&TopologyFailure::FacesNotCopiedOnce)
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(p1::faces(&b, None).unwrap(), original);
         let validation = super::super::validation::check_brep(
             &mut k,
@@ -3137,7 +3135,7 @@ mod tests {
             result
                 .as_ref()
                 .err()
-                .map(|e| (e.operation(), e.upstream_status())),
+                .map(|e| (e.operation(), e.failed_routine_status())),
             Some((OP_UNSTITCH, Some(crate::error::SM_ERR)))
         );
         assert_eq!(
@@ -3716,7 +3714,7 @@ mod tests {
                 result
                     .as_ref()
                     .err()
-                    .map(|e| (e.operation(), e.upstream_status())),
+                    .map(|e| (e.operation(), e.failed_routine_status())),
                 Some((OP, Some(crate::error::SM_ERR)))
             );
             assert_eq!(b.face(face).unwrap().rectangular_trim, fp2::UNSURE);
@@ -3790,7 +3788,7 @@ mod tests {
             &mut env,
         );
         assert_eq!(
-            e.as_ref().err().and_then(SolidError::upstream_status),
+            e.as_ref().err().and_then(SolidError::failed_routine_status),
             Some(SM_ERR_NULL_POINTER)
         );
         assert_eq!(
@@ -3813,7 +3811,7 @@ mod tests {
         );
         // no infinite region: MakeFaceTopology's NULL region
         assert_eq!(
-            e.as_ref().err().and_then(SolidError::upstream_status),
+            e.as_ref().err().and_then(SolidError::failed_routine_status),
             Some(SM_ERR_NULL_POINTER)
         );
         assert_eq!(
@@ -3990,7 +3988,7 @@ mod tests {
                         out.status
                             .as_ref()
                             .err()
-                            .and_then(SolidError::upstream_status),
+                            .and_then(SolidError::failed_routine_status),
                         Some(SM_ERR_NULL_POINTER)
                     );
                     assert_eq!(out.face, None);

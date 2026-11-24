@@ -1202,7 +1202,7 @@ mod tests {
         let objects = scene();
         let check = |e: &SolidError, cause: &IntersectFailure| {
             assert_eq!(
-                e.upstream_status(),
+                e.failed_routine_status(),
                 Some(crate::error::SM_ERR_NULL_POINTER),
                 "{e}"
             );

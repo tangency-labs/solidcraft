@@ -267,9 +267,9 @@ pub fn recorded_status(e: &SolidError) -> Option<i32> {
             | Reason::Topology(_)
             | Reason::Surface(_)
             | Reason::Blend(_) => e.sm_status(),
-            Reason::Sweep(w) if w.replaces_upstream_status() => e.sm_status(),
-            Reason::Curve(c) if c.replaces_upstream_status() => e.sm_status(),
-            Reason::Offset(o) if o.replaces_upstream_status() => e.sm_status(),
+            Reason::Sweep(w) if w.is_failed_routine() => e.sm_status(),
+            Reason::Curve(c) if c.is_failed_routine() => e.sm_status(),
+            Reason::Offset(o) if o.is_failed_routine() => e.sm_status(),
             _ => None,
         },
         _ => None,

@@ -2143,7 +2143,11 @@ mod tests {
         let arcs = four_arcs();
         let cause = |given: &[SmCurve]| {
             let e = BSplineSurface::create_sphere_from_arcs(&k, given, 1e-6).unwrap_err();
-            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+            assert_eq!(
+                e.failed_routine_status(),
+                Some(crate::error::SM_ERR),
+                "{e:?}"
+            );
             match e.nurbs_failure() {
                 Some(NurbsFailure::BSpline(b)) => *b,
                 other => panic!("{other:?}"),
@@ -2437,7 +2441,7 @@ mod tests {
             ),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     #[test]
@@ -2465,7 +2469,7 @@ mod tests {
                 direction: SurfParamType::Both
             }))
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         let sub = s
             .copy_sub_patch(&Extent2d::from_bounds(0.5, 0.25, 5.0, 0.75))
             .expect("patch");
@@ -2526,7 +2530,7 @@ mod tests {
                 IsoCurveOptions::default()
             ),
             Err(e) if e.sm_status() == Some(1006)
-                && e.upstream_status() == Some(1006)
+                && e.failed_routine_status() == Some(1006)
                 && e.nurbs_failure() == Some(&NurbsFailure::BSpline(BSplineFailure::NoNurbsForm))
         ));
     }

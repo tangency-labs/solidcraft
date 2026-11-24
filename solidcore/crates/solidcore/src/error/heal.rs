@@ -253,7 +253,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(super::super::upstream_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
@@ -351,7 +351,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::heal("heal::op", failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
@@ -374,6 +374,6 @@ mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
     }
 }

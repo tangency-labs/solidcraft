@@ -2507,7 +2507,7 @@ mod tests {
         l.make_nurb().unwrap();
         let r =
             SurfOfRevolution::create_canonical(&k(), Curve::from(l), Vec3::ZERO, Vec3::Z, false);
-        assert!(matches!(&r, Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)));
+        assert!(matches!(&r, Err(e) if e.failed_routine_status() == Some(crate::error::SM_ERR)));
     }
 
     /// The full revolution about Z through the origin of the unbounded line

@@ -3957,7 +3957,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(context.1, edges[..2]);
         assert_eq!(
             context.0.fillet_edge(edges[0]).unwrap().status(),
@@ -4024,7 +4024,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(context.1, [first, second]);
         assert!(context.0.fillet_vertex(first).unwrap().is_processed());
         assert!(!context.0.fillet_vertex(second).unwrap().is_processed());
@@ -4066,7 +4066,7 @@ mod tests {
             "{e:?}"
         );
         assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{e:?}");
         assert_eq!(
             e.kind(),
             crate::error::ErrorKind::of_status(SM_ERR),
@@ -4303,7 +4303,7 @@ mod tests {
             }),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         let b = fb.brep();
         assert_eq!(b.edge(rail).unwrap().vertices, [kv, d]);
         assert_eq!(b.vertexuse(r0_vu).unwrap().vertex, Some(kv));
@@ -4463,7 +4463,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         let line = [p[0], p[1], Point3::new(2.0, 0.0, 0.0)];
         assert!(create_planar_surface(&k, &line, 0.0).is_err());
     }

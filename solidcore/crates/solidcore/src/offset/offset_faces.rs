@@ -1882,7 +1882,7 @@ mod tests {
                 refusal: OffsetFacesRefusal::NoRoom
             })
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
         // decided from the marks themselves, not from an error the move caught
         assert!(e.cause().is_none());
@@ -1907,7 +1907,7 @@ mod tests {
                     distance
                 })
             );
-            assert_eq!(e.upstream_status(), Some(SM_ERR_INVALID_INPUT));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_INVALID_INPUT));
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
             assert_eq!(ex.refusal(), OffsetFacesRefusal::None);
         }
@@ -1938,7 +1938,7 @@ mod tests {
             e.offset_failure(),
             Some(&OffsetFailure::FollowedBlendIncomplete)
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         let e = OffsetFacesExecutive::new()
             .take_off(&mut k, &mut b, &mut blends)
             .unwrap_err();

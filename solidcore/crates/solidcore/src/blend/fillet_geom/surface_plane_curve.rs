@@ -1013,6 +1013,6 @@ mod tests {
             Some(BlendFailure::PlaneCurveEndOff { at_end: false, .. })
         ));
         assert_eq!(e.operation(), OP);
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 }

@@ -2251,7 +2251,7 @@ mod tests {
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!e.is_defect());
-        assert_eq!(e.upstream_status(), Some(1006));
+        assert_eq!(e.failed_routine_status(), Some(1006));
         for (i, param) in [0.0, 1.0, 3.0].into_iter().enumerate() {
             let mut p = TracePoint::new();
             p.curve_parameter = param;

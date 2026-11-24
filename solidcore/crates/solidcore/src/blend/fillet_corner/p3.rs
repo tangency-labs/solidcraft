@@ -2826,7 +2826,7 @@ mod tests {
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         for given in [0, 1, 3] {
             let at = VertexId::from_index(7);
             let mut c = corner(Some(vec![EdgeuseId::from_index(0); given]));
@@ -2846,7 +2846,7 @@ mod tests {
             assert_eq!(e.entity(), Some(EntityRef::Vertex(at)));
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
             assert!(!e.is_defect(), "{e:?}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         }
         let two = [EdgeuseId::from_index(0), EdgeuseId::from_index(1)];
         assert_eq!(
@@ -2871,7 +2871,7 @@ mod tests {
             Some(&BlendFailure::JoinCurveNotBSpline { kind: "composite" }),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported, "{e:?}");
     }
 
@@ -2952,7 +2952,8 @@ mod tests {
 
         let raw = p1::check_nx1_degeneracy(&k, &mut b, v, fil);
         assert!(
-            raw.as_ref().is_err_and(|e| e.upstream_status().is_some()),
+            raw.as_ref()
+                .is_err_and(|e| e.failed_routine_status().is_some()),
             "{raw:?}"
         );
         assert!(check_nx1_degeneracy(&k, &mut b, v, fil).unwrap());

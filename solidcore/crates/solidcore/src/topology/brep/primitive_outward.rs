@@ -1703,7 +1703,11 @@ mod tests {
                             "box {s:e}"
                         );
                         assert_eq!(e.operation(), "topology::brep::p8", "box {s:e}");
-                        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "box {s:e}");
+                        assert_eq!(
+                            e.failed_routine_status(),
+                            Some(crate::error::SM_ERR),
+                            "box {s:e}"
+                        );
                         assert_eq!(e.kind(), cause.kind(), "box {s:e}");
                     }
                 }

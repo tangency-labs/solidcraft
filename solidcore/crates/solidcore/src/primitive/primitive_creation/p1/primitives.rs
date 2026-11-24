@@ -2058,7 +2058,7 @@ mod tests {
             error.operation(),
             "primitive::primitive_creation::p1::create_cylinder"
         );
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             error.primitive_failure(),
             Some(&PrimitiveFailure::HeightTooSmall {
@@ -2082,7 +2082,7 @@ mod tests {
             let error = analytic_rotational_sweep(&mut k, &mut brep, &curve, Vec3::ZERO, Vec3::Z)
                 .unwrap_err();
             assert_eq!(error.operation(), ANALYTIC_SWEEP);
-            assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
             assert_eq!(
                 error.kind(),
                 crate::error::ErrorKind::InvalidInput,
@@ -2138,7 +2138,7 @@ mod tests {
                 error.operation(),
                 "primitive::primitive_creation::p1::create_circle"
             );
-            assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
             assert_eq!(
                 error.primitive_failure(),
                 Some(&PrimitiveFailure::CircleNotMade)
@@ -2189,7 +2189,7 @@ mod tests {
                 "{error}"
             );
             assert_eq!(
-                error.upstream_status(),
+                error.failed_routine_status(),
                 Some(crate::error::SM_ERR_NULL_POINTER)
             );
             assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);

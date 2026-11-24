@@ -1780,7 +1780,7 @@ mod tests {
         ];
         for (typed, failure, code, kind) in samples {
             assert_eq!(typed.sm_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert!(!typed.is_defect(), "{typed:?}");
@@ -1805,7 +1805,10 @@ mod tests {
             entity: Some(face),
         };
         assert_eq!(typed.sm_status(), before.sm_status());
-        assert_eq!(typed.upstream_status(), before.upstream_status());
+        assert_eq!(
+            typed.failed_routine_status(),
+            before.failed_routine_status()
+        );
         assert_eq!(typed.kind(), before.kind());
         assert_eq!(typed.operation(), before.operation());
         assert_eq!(typed.entity(), Some(face));

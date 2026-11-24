@@ -1746,7 +1746,7 @@ mod tests {
                 &mut Brep::default(),
                 HealerOpType::FixDegenEdges
             ),
-            Err(e) if e.upstream_status() == Some(SM_ERR)
+            Err(e) if e.failed_routine_status() == Some(SM_ERR)
                 && e.is_defect()
                 && matches!(e.heal_failure(), Some(HealFailure::Defect { .. }))
         ));
@@ -1895,7 +1895,7 @@ mod tests {
         let (mut b, mut k, seen, mut h1, mut h2) = two_healer_setup();
         let r1 = h1.fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges);
         assert!(
-            matches!(&r1, Err(e) if e.upstream_status() == Some(SM_ERR)),
+            matches!(&r1, Err(e) if e.failed_routine_status() == Some(SM_ERR)),
             "{r1:?}"
         );
         let first = seen.lock().unwrap().len();
@@ -1916,7 +1916,7 @@ mod tests {
         h1_clone.bad_edge_props_degen_edges = h2.bad_edge_props_degen_edges.clone();
         let r1 = h1.fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges);
         assert!(
-            matches!(&r1, Err(e) if e.upstream_status() == Some(SM_ERR)),
+            matches!(&r1, Err(e) if e.failed_routine_status() == Some(SM_ERR)),
             "{r1:?}"
         );
         let first = seen.lock().unwrap().len();

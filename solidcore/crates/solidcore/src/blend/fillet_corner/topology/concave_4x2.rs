@@ -43,7 +43,7 @@ use crate::topology::{Brep, EdgeuseId, VertexId};
 /// The `SmStatus` upstream's `SER` returns, as the `double` result.
 fn status_angle(e: &SolidError) -> f64 {
     let code = match e {
-        e if e.sm_status().is_some() => e.sm_status().unwrap_or(SM_ERR),
+        e if e.failed_routine_status().is_some() => e.failed_routine_status().unwrap_or(SM_ERR),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => SM_ERR,
     };

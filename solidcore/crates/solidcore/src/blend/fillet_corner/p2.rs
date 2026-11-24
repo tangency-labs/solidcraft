@@ -932,9 +932,7 @@ impl FilletCorner {
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: no surface
             // was added, so they read as FALSE (upstream reads TRUE; WR-254). A
             // certificate past its work budget carries a status but is work given up.
-            Err(e) if e.sm_status().is_some() && !e.is_nurbs_failure() && !e.is_not_certified() => {
-                Ok(false)
-            }
+            Err(e) if e.failed_routine_status().is_some() && !e.is_not_certified() => Ok(false),
             // `Unported`, `Cancelled`, `InvalidInput`, `PortInvariant`, and every error
             // whose `upstream_status()` is `None` (`NotFound`, `Degenerate`, ...): no
             // surface was added either, and none of them is an upstream FALSE to patch
@@ -2185,7 +2183,7 @@ mod tests {
         let e = no_surface("blend::fillet_corner::p2", face);
         assert_eq!(e.blend_failure(), Some(&BlendFailure::FaceHasNoSurface));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.entity(), Some(EntityRef::Face(face)));
         assert!(!e.is_defect());
     }
@@ -2206,7 +2204,7 @@ mod tests {
             ))
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.entity(), Some(EntityRef::Edge(edge)));
         assert!(!e.is_defect());
         assert!(e.to_string().contains("has no fillet surface"), "{e}");
@@ -2349,7 +2347,7 @@ mod tests {
             env.with_patch_env(|env| c.analytic_corner_surface(env))
         });
         let e = inner.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{e:?}");
         assert!(c.surfaces.is_empty());
     }
 
@@ -2374,7 +2372,7 @@ mod tests {
             "{e:?}"
         );
         assert_eq!(e.entity(), Some(EntityRef::Edge(edge)), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{e:?}");
         assert!(c.surfaces.is_empty());
     }
 
@@ -2418,7 +2416,7 @@ mod tests {
             );
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e:?}");
             assert!(!e.is_defect(), "{e:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{e:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{e:?}");
         }
         // both edges there, but the on-edge edge starts at a rail-cross-rail vertex, not
         // an on-vertex one
@@ -2439,7 +2437,7 @@ mod tests {
         );
         assert_eq!(e.entity(), Some(at));
         assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{e:?}");
     }
 
     /// After a failing analytic exit, `CreateCornerPatch` goes on to the Coons patch
@@ -2466,7 +2464,7 @@ mod tests {
         );
         assert_eq!(e.entity(), Some(EntityRef::Edge(c.edges[0])), "{e:?}");
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(pseudo.brep().edge(c.edges[0]).unwrap().curve.is_none());
 
         for (name, (mut pseudo, mut c)) in [
@@ -2488,7 +2486,11 @@ mod tests {
             );
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{name}");
             assert!(!e.is_defect(), "{name}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{name}");
+            assert_eq!(
+                e.failed_routine_status(),
+                Some(SM_ERR_NULL_POINTER),
+                "{name}"
+            );
             assert!(c.surfaces.is_empty(), "{name}");
             assert!(c.surface_faces.is_empty(), "{name}");
         }
@@ -2559,7 +2561,7 @@ mod tests {
         let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
         let e = r.unwrap_err();
         assert!(is_missing_face(&e), "{e:?}");
-        assert_eq!(e.upstream_status(), None, "{e:?}");
+        assert_eq!(e.failed_routine_status(), None, "{e:?}");
         assert!(c.surfaces.is_empty());
         assert!(pseudo.brep().edge(c.edges[0]).unwrap().curve.is_none());
 
@@ -2623,7 +2625,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported, "{e:?}");
         // four edges, none a rail-rail interpolation
         let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 4);
@@ -2635,7 +2637,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
     }
 
     /// A variable-radius conversion whose re-solve fails is reported as the failure
@@ -2694,7 +2696,7 @@ mod tests {
         assert_eq!(e.entity(), Some(EntityRef::Vertex(c.vertices[0])));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     /// Three `SM_FV_RAIL_X_RAIL` vertices on faces with no cross sections: no candidate

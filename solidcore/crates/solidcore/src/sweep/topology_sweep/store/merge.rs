@@ -1391,7 +1391,7 @@ mod tests {
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
             assert!(!e.is_defect(), "{e}");
             assert!(e.to_string().contains(CONSUMED_OTHER), "{e}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER), "{e}");
         }
         store.delete_merge(merge);
     }

@@ -1202,10 +1202,13 @@ fn knot_line_crossing(
 
 /// The status upstream stores for a failed `GetNextPoint` (see the module notes).
 fn status_of(e: &SolidError) -> i32 {
+    if let Some(code) = e.failed_routine_status() {
+        return code;
+    }
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         SolidError::NotConverged { .. } => SM_ERR_NOT_CONVERGING,
-        _ => e.sm_status().unwrap_or(SM_ERR),
+        _ => SM_ERR,
     }
 }
 

@@ -3496,7 +3496,7 @@ mod tests {
             SolidError::blend_trace(OP_SPAN, TraceFailure::SectionTangentZero { t: 0.1 })
         );
         assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(s.surface(0).unwrap().offset_distance(), 1.0);
     }
 

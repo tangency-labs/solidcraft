@@ -4472,7 +4472,7 @@ mod tests {
         wr_164_extend(&off, &k);
         let err = off.swap_uv(&k).unwrap_err();
         assert_eq!(err.operation(), OP_EDIT);
-        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             err.surface_failure(),
             Some(&SurfaceFailure::BaseSurfaceNotOwned)
@@ -4873,7 +4873,7 @@ mod tests {
         let check = |e: SolidError, op: &str, failure: SurfaceFailure, kind: ErrorKind| {
             assert_eq!(e.operation(), op, "{e:?}");
             assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{e:?}");
             assert_eq!(e.kind(), kind, "{e:?}");
             assert!(!e.is_defect(), "{e:?}");
             assert_eq!(e.surface_failure(), Some(&failure), "{e:?}");

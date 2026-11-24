@@ -2409,7 +2409,7 @@ mod tests {
         assert!(d.has_any_solid(1) && !d.has_any_solid(2));
         assert!(matches!(
             d.set_regions(1, O1, 1, O2, 1),
-            Err(e) if e.upstream_status() == Some(1001)
+            Err(e) if e.failed_routine_status() == Some(1001)
         ));
         d.set_regions(0, O3, 1, O1, 0).unwrap();
         assert_eq!(d.this_region(0), Some(O3));
@@ -2455,7 +2455,7 @@ mod tests {
         assert_eq!(all, before_all);
         assert!(matches!(
             s.read_indexed_attributes_from_db(&mut all, &mut db),
-            Err(e) if e.upstream_status() == Some(1001)
+            Err(e) if e.failed_routine_status() == Some(1001)
         ));
     }
 
@@ -2512,7 +2512,7 @@ mod tests {
         assert_eq!(read.indices, vec![3, 1]);
         assert!(matches!(
             read.status,
-            Some(e) if e.upstream_status() == Some(1001)
+            Some(e) if e.failed_routine_status() == Some(1001)
         ));
         assert_eq!(s, before_store);
         assert_eq!(all, before_all);

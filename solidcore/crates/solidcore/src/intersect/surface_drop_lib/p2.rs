@@ -546,9 +546,12 @@ fn keep_seam_side(
 
 /// The status upstream would store for a failed callee (see the module notes).
 fn status_of(e: &SolidError) -> i32 {
+    if let Some(code) = e.failed_routine_status() {
+        return code;
+    }
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
-        _ => e.sm_status().unwrap_or(SM_ERR),
+        _ => SM_ERR,
     }
 }
 

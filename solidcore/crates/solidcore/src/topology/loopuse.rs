@@ -2156,7 +2156,7 @@ mod tests {
             Some(EntityRef::Edgeuse(eu(4)))
         );
         assert!(set_edgeuse(&mut b, lu(0), Some(eu(1)))
-            .is_err_and(|e| e.upstream_status() == Some(1001)));
+            .is_err_and(|e| e.failed_routine_status() == Some(1001)));
         assert!(set_edgeuse(&mut b, lu(0), None).is_err());
         // CollectEdgeuses re-owns the CCW list
         collect_edgeuses(&mut b, lu(1), Some(eu(0))).unwrap();
@@ -2164,9 +2164,8 @@ mod tests {
             b.edgeuse(eu(6)).unwrap().owner,
             EdgeuseOwner::Loopuse(Some(lu(1)))
         );
-        assert!(
-            collect_edgeuses(&mut b, lu(1), None).is_err_and(|e| e.upstream_status() == Some(1006))
-        );
+        assert!(collect_edgeuses(&mut b, lu(1), None)
+            .is_err_and(|e| e.failed_routine_status() == Some(1006)));
         set_orientation(&mut b, lu(0), OrientType::Opposite).unwrap();
         assert_eq!(orientation(&b, lu(0)).unwrap(), OrientType::Opposite);
         set_loop(&mut b, lu(0), None).unwrap();

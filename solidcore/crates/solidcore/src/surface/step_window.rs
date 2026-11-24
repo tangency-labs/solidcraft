@@ -1662,10 +1662,10 @@ fn turn(
 }
 
 /// Whether the inversion answered that the point is off its surface
-/// (`SM_ERR_NOT_WITHIN_TOLERANCE`): by its status, whichever surface kind's inversion said
-/// it.
+/// (`SM_ERR_NOT_WITHIN_TOLERANCE`): by its status, so also a typed failure that replaced the
+/// `Upstream` (#13790).
 fn is_off_surface(error: &SolidError) -> bool {
-    error.sm_status() == Some(SM_ERR_NOT_WITHIN_TOLERANCE)
+    error.failed_routine_status() == Some(SM_ERR_NOT_WITHIN_TOLERANCE)
 }
 
 #[cfg(test)]
@@ -2508,7 +2508,7 @@ mod tests {
     /// `Upstream` is the same off-surface answer.
     #[test]
     fn off_surface_reads_the_status_of_a_typed_failure() {
-        use crate::error::replaced_upstream_samples::replaced_upstream;
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
         let upstream = SolidError::Upstream {
             operation: "surface::x",
             code: SM_ERR_NOT_WITHIN_TOLERANCE,
@@ -2518,7 +2518,10 @@ mod tests {
         for typed in replaced_upstream("surface::x", SM_ERR_NOT_WITHIN_TOLERANCE, None) {
             assert!(is_off_surface(&typed), "{typed:?}");
         }
-        for other in replaced_upstream("surface::x", crate::error::SM_ERR, None) {
+        for other in replaced_upstream("surface::x", crate::error::SM_ERR, None)
+            .into_iter()
+            .chain(native_failures("surface::x", SM_ERR_NOT_WITHIN_TOLERANCE))
+        {
             assert!(!is_off_surface(&other), "{other:?}");
         }
     }

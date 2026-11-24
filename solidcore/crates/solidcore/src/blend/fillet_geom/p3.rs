@@ -2127,11 +2127,11 @@ mod tests {
 
     fn code(e: &SolidError) -> Option<i32> {
         // a typed blend failure reads as the status of the bare `Upstream` (#13790)
-        e.upstream_status()
+        e.failed_routine_status()
     }
 
     fn failure(e: &SolidError) -> (Option<&BlendFailure>, Option<i32>) {
-        (e.blend_failure(), e.upstream_status())
+        (e.blend_failure(), e.failed_routine_status())
     }
 
     fn unit_of(e: &SolidError) -> Option<&'static str> {

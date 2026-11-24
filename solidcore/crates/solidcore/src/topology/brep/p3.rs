@@ -5495,7 +5495,7 @@ mod tests {
             assert!(!k.context.is_mark_locked(MarkType::Mark3));
             if fail_after_notifications {
                 let e = result.as_ref().unwrap_err();
-                assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+                assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
                 assert!(
                     e.topology_failure() == Some(&TopologyFailure::Defect { why: FACE_NO_UP_FU }),
                     "{e:?}"
@@ -6166,7 +6166,7 @@ mod tests {
         let r = with_env(|env| api_brep_copy(&mut k, env, None, &source_key));
         let e = r.expect_err("no B-rep");
         assert_eq!(
-            e.upstream_status(),
+            e.failed_routine_status(),
             Some(crate::error::SM_ERR_INVALID_INPUT)
         );
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoBrepGiven));
@@ -6200,7 +6200,7 @@ mod tests {
             )
         });
         let e = r.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             e.topology_failure(),
             Some(&TopologyFailure::EditingDisabled)
@@ -6218,7 +6218,7 @@ mod tests {
             )
         });
         let e = r.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotInBrep));
         assert!(DeleteFaceOptions::default().do_region_nesting);
     }

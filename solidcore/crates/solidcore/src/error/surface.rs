@@ -1357,7 +1357,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(super::super::upstream_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
@@ -1487,7 +1487,7 @@ mod tests {
         for (failure, code, kind) in cases {
             let typed = SolidError::surface("surface::op", failure);
             assert_eq!(typed.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(typed.kind(), kind, "{failure:?}");
             assert!(typed.is_status_answer(), "{failure:?}");
             assert_eq!(typed.is_defect(), kind == K::StageFailed, "{failure:?}");
@@ -1560,7 +1560,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), before.kind(), "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
@@ -1581,7 +1581,7 @@ mod tests {
             entity: Some(face),
         };
         assert_eq!(typed.sm_status(), before.sm_status());
-        assert_eq!(typed.upstream_status(), Some(SM_ERR));
+        assert_eq!(typed.failed_routine_status(), Some(SM_ERR));
         assert_eq!(typed.kind(), before.kind());
         assert_eq!(typed.operation(), before.operation());
         assert_eq!(typed.entity(), Some(face));
@@ -1690,7 +1690,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
-            assert_eq!(e.upstream_status(), Some(status), "{e:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{e:?}");
             assert_eq!(e.kind(), kind, "{e:?}");
             assert_eq!(e.operation(), op, "{e:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
@@ -1701,14 +1701,14 @@ mod tests {
         let e = Failure::new(op, SurfaceFailure::LineDirectionZero)
             .with_status(SM_ERR)
             .into_error();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::InvalidInput);
         // a chained cause is kept
         let stage = SolidError::invalid_input("stage::op", "bad");
         let e = Failure::new(op, SurfaceFailure::SolveCacheNotMade)
             .caused_by(stage.clone())
             .into_error();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.cause(), Some(&stage));
     }
 
@@ -1773,7 +1773,7 @@ mod tests {
         for (failure, code, kind) in cases {
             let e = SolidError::surface("surface::op", failure);
             assert_eq!(e.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(e.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
@@ -1792,7 +1792,7 @@ mod tests {
             SurfaceFailure::PlaneCanvasNotFinite,
         ] {
             let e = SolidError::surface(op, failure);
-            assert_eq!(e.upstream_status(), Some(SM_ERR), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{failure:?}");
             assert_eq!(e.kind(), ErrorKind::Failed, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -2084,7 +2084,7 @@ mod tests {
             }
             let e = f.into_error();
             assert_eq!(e.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(e.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
@@ -2190,7 +2190,7 @@ mod tests {
         for (failure, code, kind) in cases {
             let typed = SolidError::surface("surface::op", failure);
             assert_eq!(typed.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(typed.kind(), kind, "{failure:?}");
             assert!(!typed.is_defect(), "{failure:?}");
             assert!(!typed.is_port_failure(), "{failure:?}");
@@ -2287,7 +2287,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.operation(), op);
             assert_eq!(e.surface_failure(), Some(&failure));
@@ -2296,7 +2296,7 @@ mod tests {
         // a NURB that could not be made keeps the site's status and chains the make's error
         let made = SolidError::surface(op, SurfaceFailure::RadiusNotPositive);
         let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, made.clone());
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
         assert_eq!(e.cause(), Some(&made));
     }

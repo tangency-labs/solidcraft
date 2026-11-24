@@ -1447,7 +1447,7 @@ mod tests {
         };
         let err = targets.update(&sweep).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         assert_eq!(
             err.sweep_failure(),
             Some(&SweepFailure::SweepImageOfOtherKind {
@@ -1459,7 +1459,7 @@ mod tests {
         // the same record read by a sweep routine's image lookup
         let err = mapped_vertex(sweep.get_to_same(Some(E::Vertex(b, v0)))).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
     }
 
     #[derive(Default)]

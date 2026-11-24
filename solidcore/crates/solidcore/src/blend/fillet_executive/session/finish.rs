@@ -48,8 +48,7 @@ use crate::blend::fillet_executive::p3::{
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::error::blend::BlendFailure;
-use crate::error::nurbs::NurbsFailure;
-use crate::error::{EntityRef, Reason, Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
 use crate::kernel::Kernel;
@@ -61,39 +60,12 @@ use std::collections::BTreeSet;
 const OP: &str = "blend::fillet_executive::session::finish";
 
 /// The operation, status and entity of a failure the executive turns into a
-/// [`SolidError::FilletRefused`] when a size builds (WR-696): a failed routine of the
-/// kernel, by its status rather than its variant, so every such failure is refused alike
-/// (#13790). Refusals already typed (a blend refusal, a boolean's, a defeature's, an
-/// offset's, a curve's length bracket, a loft's caps), a foot past a domain end, an edge
-/// off its faces and an NLib failure not inside a B-spline method are passed on as they
-/// are, as is every error with no status.
+/// [`SolidError::FilletRefused`] when a size builds (WR-696): one that a routine failed with
+/// ([`SolidError::failed_routine_status`]), whatever its variant (#13790). Other failures
+/// are passed on as they are.
 fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>)> {
-    let routine = match error {
-        SolidError::Upstream { .. } => true,
-        SolidError::Failed(f) => match &f.reason {
-            Reason::Nurbs(n) => matches!(n, NurbsFailure::BSpline(_)),
-            Reason::Intersect(_)
-            | Reason::Primitive(_)
-            | Reason::Mass(_)
-            | Reason::Heal(_)
-            | Reason::Geom(_)
-            | Reason::Query(_)
-            | Reason::Topology(_)
-            | Reason::Surface(_)
-            | Reason::Blend(_) => true,
-            Reason::Sweep(w) => w.replaces_upstream_status(),
-            Reason::Curve(c) => c.replaces_upstream_status(),
-            Reason::Offset(o) => o.replaces_upstream_status(),
-            Reason::Boolean(_)
-            | Reason::Defeature(_)
-            | Reason::FootPastDomainEnd { .. }
-            | Reason::EdgeOffItsFaces { .. } => false,
-        },
-        _ => false,
-    };
-    routine
-        .then(|| error.sm_status())
-        .flatten()
+    error
+        .failed_routine_status()
         .map(|code| (error.operation(), code, error.entity()))
 }
 
@@ -1760,7 +1732,7 @@ mod ball_fit_tests {
     fn the_generic_failure_is_typed_with_its_status() {
         let e = step_failed();
         assert_eq!(e.blend_failure(), Some(&BlendFailure::ExecutiveStepFailed));
-        assert_eq!(e.upstream_status(), Some(1001));
+        assert_eq!(e.failed_routine_status(), Some(1001));
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
         assert_eq!(refusable(&e), Some((OP, 1001, None)));

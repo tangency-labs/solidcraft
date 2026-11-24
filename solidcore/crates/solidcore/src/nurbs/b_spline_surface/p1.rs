@@ -2614,7 +2614,7 @@ mod tests {
             "{e:?}"
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
     }
 

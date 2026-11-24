@@ -661,7 +661,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(super::super::upstream_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
@@ -861,7 +861,7 @@ mod tests {
         for (failure, status, kind, message) in cases {
             let e = SolidError::primitive(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.primitive_failure(), Some(&failure));
@@ -873,7 +873,7 @@ mod tests {
         let e = Failure::new(op, PrimitiveFailure::ProfileFrameDegenerate)
             .caused_by(caught)
             .into_error();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), K::InvalidInput);
     }
 
@@ -1126,7 +1126,7 @@ mod tests {
         for (failure, status, kind, message) in cases {
             let e = SolidError::primitive(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.primitive_failure(), Some(&failure));
@@ -1141,12 +1141,12 @@ mod tests {
             .caused_by(caught)
             .into_error();
         assert!(e.is_defect(), "{e}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), K::Failed);
         // a broken link of the kernel's own is a defect keeping `SM_ERR_NULL_POINTER`
         let link = SolidError::primitive_broken_link(op, why);
         assert!(link.is_defect(), "{link}");
-        assert_eq!(link.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(link.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(
             link.primitive_failure(),
             Some(&PrimitiveFailure::Defect { why })

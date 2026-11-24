@@ -52,7 +52,7 @@
 //! named at the sites of `offset_faces`, `offset_geometry_creation` and
 //! `offset_executive/p1` that returned a bare status
 //! ([`OffsetFailure::FacesMoveRefused`] and those after it) answer with that status too: they
-//! replaced one ([`OffsetFailure::replaces_upstream_status`]).
+//! replaced one ([`OffsetFailure::is_failed_routine`]).
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_BAD_INTERSECTIONS, SM_ERR_INVALID_INPUT,
@@ -903,16 +903,17 @@ impl OffsetFailure {
         )
     }
 
-    /// True for a failure that replaced a bare status an offset routine returned
+    /// True for a routine's failure, which answers with the status an offset routine returns
+    /// (`SolidError::failed_routine_status`): a bare status
     /// ([`OffsetFailure::Defect`]), or a cause named at a site
-    /// that returned one ([`OffsetFailure::LoopGapPassLimit`],
+    /// that returns one ([`OffsetFailure::LoopGapPassLimit`],
     /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`], those of
     /// `offset_executive::p1` (the module table's `offset_executive::p1` rows, from
     /// [`OffsetFailure::OffsetBaseKindUnsupported`]), and those of
-    /// [`OffsetFailure::is_named_at_a_status_site`]): it answers with
-    /// that status as the `Upstream` it replaced did. The other refusals replaced none.
+    /// [`OffsetFailure::is_named_at_a_status_site`]). The other refusals are solidcore's and
+    /// stand for no status.
     #[must_use]
-    pub const fn replaces_upstream_status(&self) -> bool {
+    pub const fn is_failed_routine(&self) -> bool {
         matches!(
             self,
             Self::Defect { .. }
@@ -1880,7 +1881,7 @@ mod tests {
             SM_ERR,
         ];
         for ((operation, failure, kept, class), code) in samples.into_iter().zip(statuses) {
-            assert!(failure.replaces_upstream_status());
+            assert!(failure.is_failed_routine());
             let typed = match kept {
                 Some(status) => Failure::new(operation, failure).with_status(status),
                 None => Failure::new(operation, failure),
@@ -1892,7 +1893,7 @@ mod tests {
                 entity: failure.entity(),
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(super::super::upstream_status(&typed), Some(code));
             assert_eq!(typed.kind(), class, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
@@ -1934,7 +1935,7 @@ mod tests {
                 largest: 1.0,
             },
         );
-        assert_eq!(folds.upstream_status(), None);
+        assert_eq!(folds.failed_routine_status(), None);
         assert_eq!(SolidError::sm_err("offset::op").offset_failure(), None);
     }
 
@@ -2519,7 +2520,7 @@ mod tests {
             // what replaced a bare status is a defect, or a cause named at a site of `offset_faces` or `offset_geometry_creation` that returned
             // a status (TE-O-18, TE-O-19); `FaceCloses` and `DraftClosesWall` are refusals of
             // their own, raised where no status was returned
-            assert_eq!(o.replaces_upstream_status(), *replaces, "{o:?}");
+            assert_eq!(o.is_failed_routine(), *replaces, "{o:?}");
         }
     }
 
@@ -2734,10 +2735,10 @@ mod tests {
             ),
         ];
         for (cause, status, entity) in samples {
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert!(cause.is_failed_routine(), "{cause:?}");
             assert!(!cause.is_defect(), "{cause:?}");
             let e = SolidError::offset("offset::op", cause);
-            assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{cause:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.sm_status(), Some(status), "{cause:?}");
             assert_eq!(e.entity(), entity, "{cause:?}");
@@ -2747,7 +2748,7 @@ mod tests {
         let e = Failure::new("offset::op", OffsetFailure::FaceHasNoOuterFaceuse { face })
             .with_status(SM_ERR_INVALID_INPUT)
             .into_error();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_INVALID_INPUT));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(
             e.to_string(),
             "offset::op: invalid input: the face has no face use on the outside of its body \
@@ -2770,7 +2771,7 @@ mod tests {
                 OffsetFailure::Defect { why: "x" },
             ));
             assert!(defect.is_defect() && !defect.is_refusal(), "{cause:?}");
-            assert_eq!(defect.upstream_status(), Some(SM_ERR));
+            assert_eq!(defect.failed_routine_status(), Some(SM_ERR));
             let refusal = around(SolidError::offset(
                 "offset::inner",
                 OffsetFailure::Folds {
@@ -2780,7 +2781,7 @@ mod tests {
                 },
             ));
             assert!(refusal.is_refusal() && !refusal.is_defect(), "{cause:?}");
-            assert_eq!(refusal.upstream_status(), Some(SM_ERR));
+            assert_eq!(refusal.failed_routine_status(), Some(SM_ERR));
             let input = around(SolidError::invalid_input(
                 "geom::extent2d::Extent2d::intersect",
                 "disjoint",
@@ -2791,7 +2792,7 @@ mod tests {
                 input.cause().map(SolidError::kind),
                 Some(ErrorKind::InvalidInput)
             );
-            assert_eq!(input.upstream_status(), Some(SM_ERR));
+            assert_eq!(input.failed_routine_status(), Some(SM_ERR));
         }
     }
 

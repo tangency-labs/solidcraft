@@ -7694,7 +7694,7 @@ mod tests {
                 BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval)
             )
         );
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// A quarter circle r 0.2 about (−300, 0, 1), the rational quadratic: over a piece of

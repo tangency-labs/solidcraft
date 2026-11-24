@@ -1312,7 +1312,10 @@ mod tests {
             Some(&BlendFailure::RemovalRefused(R::TangentSurfacesDoNotMeet))
         );
         assert!(refused.is_refusal() && !refused.is_defect());
-        assert_eq!(undecided.upstream_status(), refused.upstream_status());
+        assert_eq!(
+            undecided.failed_routine_status(),
+            refused.failed_routine_status()
+        );
     }
 
     /// A curved seam with no crossing found is not proved to stop short of the sharp edge:
@@ -1327,7 +1330,7 @@ mod tests {
             ))
         );
         assert!(!e.is_defect() && !e.is_refusal());
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// A removal whose face is already gone (an earlier call of the same removal took it)
@@ -1346,7 +1349,10 @@ mod tests {
                 RemovalInput::FaceToDelete
             ))
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
         assert!(!e.is_defect() && !e.is_refusal());
     }
 }

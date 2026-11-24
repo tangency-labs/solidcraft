@@ -395,7 +395,7 @@ mod tests {
         for (cause, status) in causes {
             let e = SolidError::blend_trace("blend::op", cause);
             assert_eq!(e.sm_status(), Some(status), "{cause:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{cause:?}");
             assert_eq!(e.kind(), cause.class(), "{cause:?}");
         }
         // A solve that stops with its numbers is a defect,
@@ -415,7 +415,7 @@ mod tests {
         assert_eq!(d.sm_status(), Some(SM_ERR_NULL_POINTER));
         let d = defect("blend::op", "why");
         assert!(d.is_defect());
-        assert_eq!(d.upstream_status(), Some(SM_ERR));
+        assert_eq!(d.failed_routine_status(), Some(SM_ERR));
     }
 
     /// The three wrapping causes keep `SM_ERR` and carry the caught error as their cause,

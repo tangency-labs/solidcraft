@@ -897,7 +897,11 @@ mod tests {
             .unwrap();
         b.vertexuse_mut(vu).unwrap().vertex = None;
         let err = validate_and_update_tolerances(&mut k, &mut b, true, None, 0).unwrap_err();
-        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR), "{err:?}");
+        assert_eq!(
+            err.failed_routine_status(),
+            Some(crate::error::SM_ERR),
+            "{err:?}"
+        );
         assert_eq!(
             err.operation(),
             "topology::brep::validation::validate_and_update_tolerances"

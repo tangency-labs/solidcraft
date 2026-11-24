@@ -1303,7 +1303,7 @@ mod tests {
         assert!(!error.is_defect(), "{error:?}");
         assert_eq!(error.entity(), Some(EntityRef::Face(face)), "{error:?}");
         assert_eq!(
-            error.upstream_status(),
+            error.failed_routine_status(),
             Some(SM_ERR_NULL_POINTER),
             "{error:?}"
         );

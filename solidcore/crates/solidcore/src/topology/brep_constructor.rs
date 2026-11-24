@@ -1552,7 +1552,7 @@ mod tests {
         let check = |r: Result<()>, cause: TopologyFailure, status: i32| {
             let e = r.unwrap_err();
             assert_eq!(e.topology_failure(), Some(&cause));
-            assert_eq!(e.upstream_status(), Some(status));
+            assert_eq!(e.failed_routine_status(), Some(status));
         };
         let not_open = |call, part| TopologyFailure::ConstructorNotOpen { call, part };
         let still_open = |call, part| TopologyFailure::ConstructorStillOpen { call, part };

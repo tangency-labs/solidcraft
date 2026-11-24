@@ -737,7 +737,7 @@ fn brep_shells(k: &mut Kernel, b: &Brep) -> Result<Vec<ShellId>> {
 fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<bool> {
     match p1::check_uv_trim_curve(k, b, eu) {
         Ok(()) => Ok(true),
-        Err(e) if e.sm_status() == Some(SM_ERR) && !e.is_nurbs_failure() => Ok(false),
+        Err(e) if e.failed_routine_status() == Some(SM_ERR) => Ok(false),
         Err(e) => Err(e),
     }
 }
@@ -3739,7 +3739,7 @@ mod tests {
         let mut env = state.env(None);
         let err =
             mate_lamina_edge_to_surface(&k, &mut b, &mut env, e, &mating, 1.0, 1.0).unwrap_err();
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         assert_eq!(err.operation(), OP);
         assert_eq!(
             err.topology_failure(),

@@ -1362,7 +1362,7 @@ mod tests {
             Err(SolidError::query(OP, QueryFailure::FaceWithoutLoops))
         );
         assert_eq!(
-            r.as_ref().map_err(SolidError::upstream_status),
+            r.as_ref().map_err(SolidError::failed_routine_status),
             Err(Some(crate::error::SM_ERR))
         );
         // the out-params keep the caller's values

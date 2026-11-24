@@ -1565,7 +1565,7 @@ mod tests {
             &StepOffOptions::default(),
         )
         .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(1007));
+        assert_eq!(e.failed_routine_status(), Some(1007));
     }
 
     #[test]
@@ -1573,7 +1573,7 @@ mod tests {
         // CreateUVTrimCurve: NER(pFU)
         let (mut b, eu) = lone_edgeuse();
         let e = rebuild_uv_trim_curve(&Kernel::default(), &mut b, eu).unwrap_err();
-        assert!(e.upstream_status().is_some());
+        assert!(e.failed_routine_status().is_some());
     }
 
     #[test]
@@ -1698,7 +1698,7 @@ mod tests {
             &StepOffOptions::default(),
         )
         .unwrap_err();
-        assert_eq!(step_err.upstream_status(), Some(1001));
+        assert_eq!(step_err.failed_routine_status(), Some(1001));
         assert_eq!(
             step_err.topology_failure(),
             Some(&TopologyFailure::SteppedOffFace)
@@ -1713,7 +1713,7 @@ mod tests {
         let mut b_opt = b0;
         let err =
             is_convex_radial_sector(&opt_in_k, &mut b_opt, concave_eu, 3, true, 0.0).unwrap_err();
-        assert_eq!(err.upstream_status(), Some(1001));
+        assert_eq!(err.failed_routine_status(), Some(1001));
         assert_eq!(
             err.topology_failure(),
             Some(&TopologyFailure::SteppedOffFace)
@@ -1782,7 +1782,7 @@ mod tests {
             &StepOffOptions::default(),
         )
         .unwrap_err();
-        assert_eq!(radial_err.upstream_status(), Some(1001));
+        assert_eq!(radial_err.failed_routine_status(), Some(1001));
         assert_eq!(
             radial_err.topology_failure(),
             Some(&TopologyFailure::SteppedOffFace)
@@ -1799,7 +1799,7 @@ mod tests {
         .unwrap());
         let err =
             is_convex_radial_sector(&opt_in_k, &mut b0, concave_eu, 1, true, 2.0).unwrap_err();
-        assert_eq!(err.upstream_status(), Some(1001));
+        assert_eq!(err.failed_routine_status(), Some(1001));
         assert_eq!(
             err.topology_failure(),
             Some(&TopologyFailure::SteppedOffFace)
@@ -1850,7 +1850,7 @@ mod tests {
         .unwrap());
         let err = is_convex_radial_sector(&opt_in_k, &mut b_const, concave_eu, 1, false, 0.0)
             .unwrap_err();
-        assert_eq!(err.upstream_status(), Some(1001));
+        assert_eq!(err.failed_routine_status(), Some(1001));
 
         // Uninitialised 3D B-spline curve (`nurb == None` -> `SM_ERR` 1001) also masks as
         // `Ok(true)` by default and propagates as `Err` under opt-in.
@@ -1872,7 +1872,7 @@ mod tests {
                 .unwrap_err();
         // the B-spline curve without its NURB, status 1001 kept
         assert!(
-            uninit_err.upstream_status() == Some(1001)
+            uninit_err.failed_routine_status() == Some(1001)
                 && uninit_err.nurbs_failure()
                     == Some(&crate::error::nurbs::NurbsFailure::BSpline(
                         crate::error::nurbs::BSplineFailure::NoNurbsForm
@@ -1886,7 +1886,7 @@ mod tests {
         assert!(is_convex_radial_sector(&default_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap());
         let lone_err =
             is_convex_radial_sector(&opt_in_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap_err();
-        assert_eq!(lone_err.upstream_status(), Some(1007));
+        assert_eq!(lone_err.failed_routine_status(), Some(1007));
 
         // Null-dereference (`edge: None`) and dangling-id errors propagate under both modes.
         let edgeless = lone_b.add_edgeuse_record(Edgeuse::default()).unwrap();

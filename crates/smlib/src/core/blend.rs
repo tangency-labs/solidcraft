@@ -76,12 +76,12 @@ fn stands_for_status(e: &SolidError) -> bool {
         || e.mass_failure().is_some()
         || e.heal_failure().is_some()
         || e.geom_failure().is_some()
-        || e.sweep_failure().is_some_and(|w| w.replaces_upstream_status())
+        || e.sweep_failure().is_some_and(|w| w.is_failed_routine())
         || e.query_failure().is_some()
         || e.topology_failure().is_some()
-        || e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
+        || e.curve_failure().is_some_and(|c| c.is_failed_routine())
         || e.surface_failure().is_some()
-        || e.offset_failure().is_some_and(|o| o.replaces_upstream_status())
+        || e.offset_failure().is_some_and(|o| o.is_failed_routine())
 }
 
 /// A failure of the Boolean engine (which slice, sweep and the other users of the merge engine

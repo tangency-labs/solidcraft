@@ -2324,7 +2324,7 @@ mod tests {
         // shell and wire vertex uses have no face: NER
         for x in [vu[0], vu[2]] {
             assert!(compute_uv_point(&k, &mut b, x, true)
-                .is_err_and(|e| e.upstream_status() == Some(SM_ERR_NULL_POINTER)));
+                .is_err_and(|e| e.failed_routine_status() == Some(SM_ERR_NULL_POINTER)));
             assert!(!compute_uv_sector(&k, &mut b, x, true).unwrap().success);
             assert!(!is_on_pole(&k, &mut b, x).unwrap());
             assert!(!is_sector_missing_seam(&k, &mut b, x, true).unwrap().missing);

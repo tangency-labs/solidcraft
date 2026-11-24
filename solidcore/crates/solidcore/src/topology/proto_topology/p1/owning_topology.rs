@@ -559,7 +559,7 @@ mod tests {
         let e = OwningTopology::default()
             .insert_after(&mut records, None, None)
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.operation(), OP_INSERT_AFTER);
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NothingToLink));
     }

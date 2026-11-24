@@ -1078,7 +1078,7 @@ mod tests {
                 b: [5.0, 6.0]
             })
         );
-        assert_eq!(disjoint.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(disjoint.failed_routine_status(), Some(crate::error::SM_ERR));
         assert!(a.are_disjoint(&c, 0.0));
         assert!(!a.are_disjoint(&Extent1d::from_min_max(2.0, 3.0), 0.0));
         assert_eq!(a.distance_from(-1.0), 1.0);

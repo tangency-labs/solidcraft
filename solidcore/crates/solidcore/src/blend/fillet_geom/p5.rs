@@ -3977,7 +3977,7 @@ mod tests {
 
     /// The typed blend failure of `e` and the upstream status it keeps (#13790).
     fn failure(e: &SolidError) -> (Option<&BlendFailure>, Option<i32>) {
-        (e.blend_failure(), e.upstream_status())
+        (e.blend_failure(), e.failed_routine_status())
     }
 
     fn kernel() -> Kernel {
@@ -4048,7 +4048,7 @@ mod tests {
             .calc_fillet_int_fillet(&k, v[0], CornerLookup::default(), &[], &Brep::new())
             .unwrap_err();
         // a typed blend failure keeps the status of the bare `Upstream` (#13790)
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         // a corner in the table: no fillet/fillet edge at the vertex
         let corners = [FilletCorner::new(
             crate::blend::fillet_corner::p3::FilletCornerKind::FourByThree,
@@ -4228,7 +4228,7 @@ mod tests {
         );
         assert_eq!(err.kind(), crate::error::ErrorKind::SplitEndNotPlanar);
         assert!(err.is_refusal() && !err.is_defect() && !err.sized());
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         assert_eq!(err.entity(), Some(EntityRef::Face(curved)));
 
         fb.fillet_vertex_mut(v[0])
@@ -4296,7 +4296,7 @@ mod tests {
         );
         assert_eq!(err.kind(), crate::error::ErrorKind::Unsupported);
         assert!(!err.is_refusal() && !err.is_defect());
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         assert_eq!(err.entity(), Some(EntityRef::Edge(te)));
     }
 
@@ -4339,7 +4339,7 @@ mod tests {
         );
         assert_eq!(err.kind(), crate::error::ErrorKind::Unsupported);
         assert!(!err.is_refusal() && !err.is_defect());
-        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(err.entity(), Some(EntityRef::Edge(te)));
     }
 

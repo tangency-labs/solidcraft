@@ -407,7 +407,7 @@ mod tests {
             error.primitive_failure(),
             Some(&PrimitiveFailure::NoProfiles)
         );
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
         Ok(())
     }

@@ -433,6 +433,6 @@ mod tests {
             SolidError::blend_trace(OP_ZONE, TraceFailure::ZoneEndsCoincide { distance: 0.0 })
         );
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 }

@@ -1655,7 +1655,10 @@ mod tests {
             e.sweep_failure(),
             Some(&SweepFailure::UntaggedEdge { edge: edge.1 })
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     #[test]

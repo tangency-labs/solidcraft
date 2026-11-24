@@ -2667,7 +2667,11 @@ mod tests {
             (get_edges(&b).unwrap_err(), QueryFailure::BrepWithoutEdges),
             (get_faces(&b).unwrap_err(), QueryFailure::BrepWithoutFaces),
         ] {
-            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+            assert_eq!(
+                e.failed_routine_status(),
+                Some(crate::error::SM_ERR),
+                "{e:?}"
+            );
             assert_eq!(e.operation(), OP);
             assert_eq!(e.query_failure(), Some(&cause));
         }

@@ -3137,9 +3137,9 @@ mod tests {
             match transfer.into_location().unwrap() {
                 TrimSurfaceLocation::Installed(face) => {
                     if mode == 4 {
-                        assert!(result
-                            .as_ref()
-                            .is_err_and(|e| e.upstream_status() == Some(crate::error::SM_ERR)));
+                        assert!(result.as_ref().is_err_and(
+                            |e| e.failed_routine_status() == Some(crate::error::SM_ERR)
+                        ));
                         assert_eq!(p1::faces(&b, None).unwrap(), vec![face]);
                         assert!(b.face(face).unwrap().loops.is_empty());
                     } else {
@@ -3165,7 +3165,7 @@ mod tests {
                     };
                     assert!(result
                         .as_ref()
-                        .is_err_and(|e| e.upstream_status() == Some(code)));
+                        .is_err_and(|e| e.failed_routine_status() == Some(code)));
                     assert!(p1::faces(&b, None).unwrap().is_empty());
                 }
                 TrimSurfaceLocation::Owned(surface) => {

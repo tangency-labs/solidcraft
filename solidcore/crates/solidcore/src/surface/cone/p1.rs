@@ -2434,7 +2434,7 @@ mod tests {
     #[test]
     fn cylinders() {
         let e = Cone::create_canonical_cylinder(&k(), &std_placement(), 0.0).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(
             e.surface_failure(),
             Some(&SurfaceFailure::RadiusNotPositive)
@@ -2505,7 +2505,7 @@ mod tests {
         let e = c
             .convert_uv_from_nurbs_to_step(&k(), Point2::new(0.5, 0.5))
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_TO_STEP);
         // the degenerate sweep iso curve left no polar converter after a successful make
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NoPolarConverter));
@@ -2537,7 +2537,7 @@ mod tests {
             .adjust_step_uv_domain(&k(), &Extent2d::from_bounds(0.0, -4.0, 360.0, 3.0))
             .unwrap_err();
         assert_eq!(
-            e.upstream_status(),
+            e.failed_routine_status(),
             Some(crate::error::SM_ERR_INVALID_INPUT)
         );
         assert_eq!(e.operation(), OP_ADJUST);
@@ -2554,7 +2554,7 @@ mod tests {
                 Some(Vec3::new(1.0, 2.0, 1.0)),
             )
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_TRANSFORM);
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
@@ -3060,7 +3060,7 @@ mod tests {
                 entity: None,
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");

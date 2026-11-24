@@ -2260,7 +2260,7 @@ mod tests {
                 "{error:?}"
             );
             assert_eq!(
-                error.upstream_status(),
+                error.failed_routine_status(),
                 Some(SM_ERR_NULL_POINTER),
                 "{error:?}"
             );

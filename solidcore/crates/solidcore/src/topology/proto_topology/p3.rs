@@ -2929,7 +2929,7 @@ mod tests {
     #[test]
     fn no_mates_has_no_relationship_to_remove() {
         let e = Mates::<H>::remove_relationship(&mut NoMates, vtx(0), vtx(1)).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotAMatedPair));
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
     }
@@ -3344,7 +3344,7 @@ mod tests {
             e.topology_failure(),
             Some(&TopologyFailure::ClassificationParametersUnset)
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         for (a, c) in [(false, true), (true, false)] {
             let (pv, created) = m
                 .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4, a), &mut on(6, c))
@@ -3454,7 +3454,7 @@ mod tests {
             e.topology_failure(),
             Some(&TopologyFailure::OverlapBelowSplitResolution)
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(m.proto_edges(), [pe1, pe2]);
         for (pe, ed, ivl, from, to) in [(pe1, ed1, ivl1, 0.0, 10.0), (pe2, ed2, ivl2, b0, 20.0)] {
             let p = m.proto_edge(pe).unwrap();
@@ -3473,7 +3473,7 @@ mod tests {
             e.topology_failure(),
             Some(&TopologyFailure::IntersectingProtoEdgeEmpty)
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
     }
 

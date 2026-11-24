@@ -1728,38 +1728,64 @@ impl SolidError {
         }
     }
 
-    /// The status of an error that answers with an `SmStatus` the way a
-    /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
-    /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
+    /// The status of an error that a routine's failure answers with, as an `SmStatus`: an
+    /// [`SolidError::Upstream`]'s `code`, or the status of a [`SolidError::Failed`] whose
+    /// reason is a routine failing ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
     /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
     /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
     /// [`surface::SurfaceFailure`], [`blend::BlendFailure`], or a [`sweep::SweepFailure`],
-    /// [`curve::CurveFailure`] or [`offset::OffsetFailure`] that replaced one
-    /// ([`sweep::SweepFailure::replaces_upstream_status`],
-    /// [`curve::CurveFailure::replaces_upstream_status`],
-    /// [`offset::OffsetFailure::replaces_upstream_status`])). The callers that branch on an
-    /// upstream status use it so that they treat both alike.
+    /// [`curve::CurveFailure`] or [`offset::OffsetFailure`] for which
+    /// [`sweep::SweepFailure::is_failed_routine`], [`curve::CurveFailure::is_failed_routine`]
+    /// or [`offset::OffsetFailure::is_failed_routine`] holds).
+    ///
+    /// `None` for every other error, including an NLib failure outside a B-spline method,
+    /// a Boolean or defeature failure, a foot past a net's domain end, an edge off its faces
+    /// and the refusals: an operation's own refusal is not a routine's status. The callers
+    /// that branch on a routine's status read it here. Both matches are exhaustive, so a
+    /// new variant or reason must be decided here.
     #[must_use]
-    pub(crate) fn upstream_status(&self) -> Option<i32> {
+    pub(crate) fn failed_routine_status(&self) -> Option<i32> {
         match self {
             Self::Upstream { code, .. } => Some(*code),
-            Self::Failed(f) => match &f.reason {
-                Reason::Nurbs(nurbs::NurbsFailure::BSpline(_))
-                | Reason::Intersect(_)
-                | Reason::Primitive(_)
-                | Reason::Mass(_)
-                | Reason::Heal(_)
-                | Reason::Geom(_)
-                | Reason::Query(_)
-                | Reason::Topology(_)
-                | Reason::Surface(_)
-                | Reason::Blend(_) => Some(f.status),
-                Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
-                Reason::Curve(c) if c.replaces_upstream_status() => Some(f.status),
-                Reason::Offset(o) if o.replaces_upstream_status() => Some(f.status),
-                _ => None,
-            },
-            _ => None,
+            Self::Failed(f) => {
+                let routine = match &f.reason {
+                    Reason::Nurbs(nurbs::NurbsFailure::BSpline(_))
+                    | Reason::Intersect(_)
+                    | Reason::Primitive(_)
+                    | Reason::Mass(_)
+                    | Reason::Heal(_)
+                    | Reason::Geom(_)
+                    | Reason::Query(_)
+                    | Reason::Topology(_)
+                    | Reason::Surface(_)
+                    | Reason::Blend(_) => true,
+                    Reason::Sweep(w) => w.is_failed_routine(),
+                    Reason::Curve(c) => c.is_failed_routine(),
+                    Reason::Offset(o) => o.is_failed_routine(),
+                    Reason::Nurbs(_)
+                    | Reason::Boolean(_)
+                    | Reason::Defeature(_)
+                    | Reason::FootPastDomainEnd { .. }
+                    | Reason::EdgeOffItsFaces { .. } => false,
+                };
+                routine.then_some(f.status)
+            }
+            Self::FilletRefused { .. }
+            | Self::BlendRefused { .. }
+            | Self::RoundRefused { .. }
+            | Self::InvalidInput { .. }
+            | Self::NotFound { .. }
+            | Self::Degenerate { .. }
+            | Self::NotConverged { .. }
+            | Self::Unsupported { .. }
+            | Self::PortInvariant { .. }
+            | Self::PreparationRequired { .. }
+            | Self::Cancelled { .. }
+            | Self::FaceTrimsUnavailable { .. }
+            | Self::UnsureRegion { .. }
+            | Self::ExtendRefused { .. }
+            | Self::DefinitionNotCertified { .. }
+            | Self::Unported { .. } => None,
         }
     }
 
@@ -2032,15 +2058,15 @@ impl SolidError {
 /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
 /// [`surface::SurfaceFailure`], [`blend::BlendFailure`], or a [`sweep::SweepFailure`],
 /// [`curve::CurveFailure`] or [`offset::OffsetFailure`] that replaced one
-/// ([`sweep::SweepFailure::replaces_upstream_status`],
-/// [`curve::CurveFailure::replaces_upstream_status`],
-/// [`offset::OffsetFailure::replaces_upstream_status`])).
+/// ([`sweep::SweepFailure::is_failed_routine`],
+/// [`curve::CurveFailure::is_failed_routine`],
+/// [`offset::OffsetFailure::is_failed_routine`])).
 ///
 /// For the goldens' and difftest's comparison only. Callers match [`SolidError::kind`] and
 /// the [`Reason`].
 #[must_use]
 pub fn upstream_status(error: &SolidError) -> Option<i32> {
-    error.upstream_status()
+    error.failed_routine_status()
 }
 
 #[cfg(test)]
@@ -2092,7 +2118,11 @@ mod tests {
         assert_eq!(e.operation(), operation, "{e:?}");
         assert_eq!(e.sm_status(), Some(status), "{e:?}");
         assert_eq!(twin.sm_status(), Some(status), "{twin:?}");
-        assert_eq!(e.upstream_status(), twin.upstream_status(), "{e:?}");
+        assert_eq!(
+            e.failed_routine_status(),
+            twin.failed_routine_status(),
+            "{e:?}"
+        );
         assert_eq!(e.is_status_answer(), twin.is_status_answer(), "{e:?}");
         assert!(!e.is_port_failure(), "{e:?}");
         assert_eq!(e.to_string(), text);
@@ -2983,7 +3013,7 @@ mod tests {
             assert_eq!(error.kind(), kind, "{error}");
             assert_eq!(error.kind(), before.kind(), "{error}");
             assert_eq!(error.sm_status(), before.sm_status(), "{error}");
-            assert_eq!(error.upstream_status(), Some(status), "{error}");
+            assert_eq!(error.failed_routine_status(), Some(status), "{error}");
             assert_eq!(error.is_port_failure(), before.is_port_failure());
             assert_eq!(error.entity(), None);
             // not an NLib routine's failure: no NL number, and no caller drops it as one
@@ -2997,16 +3027,19 @@ mod tests {
         }
         // only `Upstream` and the B-spline failures answer with an upstream status
         assert_eq!(
-            SolidError::null_pointer("op").upstream_status(),
+            SolidError::null_pointer("op").failed_routine_status(),
             Some(SM_ERR_NULL_POINTER)
         );
-        assert_eq!(SolidError::nurbs("op", N::Knots).upstream_status(), None);
         assert_eq!(
-            after("op", SolidError::sm_err("in")).upstream_status(),
+            SolidError::nurbs("op", N::Knots).failed_routine_status(),
             None
         );
         assert_eq!(
-            SolidError::invalid_input("op", "bad").upstream_status(),
+            after("op", SolidError::sm_err("in")).failed_routine_status(),
+            None
+        );
+        assert_eq!(
+            SolidError::invalid_input("op", "bad").failed_routine_status(),
             None
         );
     }
@@ -3029,7 +3062,7 @@ mod tests {
         assert_eq!(e.operation(), op);
         assert_eq!(e.sm_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::Failed);
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(nurbs::nlib_number(&e), None);
         assert!(!e.is_nurbs_failure());
         assert!(!e.is_port_failure());
@@ -3170,7 +3203,7 @@ mod tests {
     }
 }
 
-/// Samples for the tests of the decisions that read [`SolidError::upstream_status`] (#13790):
+/// Samples for the tests of the decisions that read [`SolidError::failed_routine_status`] (#13790):
 /// typed failures that replaced an [`SolidError::Upstream`], and typed failures that never
 /// stood for an upstream status.
 #[cfg(test)]
@@ -3238,7 +3271,7 @@ pub(crate) mod replaced_upstream_samples {
             })),
         ];
         for e in &natives {
-            assert_eq!(e.upstream_status(), None, "{e:?}");
+            assert_eq!(e.failed_routine_status(), None, "{e:?}");
         }
         natives
     }

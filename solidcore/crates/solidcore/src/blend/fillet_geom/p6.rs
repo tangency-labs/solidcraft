@@ -3408,11 +3408,11 @@ mod tests {
     };
 
     fn code(e: &SolidError) -> Option<i32> {
-        e.upstream_status()
+        e.failed_routine_status()
     }
 
     fn failure(e: &SolidError) -> (Option<&BlendFailure>, Option<i32>) {
-        (e.blend_failure(), e.upstream_status())
+        (e.blend_failure(), e.failed_routine_status())
     }
 
     fn vertex(fb: &mut FilletBrep, k: &Kernel, p: Point3) -> VertexId {
@@ -4121,7 +4121,7 @@ mod tests {
             err.is_refusal() && !err.is_defect() && !err.sized(),
             "{err:?}"
         );
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         assert_eq!(err.entity(), Some(EntityRef::Edge(te)));
 
         // at the middle of the same curve the tangent is (0, 0, 1): no refusal there

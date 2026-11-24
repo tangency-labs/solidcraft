@@ -5640,7 +5640,7 @@ mod tests {
             );
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
             assert!(!e.is_defect());
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         };
         let none = CornerLookup::default();
         no_corner(
@@ -5675,7 +5675,7 @@ mod tests {
             )
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(1001));
+        assert_eq!(e.failed_routine_status(), Some(1001));
         let e = fb
             .calc_rail_int_edgeuse(&k, v, None, none, &mut solvers, &mut target)
             .unwrap_err();
@@ -5688,7 +5688,7 @@ mod tests {
             ("blend::fillet_geom::p1::CornerLookup::corner", true),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         // an id outside the table is the NULL corner (`CornerLookup::corner`, p1, a stage
         // failure since #15034); a corner in it gets to the geometry check
         let e = fb
@@ -5702,7 +5702,7 @@ mod tests {
             ("blend::fillet_geom::p1::CornerLookup::corner", true),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         let corners = [FilletCorner::new(
             crate::blend::fillet_corner::p3::FilletCornerKind::FourByThree,
             None,
@@ -5736,7 +5736,7 @@ mod tests {
             );
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
             assert!(!e.is_defect());
-            assert_eq!(e.upstream_status(), Some(1001));
+            assert_eq!(e.failed_routine_status(), Some(1001));
         }
     }
 }

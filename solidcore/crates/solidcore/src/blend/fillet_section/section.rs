@@ -2759,7 +2759,7 @@ mod tests {
             matches!(error.blend_failure(), Some(BlendFailure::Defect { .. })),
             "{error:?}"
         );
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// The certificate's work budget ([`GN_HALVING_BUDGET`], [`GN_HALVINGS_PER_SPAN`]): the
@@ -2976,7 +2976,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert!(e.is_unported_or_cancelled());
     }
 }

@@ -2773,7 +2773,7 @@ mod tests {
             let e = SolidError::blend("blend::op", cause);
             assert_eq!(e.kind(), class, "{cause:?}");
             // every cause stands in for its site's status, which the goldens read
-            assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{cause:?}");
             assert_eq!(e.is_defect(), class.is_defect(), "{cause:?}");
             assert_eq!(e.is_refusal(), class.is_refusal(), "{cause:?}");
             assert_eq!(e.sized(), class.sized(), "{cause:?}");
@@ -2816,7 +2816,7 @@ mod tests {
             let e = SolidError::blend("blend::op", cause);
             assert_eq!(e.kind(), ErrorKind::InvalidInput);
             assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
             assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
             assert_eq!(e.blend_failure(), Some(&cause));
             assert_eq!(e.to_string(), format!("blend::op: {message}"));
@@ -2835,7 +2835,7 @@ mod tests {
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
         assert_eq!(e.sm_status(), Some(SM_ERR));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
         assert_eq!(e.blend_failure(), Some(&cause));
         assert_eq!(
@@ -2849,7 +2849,7 @@ mod tests {
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
         assert_eq!(e.sm_status(), Some(SM_ERR));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
         assert_eq!(e.blend_failure(), Some(&cause));
         assert_eq!(e.to_string(), format!("blend::op: {message}"));
@@ -2979,7 +2979,7 @@ mod tests {
             let e = SolidError::blend("blend::fillet_removal", cause);
             assert_eq!(e.kind(), class, "{reason:?}");
             // the status the C++ reports stays, for the goldens
-            assert_eq!(e.upstream_status(), Some(SM_ERR), "{reason:?}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{reason:?}");
             assert!(e.is_refusal() && !e.is_defect() && !e.sized(), "{reason:?}");
         }
         assert_eq!(
@@ -3013,7 +3013,7 @@ mod tests {
             let cause = BlendFailure::CornerShapeNotBuilt(shape);
             let e = SolidError::blend("blend::fillet_corner::topology", cause);
             assert_eq!(e.kind(), ErrorKind::Unsupported, "{shape:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{shape:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{shape:?}");
             assert!(!e.is_defect(), "{shape:?}");
         }
         assert_eq!(
@@ -3027,7 +3027,7 @@ mod tests {
         let drop = BlendFailure::CornerPointDropUnresolved { solutions: 2 };
         let e = SolidError::blend("blend::op", drop);
         assert_eq!(e.kind(), ErrorKind::NotFound);
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert!(!e.is_defect());
     }
 
@@ -3130,7 +3130,7 @@ mod tests {
             let cause = BlendFailure::CornerPatchNotMade(miss);
             let e = SolidError::blend("blend::fillet_corner", cause);
             assert_eq!(e.kind(), kind, "{miss:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{miss:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{miss:?}");
             assert!(!e.is_defect() && !e.is_refusal(), "{miss:?}");
         }
         assert_eq!(
@@ -3193,7 +3193,7 @@ mod tests {
             };
             let e = SolidError::blend("blend::fillet_corner", cause);
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{input:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{input:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{input:?}");
             assert!(!e.is_defect(), "{input:?}");
             assert_eq!(e.entity(), None, "{input:?}");
         }
@@ -3215,7 +3215,7 @@ mod tests {
         let link = BlendFailure::FilletSetUpInvalid(FilletSetUp::PrimaryEdgeUse);
         let e = SolidError::blend("blend::op", link);
         assert_eq!(e.kind(), ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(!e.is_defect());
         assert_eq!(
             e.to_string(),
@@ -3362,7 +3362,7 @@ mod tests {
             assert_eq!(cause.comparison_status(), SM_ERR_NULL_POINTER);
             let e = SolidError::blend_solver("blend::op", solver);
             assert_eq!(e.kind(), ErrorKind::InvalidInput);
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
             assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
             assert_eq!(e.to_string(), format!("blend::op: {message}"));
         }
@@ -3461,7 +3461,7 @@ mod tests {
             let e = SolidError::blend("blend::op", cause);
             assert_eq!(e.kind(), class, "{cause:?}");
             assert_eq!(e.blend_failure(), Some(&cause));
-            assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{cause:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status), "{cause:?}");
             assert!(!e.is_defect() && !e.is_refusal() && !e.sized(), "{cause:?}");
             assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
@@ -3481,7 +3481,7 @@ mod tests {
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
         assert_eq!(e.blend_failure(), Some(&cause));
-        assert_eq!(e.upstream_status(), Some(status));
+        assert_eq!(e.failed_routine_status(), Some(status));
         assert_eq!(e.is_defect(), defect);
         assert!(!e.is_refusal() && !e.sized());
         assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
@@ -3597,7 +3597,7 @@ mod tests {
         assert_eq!(e.operation(), "blend::op");
         assert_eq!(e.blend_failure(), Some(&cause));
         assert_eq!(e.sm_status(), Some(SM_ERR));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.is_defect(), class.is_defect());
         assert!(!e.is_refusal() && !e.sized());
         assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
@@ -3767,7 +3767,7 @@ mod tests {
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let e = SolidError::blend("blend::op", cause);
             assert_eq!(e.kind(), class);
-            assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{cause:?}");
             assert_eq!(e.blend_failure(), Some(&cause));
             assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
         }
@@ -3776,7 +3776,7 @@ mod tests {
         let chained = Failure::new("blend::op", BlendFailure::CornerSurfacesNotIntersected)
             .caused_by(refusal)
             .into_error();
-        assert_eq!(chained.upstream_status(), Some(SM_ERR));
+        assert_eq!(chained.failed_routine_status(), Some(SM_ERR));
         let defect = SolidError::blend("blend::ssi", BlendFailure::Defect { why: "x" });
         let chained = Failure::new("blend::op", BlendFailure::CornerSurfacesNotIntersected)
             .caused_by(defect)
@@ -3803,7 +3803,7 @@ mod tests {
             .into_error();
         assert_eq!(e.kind(), ErrorKind::SideEdgeDegenerate);
         assert_eq!(e.blend_failure(), Some(&cause));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.entity(), Some(EntityRef::Edge(edge)));
         assert!(e.is_refusal() && !e.is_defect() && !e.sized());
         assert_eq!(
@@ -3821,7 +3821,7 @@ mod tests {
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
         assert_eq!(e.blend_failure(), Some(&cause));
-        assert_eq!(e.upstream_status(), Some(status));
+        assert_eq!(e.failed_routine_status(), Some(status));
         assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
         assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
     }
@@ -3995,7 +3995,7 @@ mod tests {
             BlendFailure::BallTriangleNotOnePatch { pole: 2 },
         );
         assert_eq!(e.kind(), ErrorKind::Unsupported);
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert!(!e.is_defect());
         assert!(!e.is_port_failure());
         assert!(
@@ -4015,7 +4015,7 @@ mod tests {
         ] {
             let e = SolidError::blend("blend::op", BlendFailure::MixedCornerUnbuildable(step));
             assert_eq!(e.kind(), class, "{e}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR));
             assert!(!e.is_defect() && !e.is_port_failure(), "{e}");
             assert!(e.to_string().contains(step.what()), "{e}");
         }
@@ -4076,7 +4076,7 @@ mod tests {
         ] {
             let e = SolidError::blend("blend::op", BlendFailure::CornerUnbuildable(step));
             assert_eq!(e.kind(), class, "{e}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR));
             assert!(
                 !e.is_defect() && !e.is_refusal() && !e.is_port_failure(),
                 "{e}"
@@ -4111,7 +4111,7 @@ mod tests {
                 },
             );
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
-            assert_eq!(e.upstream_status(), Some(status), "{e}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{e}");
             assert!(!e.is_defect() && !e.is_port_failure(), "{e}");
             assert!(!e.is_unported_or_cancelled(), "{e}");
             assert!(e.to_string().contains(&format!("{input:?}")), "{e}");
@@ -4126,7 +4126,7 @@ mod tests {
         )
         .with_status(SM_ERR)
         .into_error();
-        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{e}");
     }
 
     #[test]
@@ -4146,7 +4146,7 @@ mod tests {
         let e = f.into_error();
         assert_eq!(e.operation(), "blend::op");
         assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.kind(), ErrorKind::StageFailed);
         assert!(e.is_defect());
         let shown = e.to_string();
@@ -4233,7 +4233,7 @@ mod tests {
             let e = open_base(entity);
             let filled = e.clone().or_at(at_edge.or(Site::point(point)));
             assert_eq!(filled.entity(), e.entity());
-            assert_eq!(filled.upstream_status(), e.upstream_status());
+            assert_eq!(filled.failed_routine_status(), e.failed_routine_status());
             assert_eq!(filled.kind(), e.kind());
             assert_eq!(
                 crate::blend::feature_executive::is_open_base_refusal(&filled),
@@ -4407,7 +4407,7 @@ mod tests {
             assert!(text.starts_with(&format!("{class}: ")), "{text}");
             let error = SolidError::blend("blend::op", cause);
             assert_eq!(error.kind(), class, "{error:?}");
-            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert_eq!(error.failed_routine_status(), Some(status), "{error:?}");
             assert!(!error.is_defect() && !error.is_refusal(), "{error:?}");
         }
         assert_eq!(
@@ -4448,7 +4448,7 @@ mod tests {
             assert!(text.starts_with(&format!("{class}: ")), "{text}");
             let error = SolidError::blend("blend::op", cause);
             assert_eq!(error.kind(), class, "{error:?}");
-            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert_eq!(error.failed_routine_status(), Some(status), "{error:?}");
             assert!(!error.is_defect() && !error.is_refusal(), "{error:?}");
         }
         assert_eq!(
@@ -4467,7 +4467,7 @@ mod tests {
             let error = SolidError::blend("blend::op", cause);
             assert_eq!(error.kind(), ErrorKind::InvalidInput, "{error:?}");
             assert_eq!(
-                error.upstream_status(),
+                error.failed_routine_status(),
                 Some(SM_ERR_NULL_POINTER),
                 "{error:?}"
             );
@@ -4480,7 +4480,7 @@ mod tests {
             .into_error();
         assert_eq!(face.kind(), ErrorKind::InvalidInput, "{face:?}");
         assert_eq!(
-            face.upstream_status(),
+            face.failed_routine_status(),
             Some(SM_ERR_NULL_POINTER),
             "{face:?}"
         );
@@ -4565,7 +4565,7 @@ mod tests {
             assert!(text.starts_with(&format!("{class}: ")), "{text}");
             let error = SolidError::blend("blend::op", cause);
             assert_eq!(error.kind(), class, "{error:?}");
-            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert_eq!(error.failed_routine_status(), Some(status), "{error:?}");
             assert!(!error.is_defect(), "{error:?}");
             assert!(!error.is_refusal(), "{error:?}");
         }
@@ -4745,7 +4745,7 @@ mod tests {
             assert!(text.starts_with(&format!("{class}: ")), "{text}");
             let error = SolidError::blend("blend::op", cause);
             assert_eq!(error.kind(), class, "{error:?}");
-            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert_eq!(error.failed_routine_status(), Some(status), "{error:?}");
             assert!(!error.is_defect(), "{error:?}");
             assert!(!error.is_refusal(), "{error:?}");
         }
@@ -4806,7 +4806,7 @@ mod tests {
             assert!(text.starts_with(&format!("{class}: ")), "{text}");
             let error = SolidError::blend("blend::op", cause);
             assert_eq!(error.kind(), class, "{error:?}");
-            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert_eq!(error.failed_routine_status(), Some(status), "{error:?}");
             assert!(!error.is_defect(), "{error:?}");
         }
         assert_eq!(
@@ -4861,7 +4861,7 @@ mod tests {
             assert!(text.starts_with(&format!("{class}: ")), "{text}");
             let error = SolidError::blend("blend::op", cause);
             assert_eq!(error.kind(), class, "{error:?}");
-            assert_eq!(error.upstream_status(), Some(SM_ERR), "{error:?}");
+            assert_eq!(error.failed_routine_status(), Some(SM_ERR), "{error:?}");
             assert!(!error.is_defect() && !error.is_refusal(), "{error:?}");
         }
         assert_eq!(

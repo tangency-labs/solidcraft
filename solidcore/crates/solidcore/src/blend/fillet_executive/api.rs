@@ -846,7 +846,7 @@ mod tests {
         assert_eq!(failed.blend_failure(), Some(&BlendFailure::NoEdgesGiven));
         assert_eq!(failed.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(failed.sm_status(), Some(SM_ERR_INVALID_INPUT));
-        assert_eq!(failed.upstream_status(), Some(SM_ERR_INVALID_INPUT));
+        assert_eq!(failed.failed_routine_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(failed.operation(), OP);
         assert_eq!(shape(&body), before);
 
@@ -897,7 +897,7 @@ mod tests {
             "{refused:?}"
         );
         assert!(refused.is_defect(), "{refused:?}");
-        assert_eq!(refused.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(refused.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(refused.operation(), OP);
         assert_eq!(refused.entity(), None);
         assert!(is_manifold_solid(&body).unwrap());
@@ -1050,7 +1050,7 @@ mod tests {
             match session.set_bevel_corner(*vertex) {
                 Ok(()) => beveled += 1,
                 Err(error) => assert_eq!(
-                    error.upstream_status(),
+                    error.failed_routine_status(),
                     Some(crate::error::SM_ERR_NULL_POINTER)
                 ),
             }
@@ -1067,7 +1067,7 @@ mod tests {
         let mut k = Kernel::default();
         let mut body = boxed(&mut k);
         let r = set_bevel_corners(&mut k, &mut body, &[], 1.0, &[]);
-        assert!(matches!(r, Err(ref e) if e.upstream_status() == Some(SM_ERR_INVALID_INPUT)));
+        assert!(matches!(r, Err(ref e) if e.failed_routine_status() == Some(SM_ERR_INVALID_INPUT)));
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
     }
 
@@ -1084,7 +1084,11 @@ mod tests {
             let e = r.unwrap_err();
             assert_eq!(e.blend_failure(), Some(&cause), "{e:?}");
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e:?}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR_INVALID_INPUT), "{e:?}");
+            assert_eq!(
+                e.failed_routine_status(),
+                Some(SM_ERR_INVALID_INPUT),
+                "{e:?}"
+            );
             assert_eq!(e.operation(), OP, "{e:?}");
             assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
         };
@@ -1168,7 +1172,7 @@ mod tests {
         let mut k = Kernel::default();
         let mut body = boxed(&mut k);
         let edges = p1::edges(&body, None).unwrap();
-        let invalid = |r: Result<()>| matches!(r, Err(ref e) if e.upstream_status() == Some(SM_ERR_INVALID_INPUT));
+        let invalid = |r: Result<()>| matches!(r, Err(ref e) if e.failed_routine_status() == Some(SM_ERR_INVALID_INPUT));
         assert!(invalid(fillet_edges(
             &mut k,
             &mut body,
@@ -1465,7 +1469,7 @@ mod tests {
         // The executive's own error, not a finalization error.
         assert!(matches!(
             result,
-            Err(ref e) if e.upstream_status() == Some(crate::error::SM_ERR)
+            Err(ref e) if e.failed_routine_status() == Some(crate::error::SM_ERR)
         ));
         crate::topology::integrity::check(&body).unwrap();
         assert_eq!(p1::faces(&body, None).unwrap().len(), 2);
@@ -1480,7 +1484,7 @@ mod tests {
         let result = variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1);
         assert!(matches!(
             result,
-            Err(ref e) if e.upstream_status() == Some(crate::error::SM_ERR)
+            Err(ref e) if e.failed_routine_status() == Some(crate::error::SM_ERR)
         ));
         crate::topology::integrity::check(&body).unwrap();
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);

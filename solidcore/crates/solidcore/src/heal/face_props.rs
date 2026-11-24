@@ -3021,7 +3021,7 @@ mod tests {
         let mut p: FaceProps<H> = FaceProps::new();
         // before Fix_TolSizes: SM_ERR, nothing is touched
         let named = |e: &SolidError| {
-            e.upstream_status() == Some(1001)
+            e.failed_routine_status() == Some(1001)
                 && e.heal_failure() == Some(&HealFailure::HealStepNotRun)
                 && e.kind() == crate::error::ErrorKind::InvalidInput
         };

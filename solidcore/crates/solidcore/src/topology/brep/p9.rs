@@ -3219,7 +3219,7 @@ mod tests {
         // a caller that stops on the note gets the status 1 the repair returned before
         let e = OrientSheetNote::stop_on_note(r).unwrap_err();
         assert_eq!(e.sm_status(), Some(1));
-        assert_eq!(e.upstream_status(), Some(1));
+        assert_eq!(e.failed_routine_status(), Some(1));
         assert_eq!(e.operation(), OP);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert_eq!(e.entity(), None);
@@ -3856,7 +3856,7 @@ mod tests {
     #[test]
     fn zero_ray_direction_retains_the_defined_native_status() {
         let e = ray_direction(Vec3::ZERO).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(1007));
+        assert_eq!(e.failed_routine_status(), Some(1007));
         assert_eq!(
             e.topology_failure(),
             Some(&TopologyFailure::ZeroLengthVector)
@@ -4376,7 +4376,7 @@ mod tests {
             Some(&TopologyFailure::FaceWithoutUses)
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP);
         assert_eq!(counts(&b), before);
     }

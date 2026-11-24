@@ -3389,7 +3389,7 @@ mod tests {
         };
         let e = Gap::from(open).gap_end_points(&k, &mut b).unwrap_err();
         assert_eq!(e.heal_failure(), Some(&HealFailure::GapWithoutTwoEnds));
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 

@@ -1462,7 +1462,7 @@ mod tests {
         ));
         assert!(matches!(
             s.solve_it(&mut Base, 0.5, 1e-9),
-            Err(e) if e.upstream_status() == Some(1001)
+            Err(e) if e.failed_routine_status() == Some(1001)
         ));
         assert_eq!(
             SolverAlgorithm::from_code(2),

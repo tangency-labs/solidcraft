@@ -1451,7 +1451,7 @@ mod tests {
     use crate::surface::plane::Plane;
 
     fn code(e: &SolidError) -> Option<i32> {
-        e.upstream_status()
+        e.failed_routine_status()
     }
 
     /// Runs `f` on a new B-rep (`new SmBrep()`) with an arena-only notification store.

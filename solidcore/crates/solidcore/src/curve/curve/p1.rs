@@ -180,9 +180,12 @@ fn first_n<const N: usize>(v: &[Vec3]) -> [Vec3; N] {
 /// The `SmStatus` value of an error a `double` function returns as its value
 /// (`sm_GetProjDist`'s `SER`).
 fn status_value(e: &SolidError) -> f64 {
+    if let Some(code) = e.failed_routine_status() {
+        return f64::from(code);
+    }
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        _ => f64::from(e.sm_status().unwrap_or(crate::error::SM_ERR)),
+        _ => 1001.0,
     }
 }
 

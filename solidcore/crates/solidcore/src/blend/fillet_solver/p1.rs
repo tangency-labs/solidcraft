@@ -3851,7 +3851,7 @@ mod tests {
             flat.blend_failure(),
             Some(&BlendFailure::Solver(SolverFailure::JacobianNotLoaded))
         );
-        assert_eq!(flat.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(flat.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(flat.cause(), Some(&stage));
         assert_eq!(bool_status(Err(e.clone())), Err(e.clone()));
         assert!(singularity_status(Err(e.clone())).is_err());
@@ -4069,7 +4069,7 @@ mod tests {
     }
 
     fn is_sm_err(r: &Result<(f64, f64, bool)>) -> bool {
-        matches!(r, Err(e) if e.blend_failure().is_some() && e.upstream_status() == Some(crate::error::SM_ERR))
+        matches!(r, Err(e) if e.blend_failure().is_some() && e.failed_routine_status() == Some(crate::error::SM_ERR))
     }
 
     #[test]
