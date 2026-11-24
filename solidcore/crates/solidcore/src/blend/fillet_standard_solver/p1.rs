@@ -64,6 +64,10 @@
 //!   each circle of fewer arcs again with the most (`ArcCounts`), as the approximated
 //!   arcs' second pass does with knots; and each point section takes the nearest
 //!   circle's arcs and weights (`collapse_point_sections`).
+//! - **Mirrored sections mirrored once.** (WR-21288, not upstream) With mirrored
+//!   approximated arcs of equal radii, the second pass keeps a section that already has
+//!   the most knots as the first pass mirrored it; upstream mirrors it a second time,
+//!   back to the unmirrored arc.
 //! - **Knife edges.** With `fixes.fillet_knife_edge_rounds` (WR-570, the fork's
 //!   tangency-labs/smlib `b7ec55b`, not in SMLib at the pin) the edge-use constructors
 //!   orient their offsets by `sector_sides` (`sm_SectorSides`), which also sides a
@@ -3411,6 +3415,12 @@ impl CircularCrossSectionFsg {
                             angle * 180.0 / PI,
                             self.tol_percent_radius,
                         )?);
+                    } else {
+                        // Not upstream (WR-21288): a section that already has the most
+                        // knots is kept as the 1st pass made it, mirrored already. Upstream
+                        // mirrors it again below, back to the unmirrored arc; only a
+                        // section built again here is mirrored.
+                        continue;
                     }
                 } else {
                     // on 2nd pass with unequal gapVector radii

@@ -1769,3 +1769,63 @@ mod g1r_moved_rows {
         assert_eq!(seen, MOVED.len());
     }
 }
+
+/// WR-458, WR-633 and WR-650 (#18921): the 10 rows the offset surface's extension from
+/// its base moves, each replayed as [`g1r_moved_rows`] replays its rows: the case's own
+/// `ComputePointValues` runs, and then every extension the solver's offset surfaces (and
+/// any offset nested in their bases) hold is certified ([`crate::g1r_cert::ExtensionWatch`]).
+/// Every row's solver holds at least one extension: the moved values are solved on
+/// certified extensions from the base (PROVEN, up to the rounding the certificate's header
+/// bounds).
+#[cfg(test)]
+mod wr458_moved_rows {
+    use super::*;
+    use crate::g1r_cert::ExtensionWatch;
+
+    const MOVED: [&str; 10] = ["gen0001", "gen0205", "gen0225", "gen0246", "gen0268", "gen0294", "gen0303", "gen0333", "gen0381", "gen0577"];
+
+    #[test]
+    fn each_moved_row_solves_on_certified_extensions_from_its_base() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Inputs::PointValues(i) = c.parse::<Inputs>().unwrap() else {
+                panic!("{}: not a point case", c.name)
+            };
+            let a = rust_surface(&k, &i.a).unwrap().unwrap();
+            let b = i.b.as_ref().map(|s| rust_surface(&k, s).unwrap().unwrap());
+            let b_id = u32::from(b.is_some());
+            let bs = b.unwrap_or_else(|| a.clone());
+            let inner = cr_solver(&k, i.tol, i.ang_tol, i.tangency_tol, i.radii, i.orient, a, bs, b_id)
+                .unwrap_or_else(|_| panic!("{}: solver", c.name));
+            let mut ops = ShimSolver { inner, fd: i.fd, extend: None };
+            let mut point = rust_point(&point_values(&i.point)).unwrap();
+            let prev = i.prev.as_ref().map(|p| rust_point(&point_values(p)).unwrap());
+            let _ = FilletSolver::compute_point_values(
+                &mut ops,
+                &k,
+                i.uv.map(p2),
+                &ext(i.dom1),
+                &ext(i.dom2),
+                i.dir,
+                &mut point,
+                prev.as_ref(),
+            );
+            let mut growths = 0;
+            for slot in ops.solver().surfaces.iter().flatten() {
+                let mut w = ExtensionWatch::default();
+                w.observe(&k, &slot.surface.surface)
+                    .unwrap_or_else(|e| panic!("{}: {e}", c.name));
+                growths += w.growths;
+            }
+            eprintln!("{}: {growths} extensions", c.name);
+            assert!(growths > 0, "{}: no extension held", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
+    }
+}
