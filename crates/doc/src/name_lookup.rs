@@ -159,7 +159,7 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
     let at_pick = |i: usize| EdgeHit { edge: i, point: near, verified: false, on_point: true };
     let Some((_, cands)) = best else {
-        let picked = if loose { resuffixed_edge(b, &m, &faces, wanted, near) } else { renamed_edge(b, &m, &faces, wanted, near) };
+        let picked = loose.then(|| resuffixed_edge(b, &m, &faces, wanted, near)).flatten().or_else(|| renamed_edge(b, &m, &faces, wanted, near));
         return picked.map(at_pick).ok_or_else(|| format!("edge `{name}` no longer exists"));
     };
     // When the faces of several numbered edges bound one edge now, every one of their names
@@ -770,27 +770,28 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
     let lost = |y: &str| {
         crate::persistent_name::made_by(y)
             .filter(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(*id)))
-            .filter(|_| (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none()))
+            .filter(|_| (0..count).all(|f| !crate::history_names::matches(faces, f, y).is_some_and(exactly)))
     };
     // Every way the name splits into two face names (a face name may hold `|` itself); they must
     // agree on the face still found.
-    let mut kept: Vec<(usize, u64)> = Vec::new();
+    let mut kept: Vec<(usize, u64, &str)> = Vec::new();
     for (i, _) in wanted.match_indices('|') {
         let (Some(x), Some(y)) = (wanted.get(..i), wanted.get(i + 1..)) else { continue };
         for (x, y) in [(x, y), (y, x)] {
-            if let Some(hit) = found(x).filter(|f| kept.iter().all(|(k, _)| k != f)).zip(lost(y)) {
-                kept.push(hit);
+            if let Some((hit_f, hit_id)) = found(x).filter(|f| kept.iter().all(|(k, _, _)| k != f)).zip(lost(y)) {
+                kept.push((hit_f, hit_id, y));
             }
         }
     }
-    let &[(face, lost_by)] = kept.as_slice() else { return None };
+    let &[(face, lost_by, lost_name)] = kept.as_slice() else { return None };
     let edge = edge_through(b, m, near)?;
     let uses = &b.body.record().edges.get(edge)?.uses;
-    // The edge's other face is not one of the lost face's feature: where that feature made the
-    // face at the pick, its face was replaced there (a sketch line swapped for another), not renamed.
     let made_by = |f: usize| faces.faces.get(f).and_then(|name| crate::persistent_name::made_by(name));
     let bounds_face = uses.iter().any(|u| u.face as usize == face);
-    let replaced = uses.iter().any(|u| u.face as usize != face && made_by(u.face as usize) == Some(lost_by));
+    let other = uses.iter().find(|u| u.face as usize != face).map(|u| u.face as usize);
+    let same_feature = other.and_then(made_by) == Some(lost_by);
+    let side_migration = same_feature && (qualified(lost_name) || other.and_then(|f| faces.faces.get(f)).is_some_and(|n| n.contains(":side:")));
+    let replaced = same_feature && !side_migration;
     (bounds_face && !replaced).then_some(edge)
 }
 
