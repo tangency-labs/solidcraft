@@ -516,6 +516,113 @@ pub struct PointClassification<O> {
     sss_point: Point3,
 }
 
+/// A regular chart marker together with the complete material trim that it marks.
+pub(crate) struct PeriodicTrimWitness<'a> {
+    point: Point3,
+    zone: f64,
+    curve: &'a Curve,
+    interval: Extent1d,
+    curve_zone: f64,
+}
+
+impl PeriodicTrimWitness<'_> {
+    /// Both the marker and its entire trim must be excluded by the same source evidence.
+    pub(crate) fn excluded_by(
+        &self,
+        k: &Kernel,
+        source: &crate::curve::contact::NativeSupport<'_>,
+        source_zone: f64,
+        marker_zone: f64,
+        foreign: Option<(&crate::surface::implicit::AnalyticSupport, f64)>,
+    ) -> bool {
+        use crate::curve::contact::NativeSupport;
+        let Some(source_zone) = source.zone(source_zone) else {
+            return false;
+        };
+        if ![self.zone, self.curve_zone, marker_zone]
+            .iter()
+            .all(|z| z.is_finite() && *z >= 0.0)
+        {
+            return false;
+        }
+        let foreign = foreign.filter(|(_, zone)| zone.is_finite() && *zone >= 0.0);
+        let marker_zone = marker_zone.max(self.zone);
+        let point_apart = source.disjoint(
+            k,
+            source_zone,
+            &NativeSupport::point(self.point),
+            marker_zone,
+        );
+        let surface_apart = foreign.is_some_and(|(support, zone)| {
+            NativeSupport::point(self.point).outside_surface(
+                k,
+                marker_zone,
+                support,
+                zone.max(source_zone),
+            )
+        });
+        if !(point_apart || surface_apart) {
+            return false;
+        }
+        let Some(trim) = NativeSupport::curve(self.curve, &self.interval) else {
+            return false;
+        };
+        (point_apart && source.disjoint(k, source_zone, &trim, self.curve_zone))
+            || (surface_apart
+                && foreign.is_some_and(|(support, zone)| {
+                    trim.outside_surface(k, self.curve_zone, support, zone.max(source_zone))
+                }))
+    }
+
+    /// A native marker cannot veto a merge when its complete rim crosses the support.
+    pub(crate) fn outside_surface(
+        &self,
+        k: &Kernel,
+        support: &crate::surface::implicit::AnalyticSupport,
+        zone: f64,
+    ) -> bool {
+        if ![self.zone, self.curve_zone]
+            .iter()
+            .all(|z| z.is_finite() && *z >= 0.0)
+        {
+            return false;
+        }
+        crate::curve::contact::NativeSupport::point(self.point).outside_surface(
+            k,
+            self.zone.max(self.curve_zone),
+            support,
+            zone,
+        ) && crate::curve::contact::NativeSupport::curve(self.curve, &self.interval)
+            .is_some_and(|trim| trim.outside_surface(k, self.curve_zone, support, zone))
+    }
+}
+
+/// Resolves a chart marker without eagerly allocating its curve's control hull.
+pub(crate) fn periodic_trim_witness<'a, O: ClassObject>(
+    k: &Kernel,
+    geometry: &'a impl ClassGeometry<O>,
+    marker: O,
+) -> Result<Option<PeriodicTrimWitness<'a>>> {
+    let Some((brep, EntityRef::Vertex(vertex))) = geometry.topology_entity(marker) else {
+        return Ok(None);
+    };
+    let Some(edge) = vertex::regular_periodic_trim_edge(k, brep, vertex)? else {
+        return Ok(None);
+    };
+    let Some(curve) = edge::curve(brep, edge)? else {
+        return Ok(None);
+    };
+    let zone = object_zone_tol_3d(k, geometry, Some(marker))?;
+    let curve_zone = edge::tolerance(brep, edge)?;
+    Ok(Some(PeriodicTrimWitness {
+        point: vertex::point(brep, vertex)?,
+        zone,
+        curve,
+        interval: edge::interval(brep, edge)?,
+        curve_zone,
+    }))
+}
+
 impl<O: ClassObject> PointClassification<O> {
     /// The same classification with every object handle (`m_pObject`, `m_cpFace`)
     /// replaced by `f` of it: a change of handle type, no new state.
