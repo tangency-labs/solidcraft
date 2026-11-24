@@ -13,60 +13,20 @@
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
-      # Linux only. Why this shell exists. winit opens the window by dlopen'ing the Wayland client libraries,
-      # wgpu renders through the EGL loader (libEGL.so.1), and rfd's file dialogs reach
-      # xdg-desktop-portal through libdbus-1; a plain `cargo run` under NixOS finds none of them,
-      # because there is no /usr/lib and nothing puts them on LD_LIBRARY_PATH:
-      #   winit EventLoopError: The wayland library could not be loaded
-      #   eframe: WGPU error: Failed to create surface for any enabled backend: {}
-      #   rfd::backend::xdg_desktop_portal::portal::libdbus: Can't connect to a portal: libdbus-1.so not found
-      # The Mesa drivers themselves — and the EGL vendor / Vulkan ICD descriptions that name them —
-      # come from the system in /run/opengl-driver (hardware.graphics.enable), not from here, since
-      # that is the driver stack the compositor runs on. Verified on an Intel LNL iGPU under
-      # Wayland: wgpu picks the GL backend through this loader and draws.
-      # The X11 libraries are the ones the app actually uses on a Wayland desktop: with `DISPLAY`
-      # set and `SOLIDCRAFT_WAYLAND` unset, winit runs through XWayland (file drag and drop exists
-      # only there). The Wayland ones are for `SOLIDCRAFT_WAYLAND=1`, and both are needed under
-      # `xvfb-run` on a machine with no display at all.
-      runtimeLibs =
-        pkgs:
-        pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
-          (with pkgs; [
-            wayland
-            libxkbcommon
-            libglvnd
-            vulkan-loader
-            dbus
-          ])
-          ++ (with pkgs; [
-            # xorg.libX11 and friends are deprecated aliases in current nixpkgs.
-            libx11
-            libxcursor
-            libxi
-            libxrandr
-            libxrender
-            libxext
-            libxcb
-          ])
-        );
-      # macOS needs none of the above: winit talks to AppKit, wgpu renders through Metal, and the
-      # OS ships its GPU drivers, so the darwin package and shells skip the wrapper and paths.
-      driverLibDir = pkgs: if pkgs.stdenv.hostPlatform.isLinux then "/run/opengl-driver/lib" else "";
-      driverShareDir = pkgs: if pkgs.stdenv.hostPlatform.isLinux then "/run/opengl-driver/share" else "";
-      libraryPath =
-        pkgs:
-        if pkgs.stdenv.hostPlatform.isLinux then "${pkgs.lib.makeLibraryPath (runtimeLibs pkgs)}:${driverLibDir pkgs}" else "";
+      # The run-time libraries, driver paths and package live in nix/; see nix/runtime.nix for
+      # why a NixOS shell needs them at all.
+      runtime = pkgs: import ./nix/runtime.nix pkgs;
 
       shellHook = pkgs: ''
         ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-          if [ ! -d ${driverLibDir pkgs} ]; then
-            echo "SolidCraft: ${driverLibDir pkgs} is missing — on NixOS enable hardware.graphics; on other distributions use a matching nixGL driver wrapper." >&2
+          if [ ! -d ${(runtime pkgs).driverLibDir} ]; then
+            echo "SolidCraft: ${(runtime pkgs).driverLibDir} is missing — on NixOS enable hardware.graphics; on other distributions use a matching nixGL driver wrapper." >&2
           fi
         ''}
         command -v cc >/dev/null || echo "solidcraft: no C linker on PATH, cargo cannot link — use nix develop .#rust" >&2
         echo "solidcraft: cargo run --release -p solidcraft -- --sample"
         ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-          export XDG_DATA_DIRS="${driverShareDir pkgs}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+          export XDG_DATA_DIRS="${(runtime pkgs).driverShareDir}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
         ''}
       '';
     in
@@ -78,7 +38,7 @@
         # `cargo build` produce binaries from somewhere else.
         default = pkgs.mkShellNoCC {
           name = "solidcraft";
-          LD_LIBRARY_PATH = libraryPath pkgs;
+          LD_LIBRARY_PATH = (runtime pkgs).libraryPath;
           shellHook = shellHook pkgs;
         };
 
@@ -92,7 +52,7 @@
             pkgs.rustfmt
             pkgs.clippy
           ];
-          LD_LIBRARY_PATH = libraryPath pkgs;
+          LD_LIBRARY_PATH = (runtime pkgs).libraryPath;
           # Under target/, which .gitignore already covers.
           CARGO_TARGET_DIR = "target/nix";
           shellHook = ''
@@ -102,85 +62,52 @@
         };
       });
 
-      packages = forAllSystems (pkgs: rec {
-        default = solidcraft;
-        solidcraft = assert pkgs.lib.assertMsg
-          (pkgs.lib.versionAtLeast pkgs.rustc.version (pkgs.lib.importTOML ./Cargo.toml).workspace.package.rust-version)
-          "SolidCraft requires the Rust version advertised in Cargo.toml; update the pinned nixpkgs input.";
-          pkgs.rustPlatform.buildRustPackage {
-          pname = "solidcraft";
-          version = (pkgs.lib.importTOML ./Cargo.toml).workspace.package.version;
-          src = self;
-
-          cargoLock = {
-            lockFile = ./Cargo.lock;
+      packages = forAllSystems (
+        pkgs:
+        let
+          workspace = (pkgs.lib.importTOML ./Cargo.toml).workspace.package;
+          # The upstream releases pinned in nix/sources.json (refreshed by nix/update.sh).
+          channels = import ./nix/channels.nix pkgs;
+        in
+        rec {
+          default = solidcraft;
+          # This checkout: `main` when the flake input follows the default branch.
+          solidcraft = import ./nix/package.nix pkgs {
+            src = self;
+            inherit (workspace) version;
+            rustVersion = workspace.rust-version;
+            cargoLock.lockFile = ./Cargo.lock;
           };
+          # The newest release marked Latest.
+          solidcraft-stable = channels.stable;
+          # The newest published release of any kind: a nightly or release candidate when one is
+          # newer than the latest stable release.
+          solidcraft-prerelease = channels.prerelease;
+        }
+      );
 
-          # The CLI draws the same packaging icons as the other Linux distributions.
-          cargoBuildFlags = [
-            "-p"
-            "solidcraft"
-            "-p"
-            "solidcraft-cli"
-          ];
-          cargoInstallFlags = [
-            "-p"
-            "solidcraft"
-            "-p"
-            "solidcraft-cli"
-          ];
-          # `cargo xtask ci` is the test gate (it wants a wasm target and a GPU); the sandbox has
-          # neither.
-          doCheck = false;
-
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          buildInputs = runtimeLibs pkgs;
-
-          postInstall = ''
-            ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-              install -Dm644 assets/platforms/linux/io.tangencylabs.solidcraft.desktop \
-                $out/share/applications/io.tangencylabs.solidcraft.desktop
-              install -Dm644 assets/platforms/linux/io.tangencylabs.solidcraft.mime.xml \
-                $out/share/mime/packages/io.tangencylabs.solidcraft.xml
-              for size in 16 24 32 48 64 128 256 512; do
-                icon=$out/share/icons/hicolor/''${size}x''${size}/apps/io.tangencylabs.solidcraft.png
-                mkdir -p "$(dirname "$icon")"
-                cp assets/icons/app/linux/exports/hicolor/''${size}x''${size}/apps/io.tangencylabs.solidcraft.png "$icon" >/dev/null
-              done
-            ''}
-          '';
-
-          # Linux only: the app reaches the window through dlopen'd libraries, so the packaged
-          # binary needs the same LD_LIBRARY_PATH the shell exports. File dialogs go through the
-          # desktop portal and fall back to zenity without one (#2177), so zenity comes along,
-          # after the system's own on PATH. macOS needs no wrapper.
-          postFixup = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-            wrapProgram $out/bin/solidcraft \
-              --prefix LD_LIBRARY_PATH : "${libraryPath pkgs}" \
-              --suffix PATH : "${pkgs.lib.makeBinPath [ pkgs.zenity ]}" \
-              --set-default XDG_DATA_DIRS /usr/local/share:/usr/share \
-              --prefix XDG_DATA_DIRS : "$out/share:${driverShareDir pkgs}"
-          '';
-
-          meta = {
-            description = "Rust-native parametric 3D CAD app";
-            homepage = "https://github.com/bherbruck/solidcraft";
-            license = with pkgs.lib.licenses; [
-              mit
-              asl20
-            ];
-            mainProgram = "solidcraft";
+      apps = forAllSystems (
+        pkgs:
+        let
+          packages = self.packages.${pkgs.stdenv.hostPlatform.system};
+          app = package: {
+            type = "app";
+            program = "${package}/bin/solidcraft";
           };
-        };
-      });
+        in
+        {
+          default = app packages.solidcraft;
+          solidcraft = app packages.solidcraft;
+          stable = app packages.solidcraft-stable;
+          prerelease = app packages.solidcraft-prerelease;
+          cli = {
+            type = "app";
+            program = "${packages.solidcraft}/bin/solidcraft-cli";
+          };
+        }
+      );
 
-      apps = forAllSystems (pkgs: let
-        package = self.packages.${pkgs.stdenv.hostPlatform.system}.solidcraft;
-        desktop = { type = "app"; program = "${package}/bin/solidcraft"; };
-      in {
-        default = desktop;
-        solidcraft = desktop;
-        cli = { type = "app"; program = "${package}/bin/solidcraft-cli"; };
-      });
+      # `programs.solidcraft.enable = true;` in Home Manager; see docs/nix.md.
+      homeManagerModules.default = import ./nix/hm-module.nix self;
     };
 }
