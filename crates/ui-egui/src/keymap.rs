@@ -1046,6 +1046,18 @@ fn shortcut_row(
         crate::ui_kit::settings_search::reveal(ui);
         crate::ui_kit::settings_search::push_force(ui);
     }
+    // Shortcut rows wrap their bindings instead of using Table, but recording and hover
+    // share its selection language. The surrounding card's padding holds the accent strip.
+    let highlight = rect.expand2(egui::vec2(t.space_8, 0.0));
+    let hovered = editing && ui.is_enabled() && ui.rect_contains_pointer(rect);
+    if capturing {
+        let fill = if hovered { t.selected_bg.lerp_to_gamma(t.form_primary, 0.08) } else { t.selected_bg };
+        ui.painter().rect_filled(highlight, t.radius_md, fill);
+        let bar = egui::Rect::from_min_max(highlight.min, egui::pos2(highlight.left() + t.space_3, highlight.bottom()));
+        ui.painter().with_clip_rect(ui.clip_rect().intersect(bar)).rect_filled(highlight, t.radius_md, t.form_primary);
+    } else if hovered {
+        ui.painter().rect_filled(highlight, t.radius_md, t.text.gamma_multiply(0.06));
+    }
     let mut action = None;
     ui.push_id(command.id, |ui| {
         let name =
@@ -1191,6 +1203,60 @@ mod tests {
         assert_eq!(command_for(&a, "M"), Some("sketch.mirror"), "precedence survives a reload");
         a.keymap.custom.remove("sketch.mirror");
         assert_eq!(command_for(&a, "M"), Some("sketch.move"), "reset restores the new default");
+    }
+
+    #[test]
+    fn shortcut_recording_row_uses_selection_and_read_only_rows_have_no_hover() {
+        let t = solidcraft_theme::Tokens::get();
+        for (recording, read_only) in [(false, false), (true, false), (false, true)] {
+            let mut a = app();
+            a.keymap.read_only = read_only;
+            a.keymap.capturing = recording.then(|| "solid.extrude".to_owned());
+            let command = command_specs().into_iter().find(|c| c.id == "solid.extrude").unwrap();
+            let ctx = crate::fonts::test_context();
+            for hovered in [false, true] {
+                let events = if hovered { vec![egui::Event::PointerMoved(egui::pos2(30.0, 32.0))] } else { vec![] };
+                let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                    ui.scope_builder(
+                        egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(500.0, 100.0))),
+                        |ui| {
+                            ui_kit::scope(ui, |ui| {
+                                shortcut_row(&a, ui, command, &["E"], "Extrude", false);
+                            });
+                        },
+                    );
+                });
+                output.textures_delta.clear();
+                let selected = if hovered { t.selected_bg.lerp_to_gamma(t.form_primary, 0.08) } else { t.selected_bg };
+                assert_eq!(
+                    output
+                        .shapes
+                        .iter()
+                        .filter(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                    if r.rect.width() > 500.0 && r.fill == selected && r.corner_radius == egui::CornerRadius::same(t.radius_md)))
+                        .count(),
+                    usize::from(recording)
+                );
+                assert_eq!(
+                    output
+                        .shapes
+                        .iter()
+                        .filter(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                    if r.rect.width() > 500.0 && r.fill == t.text.gamma_multiply(0.06)))
+                        .count(),
+                    usize::from(hovered && !recording && !read_only)
+                );
+                assert_eq!(
+                    output
+                        .shapes
+                        .iter()
+                        .filter(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                    if r.rect.width() > 500.0 && r.fill == t.form_primary && s.clip_rect.width() == t.space_3))
+                        .count(),
+                    usize::from(recording)
+                );
+            }
+        }
     }
 
     #[test]
@@ -1702,14 +1768,15 @@ mod tests {
     /// page (#10043): the search keeps its query, and the key runs no command behind
     /// Preferences (P is Project's, which would open Create Sketch). P being Project's is
     /// reported there with the choice to use it anyway, as on the page. Going back to the search
-    /// field to type stops a recording.
+    /// field to type stops a recording. The search is "unfix", not "fix", which also finds the
+    /// URDF mesh prefix setting on General and pushes the shortcut matches below the window.
     #[test]
     fn a_shortcut_recorded_from_a_preferences_search_takes_the_key() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.prefs", json!({"open": "General"}));
         h.frames(3);
-        h.step(&json!({"text": "fix"})).expect("search");
+        h.step(&json!({"text": "unfix"})).expect("search");
         h.frames(3);
         h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
         h.frames(2);
@@ -1719,7 +1786,7 @@ mod tests {
         h.step(&json!({"text": "p"})).unwrap();
         h.step(&json!({"key": "P", "pressed": false})).unwrap();
         h.frames(65);
-        assert_eq!(h.app.prefs_window.shell.filter, "fix", "the key went to the search");
+        assert_eq!(h.app.prefs_window.shell.filter, "unfix", "the key went to the search");
         assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_none(), "the key ran a command");
         assert!(h.app.keymap.capturing.is_none());
         let conflict = h.app.keymap.conflict.as_ref().map(|(id, key, ..)| (id.as_str(), key.as_str()));
@@ -1736,7 +1803,7 @@ mod tests {
         h.step(&json!({"text": "x"})).unwrap();
         h.frames(2);
         assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
-        assert_eq!(h.app.prefs_window.shell.filter, "fixx");
+        assert_eq!(h.app.prefs_window.shell.filter, "unfixx");
     }
 
     /// Dialog OK (`ui.dialog_ok`, #17416) has no default key: a Preferences search finds it on

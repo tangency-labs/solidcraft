@@ -20,6 +20,98 @@ fn part(path: &Path, height: u32) {
     run(&mut s, "file.save", json!({"path": path}));
 }
 
+fn three_hole_plate() -> Session {
+    let mut plate = Session::default();
+    run(&mut plate, "solid.box", json!({"length": 100, "width": 40, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut plate, "sketch.create", json!({"name": "HolePoints", "plane": "XY", "offset": 10}));
+    for x in [20, 50, 80] {
+        run(&mut plate, "sketch.point", json!({"point": [x, 20]}));
+    }
+    run(&mut plate, "sketch.finish", json!({}));
+    run(&mut plate, "solid.hole", json!({"sketch": "HolePoints", "points": ["p1", "p2", "p3"], "diameter": 8}));
+    plate
+}
+
+fn remove_first_hole_point(plate: &mut Session) {
+    run(plate, "sketch.edit", json!({"sketch": "HolePoints"}));
+    run(plate, "sketch.delete", json!({"entities": ["p1"]}));
+    run(plate, "sketch.finish", json!({}));
+}
+
+#[test]
+fn deleting_a_hole_point_keeps_surviving_linked_joints() {
+    let dir = folder("hole-point-deletion");
+    let before = dir.join("plate-before.sc");
+    let after = dir.join("plate-after.sc");
+    let pin = dir.join("pin.sc");
+    let mut plate = three_hole_plate();
+    run(&mut plate, "file.save", json!({"path": before}));
+    remove_first_hole_point(&mut plate);
+    run(&mut plate, "file.save", json!({"path": after}));
+
+    let mut part = Session::default();
+    run(&mut part, "solid.cylinder", json!({"radius": 4, "height": 20}));
+    run(&mut part, "file.save", json!({"path": pin}));
+    let mut assembly = Session::default();
+    let link = run(&mut assembly, "component.insert_design", json!({"path": before, "name": "Plate"}));
+    let occurrence = &link["occurrence"];
+    run(&mut assembly, "occurrence.ground", json!({"occurrence": occurrence}));
+    for (name, x) in [("Middle", 50), ("Right", 80), ("Left", 20)] {
+        let peg = run(&mut assembly, "component.insert_design", json!({"path": pin, "name": format!("{name} pin")}));
+        run(
+            &mut assembly,
+            "joint.create",
+            json!({"name": name, "type": "rigid",
+                "a": {"occurrence": occurrence, "circle": [x + 4, 20, 10]},
+                "b": {"occurrence": peg["occurrence"], "circle": [4, 0, 20]}}),
+        );
+    }
+    let assert_origin = |list: &Value, name: &str, want: f64| {
+        let joint = list["joints"].as_array().unwrap().iter().find(|j| j["name"] == name).unwrap();
+        for side in ["frame_a", "frame_b"] {
+            let x = joint[side]["origin"][0].as_f64().unwrap_or(f64::NAN);
+            assert!((x - want).abs() < 1e-6, "{name} {side} should stay at x={want}, got {x}: {joint}");
+        }
+    };
+    let original = run(&mut assembly, "joint.list", json!({}));
+    assert_eq!(original["errors"], json!([]), "{original}");
+    for (name, x) in [("Middle", 50.0), ("Right", 80.0), ("Left", 20.0)] {
+        assert_origin(&original, name, x);
+    }
+
+    run(&mut assembly, "component.relink", json!({"component": link["component"], "path": after}));
+    let updated = run(&mut assembly, "joint.list", json!({}));
+    assert_origin(&updated, "Middle", 50.0);
+    assert_origin(&updated, "Right", 80.0);
+    let errors = updated["errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1, "{updated}");
+    assert_eq!(errors[0]["name"], "Left", "{updated}");
+    assert!(errors[0]["why"].as_str().unwrap().contains("no longer exists"), "{updated}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn legacy_hole_names_keep_their_numbering_until_a_point_is_lost() {
+    let plate = three_hole_plate();
+    let mut old: Value = serde_json::from_str(&plate.doc.to_json()).unwrap();
+    old["format_pending"].as_array_mut().unwrap().retain(|name| name != "hole-point-face-roles");
+    let mut legacy = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
+    let legacy_names = |s: &mut Session| {
+        let result = run(s, "model.faces", json!({"body": "Body1"}));
+        let mut names: Vec<_> = result["faces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|face| face["name"].as_str().filter(|name| name.contains(":bore:side:0")).map(str::to_string))
+            .collect();
+        names.sort();
+        names
+    };
+    assert_eq!(legacy_names(&mut legacy), ["F3:bore:side:0#1", "F3:bore:side:0#2", "F3:bore:side:0#3"]);
+    remove_first_hole_point(&mut legacy);
+    assert_eq!(legacy_names(&mut legacy), ["F3:point:p2:bore:side:0", "F3:point:p3:bore:side:0"]);
+}
+
 fn threaded_part(path: &Path, length: Option<u32>) -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 10, "body_name": "Stud"}));
@@ -1579,6 +1671,75 @@ fn a_kept_linked_part_moves_up_to_the_component_the_deleted_one_sat_in() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A saved design of boxes, each `(name, edge length, x, material)`, in this build order.
+fn boxes(path: &Path, parts: &[(&str, u32, u32, &str)]) {
+    let mut s = Session::default();
+    for (name, size, x, material) in parts {
+        run(&mut s, "solid.box", json!({"length": size, "width": size, "height": size, "body_name": name, "corner": [x, 0, 0]}));
+        run(&mut s, "material.assign", json!({"bodies": [name], "material": material}));
+    }
+    run(&mut s, "file.save", json!({"path": path}));
+}
+
+/// Each linked body of `component` by name: its volume rounded to mm³ and its material.
+fn linked_bodies(s: &Session, component: u64) -> std::collections::BTreeMap<String, (i64, String)> {
+    let state = s.model.state();
+    state
+        .bodies
+        .iter()
+        .filter(|b| b.component == component)
+        .map(|b| (b.name.clone(), (b.volume().unwrap_or_default().round() as i64, s.doc.body_material(&b.name))))
+        .collect()
+}
+
+/// #21371: the issue's two versions of a design with three boxes. In the second, the first box
+/// is replaced by a new one built last, so the design lists the same number of bodies in
+/// another order. The assembly gave the middle box a name of its own.
+fn reordered_versions(dir: &Path) -> (PathBuf, PathBuf) {
+    let (v1, v2) = (dir.join("child_v1.sc"), dir.join("child_v2.sc"));
+    boxes(&v1, &[("PartA", 10, 0, "Aluminum"), ("PartB", 20, 50, "Steel"), ("PartC", 30, 100, "Brass")]);
+    boxes(&v2, &[("PartB", 20, 50, "Steel"), ("PartC", 30, 100, "Brass"), ("PartA_New", 10, 0, "Steel")]);
+    (v1, v2)
+}
+
+fn reordered_assembly(v1: &Path) -> (Session, u64) {
+    let mut s = Session::default();
+    let component = run(&mut s, "component.insert_design", json!({"path": v1, "name": "SubAsm"}))["component"].as_u64().unwrap();
+    run(&mut s, "body.rename", json!({"body": "PartB", "name": "Bracket"}));
+    let before = [("PartA", (1000, "Aluminum")), ("Bracket", (8000, "Steel")), ("PartC", (27000, "Brass"))];
+    assert_eq!(linked_bodies(&s, component), std::collections::BTreeMap::from(before.map(|(n, (v, m))| (n.to_string(), (v, m.to_string())))));
+    (s, component)
+}
+
+/// Each body keeps the assembly's name for it, wherever the design now lists it, and the new
+/// box takes the name of the one it replaced, with the material the design gives it.
+fn assert_reordered(s: &Session, component: u64, what: &str) {
+    let after = [("PartA", (1000, "Steel")), ("Bracket", (8000, "Steel")), ("PartC", (27000, "Brass"))];
+    assert_eq!(linked_bodies(s, component), std::collections::BTreeMap::from(after.map(|(n, (v, m))| (n.to_string(), (v, m.to_string())))), "{what}");
+}
+
+#[test]
+fn relink_keeps_each_body_its_name_when_the_design_lists_its_bodies_in_another_order() {
+    let dir = folder("reordered-relink");
+    let (v1, v2) = reordered_versions(&dir);
+    let (mut s, component) = reordered_assembly(&v1);
+    run(&mut s, "component.relink", json!({"component": component, "path": v2}));
+    assert_reordered(&s, component, "relink");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn update_links_keeps_each_body_its_name_when_the_design_lists_its_bodies_in_another_order() {
+    let dir = folder("reordered-update");
+    let (v1, v2) = reordered_versions(&dir);
+    let (mut s, component) = reordered_assembly(&v1);
+    // The design saved over in place.
+    std::fs::copy(&v2, &v1).unwrap();
+    run(&mut s, "component.update_links", json!({}));
+    assert_reordered(&s, component, "update links");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// An assembly of its own 10 x 10 x 10 box and the linked design `part` (a 10 x 20 box), saved
 /// as `assembly` in `dir` without the bodies of linked designs.
 fn saved_without_linked_bodies(dir: &Path, part: &Path, assembly: &str) -> (Session, PathBuf) {
@@ -2061,4 +2222,35 @@ fn a_save_without_linked_bodies_keeps_the_bodies_of_a_linked_step_file() {
     let listed = run(&mut opened, "component.links", json!({}));
     assert!(listed["links"].as_array().unwrap().iter().all(|l| l["changed"] != true), "{listed}");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_physical_override_survives_a_link_update() {
+    let dir = folder("override-update");
+    let file = dir.join("source.solidcraft");
+    let mut part = properties_part(&file, "Steel", None, [12, 34, 56]);
+    let mut s = Session::default();
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    run(&mut s, "component.physical_override", json!({"component": c, "mass": 5.0}));
+    run(&mut part, "material.assign", json!({"bodies": ["Cube"], "material": "Aluminum"}));
+    run(&mut part, "file.save", json!({}));
+    assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"].as_array().unwrap().len(), 1);
+    let saved = s.doc.components.iter().find(|x| x.id == c).and_then(|x| x.physical_override);
+    assert_eq!(saved.map(|o| o.mass), Some(5.0));
+}
+
+#[test]
+fn a_collision_shape_survives_a_link_update() {
+    let dir = folder("collision-update");
+    let file = dir.join("source.solidcraft");
+    let mut part = properties_part(&file, "Steel", None, [12, 34, 56]);
+    let mut s = Session::default();
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    run(&mut s, "body.collision", json!({"component": c, "shape": "box"}));
+    assert!(!s.doc.collision_shapes.is_empty());
+    let before = s.doc.collision_shapes.clone();
+    run(&mut part, "material.assign", json!({"bodies": ["Cube"], "material": "Aluminum"}));
+    run(&mut part, "file.save", json!({}));
+    assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"].as_array().unwrap().len(), 1);
+    assert_eq!(s.doc.collision_shapes, before);
 }

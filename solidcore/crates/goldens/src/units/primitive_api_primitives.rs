@@ -1684,3 +1684,331 @@ mod moved_rows {
         }
     }
 }
+
+/// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired): the
+/// partial cone, cylinder and torus rows it moved. Their walls are now the analytic cone,
+/// cylinder and torus rather than B-spline surfaces of revolution, so the samples taken at
+/// fixed fractions of each edge interval and face domain moved along the same solid, the
+/// vertex and edge tolerances moved by rounding, and three edges keep one stored UV trim
+/// rather than two. Each row is replayed and checked against the solid's closed form:
+/// every recorded point is on a face carrier, the body is sound with its volume enclosure
+/// overlapping the enclosed closed-form volume, every tolerance covers its certified gaps,
+/// and every edge use's UV trim (stored, its mate's, or built on demand) runs between its
+/// edge's vertices.
+#[cfg(test)]
+mod revolve_analytic_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+    use super::*;
+    use crate::interval::Iv;
+    use std::f64::consts::PI;
+
+    /// The moved rows: 39 partial cones, 30 partial cylinders and 28 partial tori.
+    const ROWS: [&str; 97] = ["gen0012", "gen0015", "gen0049", "gen0052", "gen0068", "gen0070", "gen0080", "gen0107", "gen0115", "gen0129", "gen0153", "gen0194", "gen0203", "gen0220", "gen0238", "gen0246", "gen0251", "gen0253", "gen0261", "gen0285", "gen0290", "gen0307", "gen0313", "gen0327", "gen0329", "gen0337", "gen0423", "gen0438", "gen0454", "gen0460", "gen0466", "gen0471", "gen0475", "gen0479", "gen0526", "gen0529", "gen0533", "gen0534", "gen0542", "gen0562", "gen0589", "gen0590", "gen0600", "gen0607", "gen0637", "gen0642", "gen0643", "gen0660", "gen0700", "gen0714", "gen0716", "gen0724", "gen0749", "gen0880", "gen0885", "gen0895", "gen0905", "gen0909", "gen0919", "gen0929", "gen0940", "gen0959", "gen0977", "gen0988", "gen0989", "gen1013", "gen1036", "gen1042", "gen1085", "gen1120", "gen1122", "gen1126", "gen1133", "gen1159", "gen1163", "gen1165", "gen1183", "gen1189", "gen1210", "gen1242", "gen1246", "gen1300", "gen1323", "gen1337", "gen1349", "gen1375", "gen1377", "gen1391", "gen1398", "gen1404", "gen1405", "gen1418", "gen1439", "gen1450", "gen1463", "gen1464", "gen1484"];
+
+    /// The solid's closed form in its frame (`w` the point less the origin, `rho` its
+    /// distance from Z): the radial distance off the wall, and the volume.
+    #[derive(Debug, Clone, Copy)]
+    enum Solid {
+        /// The sector of the cone (a cylinder: equal radii) from `base` at `w.z = 0` to
+        /// `top` at `w.z = height`.
+        Cone { base: f64, top: f64, height: f64 },
+        /// The sector of the torus `(rho - major)^2 + w.z^2 = minor^2`.
+        Torus { major: f64, minor: f64 },
+    }
+
+    /// A face carrier of the exact solid.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Carrier {
+        /// The cone's or torus' wall.
+        Wall,
+        /// The cone's base plane `w.z = 0`.
+        Bottom,
+        /// The cone's top plane `w.z = height`.
+        Top,
+        /// The half-plane through Z at the row's start (`0`) or end (`1`) angle.
+        Sector(usize),
+    }
+
+    impl Solid {
+        /// An enclosure of the signed distance-like quantity of `w` (exact operands,
+        /// interval arithmetic) to `carrier`, whose magnitude bounds the distance from `w`
+        /// to the carrier: the cone wall's generator line in `w`'s meridian half-plane
+        /// (`((rho - base) height - (top - base) w.z) / |(top - base, height)|`; the line
+        /// is on the cone, so its distance bounds the cone's), the torus' exact distance
+        /// `sqrt((rho - major)^2 + w.z^2) - minor`, the end planes' `w.z` and
+        /// `w.z - height`, and the sector plane's `cos a w.y - sin a w.x`. `None` for a
+        /// carrier the solid lacks.
+        fn distance(&self, carrier: Carrier, angles: [f64; 2], w: [Iv; 3]) -> Option<Iv> {
+            let [x, y, z] = w;
+            let rho = x.mul(x).add(y.mul(y)).sqrt();
+            match (*self, carrier) {
+                (Self::Cone { base, top, height }, Carrier::Wall) => {
+                    let (b, h) = (Iv::exact(base), Iv::exact(height));
+                    let slope = Iv::exact(top).sub(b);
+                    let num = rho.sub(b).mul(h).sub(slope.mul(z));
+                    Some(num.div(h.mul(h).add(slope.mul(slope)).sqrt()))
+                }
+                (Self::Torus { major, minor }, Carrier::Wall) => {
+                    let d = rho.sub(Iv::exact(major));
+                    Some(d.mul(d).add(z.mul(z)).sqrt().sub(Iv::exact(minor)))
+                }
+                (Self::Cone { .. }, Carrier::Bottom) => Some(z),
+                (Self::Cone { height, .. }, Carrier::Top) => Some(z.sub(Iv::exact(height))),
+                (_, Carrier::Sector(n)) => {
+                    let (s, c) = crate::interval::sin_cos_deg(angles[n]);
+                    Some(c.mul(y).sub(s.mul(x)))
+                }
+                _ => None,
+            }
+        }
+
+        /// The volume of the sector from `angles[0]` to `angles[1]` degrees, enclosed
+        /// (`pi` by its neighbouring doubles, every operation rounded outward): with
+        /// `theta` the sweep in radians, `theta h (b^2 + b t + t^2) / 6` for the cone,
+        /// `theta pi R r^2` for the torus.
+        fn volume(&self, angles: [f64; 2]) -> Iv {
+            let pi = Iv { lo: PI.next_down(), hi: PI.next_up() };
+            let theta = Iv::exact(angles[1])
+                .sub(Iv::exact(angles[0]))
+                .mul(pi)
+                .div(Iv::exact(180.0));
+            match *self {
+                Self::Cone { base, top, height } => {
+                    let (b, t) = (Iv::exact(base), Iv::exact(top));
+                    let area = b.mul(b).add(b.mul(t)).add(t.mul(t));
+                    theta.mul(Iv::exact(height)).mul(area).div(Iv::exact(6.0))
+                }
+                Self::Torus { major, minor } => {
+                    let r = Iv::exact(minor);
+                    theta.mul(pi).mul(Iv::exact(major)).mul(r).mul(r)
+                }
+            }
+        }
+    }
+
+    /// The row's solid and its angles in degrees.
+    fn solid(i: &Inputs) -> (Solid, [f64; 2]) {
+        let a = |n: usize| i.arg(n).unwrap();
+        match i.op {
+            OpName::PartialCone => (
+                Solid::Cone { base: a(3), top: a(4), height: a(5) },
+                [a(6), a(7)],
+            ),
+            OpName::PartialCylinder => (
+                Solid::Cone { base: a(3), top: a(3), height: a(4) },
+                [a(5), a(6)],
+            ),
+            OpName::PartialTorus => (Solid::Torus { major: a(3), minor: a(4) }, [a(5), a(6)]),
+            op => panic!("{op:?}"),
+        }
+    }
+
+    /// The row's body (the one [`crate::util::primitive::append`] recorded), checked to be
+    /// the record: its success flags and counts, then exactly `append`'s fields of it.
+    fn body(name: &str, i: &Inputs) -> Brep {
+        crate::certify::watch_written();
+        let out = rust(i).unwrap();
+        let mut bodies = crate::certify::take_written();
+        assert_eq!(bodies.len(), 1, "{name}");
+        let b = bodies.remove(0);
+        let mut again = vec![0.0, 1.0];
+        put_brep(&mut again, &b);
+        crate::util::primitive::append(&Kernel::default(), &b, &mut again).unwrap();
+        let _ = crate::certify::take_written();
+        let record = &out.values["rec"];
+        assert_eq!(record.len(), again.len(), "{name}");
+        for (n, (r, a)) in record.iter().zip(&again).enumerate() {
+            assert_eq!(r.to_bits(), a.to_bits(), "{name}: record value {n}");
+        }
+        b
+    }
+
+    /// Every recorded value is the body's own: each face's domain is its surface's natural
+    /// domain and each edge's interval its curve's natural interval (so the fixed sample
+    /// fractions are fractions of the analytic parameterisations), and every point is on
+    /// the exact solid: each face is assigned the one carrier (its wall, an end plane or a
+    /// sector plane) that its samples, its edges' samples and its vertices are all on,
+    /// each within its own entity's tolerance (the face's, the edge's, the vertex's); no
+    /// two faces share a carrier; the wall's face is the solid's analytic kind and the
+    /// other faces are planes; and each sector face's vertices are on the angle's side of
+    /// Z. The distances are enclosed in interval arithmetic from the exact inputs and the
+    /// recorded points, so the bounds are certain; the tolerances are the body's own, so
+    /// no allowance is chosen here. (UV trims are not claimed: an edge use may hold none,
+    /// which `edgeuse::p3::get_or_create_uv_trim_curve` builds on demand.)
+    #[test]
+    fn every_moved_record_is_the_exact_solid_sampled() {
+        use solidcore::topology::face::p4 as fp;
+        use solidcore::topology::edge;
+        for name in ROWS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let (solid, angles) = solid(&i);
+            let o = i.point(0).unwrap();
+            let b = body(name, &i);
+            let k = Kernel::default();
+            let w = |p: Vec3| {
+                [
+                    Iv::exact(p.x).sub(Iv::exact(o.x)),
+                    Iv::exact(p.y).sub(Iv::exact(o.y)),
+                    Iv::exact(p.z).sub(Iv::exact(o.z)),
+                ]
+            };
+            let on = |c: Carrier, pts: &[(Vec3, f64)]| {
+                pts.iter().all(|&(p, tol)| {
+                    solid.distance(c, angles, w(p)).is_some_and(|d| d.mag() <= tol)
+                })
+            };
+            let carriers = [
+                Carrier::Wall,
+                Carrier::Bottom,
+                Carrier::Top,
+                Carrier::Sector(0),
+                Carrier::Sector(1),
+            ];
+            let mut used = Vec::new();
+            for f in p1::faces(&b, None).unwrap() {
+                let face = b.face(f).unwrap();
+                let surface = face.surface.as_ref().unwrap();
+                let domain = face.uv_domain;
+                assert_eq!(domain, surface.natural_uv_domain_with_nurb(&k).unwrap(), "{name}");
+                let mut pts = Vec::new();
+                for uv in [(0.17, 0.37), (0.37, 0.61), (0.83, 0.23)] {
+                    let p = surface.evaluate_point(&k, domain.evaluate(uv.0, uv.1)).unwrap();
+                    pts.push((p, face.tolerance));
+                }
+                for e in fp::edges(&b, f, None, false, None).unwrap() {
+                    let er = b.edge(e).unwrap();
+                    let curve = er.curve.as_ref().unwrap();
+                    assert_eq!(er.interval, curve.natural_interval(), "{name}");
+                    for t in [0.17, 0.37, 0.83] {
+                        let p = curve.evaluate_point(&k, er.interval.evaluate(t)).unwrap();
+                        pts.push((p, er.tolerance));
+                    }
+                    assert!(edge::faces(&b, e, None).unwrap().contains(&f), "{name}");
+                }
+                let vertices = fp::vertices(&b, f, None, false, None).unwrap();
+                for &v in &vertices {
+                    let vr = b.vertex(v).unwrap();
+                    pts.push((vr.point, vr.tolerance));
+                }
+                let found: Vec<Carrier> = carriers.into_iter().filter(|&c| on(c, &pts)).collect();
+                assert_eq!(found.len(), 1, "{name}: face {f:?} on carriers {found:?}");
+                let c = found[0];
+                assert!(!used.contains(&c), "{name}: two faces on {c:?}");
+                used.push(c);
+                let kind_ok = match (c, surface.kind(), solid) {
+                    (Carrier::Wall, SurfaceKind::Cone(_), Solid::Cone { .. })
+                    | (Carrier::Wall, SurfaceKind::Torus(_), Solid::Torus { .. }) => true,
+                    (Carrier::Wall, _, _) => false,
+                    (_, kind, _) => matches!(kind, SurfaceKind::Plane(_)),
+                };
+                assert!(kind_ok, "{name}: face {f:?} on {c:?} of {solid:?}");
+                if let Carrier::Sector(n) = c {
+                    let (s, cs) = crate::interval::sin_cos_deg(angles[n]);
+                    for &v in &vertices {
+                        let vr = b.vertex(v).unwrap();
+                        let [x, y, _] = w(vr.point);
+                        let along = cs.mul(x).add(s.mul(y));
+                        assert!(along.lo >= -vr.tolerance, "{name}: {v:?} behind Z");
+                    }
+                }
+            }
+            for c in [Carrier::Wall, Carrier::Sector(0), Carrier::Sector(1)] {
+                assert!(used.contains(&c), "{name}: no face on {c:?}");
+            }
+        }
+    }
+
+    /// Every edge use's UV trim, its own or its mate's as stored or the one
+    /// `get_or_create_uv_trim_curve` builds when neither holds one (the moved field is how
+    /// many are stored, which is not a property of the solid, so the count itself is not
+    /// certified, only every trim it counts), maps through its face's
+    /// surface to the edge's vertices: each end of the trim evaluates within the larger of
+    /// the vertex's and the edge's tolerance of one of them (the distance enclosed in
+    /// interval arithmetic from the evaluated and the vertex point), and an open edge's
+    /// two ends reach both.
+    #[test]
+    fn every_moved_edge_use_trims_between_its_vertices() {
+        use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
+        use solidcore::topology::{edge, face};
+        for name in ROWS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let mut b = body(name, &i);
+            let k = Kernel::default();
+            let ids: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
+            for eu in ids {
+                let made = eu3::get_or_create_uv_trim_curve(&k, &mut b, eu, false, false, true);
+                assert!(made.unwrap().status.is_ok(), "{name} {eu:?}: a trim");
+                let (Some(t), owner) = eu1::uv_trim_curve(&b, eu).unwrap() else {
+                    panic!("{name} {eu:?}: no trim");
+                };
+                let f = eu1::face(&b, owner.unwrap_or(eu)).unwrap().unwrap();
+                let s = face::p2::surface(&b, f).unwrap().unwrap();
+                let e = eu1::edge(&b, eu).unwrap().unwrap();
+                let etol = edge::tolerance(&b, e).unwrap();
+                let (v0, v1) = edge::start_end_vertices(&b, e).unwrap();
+                let vs = [v0.unwrap(), v1.unwrap()].map(|v| b.vertex(v).unwrap().clone());
+                let ends = t.ends(&k).unwrap();
+                let mut hit = Vec::new();
+                for uv in [ends.start, ends.end] {
+                    let p = s.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+                    let near: Vec<usize> = (0..2)
+                        .filter(|&n| {
+                            let q = vs[n].point;
+                            let dx = Iv::exact(p.x).sub(Iv::exact(q.x));
+                            let dy = Iv::exact(p.y).sub(Iv::exact(q.y));
+                            let dz = Iv::exact(p.z).sub(Iv::exact(q.z));
+                            let dist = dx.mul(dx).add(dy.mul(dy)).add(dz.mul(dz)).sqrt();
+                            dist.hi <= vs[n].tolerance.max(etol)
+                        })
+                        .collect();
+                    assert!(!near.is_empty(), "{name} {eu:?}: trim end {p:?} at no vertex");
+                    hit.extend(near);
+                }
+                if v0 != v1 {
+                    assert!(hit.contains(&0) && hit.contains(&1), "{name} {eu:?}: one vertex");
+                }
+            }
+        }
+    }
+
+    /// Each row's body is sound (`check_brep` level 2 clean, a manifold solid), its volume
+    /// enclosure ([`enclose_volume`] to a relative width of `1e-4`, reached) overlaps the enclosed
+    /// closed-form volume, and every edge and vertex tolerance covers its certified gaps
+    /// ([`crate::certify::tolerance_covers`]: an edge's tolerance at least the certified
+    /// upper end of its uses' edge-face gaps, a vertex's at least the distance to its
+    /// edges' curve ends plus that distance's rounding).
+    ///
+    /// [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
+    #[test]
+    fn every_moved_body_is_the_exact_solid_and_covers_its_gaps() {
+        for name in ROWS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let (solid, angles) = solid(&i);
+            let want = solid.volume(angles);
+            let b = &mut body(name, &i);
+            let mut k = Kernel::default();
+            let found = solidcore::topology::brep::validation::soundness(&mut k, b).unwrap();
+            assert!(found.check.lines().is_empty(), "{name}: {:?}", found.check.lines());
+            assert!(found.manifold, "{name}: a manifold solid");
+            // a relative width of 1e-4, which the refinement budget reaches for every row (1e-6
+            // and 1e-5 are not, for gen0129 and gen0329); it is the proof's resolution, not an
+            // allowance on the body: a face out of place moves the volume far more
+            let enc = solidcore::mass::enclosure::enclose_volume(&k, b, 1e-4 * want.hi).unwrap();
+            // the enclosure reached the width asked, so the overlap is a real check
+            assert_eq!(enc.stop, solidcore::mass::enclosure::EnclosureStop::Reached, "{name}: {:?} width {} of {:?}", enc.stop, enc.hi - enc.lo, want);
+            assert!(
+                enc.lo <= want.hi && want.lo <= enc.hi,
+                "{name}: volume {want:?} apart from [{}, {}]",
+                enc.lo,
+                enc.hi
+            );
+            let (edges, vertices) = crate::certify::tolerance_covers(&k, b);
+            for e in &edges {
+                assert!(e.needed_hi <= e.tolerance, "{name}: {e:?}");
+            }
+            for v in &vertices {
+                assert!(v.distance + v.slack <= v.tolerance, "{name}: {v:?}");
+            }
+        }
+    }
+}
