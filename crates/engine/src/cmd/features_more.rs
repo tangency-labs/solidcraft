@@ -700,6 +700,102 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
+/// A side of an Align that `timeline.edit` picks again: a point as `from` takes one, or a point
+/// on a planar face (`from_face`).
+pub(crate) enum AlignPick {
+    Point(Value),
+    Face(Value),
+}
+
+/// `timeline.edit` of an Align (#21331): its `from`, `to`, `from_face` and `to_face` are picks,
+/// read as `solid.align` reads them, so they are taken out of `set` before it is merged into the
+/// stored feature.
+pub(crate) fn take_align_picks(set: &mut Value) -> Result<[Option<AlignPick>; 2]> {
+    let mut take = |k: &str| set.as_object_mut().and_then(|o| o.remove(k)).filter(|v| !v.is_null());
+    let mut side = |k: &str| match (take(k), take(&format!("{k}_face"))) {
+        (Some(_), Some(_)) => Err(bad("timeline.edit", format!("give `{k}` or `{k}_face`, not both"))),
+        (point, face) => Ok(face.map(AlignPick::Face).or(point.map(AlignPick::Point))),
+    };
+    Ok([side("from")?, side("to")?])
+}
+
+/// The edited Align `new` (`old` before the edit, feature `id` in `component`) with the sides
+/// `picks` gives picked again in the model before it ([`side_pick`]), and both stored ways worked
+/// out again ([`mate_ways`]), so none is left from an old pick. A side not picked again keeps
+/// its stored way; one that was stored as the exact opposite of the side picked again may have
+/// been taken from it, so then the new pick must face as the old one did, or both sides are asked
+/// for. `flip` with no side that faces a way is refused.
+pub(crate) fn repick_align(
+    s: &Session,
+    id: u64,
+    component: u64,
+    old: &FeatureKind,
+    new: &mut FeatureKind,
+    picks: [Option<AlignPick>; 2],
+) -> Result<()> {
+    let cmd = "timeline.edit";
+    let (
+        FeatureKind::Align { from_normal: was_from, to_normal: was_to, .. },
+        FeatureKind::Align { from, to, from_normal, to_normal, flip, from_plane, to_plane, from_frame, to_frame, axes, .. },
+    ) = (old, new)
+    else {
+        return Ok(());
+    };
+    let st = s.model.state_before(id);
+    let way = |n: &Option<Dir>| n.as_ref().map(|d| d.0);
+    let (mut from_way, mut to_way) = (way(from_normal), way(to_normal));
+    let [from_pick, to_pick] = picks;
+    let repick = |v: &AlignPick,
+                  key: &str,
+                  held: bool,
+                  at: &mut Position,
+                  mine: &mut Option<Vec3>,
+                  was: Option<Vec3>,
+                  other: Option<Vec3>,
+                  other_given: bool|
+     -> Result<()> {
+        if held {
+            return Err(bad(cmd, format!("`{key}` is a plane or a frame here: set `{key}_plane` or `{key}_frame` instead")));
+        }
+        let (p, n) = match v {
+            AlignPick::Point(v) => side_pick(&st, Some(v), key, &format!("{key}_face")).map_err(|why| bad(cmd, why))?,
+            AlignPick::Face(v) => {
+                let fp = vec3(v).ok_or_else(|| bad(cmd, format!("`{key}_face` must be [x, y, z]")))?;
+                (fp, Some(planar_face_normal(&st, fp).ok_or_else(|| bad(cmd, format!("`{key}_face` must be on a planar face")))?))
+            }
+        };
+        let opposite = matches!((was, other), (Some(a), Some(b)) if a * -1.0 == b);
+        if opposite && !other_given && n != was {
+            return Err(bad(
+                cmd,
+                "this Align's two sides face opposite ways, so one may have taken its way from the other: give both `from` and `to`",
+            ));
+        }
+        (*at, *mine) = (Position(p), n);
+        Ok(())
+    };
+    let given_to = to_pick.is_some();
+    if let Some(v) = &from_pick {
+        repick(v, "from", from_plane.is_some() || from_frame.is_some(), from, &mut from_way, way(was_from), way(was_to), given_to)?;
+    }
+    if let Some(v) = &to_pick {
+        repick(v, "to", to_plane.is_some() || to_frame.is_some(), to, &mut to_way, way(was_to), way(was_from), from_pick.is_some())?;
+    }
+    let (vals, _) = s.doc.param_values();
+    let from_held = held_way(&s.doc, &vals, &st, component, from_plane, from_frame)?;
+    let to_held = held_way(&s.doc, &vals, &st, component, to_plane, to_frame)?;
+    let facing = from_way.is_some() || to_way.is_some() || from_held.is_some() || to_held.is_some();
+    if *flip && !facing {
+        return Err(bad(cmd, FLIP_NEEDS));
+    }
+    if axes.is_some() && facing && (from_pick.is_some() || to_pick.is_some()) {
+        return Err(bad(cmd, "`axes` applies to point-to-point alignment: pick two points, or set `axes` to null"));
+    }
+    let (f, t) = mate_ways(from_way, to_way, from_held, to_held);
+    (*from_normal, *to_normal) = (f.map(Dir), t.map(Dir));
+    Ok(())
+}
+
 /// The longest sketch point or curve id an Align frame takes.
 pub(crate) const MAX_SKETCH_ID: usize = 256;
 
