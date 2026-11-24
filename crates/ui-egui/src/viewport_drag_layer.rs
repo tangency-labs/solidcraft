@@ -276,8 +276,8 @@ fn build(app: &mut SolveApp, layer: &DragLayer) -> GpuScene {
     let world = &layer.from.world;
     let moved = |i: usize| layer.moving.get(i).copied().unwrap_or(false);
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
-    let (mut statics, mut made) = super::body_scene(app, world, |i| !moved(i), false, &mut kept);
-    let (moving, made_moving) = super::body_scene(app, world, moved, false, &mut kept);
+    let (mut statics, mut made, _) = super::body_scene(app, world, |i| !moved(i), false, &mut kept);
+    let (moving, made_moving, _) = super::body_scene(app, world, moved, false, &mut kept);
     made.extend(made_moving);
     super::keep_body_tris(app, &made);
     if let Ok(mut b) = app.viewport.blocks.lock() {

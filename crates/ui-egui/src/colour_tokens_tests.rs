@@ -76,7 +76,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_viewport::Camera::default();
     let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
-    let triad = crate::gizmo::Triad { center: Vec3::ZERO, translate: true, rotate: true };
+    let triad = crate::gizmo::Triad::world(Vec3::ZERO, true, true);
     for (dark, mode) in [false, true].into_iter().flat_map(|d| ColorVision::ALL.map(|m| (d, m))) {
         set_dark(dark);
         set_vision(mode);
@@ -176,7 +176,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("view_tiles.rs", 2, "the black shadows under a view card and the name pill: a shadow is black at an opacity in every theme"),
     ("workspace.rs", 1, "the view kinds' icon strokes, drawn on the Tabs board: a fixed palette per kind in each theme"),
     ("links.rs", 1, "the link pills' white ink on the brand fills"),
-    ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
+    ("ui_kit/icons/mod.rs", 2, "the white tint that carries an icon image's opacity, and greyscale desaturation"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
 ];

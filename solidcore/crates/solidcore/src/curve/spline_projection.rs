@@ -342,6 +342,53 @@ pub fn project_curve(
     crate::prism::read::planar_curves(&k, &run, frame, tol, work)
 }
 
+/// The exact circular image of a cylinder boundary viewed along its axis.
+/// Its parameter curve may be a shell's marched spline: every span must still
+/// certify its distance to the supporting circle and its selected traversal.
+pub fn cylinder_projection(
+    curve: &Curve,
+    interval: [f64; 2],
+    ends: [Vec3; 2],
+    cylinder: (&Frame, f64),
+    target: &Frame,
+    tol: f64,
+) -> Option<Vec<PlanarPiece>> {
+    let (support, radius) = cylinder;
+    if !crate::prism::profile::frame_is_orthonormal(support)
+        || !crate::prism::profile::frame_is_orthonormal(target)
+    {
+        return None;
+    }
+    let vector = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
+    let axis = vector(support.x_axis).cross(vector(support.y_axis));
+    let normal = vector(target.x_axis).cross(vector(target.y_axis));
+    // Only a projection along the cylinder's axis is its circle. A tilted
+    // projection retains the general native-curve projection path. The two frames come from
+    // different constructions, so their axes agree only to rounding of those; the certificate
+    // below measures the projected spans against the circle itself.
+    let tilt = axis.cross(normal).length();
+    if !tilt.is_finite() || tilt > 1e-9 {
+        return None;
+    }
+    let k = crate::Kernel::default();
+    let native = crate::curve::from_parameters::from_parameters(&k, curve, interval).ok()?;
+    let run = Run {
+        curve: &native.curve,
+        interval: native.interval,
+        forward: true,
+        ends,
+    };
+    crate::prism::read::circular_boundary(
+        &k,
+        &run,
+        target,
+        crate::prism::profile::to_local(target, vector(support.origin)),
+        radius,
+        tol,
+        &mut 262_144,
+    )
+}
+
 /// Whether the selected native curve is readable in a plane parallel to `frame`.
 /// Uses the same trimmed-net and endpoint checks as projection, with the parallel guard.
 pub fn has_parallel_projection(
@@ -493,6 +540,71 @@ mod tests {
                     [p.x * w, p.y * w, 0.0, w]
                 })
                 .collect(),
+        }
+    }
+
+    #[test]
+    fn cylinder_support_recovers_marched_minor_and_major_arcs_without_extra_turns() {
+        use crate::prism::profile::Seg2;
+        use std::f64::consts::FRAC_PI_2;
+
+        // The unit quarter-circle cubic has squared radial error
+        // (9k² + 6k - 6)t²(1-t)²(2t-1)², at most (9k² + 6k - 6)/108.
+        // Thus its radial error is below 0.000273, but it is not an exact
+        // rational circle. Only its analytic cylinder supplies that circle.
+        let k = 4.0 / 3.0 * (2.0_f64.sqrt() - 1.0);
+        assert!((9.0 * k * k + 6.0 * k - 6.0) / 216.0 < 0.000273);
+        for quarters in [1u32, 3, 5] {
+            let mut points = Vec::new();
+            let mut knots = vec![0.0; 4];
+            for quarter in 0..quarters {
+                if quarter > 0 {
+                    knots.extend([f64::from(quarter); 3]);
+                }
+                for (i, [x, y]) in [[1.0, 0.0], [1.0, k], [k, 1.0], [0.0, 1.0]]
+                    .into_iter()
+                    .enumerate()
+                {
+                    if quarter > 0 && i == 0 {
+                        continue;
+                    }
+                    let [x, y] = match quarter % 4 {
+                        0 => [x, y],
+                        1 => [-y, x],
+                        2 => [-x, -y],
+                        _ => [y, -x],
+                    };
+                    points.push([x, y, 0.0]);
+                }
+            }
+            knots.extend([f64::from(quarters); 4]);
+            let curve = Curve::Spline { knots, points };
+            let interval = [0.0, f64::from(quarters)];
+            let ends = interval.map(|t| at(&curve, t));
+            let image = |radius| {
+                cylinder_projection(&curve, interval, ends, (&frame(), radius), &frame(), 0.001)
+            };
+            assert!(image(1.1).is_none(), "a different support is not this rim");
+            if quarters == 5 {
+                assert!(
+                    image(1.0).is_none(),
+                    "a turn and a quarter is not a quarter arc"
+                );
+                continue;
+            }
+            let pieces = image(1.0).unwrap();
+            let [PlanarPiece::Seg(Seg2::Arc {
+                center,
+                radius,
+                sweep,
+                ..
+            })] = pieces.as_slice()
+            else {
+                panic!("{pieces:?}")
+            };
+            assert!(center.length() < 1e-12);
+            assert_eq!(*radius, 1.0);
+            assert!((*sweep - f64::from(quarters) * FRAC_PI_2).abs() < 1e-12);
         }
     }
 

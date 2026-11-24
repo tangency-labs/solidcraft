@@ -38,12 +38,13 @@
 //! [`OrientSheetNote::into_error`] (status 1). Mutation success paths
 //! remain uncertified while part 2 and face notification dependencies defer;
 //! passing refusal/projection comparisons do not certify those paths.
-//! Opt-in ([`UpstreamFixes::new_edge_vertex_tolerance_covers_gap`](crate::kernel::UpstreamFixes::new_edge_vertex_tolerance_covers_gap),
-//! WR-469): `MakeEdgeInFaceWithVU` follows the SolidCraft fork's fix: after
-//! `RefreshTolerance`, which keeps a vertex's tolerance as it was, each end vertex's
-//! tolerance grows to twice its gap to the new edge's end (only if larger), as
-//! `UpdateVertexEdgeIntervals` sets it. By default it leaves gaps up to the full
-//! tolerance, as the pinned C++ does, which `AssertValid` refuses above half of it.
+//! Not upstream (WR-469, tangency-labs/solidcraft#17985): after `RefreshTolerance`, which
+//! keeps a vertex's tolerance as it was, `MakeEdgeInFaceWithVU` grows each end vertex's
+//! tolerance to twice the farthest edge end at it (the new edge's end and every other
+//! edge's end at the vertex; doubling is exact, so every such end lies within half of it;
+//! only if larger), as
+//! `UpdateVertexEdgeIntervals` sets it. The pinned C++ leaves gaps up to the full
+//! tolerance, which `AssertValid` refuses above half of it.
 //! See `plan/upstream-issues/WR-469--make-edge-in-face-vertex-tolerance-gap.md`.
 //! Not upstream (WR-527, #1527): on two planes, `MakeEdgeInFaceWithVU` leaves an inner loop whose
 //! test point lies outside the new face's outer loop box (at the retry tolerance)
@@ -57,7 +58,7 @@
 
 use crate::curve::curve::Curve;
 use crate::error::topology::TopologyFailure;
-use crate::error::{ignore_status, Failure, Result, SolidError, SM_ERR};
+use crate::error::{ignore_status, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::object::NotifyOperation;
@@ -78,6 +79,18 @@ use crate::topology::{
 use crate::EntityRef;
 
 const OP: &str = "topology::brep::p9";
+
+/// A topology failure of p9 ([`SolidError::topology`]).
+fn failure(cause: TopologyFailure) -> SolidError {
+    SolidError::topology(OP, cause)
+}
+
+/// A defect ([`TopologyFailure::Defect`]) with the status `status` of the site it replaces.
+fn defect(why: &'static str, status: i32) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(status)
+        .into_error()
+}
 
 /// Identity transport at the actual curve construction event. Legacy callbacks
 /// keep their existing domain; Actual receives the original object and live stores.
@@ -217,10 +230,7 @@ pub fn find_infinite_region(
                     let face = required(use_.face, "shell faceuse without face")?;
                     let edges = crate::topology::topology_traverser::face_edges(b, face)?;
                     if edges.is_empty() {
-                        return Err(SolidError::topology_failed(
-                            OP,
-                            "a face of the shell has no edges to aim a ray at",
-                        ));
+                        return Err(failure(TopologyFailure::NoEdgeToAimAt));
                     }
                     for edge_id in edges {
                         required(
@@ -274,8 +284,11 @@ pub fn find_infinite_region(
             let success = ray_success(&attempt.status)?;
             state = attempt.state;
             if !success {
-                let edge_id = best_edge
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the shell's nearest edge"))?;
+                let edge_id = best_edge.ok_or_else(|| {
+                    Failure::new(OP, TopologyFailure::NoEdgeToAimAt)
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error()
+                })?;
                 let record = b.edge(edge_id)?;
                 // (a copy: the ray fires may add UV trim curves to the B-rep)
                 let curve =
@@ -327,10 +340,7 @@ pub fn find_infinite_region(
         } else {
             let edges = brep_edges(b)?;
             if edges.is_empty() {
-                return Err(SolidError::topology_failed(
-                    OP,
-                    "the B-rep has no edges to aim a ray at",
-                ));
+                return Err(failure(TopologyFailure::NoEdgeToAimAt));
             }
             let mut distance = crate::math::BIG_DOUBLE;
             for pass in 0..6 {
@@ -395,10 +405,7 @@ pub fn find_infinite_region(
                     let point = curve.evaluate_point(k, interval.evaluate(0.189))?;
                     let start = bounds.min() - (bounds.max() - bounds.min()) * 0.5;
                     if !fire(b, start, point - start)? {
-                        return Err(SolidError::topology_failed(
-                            OP,
-                            "no ray toward the edge found the region",
-                        ));
+                        return Err(failure(TopologyFailure::RayFoundNoRegion));
                     }
                 }
             }
@@ -446,7 +453,7 @@ fn brep_ray_fire<O>(
 fn ray_direction(direction: Vec3) -> Result<Vec3> {
     direction
         .unitize()
-        .map_err(|_| SolidError::topology_invalid_value(OP, "the ray direction has zero length"))
+        .map_err(|_| failure(TopologyFailure::ZeroLengthVector))
 }
 
 /// Whether a `SmShell::RayFire` call succeeded. Upstream retries on any failed status;
@@ -488,12 +495,7 @@ impl OrientSheetNote {
     #[must_use]
     pub fn into_error(self) -> SolidError {
         match self {
-            Self::Reoriented => Failure::new(
-                OP,
-                TopologyFailure::Failed("the sheet's faces were turned to agree"),
-            )
-            .with_status(1)
-            .into_error(),
+            Self::Reoriented => failure(TopologyFailure::SheetReoriented),
         }
     }
 
@@ -529,13 +531,10 @@ pub fn orient_sheet_surfaces(
 ) -> Result<Option<OrientSheetNote>> {
     let faces = brep_faces(b)?;
     let Some(face) = face.filter(|face| faces.contains(face)) else {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the face is not in the B-rep",
-        ));
+        return Err(failure(TopologyFailure::NotInBrep));
     };
     if !is_sheet(k, b)? {
-        return Err(SolidError::topology_failed(OP, "the B-rep is not a sheet"));
+        return Err(failure(TopologyFailure::NotASheet));
     }
     if is_oriented_sheet(k, b)? {
         if !same {
@@ -740,6 +739,16 @@ pub fn make_vertex_loop(
 ) -> Result<(LoopId, VertexId)> {
     b.face(face)?;
     face_notify(b, face, env, NotifyOperation::PreEdit)?;
+    // the caller's face as supplied: checked before any record is made, so a face without
+    // face uses leaves the B-rep as it was
+    let fu1 = crate::topology::face::p2::upward_faceuse(b, face)?
+        .ok_or_else(|| failure(TopologyFailure::FaceWithoutUses))?;
+    let fu2 = b.faceuse(fu1)?.mate.ok_or_else(|| {
+        defect(
+            "a face use has no mate, though the kernel makes face uses in mated pairs",
+            SM_ERR_NULL_POINTER,
+        )
+    })?;
     let loop_ = b.add_loop_record(Loop {
         face,
         edges: Vec::new(),
@@ -768,12 +777,6 @@ pub fn make_vertex_loop(
         b.vertexuse_mut(vu)?.vertex = Some(vertex);
     }
     ignore_status(set_vertex_point(b, vertex, point, env))?;
-    let fu1 = crate::topology::face::p2::upward_faceuse(b, face)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
-    let fu2 = b
-        .faceuse(fu1)?
-        .mate
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face use's mate"))?;
     b.loop_mut(loop_)?.loopuse = Some(lu1);
     for (lu, mate, fu, vu) in [(lu1, lu2, fu1, vu1), (lu2, lu1, fu2, vu2)] {
         *b.loopuse_mut(lu)? = Loopuse {
@@ -1537,39 +1540,31 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     };
     let face = input
         .face
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face"))?;
-    let mut curve = input
-        .curve
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?;
+        .ok_or_else(|| failure(TopologyFailure::NoFaceGiven))?;
+    let mut curve = input.curve.ok_or_else(|| {
+        Failure::new(OP, TopologyFailure::NoCurveGiven)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    })?;
     if !b.editing_enabled() {
-        return Err(SolidError::topology_failed(
-            OP,
-            "editing is disabled on the B-rep",
-        ));
+        return Err(failure(TopologyFailure::EditingDisabled));
     }
     let [Some(start), Some(mut end)] = input.vertices else {
-        return Err(SolidError::topology_failed(
-            OP,
-            "both vertex uses are needed",
-        ));
+        return Err(failure(TopologyFailure::VertexusesNotGiven));
     };
     for vu in [start, end] {
         if !matches!(
             b.vertexuse(vu)?.owner,
             VertexuseOwner::Edgeuse(_) | VertexuseOwner::Loopuse(_)
         ) {
-            return Err(SolidError::topology_failed(
-                OP,
-                "a vertex use is on neither an edge use nor a loop use",
-            ));
+            return Err(Failure::new(OP, TopologyFailure::VertexUseNotOnFace)
+                .with_status(SM_ERR)
+                .into_error());
         }
     }
     let start_faceuse = vertexuse::faceuse(b, start)?;
     if start_faceuse != vertexuse::faceuse(b, end)? {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the vertex uses are on different face uses",
-        ));
+        return Err(failure(TopologyFailure::VertexusesOnDifferentFaces));
     }
     let fu = required(start_faceuse, "VU pair has no faceuse")?;
     let actual_face = required(b.faceuse(fu)?.face, "VU faceuse has no face")?;
@@ -2042,16 +2037,24 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     }
     vertex::refresh_tolerance(b, start_vertex, false)?;
     vertex::refresh_tolerance(b, end_vertex, false)?;
-    // Opt-in (WR-469): each vertex's tolerance grows to twice its gap to the new edge's end.
-    if k.fixes.new_edge_vertex_tolerance_covers_gap {
+    // Not upstream (WR-469): each vertex's tolerance grows to twice the farthest edge end
+    // at it (the new edge's and every other edge's), so each end lies within half of it
+    // (`AssertValid`).
+    {
         let record = b.edge(edge_id)?;
         let curve = required(record.curve.as_ref(), "new edge without curve")?;
         let (curve_start, curve_end) = (
             curve.evaluate_point(k, t_start)?,
             curve.evaluate_point(k, t_end)?,
         );
-        let start_gap = curve_start.distance(vertex::point(b, start_vertex)?);
-        let end_gap = curve_end.distance(vertex::point(b, end_vertex)?);
+        // the farthest end at the vertex, of the new edge and of every other edge there,
+        // so that every end at the vertex lies within half the grown tolerance
+        let start_gap = curve_start
+            .distance(vertex::point(b, start_vertex)?)
+            .max(farthest_end_gap(k, b, start_vertex)?);
+        let end_gap = curve_end
+            .distance(vertex::point(b, end_vertex)?)
+            .max(farthest_end_gap(k, b, end_vertex)?);
         vertex::set_tolerance(b, start_vertex, 2.0 * start_gap, true, true)?;
         vertex::set_tolerance(b, end_vertex, 2.0 * end_gap, true, true)?;
     }
@@ -2062,6 +2065,39 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     }
     sync_edge_cache(b, edge_id)?;
     Ok(output)
+}
+
+/// The farthest any edge's curve end at `v` lies from `v`'s point (0 with none): per
+/// edge at `v`, its curve at its interval's start when `v` is its start vertex and at its
+/// interval's end when `v` is its end vertex (both for a closed edge). An edge without a
+/// curve or without a resolvable start and end vertex has no end to measure.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling `v`; those of evaluating a curve. An edge at
+/// `v` whose start and end vertices cannot be resolved is skipped, not an error.
+fn farthest_end_gap(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
+    let p = vertex::point(b, v)?;
+    let mut worst: f64 = 0.0;
+    for e in vertex::edges(b, v, None)? {
+        let Ok((start, end)) = edge::start_end_vertices(b, e) else {
+            continue;
+        };
+        let record = b.edge(e)?;
+        let Some(curve) = record.curve.as_ref() else {
+            continue;
+        };
+        let interval = edge::interval(b, e)?;
+        for (at_v, t) in [(start, interval.min()), (end, interval.max())] {
+            if at_v == Some(v) {
+                let gap = curve.evaluate_point(k, t)?.distance(p);
+                if gap > worst {
+                    worst = gap;
+                }
+            }
+        }
+    }
+    Ok(worst)
 }
 
 #[derive(Clone, Copy)]
@@ -2234,16 +2270,17 @@ fn faceuse_remove_loopuse(
     lu: crate::topology::LoopuseId,
 ) -> Result<()> {
     if b.loopuse(lu)?.faceuse != Some(fu) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the loop use is not on the face use",
+        return Err(defect(
+            "the loop use to take off is not on the face use, though the split reads each from \
+             the face use it splits",
+            SM_ERR,
         ));
     }
     let list = &mut b.faceuse_mut(fu)?.loopuses;
     let Some(at) = list.iter().position(|&x| x == lu) else {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the loop use is not in the face use's list",
+        return Err(defect(
+            "the loop use is not in its face use's list, though it names that face use",
+            SM_ERR,
         ));
     };
     list.remove(at);
@@ -3186,7 +3223,10 @@ mod tests {
         assert_eq!(e.operation(), OP);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert_eq!(e.entity(), None);
-        assert!(e.topology_failure().is_some());
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::SheetReoriented)
+        );
         assert_eq!(OrientSheetNote::stop_on_note(Ok(None)), Ok(()));
     }
 
@@ -3815,22 +3855,22 @@ mod tests {
 
     #[test]
     fn zero_ray_direction_retains_the_defined_native_status() {
+        let e = ray_direction(Vec3::ZERO).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(1007));
         assert_eq!(
-            ray_direction(Vec3::ZERO).unwrap_err().upstream_status(),
-            Some(1007)
+            e.topology_failure(),
+            Some(&TopologyFailure::ZeroLengthVector)
         );
         assert_eq!(ray_direction(Vec3::Z).unwrap(), Vec3::Z);
     }
 
     /// WR-469: a box face's diagonal, given with its UV trim, overshooting its far corner
-    /// by 0.7 of that corner's tolerance along the face, made with
-    /// `new_edge_vertex_tolerance_covers_gap` set to `fix`. Returns the far corner's
+    /// by 0.7 of that corner's tolerance along the face. Returns the far corner's
     /// tolerance before and after and the end gap, or `None` when a dependency the
     /// success path needs is still unported.
-    fn diagonal_overshooting_its_corner(fix: bool) -> Option<(f64, f64, f64)> {
+    fn diagonal_overshooting_its_corner() -> Option<(f64, f64, f64)> {
         use crate::topology::edgeuse::p1 as eu1;
         let k = &mut Kernel::default();
-        k.fixes.new_edge_vertex_tolerance_covers_gap = fix;
         let mut b = crate::primitive::api_primitives::create_box(k, Point3::ZERO, 10.0, 10.0, 10.0)
             .unwrap();
         b.set_editing_enabled(true);
@@ -3914,28 +3954,23 @@ mod tests {
         ))
     }
 
-    /// WR-469, opt-in: a new edge that ends `gap` from its vertex, above half the
-    /// vertex's tolerance (steel-026: 5.44e-6 against 5.42e-6), leaves the vertex a
-    /// tolerance of at least twice the gap.
+    /// WR-469: a new edge that ends `gap` from its vertex, above half the vertex's
+    /// tolerance (steel-026: 5.44e-6 against 5.42e-6), leaves the vertex a tolerance of
+    /// at least twice the gap. The tolerance it had (which `RefreshTolerance(FALSE)` keeps,
+    /// as the pinned C++ leaves it) is under twice the gap: 0.7 of it doubled is 1.4 of it.
     #[test]
     fn new_edge_grows_its_vertices_tolerance_to_twice_the_end_gap() {
-        let Some((_, grown, gap)) = diagonal_overshooting_its_corner(true) else {
+        let Some((before, grown, gap)) = diagonal_overshooting_its_corner() else {
             return;
         };
+        assert!(
+            before < 2.0 * gap,
+            "tolerance {before} before, end gap {gap}"
+        );
         assert!(
             grown >= 2.0 * gap * (1.0 - 1e-12),
             "tolerance {grown} for an end gap {gap}"
         );
-    }
-
-    /// WR-469, default: the vertex keeps its tolerance, as the pinned C++ does.
-    #[test]
-    fn new_edge_keeps_its_vertices_tolerance_by_default() {
-        let Some((before, after, gap)) = diagonal_overshooting_its_corner(false) else {
-            return;
-        };
-        assert_eq!(after, before, "end gap {gap}");
-        assert!(after < 2.0 * gap);
     }
 
     #[test]
@@ -4302,5 +4337,47 @@ mod tests {
         assert!(new_face_outer_box(&k, &b, side, side, false)
             .unwrap()
             .is_none());
+    }
+
+    /// A face the caller gives without face uses is the caller's input, not a kernel
+    /// defect, and is refused before any record is made (review of #21110).
+    #[test]
+    fn a_vertex_loop_on_a_face_without_face_uses_is_invalid_input() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        b.set_editing_enabled(true);
+        let shell = b.shells().ids().next().unwrap();
+        let face = b
+            .add_face_record(crate::topology::Face::new(shell))
+            .unwrap();
+        let counts = |b: &Brep| {
+            [
+                b.loops().len(),
+                b.loopuses().len(),
+                b.vertices().len(),
+                b.vertexuses().len(),
+            ]
+        };
+        let before = counts(&b);
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        let e = make_vertex_loop(&mut b, face, Point3::ZERO, OrientType::Opposite, &mut env)
+            .unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::FaceWithoutUses)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.operation(), OP);
+        assert_eq!(counts(&b), before);
     }
 }

@@ -15,12 +15,12 @@ use crate::schema::inspect::{
 };
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
-    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
-    DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch, FaceCylinder, KernelCounts, ListedMaterial,
-    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, MeasureTotal, Measured,
-    MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
-    PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile, SketchWire,
-    SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
+    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DiskStamp, DocInfoParams, DocInfoResult,
+    DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch,
+    FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
+    MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
+    ModelThread, ModelThreads, ModelThreadsParams, PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected,
+    SketchPoint, SketchProfile, SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -33,6 +33,7 @@ const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract:
 const MEASURE_CONTRACT: TypedContract<MeasureParams> = TypedContract::new();
 const DOCUMENT_INSPECT_CONTRACT: TypedContract<DocumentInspectParams> = TypedContract::new();
 const DOCUMENT_REVISION_CONTRACT: TypedContract<DocumentRevisionParams> = TypedContract::new();
+const DOC_INFO_CONTRACT: TypedContract<DocInfoParams> = TypedContract::new();
 const SKETCH_INSPECT_CONTRACT: TypedContract<SketchInspectParams> = TypedContract::new();
 const MATERIAL_ASSIGN_CONTRACT: TypedContract<MaterialAssignParams> = TypedContract::new();
 const MATERIAL_LIST_CONTRACT: TypedContract<MaterialListParams> = TypedContract::new();
@@ -94,6 +95,21 @@ pub static COMMANDS: &[CommandSpec] = &[
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
+    CommandSpec::new("doc.info", "Design File Info", crate::checked!("doc.info", design_file_info))
+        .any_part()
+        .doc_only()
+        .icon("inspect")
+        .noundo()
+        .read_only()
+        .contract(&DOC_INFO_CONTRACT)
+        .output(output_schema_for::<DocInfoResult>)
+        .params(
+            "→ path (the design's file; null until it is first saved), read_only (a save to its own file is refused), \
+             unsaved (changes its file does not hold, as document.inspect's dirty), disk ({len, modified_ns}: size in bytes and \
+             modification time in nanoseconds since the Unix epoch as a decimal string, when it was opened or last saved; \
+             null without a file, in the browser, or when they could not be read), \
+             document_id (as document.revision). In a plugin run: the design the run started on, as it was before the run. Read-only",
+        ),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
@@ -632,6 +648,27 @@ fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
     out
 }
 
+impl Session {
+    /// What `doc.info` says of this session's own design (a scratch copy names its source's file).
+    pub(crate) fn doc_info(&self) -> DocInfoResult {
+        DocInfoResult {
+            path: self.path.clone().or_else(|| self.source_path.clone()),
+            read_only: self.read_only,
+            unsaved: self.is_dirty(),
+            disk: self.disk.map(|d| DiskStamp { len: d.len, modified_ns: d.modified_ns.map(|ns| ns.to_string()) }),
+            document_id: self.document_id.clone(),
+            param_warnings: Vec::new(),
+        }
+    }
+}
+
+/// `doc.info`: in a plugin run, the design the run started on as it was before the run
+/// (`AppState::caller_design`); a design the run opened itself, or any other session, answers for itself.
+fn design_file_info(s: &mut Session, _p: &Value) -> Result<Value> {
+    let info = s.plugin_state.caller_design.clone().filter(|c| c.document_id == s.document_id).unwrap_or_else(|| s.doc_info());
+    reply("doc.info", info)
+}
+
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let timeline_detail = TimelineDetail::read(p.get("timeline")).map_err(|e| bad("document.inspect", e))?;
     let bodies_detail = BodiesDetail::read(p.get("bodies")).map_err(|e| bad("document.inspect", e))?;
@@ -998,7 +1035,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
-            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt:?}")))?, pt));
+            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt}")))?, pt));
         }
     }
     let mut comps: Vec<u64> = Vec::new();

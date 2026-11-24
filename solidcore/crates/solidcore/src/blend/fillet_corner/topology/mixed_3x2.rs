@@ -36,7 +36,8 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletSolverId, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -122,7 +123,9 @@ impl FilletCorner {
     ///
     /// # Errors
     /// Reviewed `Defect`s: `SM_ERR` unless three edge uses meet at the corner;
-    /// `SM_ERR_NULL_POINTER` without the unblended edge use or a side face surface; [`SolidError::InvalidInput`] for a
+    /// `SM_ERR_NULL_POINTER` without the unblended edge use. [`BlendFailure::FaceHasNoSurface`]
+    /// (`SM_ERR_NULL_POINTER`) at a concave side face of the body without its surface;
+    /// [`SolidError::InvalidInput`] for a
     /// different corner kind or topology upstream dereferences; those of the convexity,
     /// solver, surface-extension and pseudo-topology operations.
     #[allow(clippy::too_many_lines)] // one upstream routine
@@ -352,12 +355,12 @@ impl FilletCorner {
             face_by_two_edgeuses(target, Some(curr_eu), Some(cross_eu), None)?,
             "no concave side face",
         )?;
+        // NER on a face of the caller's body without its surface
         let surface = target.face(orig_face1)?.surface.as_ref().ok_or_else(|| {
-            missing_defect(
-                OP,
-                "the concave side face has no surface, though the face is beside the blended \
-                     edge whose solver's offset surfaces were made from its faces' surfaces",
-            )
+            Failure::new(OP, BlendFailure::FaceHasNoSurface)
+                .with_status(SM_ERR_NULL_POINTER)
+                .at(EntityRef::Face(orig_face1))
+                .into_error()
         })?;
         let new_surface = surface
             .extended_sides(

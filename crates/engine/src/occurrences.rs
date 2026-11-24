@@ -193,6 +193,14 @@ pub(crate) struct OccurrenceBodiesCache {
 /// new one.
 const OCCURRENCE_BODIES_CACHED: usize = 256;
 
+/// The design's name index ([`solidcraft_doc::WorldNames`]) for `doc` and `state`. Made once and
+/// handed on: making it at every path named every body of the design again at each placement.
+fn name_index<'a>(doc: &'a solidcraft_doc::Document, state: &'a solidcraft_doc::ModelState) -> solidcraft_doc::WorldNames<'a> {
+    #[cfg(test)]
+    NAME_INDEXES.with(|n| n.set(n.get() + 1));
+    solidcraft_doc::WorldNames::new(doc, state)
+}
+
 /// Placement identity for one document and evaluated model, worked out once per design:
 /// occurrences by (parent, id), children per parent, bodies per component, and each placement
 /// path already named. Listing a subtree then costs the subtree, not the subtree times the
@@ -233,7 +241,11 @@ impl PlacementIndex {
     fn new(doc: &std::sync::Arc<solidcraft_doc::Document>, state: &std::sync::Arc<solidcraft_doc::ModelState>) -> PlacementIndex {
         let mut by_parent_id = std::collections::HashMap::with_capacity(doc.occurrences.len());
         let mut children: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
+        let inactive = doc.inactive_pattern_occurrences();
         for (i, o) in doc.occurrences.iter().enumerate() {
+            if inactive.contains(&o.id) {
+                continue;
+            }
             by_parent_id.insert((o.parent, o.id), i);
             children.entry(o.parent).or_default().push(o.id);
         }
@@ -272,11 +284,7 @@ impl PlacementIndex {
         if let Some(bodies) = self.placed.get(path) {
             return bodies.clone();
         }
-        let names = names.get_or_insert_with(|| {
-            #[cfg(test)]
-            NAME_INDEXES.with(|n| n.set(n.get() + 1));
-            solidcraft_doc::WorldNames::new(doc, state)
-        });
+        let names = names.get_or_insert_with(|| name_index(doc, state));
         let empty = Vec::new();
         let bodies: std::sync::Arc<[OccurrenceBody]> = self
             .bodies
@@ -290,6 +298,65 @@ impl PlacementIndex {
         }
         bodies
     }
+
+    /// The component the placement `path` ends in, when every step is an occurrence of a
+    /// component of the design: what [`Session::occurrence_placement`] requires of a path. A
+    /// path whose placement cannot be resolved is not named, as the session does not name it.
+    fn component_at(&self, path: &[u64]) -> Option<u64> {
+        let mut component = 0;
+        let mut world = IDENTITY;
+        for id in path {
+            let i = *self.by_parent_id.get(&(component, *id))?;
+            let o = self.doc.occurrences.get(i)?;
+            if !self.components.contains(&o.component) {
+                return None;
+            }
+            world = mat_mul(&world, &o.transform);
+            if world.iter().flatten().any(|x| !x.is_finite()) {
+                return None;
+            }
+            component = o.component;
+        }
+        Some(component)
+    }
+}
+
+/// Placements a walk names at most, as the Browser's own walk did: a design that lists more is
+/// not walked to its end (the cap keeps a runaway design bounded).
+const MAX_BODY_PATHS_WALKED: usize = 100_000;
+
+/// Each placed body's placement path, by its world name: the Browser's answer from the body under
+/// the pointer to the rows above it. One name index serves the whole walk, where naming each
+/// path on its own made the index again at every placement: on a 100-printer assembly that was
+/// 14 s of one frame on the window thread. A caller may run it beside the window
+/// (`crates/ui-egui/src/browser_model.rs`).
+pub fn body_paths(
+    doc: &std::sync::Arc<solidcraft_doc::Document>,
+    state: &std::sync::Arc<solidcraft_doc::ModelState>,
+) -> std::collections::HashMap<String, Vec<u64>> {
+    let mut index = PlacementIndex::new(doc, state);
+    let mut names = Some(name_index(doc, state));
+    let mut paths: std::collections::HashMap<String, Vec<u64>> = std::collections::HashMap::new();
+    let mut stack: Vec<Vec<u64>> = index.children.get(&0).into_iter().flatten().map(|id| vec![*id]).collect();
+    let mut walked = 0usize;
+    while let Some(path) = stack.pop() {
+        walked += 1;
+        if walked > MAX_BODY_PATHS_WALKED {
+            break;
+        }
+        let Some(component) = index.component_at(&path) else { continue };
+        for body in index.bodies_at(&path, component, &mut names, doc, state).iter() {
+            paths.entry(body.world.clone()).or_insert_with(|| path.clone());
+        }
+        if path.len() < 64 {
+            for child in index.children.get(&component).into_iter().flatten() {
+                let mut next = path.clone();
+                next.push(*child);
+                stack.push(next);
+            }
+        }
+    }
+    paths
 }
 
 impl OccurrenceBodiesCache {
@@ -548,6 +615,7 @@ impl Session {
         let mut world = IDENTITY;
         let mut parent_world = IDENTITY;
         let mut seen = std::collections::BTreeSet::new();
+        let inactive = self.doc.inactive_pattern_occurrences();
         for id in path {
             if !seen.insert(*id) {
                 return Err(invalid("occurrence path repeats an id"));
@@ -556,7 +624,7 @@ impl Session {
                 .doc
                 .occurrences
                 .iter()
-                .find(|o| o.id == *id && o.parent == component)
+                .find(|o| o.id == *id && o.parent == component && !inactive.contains(id))
                 .ok_or_else(|| invalid("occurrence path has a missing or mismatched parent"))?;
             if !self.doc.components.iter().any(|c| c.id == o.component) {
                 return Err(invalid("occurrence path has a missing component"));
@@ -608,8 +676,7 @@ impl Session {
     pub fn occurrence_children(&self, path: &[u64]) -> Result<Vec<OccurrencePlacement>> {
         let component = if path.is_empty() { 0 } else { self.occurrence_placement(path)?.component };
         self.doc
-            .occurrences
-            .iter()
+            .active_occurrences()
             .filter(|o| o.parent == component)
             .map(|o| {
                 let mut child = path.to_vec();
@@ -1107,11 +1174,23 @@ impl Session {
             });
         }
         let hidden = std::mem::take(&mut self.visibility.hidden_occurrences);
-        self.visibility.hidden_occurrences = hidden.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();
-        // A shown Origin folder whose placement is gone cannot be cleared by hand - browser.visibility
-        // refuses a path that no longer resolves, whichever eye it sets - so it prunes like
-        // hidden_occurrences does; undo restores the snapshot with the placement (#7313).
+        // Keep the view flags for a live occurrence that a pattern has temporarily taken out
+        // of the model, while still pruning paths that were actually deleted.
         let shown = std::mem::take(&mut self.visibility.shown_component_origins);
-        self.visibility.shown_component_origins = shown.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();
+        if hidden.is_empty() && shown.is_empty() {
+            return;
+        }
+        let inactive = self.doc.inactive_pattern_occurrences();
+        let kept = |path: &Vec<u64>| {
+            if path.iter().any(|id| inactive.contains(id)) {
+                path.len() <= solidcraft_doc::MAX_PLACEMENT_DEPTH && self.doc.stored_path_placement(path).is_some()
+            } else {
+                self.occurrence_placement(path).is_ok()
+            }
+        };
+        let hidden = hidden.into_iter().filter(kept).collect();
+        let shown = shown.into_iter().filter(kept).collect();
+        self.visibility.hidden_occurrences = hidden;
+        self.visibility.shown_component_origins = shown;
     }
 }
