@@ -44,6 +44,10 @@
 //! | the other causes of `offset_geometry_creation` ([`OffsetFailure::VertexCurveNotArc`] to [`OffsetFailure::VertexArcsNotOneSphere`]) | `SM_ERR` |
 //! | [`OffsetFailure::OffsetBaseKindUnsupported`], [`OffsetFailure::GapCornerBlendNotMade`] | `SM_ERR` (`offset_executive::p1`) |
 //! | [`OffsetFailure::EdgeOffsetsUnpaired`], [`OffsetFailure::GapEndWithoutEdge`], [`OffsetFailure::FaceuseNotGiven`], [`OffsetFailure::SelfIntersectionWithoutUvCurve`], [`OffsetFailure::FaceuseHasNoFace`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`) |
+//! | [`OffsetFailure::BrepNotGiven`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` (`offset_executive::p2`) |
+//! | [`OffsetFailure::ShellLeavesNoCavity`], [`OffsetFailure::ShellWallUnresolved`], [`OffsetFailure::ShellFaceNotOfBody`] | `SM_ERR_INVALID_INPUT` (`offset_executive::p2`) |
+//! | [`OffsetFailure::ExtendedFaceCollapses`], [`OffsetFailure::TrimPastExtension`] | `SM_ERR` (`offset_executive::p2`) |
+//! | [`OffsetFailure::FaceHasNoFaceuse`], [`OffsetFailure::FaceuseHasNoShell`], [`OffsetFailure::ShellHasNoRegion`], [`OffsetFailure::FaceuseHasNoMate`], [`OffsetFailure::EdgeuseHasNoEdge`], [`OffsetFailure::EdgeuseHasNoMate`], [`OffsetFailure::EdgeuseHasNoRadial`], [`OffsetFailure::EdgeuseHasNoFaceuse`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`, `offset_executive::p2`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -56,8 +60,8 @@
 //! four phrase causes ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
 //! [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]) describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
-//! says which routine and its entity, where the site named one, which face. The file
-//! with open work elsewhere (`offset_executive/p2`) does not use them yet. The causes
+//! says which routine and its entity, where the site named one, which face.
+//! `offset_executive/p2` does not use them. The causes
 //! named at the sites of `offset_faces`, `offset_geometry_creation` and
 //! `offset_executive/p1` that returned a bare status or an unreviewed stage failure
 //! ([`OffsetFailure::FacesMoveRefused`] and those after it) answer with that status too: they
@@ -69,7 +73,7 @@ use super::{
     SM_ERR_OFFSET_WALLS_TOUCH,
 };
 use crate::offset::offset_faces::OffsetFacesRefusal;
-use crate::topology::{EdgeId, FaceId, FaceuseId};
+use crate::topology::{EdgeId, EdgeuseId, FaceId, FaceuseId, ShellId};
 
 /// Why an offset, shell, thicken or local operation is refused.
 ///
@@ -94,6 +98,9 @@ pub enum OffsetFailure {
         /// The blend face, of the operation's input.
         face: FaceId,
     },
+    /// The operation was given no B-rep (a null body: upstream's `NER`, or its native 1007
+    /// at the shell and offset APIs).
+    BrepNotGiven,
     /// The offset of `face` by `distance` collapses onto a line or point: the face has a
     /// radius of curvature `radius` on the displaced side that the distance reaches, within
     /// the B-rep's tolerance (a round inset by its radius). The offset is no surface there,
@@ -182,6 +189,32 @@ pub enum OffsetFailure {
         /// A face the edge bounds, when the edge itself is not known.
         face: Option<FaceId>,
     },
+    /// An edge use of the operation's input names no edge. A caller can build such a body
+    /// (`Brep::edgeuse_mut`), so it is the caller's input, not the kernel's fault.
+    EdgeuseHasNoEdge {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
+    },
+    /// An edge use of the operation's input has no face use (it is in no loop of a face).
+    /// A caller can build such a body (`Brep::edgeuse_mut`, `Brep::loopuse_mut`), so it is
+    /// the caller's input, not the kernel's fault.
+    EdgeuseHasNoFaceuse {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
+    },
+    /// An edge use of the operation's input has no mate. A caller can build such a body
+    /// (`Brep::add_edgeuse_record`), so it is the caller's input, not the kernel's fault.
+    EdgeuseHasNoMate {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
+    },
+    /// An edge use of the operation's input has no radial (no other use around its edge).
+    /// A caller can build such a body (`Brep::add_edgeuse_record`), so it is the caller's
+    /// input, not the kernel's fault.
+    EdgeuseHasNoRadial {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
+    },
     /// An edge use of the edge `edge` has no UV trim curve (`None` where the handle names no
     /// edge of the input), which the cap between the edge's offsets is made from, and which
     /// the matching of an offset face's edge uses to the input's drops onto (the offset
@@ -205,6 +238,16 @@ pub enum OffsetFailure {
     /// `TrimExtendedEdge` looks for a cut: no trim interval, so the edge is not extended or
     /// mated.
     ExtendedEdgeUntrimmed,
+    /// The offset surface of `face`, offset by `distance`, collapses (onto its spine or past
+    /// it: a round offset by its radius or more) in an extended offset, which builds every
+    /// face it offsets (only an inset that extends convex edges leaves such a face out and
+    /// mates its neighbours across it). The collapse test that finds it gives no radius.
+    ExtendedFaceCollapses {
+        /// The face, of the operation's input.
+        face: FaceId,
+        /// The offset distance asked for (as the executive holds it).
+        distance: f64,
+    },
     /// In a local operation, `face`, a band bounded by the two faces `beside` (a ring between
     /// a countersink's cone and the well below it, or the cone itself between the ring and
     /// the hole above), closes to nothing as the faces move: its two sides, each where its
@@ -228,6 +271,12 @@ pub enum OffsetFailure {
     /// decides ([`crate::SolidError::is_defect`], [`crate::SolidError::is_refusal`]), and
     /// [`crate::SolidError::cause`] gives its own class.
     FaceDomainUnresolved,
+    /// A face of the operation's input has no face use. A caller can build such a body
+    /// (`Brep::face_mut`), so it is the caller's input, not the kernel's fault.
+    FaceHasNoFaceuse {
+        /// The face, of the operation's input.
+        face: FaceId,
+    },
     /// Face `face` of the body the operation was given has no face use on the outside of
     /// its body: none at all, or only an inner one with no mate.
     FaceHasNoOuterFaceuse {
@@ -267,6 +316,18 @@ pub enum OffsetFailure {
     /// A face use of the operation's input names no face. A caller can build such a body
     /// (`Brep::add_faceuse_record`), so it is the caller's input, not the kernel's fault.
     FaceuseHasNoFace {
+        /// The face use, of the operation's input.
+        faceuse: FaceuseId,
+    },
+    /// A face use of the operation's input has no mate. A caller can build such a body
+    /// (`Brep::add_faceuse_record`), so it is the caller's input, not the kernel's fault.
+    FaceuseHasNoMate {
+        /// The face use, of the operation's input.
+        faceuse: FaceuseId,
+    },
+    /// A face use of the operation's input is in no shell. A caller can build such a body
+    /// (`Brep::faceuse_mut`), so it is the caller's input, not the kernel's fault.
+    FaceuseHasNoShell {
         /// The face use, of the operation's input.
         faceuse: FaceuseId,
     },
@@ -465,6 +526,25 @@ pub enum OffsetFailure {
         /// The face, of the operation's input.
         face: FaceId,
     },
+    /// The shell's face selection at `index` (in the order given) names no face of the body
+    /// it was given: it is empty, of another body, or a face the body does not have.
+    ShellFaceNotOfBody {
+        /// The selection's position in the list given.
+        index: usize,
+    },
+    /// A shell of the operation's input is in no region. A caller can build such a body
+    /// (`Brep::shell_mut`), so it is the caller's input, not the kernel's fault.
+    ShellHasNoRegion {
+        /// The shell, of the operation's input.
+        shell: ShellId,
+    },
+    /// An inward shell of a closed solid by `distance` leaves no offset of it at all: the
+    /// wall is as thick as the solid or thicker, so there is no cavity to take away
+    /// (WR-454). A thinner wall passes.
+    ShellLeavesNoCavity {
+        /// The offset distance asked for (signed, as the shell takes it).
+        distance: f64,
+    },
     /// Across a shell's tangent gap, the curve between an offset edge's settled vertices is
     /// not certified from the edge's curve within the endpoint bound (its tolerance and the
     /// vertices'): the vertices are off the curve by more, a drop onto it found no foot,
@@ -481,6 +561,15 @@ pub enum OffsetFailure {
         moved: f64,
         /// The farthest it may be.
         bound: f64,
+    },
+    /// The shell's wall `wall` (the offset distance's magnitude) is below `smallest`, twice
+    /// the body's B-rep tolerance: a wall the shell does not resolve. A wall of at least
+    /// `smallest` passes.
+    ShellWallUnresolved {
+        /// The wall asked for.
+        wall: f64,
+        /// The smallest wall the shell resolves.
+        smallest: f64,
     },
     /// An offset edge that a loop gap's bridge or a step corner must split is not split at
     /// the point: the edge split takes the point for one of the edge's ends (within an end
@@ -523,6 +612,10 @@ pub enum OffsetFailure {
         /// The tolerance asked for, as given (the executive takes its magnitude).
         tolerance: f64,
     },
+    /// The UV trim curves of an extended offset face, on its extended surface, reach
+    /// outside both its offset surface's domain and the extension's (by more than
+    /// `SM_EFF_ZERO`): the face is trimmed on neither surface.
+    TrimPastExtension,
     /// A face of the body the operation was given has no surface, behind a handle that names
     /// no face of the input (a backend whose handles carry no topology entity): the
     /// [`OffsetFailure::FaceHasNoSurface`] of a face it cannot name.
@@ -710,7 +803,9 @@ impl OffsetFailure {
             | Self::FaceHasNoSurface { face }
             | Self::FaceHasNoOuterFaceuse { face }
             | Self::SelfIntersectionWithoutUvCurve { face }
-            | Self::MoveCollapses { face, .. } => Some(EntityRef::Face(face)),
+            | Self::MoveCollapses { face, .. }
+            | Self::ExtendedFaceCollapses { face, .. }
+            | Self::FaceHasNoFaceuse { face } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. }
             | Self::LoopsCross { face, .. }
             | Self::LoopGapUncertified { face }
@@ -725,7 +820,14 @@ impl OffsetFailure {
             | Self::CurveKindUnsupported { edge, .. }
             | Self::EdgeuseHasNoUvTrim { edge } => edge.map(EntityRef::Edge),
             Self::Unsound { what } => what.entity(),
-            Self::FaceuseHasNoFace { faceuse } => Some(EntityRef::Faceuse(faceuse)),
+            Self::FaceuseHasNoFace { faceuse }
+            | Self::FaceuseHasNoShell { faceuse }
+            | Self::FaceuseHasNoMate { faceuse } => Some(EntityRef::Faceuse(faceuse)),
+            Self::ShellHasNoRegion { shell } => Some(EntityRef::Shell(shell)),
+            Self::EdgeuseHasNoEdge { edgeuse }
+            | Self::EdgeuseHasNoMate { edgeuse }
+            | Self::EdgeuseHasNoRadial { edgeuse }
+            | Self::EdgeuseHasNoFaceuse { edgeuse } => Some(EntityRef::Edgeuse(edgeuse)),
             Self::BlendRailWithoutSupport { edge }
             | Self::EdgeOffsetsUnpaired { edge }
             | Self::GapEndWithoutEdge { edge }
@@ -763,7 +865,12 @@ impl OffsetFailure {
             | Self::InvalidValue(_)
             | Self::Inconsistent(_)
             | Self::StageFailed
-            | Self::Defect { .. } => None,
+            | Self::Defect { .. }
+            | Self::BrepNotGiven
+            | Self::ShellLeavesNoCavity { .. }
+            | Self::ShellWallUnresolved { .. }
+            | Self::ShellFaceNotOfBody { .. }
+            | Self::TrimPastExtension => None,
         }
     }
 
@@ -797,6 +904,20 @@ impl OffsetFailure {
                 | Self::FaceuseNotGiven
                 | Self::SelfIntersectionWithoutUvCurve { .. }
                 | Self::FaceuseHasNoFace { .. }
+                | Self::BrepNotGiven
+                | Self::ShellLeavesNoCavity { .. }
+                | Self::ShellWallUnresolved { .. }
+                | Self::ShellFaceNotOfBody { .. }
+                | Self::ExtendedFaceCollapses { .. }
+                | Self::TrimPastExtension
+                | Self::FaceHasNoFaceuse { .. }
+                | Self::FaceuseHasNoShell { .. }
+                | Self::ShellHasNoRegion { .. }
+                | Self::FaceuseHasNoMate { .. }
+                | Self::EdgeuseHasNoEdge { .. }
+                | Self::EdgeuseHasNoMate { .. }
+                | Self::EdgeuseHasNoRadial { .. }
+                | Self::EdgeuseHasNoFaceuse { .. }
         ) || self.is_named_at_a_status_site()
     }
 
@@ -849,6 +970,7 @@ impl OffsetFailure {
         match self {
             Self::BlendRailWithoutSupport { .. }
             | Self::BlendSectionNotFound { .. }
+            | Self::BrepNotGiven
             | Self::Collapses { .. }
             | Self::CrossingUndecided
             | Self::CurveKindUnsupported { .. }
@@ -858,18 +980,26 @@ impl OffsetFailure {
             | Self::EdgeHasNoCurve { .. }
             | Self::EdgeOffsetsUnpaired { .. }
             | Self::EdgeVanishes { .. }
+            | Self::EdgeuseHasNoEdge { .. }
+            | Self::EdgeuseHasNoFaceuse { .. }
+            | Self::EdgeuseHasNoMate { .. }
+            | Self::EdgeuseHasNoRadial { .. }
             | Self::EdgeuseHasNoUvTrim { .. }
             | Self::EdgeuseNotGiven
             | Self::ExactCurveUncut
             | Self::ExtendedEdgeUntrimmed
+            | Self::ExtendedFaceCollapses { .. }
             | Self::FaceCloses { .. }
             | Self::FaceDomainUnresolved
+            | Self::FaceHasNoFaceuse { .. }
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceMoveEmpty { .. }
             | Self::FacesApart { .. }
             | Self::FacesMoveRefused { .. }
             | Self::FaceuseHasNoFace { .. }
+            | Self::FaceuseHasNoMate { .. }
+            | Self::FaceuseHasNoShell { .. }
             | Self::FaceuseNotGiven
             | Self::Folds { .. }
             | Self::FollowedBlendIncomplete
@@ -891,15 +1021,20 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::SeamOpened { .. }
             | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::ShellFaceNotOfBody { .. }
+            | Self::ShellHasNoRegion { .. }
+            | Self::ShellLeavesNoCavity { .. }
             | Self::ShellTangentCurveUncertified
             | Self::ShellTangentUvUnmatched
             | Self::ShellTangentVertexMoveTooFar { .. }
+            | Self::ShellWallUnresolved { .. }
             | Self::SplitAtEdgeEnd { .. }
             | Self::StageFailed
             | Self::TangentBranchUncertified
             | Self::TangentEndOffCurve
             | Self::TangentGapsAtConcaveEdge
             | Self::ToleranceUnresolved { .. }
+            | Self::TrimPastExtension
             | Self::UnnamedFaceHasNoSurface
             | Self::Unsound { .. }
             | Self::VertexArcInPlane
@@ -929,6 +1064,7 @@ impl OffsetFailure {
         match self {
             Self::BlendRailWithoutSupport { .. }
             | Self::BlendSectionNotFound { .. }
+            | Self::BrepNotGiven
             | Self::Collapses { .. }
             | Self::CrossingUndecided
             | Self::CurveKindUnsupported { .. }
@@ -937,18 +1073,26 @@ impl OffsetFailure {
             | Self::EdgeHasNoCurve { .. }
             | Self::EdgeOffsetsUnpaired { .. }
             | Self::EdgeVanishes { .. }
+            | Self::EdgeuseHasNoEdge { .. }
+            | Self::EdgeuseHasNoFaceuse { .. }
+            | Self::EdgeuseHasNoMate { .. }
+            | Self::EdgeuseHasNoRadial { .. }
             | Self::EdgeuseHasNoUvTrim { .. }
             | Self::EdgeuseNotGiven
             | Self::ExactCurveUncut
             | Self::ExtendedEdgeUntrimmed
+            | Self::ExtendedFaceCollapses { .. }
             | Self::FaceCloses { .. }
             | Self::FaceDomainUnresolved
+            | Self::FaceHasNoFaceuse { .. }
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceMoveEmpty { .. }
             | Self::FacesApart { .. }
             | Self::FacesMoveRefused { .. }
             | Self::FaceuseHasNoFace { .. }
+            | Self::FaceuseHasNoMate { .. }
+            | Self::FaceuseHasNoShell { .. }
             | Self::FaceuseNotGiven
             | Self::Failed(_)
             | Self::Folds { .. }
@@ -971,13 +1115,18 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::SeamOpened { .. }
             | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::ShellFaceNotOfBody { .. }
+            | Self::ShellHasNoRegion { .. }
+            | Self::ShellLeavesNoCavity { .. }
             | Self::ShellTangentCurveUncertified
             | Self::ShellTangentUvUnmatched
             | Self::ShellTangentVertexMoveTooFar { .. }
+            | Self::ShellWallUnresolved { .. }
             | Self::TangentBranchUncertified
             | Self::TangentEndOffCurve
             | Self::TangentGapsAtConcaveEdge
             | Self::ToleranceUnresolved { .. }
+            | Self::TrimPastExtension
             | Self::UnnamedFaceHasNoSurface
             | Self::Unsound { .. }
             | Self::VertexArcInPlane
@@ -1000,19 +1149,28 @@ impl OffsetFailure {
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
             Self::BlendRailWithoutSupport { .. }
+            | Self::BrepNotGiven
             | Self::CurveKindUnsupported { .. }
             | Self::EdgeHasNoCurve { .. }
             | Self::EdgeOffsetsUnpaired { .. }
+            | Self::EdgeuseHasNoEdge { .. }
+            | Self::EdgeuseHasNoFaceuse { .. }
+            | Self::EdgeuseHasNoMate { .. }
+            | Self::EdgeuseHasNoRadial { .. }
             | Self::EdgeuseHasNoUvTrim { .. }
             | Self::EdgeuseNotGiven
+            | Self::FaceHasNoFaceuse { .. }
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceuseHasNoFace { .. }
+            | Self::FaceuseHasNoMate { .. }
+            | Self::FaceuseHasNoShell { .. }
             | Self::FaceuseNotGiven
             | Self::FollowedBlendIncomplete
             | Self::GapEndWithoutEdge { .. }
             | Self::Missing(_)
             | Self::SelfIntersectionWithoutUvCurve { .. }
+            | Self::ShellHasNoRegion { .. }
             | Self::UnnamedFaceHasNoSurface
             | Self::VertexNotGiven => SM_ERR_NULL_POINTER,
             Self::BlendSectionNotFound { .. }
@@ -1022,6 +1180,7 @@ impl OffsetFailure {
             | Self::DraftClosesWall { .. }
             | Self::ExactCurveUncut
             | Self::ExtendedEdgeUntrimmed
+            | Self::ExtendedFaceCollapses { .. }
             | Self::FaceCloses { .. }
             | Self::FaceDomainUnresolved
             | Self::FacesApart { .. }
@@ -1051,6 +1210,7 @@ impl OffsetFailure {
             | Self::TangentBranchUncertified
             | Self::TangentEndOffCurve
             | Self::TangentGapsAtConcaveEdge
+            | Self::TrimPastExtension
             | Self::Unsound { .. }
             | Self::VertexArcInPlane
             | Self::VertexArcMissesPlane { .. }
@@ -1061,7 +1221,11 @@ impl OffsetFailure {
                 SM_ERR_INVALID_INPUT
             }
             Self::EdgeVanishes { .. } => SM_ERR_OFFSET_EDGE_VANISHES,
-            Self::FaceMoveEmpty { .. } | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::FaceMoveEmpty { .. }
+            | Self::InvalidValue(_)
+            | Self::ShellFaceNotOfBody { .. }
+            | Self::ShellLeavesNoCavity { .. }
+            | Self::ShellWallUnresolved { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
@@ -1101,28 +1265,42 @@ impl OffsetFailure {
             | Self::TangentBranchUncertified
             | Self::TangentEndOffCurve
             | Self::TangentGapsAtConcaveEdge
+            | Self::TrimPastExtension
             | Self::Unsound { .. }
             | Self::VertexArcInPlane
             | Self::VertexArcMissesPlane { .. }
             | Self::VertexCurveNotArc => ErrorKind::Unsupported,
-            Self::Collapses { .. } | Self::WallsMeetAcross { .. } | Self::MoveCollapses { .. } => {
-                ErrorKind::OffsetCollapses
-            }
+            Self::Collapses { .. }
+            | Self::ExtendedFaceCollapses { .. }
+            | Self::MoveCollapses { .. }
+            | Self::ShellLeavesNoCavity { .. }
+            | Self::WallsMeetAcross { .. } => ErrorKind::OffsetCollapses,
             Self::Defect { .. }
             | Self::LoopGapEndsAmbiguous { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::SplitAtEdgeEnd { .. }
             | Self::StageFailed => ErrorKind::StageFailed,
-            Self::DistanceUnresolved { .. }
+            Self::BrepNotGiven
+            | Self::DistanceUnresolved { .. }
             | Self::EdgeHasNoCurve { .. }
+            | Self::EdgeuseHasNoEdge { .. }
+            | Self::EdgeuseHasNoFaceuse { .. }
+            | Self::EdgeuseHasNoMate { .. }
+            | Self::EdgeuseHasNoRadial { .. }
             | Self::EdgeuseNotGiven
+            | Self::FaceHasNoFaceuse { .. }
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceMoveEmpty { .. }
             | Self::FaceuseHasNoFace { .. }
+            | Self::FaceuseHasNoMate { .. }
+            | Self::FaceuseHasNoShell { .. }
             | Self::FaceuseNotGiven
             | Self::FollowedBlendIncomplete
             | Self::LocalFaceNotListed
+            | Self::ShellFaceNotOfBody { .. }
+            | Self::ShellHasNoRegion { .. }
+            | Self::ShellWallUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::UnnamedFaceHasNoSurface
             | Self::VertexNotGiven => ErrorKind::InvalidInput,
@@ -1603,6 +1781,55 @@ impl core::fmt::Display for OffsetFailure {
             Self::FaceuseHasNoFace { .. } => {
                 f.write_str("invalid input: a face use of the body has no face")
             }
+            Self::BrepNotGiven => f.write_str("invalid input: the operation was given no B-rep"),
+            Self::ShellLeavesNoCavity { distance } => write!(
+                f,
+                "an inward shell by {distance} leaves no offset of the solid: the wall is as \
+                 thick as the solid or thicker, so there is no cavity"
+            ),
+            Self::ShellWallUnresolved { wall, smallest } => write!(
+                f,
+                "invalid input: the shell's wall {wall:e} is below {smallest:e}, twice the \
+                 body's tolerance"
+            ),
+            Self::ShellFaceNotOfBody { index } => write!(
+                f,
+                "invalid input: the shell's face selection {index} names no face of the body \
+                 it was given"
+            ),
+            Self::ExtendedFaceCollapses { distance, .. } => write!(
+                f,
+                "the face's offset surface collapses at the distance {distance}, and the \
+                 extended offset builds every face it offsets"
+            ),
+            Self::TrimPastExtension => f.write_str(
+                "an extended offset face's trim reaches past both its offset surface's domain \
+                 and the extension's",
+            ),
+            Self::FaceHasNoFaceuse { .. } => {
+                f.write_str("invalid input: a face of the body has no face use")
+            }
+            Self::FaceuseHasNoShell { .. } => {
+                f.write_str("invalid input: a face use of the body is in no shell")
+            }
+            Self::ShellHasNoRegion { .. } => {
+                f.write_str("invalid input: a shell of the body is in no region")
+            }
+            Self::FaceuseHasNoMate { .. } => {
+                f.write_str("invalid input: a face use of the body has no mate")
+            }
+            Self::EdgeuseHasNoEdge { .. } => {
+                f.write_str("invalid input: an edge use of the body has no edge")
+            }
+            Self::EdgeuseHasNoMate { .. } => {
+                f.write_str("invalid input: an edge use of the body has no mate")
+            }
+            Self::EdgeuseHasNoRadial { .. } => {
+                f.write_str("invalid input: an edge use of the body has no radial")
+            }
+            Self::EdgeuseHasNoFaceuse { .. } => {
+                f.write_str("invalid input: an edge use of the body has no face use")
+            }
         }
     }
 }
@@ -1842,6 +2069,7 @@ mod tests {
                 false,
                 true,
             ),
+            (O::BrepNotGiven, ErrorKind::InvalidInput, false, false, true),
             (
                 O::Collapses {
                     face,
@@ -1926,6 +2154,42 @@ mod tests {
                 false,
             ),
             (
+                O::EdgeuseHasNoEdge {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::EdgeuseHasNoFaceuse {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::EdgeuseHasNoMate {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::EdgeuseHasNoRadial {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
                 O::EdgeuseHasNoUvTrim { edge: None },
                 ErrorKind::Unsupported,
                 false,
@@ -1954,6 +2218,16 @@ mod tests {
                 true,
             ),
             (
+                O::ExtendedFaceCollapses {
+                    face,
+                    distance: 0.5,
+                },
+                ErrorKind::OffsetCollapses,
+                false,
+                false,
+                true,
+            ),
+            (
                 O::FaceCloses {
                     face,
                     beside: [face, face],
@@ -1968,6 +2242,13 @@ mod tests {
             (
                 O::FaceDomainUnresolved,
                 ErrorKind::Failed,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::FaceHasNoFaceuse { face },
+                ErrorKind::InvalidInput,
                 false,
                 false,
                 true,
@@ -2014,6 +2295,24 @@ mod tests {
             ),
             (
                 O::FaceuseHasNoFace {
+                    faceuse: FaceuseId::from_index(2),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::FaceuseHasNoMate {
+                    faceuse: FaceuseId::from_index(2),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::FaceuseHasNoShell {
                     faceuse: FaceuseId::from_index(2),
                 },
                 ErrorKind::InvalidInput,
@@ -2217,6 +2516,29 @@ mod tests {
                 true,
             ),
             (
+                O::ShellFaceNotOfBody { index: 1 },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::ShellHasNoRegion {
+                    shell: ShellId::from_index(1),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::ShellLeavesNoCavity { distance: -5.0 },
+                ErrorKind::OffsetCollapses,
+                false,
+                false,
+                true,
+            ),
+            (
                 O::ShellTangentCurveUncertified,
                 ErrorKind::Unsupported,
                 false,
@@ -2236,6 +2558,16 @@ mod tests {
                     bound: 1e-5,
                 },
                 ErrorKind::Unsupported,
+                false,
+                false,
+                true,
+            ),
+            (
+                O::ShellWallUnresolved {
+                    wall: 0.1,
+                    smallest: 0.25,
+                },
+                ErrorKind::InvalidInput,
                 false,
                 false,
                 true,
@@ -2279,6 +2611,13 @@ mod tests {
                 false,
                 false,
                 false,
+            ),
+            (
+                O::TrimPastExtension,
+                ErrorKind::Unsupported,
+                false,
+                false,
+                true,
             ),
             (
                 O::UnnamedFaceHasNoSurface,
@@ -2361,6 +2700,7 @@ mod tests {
             match o {
                 O::BlendRailWithoutSupport { .. } => "BlendRailWithoutSupport",
                 O::BlendSectionNotFound { .. } => "BlendSectionNotFound",
+                O::BrepNotGiven => "BrepNotGiven",
                 O::Collapses { .. } => "Collapses",
                 O::CrossingUndecided => "CrossingUndecided",
                 O::CurveKindUnsupported { .. } => "CurveKindUnsupported",
@@ -2370,18 +2710,26 @@ mod tests {
                 O::EdgeHasNoCurve { .. } => "EdgeHasNoCurve",
                 O::EdgeOffsetsUnpaired { .. } => "EdgeOffsetsUnpaired",
                 O::EdgeVanishes { .. } => "EdgeVanishes",
+                O::EdgeuseHasNoEdge { .. } => "EdgeuseHasNoEdge",
+                O::EdgeuseHasNoFaceuse { .. } => "EdgeuseHasNoFaceuse",
+                O::EdgeuseHasNoMate { .. } => "EdgeuseHasNoMate",
+                O::EdgeuseHasNoRadial { .. } => "EdgeuseHasNoRadial",
                 O::EdgeuseHasNoUvTrim { .. } => "EdgeuseHasNoUvTrim",
                 O::EdgeuseNotGiven => "EdgeuseNotGiven",
                 O::ExactCurveUncut => "ExactCurveUncut",
                 O::ExtendedEdgeUntrimmed => "ExtendedEdgeUntrimmed",
+                O::ExtendedFaceCollapses { .. } => "ExtendedFaceCollapses",
                 O::FaceCloses { .. } => "FaceCloses",
                 O::FaceDomainUnresolved => "FaceDomainUnresolved",
+                O::FaceHasNoFaceuse { .. } => "FaceHasNoFaceuse",
                 O::FaceHasNoOuterFaceuse { .. } => "FaceHasNoOuterFaceuse",
                 O::FaceHasNoSurface { .. } => "FaceHasNoSurface",
                 O::FaceMoveEmpty { .. } => "FaceMoveEmpty",
                 O::FacesApart { .. } => "FacesApart",
                 O::FacesMoveRefused { .. } => "FacesMoveRefused",
                 O::FaceuseHasNoFace { .. } => "FaceuseHasNoFace",
+                O::FaceuseHasNoMate { .. } => "FaceuseHasNoMate",
+                O::FaceuseHasNoShell { .. } => "FaceuseHasNoShell",
                 O::FaceuseNotGiven => "FaceuseNotGiven",
                 O::Failed(_) => "Failed",
                 O::Folds { .. } => "Folds",
@@ -2407,15 +2755,20 @@ mod tests {
                 O::ReachUncertified { .. } => "ReachUncertified",
                 O::SeamOpened { .. } => "SeamOpened",
                 O::SelfIntersectionWithoutUvCurve { .. } => "SelfIntersectionWithoutUvCurve",
+                O::ShellFaceNotOfBody { .. } => "ShellFaceNotOfBody",
+                O::ShellHasNoRegion { .. } => "ShellHasNoRegion",
+                O::ShellLeavesNoCavity { .. } => "ShellLeavesNoCavity",
                 O::ShellTangentCurveUncertified => "ShellTangentCurveUncertified",
                 O::ShellTangentUvUnmatched => "ShellTangentUvUnmatched",
                 O::ShellTangentVertexMoveTooFar { .. } => "ShellTangentVertexMoveTooFar",
+                O::ShellWallUnresolved { .. } => "ShellWallUnresolved",
                 O::SplitAtEdgeEnd { .. } => "SplitAtEdgeEnd",
                 O::StageFailed => "StageFailed",
                 O::TangentBranchUncertified => "TangentBranchUncertified",
                 O::TangentEndOffCurve => "TangentEndOffCurve",
                 O::TangentGapsAtConcaveEdge => "TangentGapsAtConcaveEdge",
                 O::ToleranceUnresolved { .. } => "ToleranceUnresolved",
+                O::TrimPastExtension => "TrimPastExtension",
                 O::UnnamedFaceHasNoSurface => "UnnamedFaceHasNoSurface",
                 O::Unsound { .. } => "Unsound",
                 O::VertexArcInPlane => "VertexArcInPlane",
@@ -2575,6 +2928,89 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 Some(EntityRef::Faceuse(FaceuseId::from_index(2))),
             ),
+            // and those of `offset_executive::p2` (TE-O-18)
+            (OffsetFailure::BrepNotGiven, SM_ERR_NULL_POINTER, None),
+            (
+                OffsetFailure::ShellLeavesNoCavity { distance: -5.0 },
+                SM_ERR_INVALID_INPUT,
+                None,
+            ),
+            (
+                OffsetFailure::ShellWallUnresolved {
+                    wall: 0.1,
+                    smallest: 0.25,
+                },
+                SM_ERR_INVALID_INPUT,
+                None,
+            ),
+            (
+                OffsetFailure::ShellFaceNotOfBody { index: 1 },
+                SM_ERR_INVALID_INPUT,
+                None,
+            ),
+            (
+                OffsetFailure::ExtendedFaceCollapses {
+                    face,
+                    distance: 0.5,
+                },
+                SM_ERR,
+                Some(EntityRef::Face(face)),
+            ),
+            (OffsetFailure::TrimPastExtension, SM_ERR, None),
+            (
+                OffsetFailure::FaceHasNoFaceuse { face },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Face(face)),
+            ),
+            (
+                OffsetFailure::FaceuseHasNoShell {
+                    faceuse: FaceuseId::from_index(2),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Faceuse(FaceuseId::from_index(2))),
+            ),
+            (
+                OffsetFailure::ShellHasNoRegion {
+                    shell: ShellId::from_index(1),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Shell(ShellId::from_index(1))),
+            ),
+            (
+                OffsetFailure::FaceuseHasNoMate {
+                    faceuse: FaceuseId::from_index(2),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Faceuse(FaceuseId::from_index(2))),
+            ),
+            (
+                OffsetFailure::EdgeuseHasNoEdge {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
+            (
+                OffsetFailure::EdgeuseHasNoMate {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
+            (
+                OffsetFailure::EdgeuseHasNoRadial {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
+            (
+                OffsetFailure::EdgeuseHasNoFaceuse {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
         ];
         for (cause, status, entity) in samples {
             assert!(cause.replaces_upstream_status(), "{cause:?}");
@@ -2685,15 +3121,10 @@ mod tests {
     }
 
     /// The offset routines describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still
-    /// hold) whose conversion waits on other open work.
+    /// `Upstream` status.
     #[test]
     fn the_offset_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting(
-            "offset",
-            20,
-            &[("offset/offset_executive/p2.rs", 57)],
-        );
+        super::super::bare_scan::assert_waiting("offset", 20, &[]);
     }
 
     /// The sites that build a offset phrase cause only fall:
