@@ -3673,6 +3673,91 @@ mod tests {
         }
     }
 
+    // A quadratic UV curve whose first span [0, 1e-4] is a pole (its three control points
+    // coincide), with interior knots at 0.5 and 0.75; `reversed` gives the same curve run
+    // backwards, its pole span at the end.
+    fn pole_head_uv_curve(reversed: bool) -> BSplineCurve {
+        let mut points = [
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(0.5, 0.2, 0.0, NOW),
+            CPoint::new(1.0, 0.0, 0.0, NOW),
+            CPoint::new(1.2, 0.3, 0.0, NOW),
+        ];
+        let mut knots = [0.0, 0.0, 0.0, 1e-4, 0.5, 0.75, 1.0, 1.0, 1.0];
+        if reversed {
+            points.reverse();
+            knots.reverse();
+            for u in &mut knots {
+                *u = 1.0 - *u;
+            }
+        }
+        let mut nurb = allocate_nurb_curve(5, 2, 8).unwrap();
+        nurb.cpts_mut().copy_from_slice(&points);
+        nurb.knots_mut().copy_from_slice(&knots);
+        BSplineCurve::from_nurb(nurb, 2, false)
+    }
+
+    #[test]
+    fn uv_trim_with_a_pole_end_keeps_its_short_other_end() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_trim_preserves_uv_spans = true;
+        // The trim keeps the pole span at one end and a span of 1e-6 at the other end,
+        // past an interior knot. The curve's speed there is about 2.2, so that span is
+        // about 2.2e-6 long, below the zone tolerance (1e-5), but it is no pole.
+        for reversed in [false, true] {
+            let original = pole_head_uv_curve(reversed);
+            let (ivl, kept) = if reversed {
+                (
+                    Extent1d::from_min_max(0.25 - 1e-6, 1.0),
+                    (0.25 - 1e-6, 1.0 - 1e-4),
+                )
+            } else {
+                (
+                    Extent1d::from_min_max(0.0, 0.75 + 1e-6),
+                    (1e-4, 0.75 + 1e-6),
+                )
+            };
+            let mut trimmed = original.clone();
+            let mut trimmed_ivl = ivl;
+            trimmed
+                .trim(&k, &mut trimmed_ivl, TrimMode::Notify)
+                .unwrap();
+            assert_eq!(trimmed_ivl, ivl, "reversed {reversed}");
+            assert_eq!(trimmed.natural_interval(), ivl, "reversed {reversed}");
+
+            // Only the pole span goes: the rest is the exact restriction of the curve,
+            // its control points unchanged and its knots mapped linearly onto the
+            // edge's interval, so its image is the restriction's (an identity).
+            let restriction = crv_trim(original.nurb.as_ref().unwrap(), kept.0, kept.1).unwrap();
+            let nurb = trimmed.nurb.as_ref().unwrap();
+            assert_eq!(nurb.cpts(), restriction.cpts(), "reversed {reversed}");
+            assert_eq!(nurb.knots().len(), restriction.knots().len());
+            let scale = (ivl.max() - ivl.min()) / (kept.1 - kept.0);
+            for (&u, &r) in nurb.knots().iter().zip(restriction.knots()) {
+                let expected = ivl.min() + scale * (r - kept.0);
+                assert!(
+                    (u - expected).abs() <= 4.0 * f64::EPSILON,
+                    "reversed {reversed}: knot {u} vs {expected}"
+                );
+            }
+            // the short non-pole span keeps its knot
+            assert_eq!(
+                trimmed.knots(None).unwrap().0.len(),
+                4,
+                "reversed {reversed}"
+            );
+            // the ends stay on the curve's ends (the pole is one point)
+            for t in [ivl.min(), ivl.max()] {
+                let gap = trimmed.evaluate_point(t).unwrap() - original.evaluate_point(t).unwrap();
+                assert!(gap.length() <= 4.0 * f64::EPSILON, "reversed {reversed}");
+            }
+            // and check test #15 finds no pole
+            assert!(!trimmed.has_internal_pole(&k, ZONE_TOL_3D / 10.0).unwrap());
+        }
+    }
+
     #[test]
     fn uv_trim_fix_preserves_interval_only_and_curve_dispatch() {
         let mut k = Kernel::default();
