@@ -1434,13 +1434,9 @@ fn keeps_seams(k: &Kernel, b: &mut Brep, face: FaceId, surface: &Surface) -> Res
             let line = if let Some(c) = eu1::uv_trim_curve(b, u)?.0 {
                 uv_line(k, c)?
             } else {
-                if scratch.is_none() {
-                    scratch = Some(b.clone_standing_for_self()?);
-                }
-                let Some(s) = scratch.as_mut() else {
-                    return Err(broken(
-                        "the scratch copy of the B-rep is gone, though it was made just above",
-                    ));
+                let s = match &mut scratch {
+                    Some(s) => s,
+                    slot => slot.insert(b.clone_standing_for_self()?),
                 };
                 let _ = get_or_create_uv_trim_curve(k, s, u, false, false, true)?;
                 match eu1::uv_trim_curve(s, u)?.0 {
