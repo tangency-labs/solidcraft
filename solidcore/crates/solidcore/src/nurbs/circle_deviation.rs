@@ -328,7 +328,7 @@ impl Near {
         }
         // the computed weights are within `e_ref` of the exact ones, so the exact
         // smallest is at least `w_min - e_ref`, taken rounded down
-        if !(e_ref < 0.5 * w_min) {
+        if e_ref.is_nan() || e_ref >= 0.5 * w_min {
             return Err(unbounded());
         }
         let w_low = (w_min - e_ref) * (1.0 - gamma(1));
@@ -483,7 +483,7 @@ fn checked_pieces(c: &Curve, [lo, hi]: [f64; 2]) -> Result<(Vec<Curve>, usize)> 
 fn binomials(n: usize) -> Vec<f64> {
     let mut row = vec![1.0_f64];
     for _ in 0..n {
-        let mut next = Vec::with_capacity(row.len() + 1);
+        let mut next = Vec::new();
         next.push(1.0);
         next.extend(row.windows(2).map(|w| w.iter().sum::<f64>()));
         next.push(1.0);
@@ -501,8 +501,8 @@ struct Item {
 
 /// The halves of a Bernstein polynomial's coefficients (de Casteljau at 1/2).
 fn halve(c: &[f64]) -> (Vec<f64>, Vec<f64>) {
-    let mut left = Vec::with_capacity(c.len());
-    let mut right = Vec::with_capacity(c.len());
+    let mut left = Vec::new();
+    let mut right = Vec::new();
     let mut row = c.to_vec();
     while let Some(&first) = row.first() {
         left.push(first);
