@@ -2,24 +2,28 @@
 //! test shares, so the round follows its radius law between traced points. The seven
 //! `law-*` rows it moves keep their status and counts and change only their geometry and
 //! mass values. Each row is checked here, on the finished body, one test per row:
-//! - the status is 0 and the vertex, edge and face counts are the golden's, unchanged;
+//! - the fillet succeeds and the vertex, edge and face counts are the golden's, unchanged;
 //! - `check_brep` Level 2 reports nothing and the body is one closed manifold solid;
 //! - the volume the mass integrator converges to lies in the body's certified volume
-//!   enclosure ([`enclose_volume`]), and every other mass value the golden records lies
-//!   in its certified band ([`mass_bands`]): the golden's new values are the body's;
-//! - the linear-section row's certified enclosure holds the closed form: a linear
-//!   section cuts the triangle `r^2 / 2` from the box, so with the law
-//!   `r(u) = 4 - 4u + 4u^2` along the 20-long edge it removes
-//!   `20 * int_0^1 r^2 du / 2 = 20 * 11.2 / 2 = 112`. The round's skin lies within
-//!   `T = 4 * tol` (the edge's tolerance) of that ruled chord surface, so the body's
-//!   volume is within `T * A` of `8000 - 112`, with `A` the chord surface's area,
-//!   bounded above by `sqrt(2.04) * 20 * int_0^1 r du = sqrt(2.04) * 20 * 10 / 3`
-//!   (the chord is `sqrt(2) r` long and tilts by at most `|r'(u)| / 20 <= 0.2` along the
-//!   edge). Main's body removed `112.0517` (off by `5.2e-2`, past that bound).
+//!   enclosure ([`enclose_volume`]), and every other mass value lies in its certified
+//!   band ([`mass_bands`]). This is a consistency check: it certifies that the values are
+//!   this body's, not that the body is the true round.
+//! - the linear-section row's certified enclosure meets a necessary condition from the
+//!   closed form, and main's volume fails it. A linear section cuts the triangle `r^2 / 2`
+//!   from the box, so with the law `r(u) = 4 - 4u + 4u^2` along the 20-long edge it
+//!   removes `20 * int_0^1 r^2 du / 2 = 20 * 11.2 / 2 = 112`. Premise (not checked here):
+//!   the round's skin lies within `T = 4 * tol` (the edge's tolerance) of that ruled chord
+//!   surface. Then, to first order, the body's volume is within `T * A` of `8000 - 112`,
+//!   with `A` the chord surface's area, bounded above by
+//!   `sqrt(2.04) * 20 * int_0^1 r du = sqrt(2.04) * 20 * 10 / 3` (the chord is `sqrt(2) r`
+//!   long and tilts by at most `|r'(u)| / 20 <= 0.2` along the edge). Main's body removed
+//!   `112.0517` (off by `5.2e-2`, past that bound), so main's value is refuted.
 //!
-//! The six ball-section rows have no closed form: their removed volume is checked
-//! against the balls' envelope by quadrature, and their skins are certified within `T`
-//! of the envelope, in `solidcore/crates/solidcore/tests/wr646_variable_round_follows_law.rs`.
+//! The six ball-section rows have no closed form. Their removed volume is compared with
+//! the balls' envelope by a converged (non-interval) quadrature in
+//! `solidcore/crates/solidcore/tests/wr646_variable_round_follows_law.rs`; main's and the
+//! new values both lie within `T` times the envelope's area of it, the new ones 3.6 to 10
+//! times closer. The skin-to-envelope certificate there is an ignored proof run.
 //!
 //! [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
 //! [`mass_bands`]: super::round_definition_proof::mass_bands
