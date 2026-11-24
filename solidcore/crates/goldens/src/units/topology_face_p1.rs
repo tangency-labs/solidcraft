@@ -804,7 +804,6 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 let found = tests::problems(&mut b, &before, refused);
                 AFTER_MOVE_SEAM.with(|c| *c.borrow_mut() = Some(found));
             }
-            crate::trim_hook::observe(&mut b);
         }
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;
