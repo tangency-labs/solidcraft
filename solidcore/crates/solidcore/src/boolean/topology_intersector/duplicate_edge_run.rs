@@ -26,8 +26,11 @@
 //! and on face B the run is not vertex/edge/vertex, its middle is classified as the other
 //! curve's interval there (same class and object; or to nothing, or unknown), and every
 //! end of it classified to an edge or a vertex of B is an end of that interval or of its
-//! two neighbours with the same object (so dropping the run removes no imprint or split of
-//! B that C1 does not make too). An interval already dropped never justifies a drop.
+//! two neighbours with the same object that is the same point: for a vertex, the vertex
+//! itself; for an edge G, a point within G's zone tolerance of the run's, or an end that
+//! on A is classified to the same vertex as the run's end there (the merge splits G at
+//! that one vertex for both). So dropping the run removes no imprint or split of B that
+//! C1 does not make too. An interval already dropped never justifies a drop.
 //!
 //! Within the tolerance C2's run and C1 are then one intersection. ARGUED, not proven:
 //! the run's ends and middle are on E within the classification tolerance, and C1 is E
@@ -58,6 +61,7 @@ use crate::error::{Result, SolidError};
 use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
 use crate::intersect::point_class::{ClassGeometry, ClassObject, PointClassType};
 use crate::kernel::Kernel;
+use crate::math::Point3;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{edge, vertexuse, Brep, EdgeId, VertexId};
 use crate::EntityRef;
@@ -159,36 +163,95 @@ fn is_whole_edge<O: ClassObject>(
         )
 }
 
-/// Whether dropping `run` (an interval on face B) loses nothing of B that interval `m` of
-/// `whole` (the curve that is the whole edge on A, here on B) does not make: `run`'s middle
-/// is classified as `whole`'s interval `m` (same class and object), or to nothing or
-/// is unknown (no imprint), and every end of `run` classified to an edge or a vertex is an
-/// end of interval `m - 1`, `m` or `m + 1` of `whole` with the same class and object.
+/// The 3D point of curve classification `cc` at parameter `t`, `None` when its curve is
+/// not there.
+fn point_of<O: ClassObject>(
+    k: &Kernel,
+    g: &impl ClassGeometry<O>,
+    cc: &CurveClassification<O>,
+    t: f64,
+) -> Result<Option<Point3>> {
+    let Some(curve) = cc.curve().and_then(|h| g.curve(h)) else {
+        return Ok(None);
+    };
+    Ok(curve.evaluate(k, t, 0, false, false)?.first().copied())
+}
+
+/// Whether dropping interval `ll` of `run_cc` (the run, on face B) loses nothing of B that
+/// interval `m` of `whole` (the curve that is the whole edge on A, here on B) does not
+/// make. `run_a` and `whole_a` are the same two curves' classifications on face A (each
+/// interval of one curve is the same parameter range on both faces):
+/// - the run's middle is classified as `whole`'s interval `m` (same class and object), or
+///   to nothing, or is unknown (no imprint);
+/// - every end of the run classified to a vertex is an end of interval `m - 1`, `m` or
+///   `m + 1` of `whole` classified to the same vertex;
+/// - every end of the run classified to an edge G is such an end classified to G that is
+///   the same point: either the two curves' points there lie within G's zone tolerance
+///   of each other, or on face A both ends are classified to one vertex (each lies within
+///   that vertex's tolerance of it, and the merge splits G at that one vertex for both).
+///   A curve that is not there keeps the run.
 fn kept_by<O: ClassObject>(
-    run: &CurveInterval<O>,
-    whole: &CurveClassification<O>,
+    k: &Kernel,
+    g: &impl ClassGeometry<O>,
+    (run_cc, run_a): (&CurveClassification<O>, &CurveClassification<O>),
+    ll: usize,
+    (whole, whole_a): (&CurveClassification<O>, &CurveClassification<O>),
     m: usize,
 ) -> Result<bool> {
+    let run = run_cc.at(ll)?;
+    let run_on_a = run_a.at(ll)?;
     let mate = whole.at(m)?;
     let mid = run.mid.point_class();
     let differs = mid != mate.mid.point_class() || run.mid.object() != mate.mid.object();
     if differs && !matches!(mid, PointClassType::Nothing | PointClassType::Unknown) {
         return Ok(false);
     }
-    for end in [&run.start, &run.end] {
+    for (end, end_a, t) in [
+        (&run.start, &run_on_a.start, run.interval.min()),
+        (&run.end, &run_on_a.end, run.interval.max()),
+    ] {
         let class = end.point_class();
         if class != PointClassType::Edge && class != PointClassType::Vertex {
             continue;
         }
+        let at = if class == PointClassType::Edge {
+            let Some(p) = point_of(k, g, run_cc, t)? else {
+                return Ok(false);
+            };
+            Some((p, end.obj_zone_tol_3d(k, g)?))
+        } else {
+            None
+        };
         let mut found = false;
         for n in m.saturating_sub(1)..=m.saturating_add(1) {
             if n >= whole.size() {
                 continue;
             }
             let w = whole.at(n)?;
-            for b in [&w.start, &w.end] {
-                if b.point_class() == class && b.object() == end.object() {
-                    found = true;
+            let w_a = whole_a.at(n)?;
+            for (b, b_a, tw) in [
+                (&w.start, &w_a.start, w.interval.min()),
+                (&w.end, &w_a.end, w.interval.max()),
+            ] {
+                if b.point_class() != class || b.object() != end.object() {
+                    continue;
+                }
+                match at {
+                    None => found = true,
+                    Some((p, tol)) => {
+                        // (one vertex of A for both: one point of G)
+                        if end_a.point_class() == PointClassType::Vertex
+                            && b_a.point_class() == PointClassType::Vertex
+                            && end_a.object().is_some()
+                            && end_a.object() == b_a.object()
+                        {
+                            found = true;
+                        } else if let Some(q) = point_of(k, g, whole, tw)? {
+                            if (p - q).length() <= tol {
+                                found = true;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -256,12 +319,15 @@ pub(super) fn drop_duplicate_edge_runs<O: ClassObject>(
                             continue;
                         }
                         let (other, other_b) = if side == 0 { (d1, d2) } else { (d2, d1) };
+                        let (run_a, run_b) = if side == 0 { (c1, c2) } else { (c2, c1) };
                         for m in 0..other.size() {
                             // (never against an interval already dropped)
                             if dropped.contains(&[pi, cj, m]) {
                                 continue;
                             }
-                            if is_whole_edge(g, other.at(m)?, ends) && kept_by(ivl_b, other_b, m)? {
+                            if is_whole_edge(g, other.at(m)?, ends)
+                                && kept_by(k, g, (run_b, run_a), ll, (other_b, other), m)?
+                            {
                                 duplicate = true;
                             }
                         }
