@@ -22,7 +22,7 @@ The long form is `docs/book/src/dev/testing.md`.
 A failing test cannot merge without its fix (it turns `main` red): include it, or list the test and cause in `tests/KNOWN_FAILING_TESTS` (`cargo xtask known-failing`); the fix drops the line.
 
 ## Running
-- `cargo xtask test` builds with the `ci` profile and runs every test binary at once; arguments after `--` go to each binary (`cargo xtask test -- shell`). It builds far faster than `--release`; a test failing only in a debug build: say so in the PR.
+- `cargo xtask test` builds with the `ci` profile and runs every test binary at once; arguments after `--` go to each binary (`cargo xtask test -- shell`). It builds several times faster than `--release`; a test failing only in a debug build: say so in the PR.
 - `SOLIDCRAFT_TEST_JOBS=N` bounds concurrent commands. `cargo xtask fast` before a commit (kernel: `--units <id,...>`); CI runs `cargo xtask ci`.
 - Tests run in their own processes: no shared state, no wall-clock timing.
 
@@ -31,5 +31,5 @@ A failing test cannot merge without its fix (it turns `main` red): include it, o
 - `ci` runs `kernel-rig.yml` (areas by `PATHS` against `KNOWN_FAILING`, the ladder against its golden). In the same PR a fix drops its line, a kernel update's new failure adds one, a changed ladder result is re-recorded (`--record "why"`), a new command gets an `EXEMPT` line (`tests/kernel-cases/README.md`).
 - Maintainers' PRs run native, GPU and reference tests on affected packages; others wait for `approved-for-ci`. `release-gate.yml` runs all before develop replaces main.
 - The action matrix is a ratchet: bless a newly passing action (`cargo xtask action-matrix --bless`, `docs/action-matrix.md`).
-- Heavy tests (`.config/nextest.toml`) run in the merge queue, nightly and on `main`, not in PRs or locally (`SOLIDCRAFT_TEST_HEAVY=1` runs them).
+- PRs skip a few heavy tests, run in the merge queue, nightly and on `main`. Check them after merging (`.config/nextest.toml`).
 - Mutation testing: `docs/mutation-testing.md`.
