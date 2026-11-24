@@ -1,6 +1,6 @@
-//! WR-642 (the fork's tangency-labs/smlib@4f06e72, the owner's ruling of 2026-10-30): with
-//! `fillet_mitre_concave_face_corners`, two blends meeting where the common face's corner
-//! between them is concave (a pocket's rim at its sharp corner, a boss's root at its sharp
+//! WR-642 (the fork's tangency-labs/smlib@4f06e72, the owner's ruling of 2026-10-30; formerly
+//! the `fillet_mitre_concave_face_corners` fix, now the only path): two blends meeting
+//! where the common face's corner between them is concave (a pocket's rim at its sharp corner, a boss's root at its sharp
 //! corner, the side edge not filleted) are mitred, as at a corner of uniform convexity,
 //! instead of being joined by a 3-sided face swept round the side edge.
 //!
@@ -27,18 +27,15 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, and WR-642's as given: the blend corner's
+/// Every fix: the blend corner's
 /// Mitre turn of two equal cylinders is their exact plane section only with the rounds'
 /// exact classes and circle sections, its companion fixes (on the default kernel the boss
 /// root's rounds come 4.8e-4 off the closed form, #2400).
-fn kernel(mitre: bool) -> Kernel {
-    let mut k = Kernel {
+fn kernel() -> Kernel {
+    Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
-    };
-    k.fixes.geometric_g2_continuity = false;
-    k.fixes.fillet_mitre_concave_face_corners = mitre;
-    k
+    }
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
@@ -76,13 +73,12 @@ fn rect_loop(c: [Point3; 4]) -> Vec<(Point3, Point3)> {
 /// Chamfers (`chamfer`) or rounds the edges between the point pairs `edges` of the body
 /// `make` builds, by `r`: the result's face count and volume.
 fn blend(
-    mitre: bool,
     make: fn(&mut Kernel) -> Brep,
     edges: &[(Point3, Point3)],
     r: f64,
     chamfer: bool,
 ) -> (usize, f64) {
-    let mut k = kernel(mitre);
+    let mut k = kernel();
     let mut b = make(&mut k);
     let ids: Vec<EdgeId> = edges
         .iter()
@@ -166,15 +162,9 @@ fn a_pocket_rim_chamfer_is_mitred_at_its_corners() {
     // d = 3 fits the 5 deep walls; d = 5.5 runs past the pocket's floor (a cliff
     // overflow, WR-636): the chamfer takes the same region either way.
     for d in [3.0, 5.5] {
-        let (_, v) = blend(true, pocketed_plate, &pocket_rim(), d, true);
+        let (_, v) = blend(pocketed_plate, &pocket_rim(), d, true);
         assert_close(v, POCKETED - chamfer_mitred(100.0, d), 1e-6);
     }
-    // without the flag the corners are upstream's swept 3-sided faces, not mitres
-    let (_, v) = blend(false, pocketed_plate, &pocket_rim(), 3.0, true);
-    assert!(
-        (v - (POCKETED - chamfer_mitred(100.0, 3.0))).abs() > 1e-3,
-        "volume {v}"
-    );
 }
 
 #[test]
@@ -182,20 +172,16 @@ fn pocket_rim_rounds_are_mitred_at_their_corners() {
     // The fork: r 2 15 faces 20911.091276, r 5 11 faces 20415.559998; the mitre's curve is
     // the fitted fillet-fillet intersection, 3.5e-5 to 6e-5 mm^3 per corner.
     for (r, faces) in [(2.0, 15), (5.0, 11)] {
-        let (n, v) = blend(true, pocketed_plate, &pocket_rim(), r, false);
+        let (n, v) = blend(pocketed_plate, &pocket_rim(), r, false);
         assert_eq!(n, faces, "r {r}");
         assert_close(v, POCKETED - round_mitred(100.0, r), 4.0 * 1e-4);
     }
-    let (n, _) = blend(false, pocketed_plate, &pocket_rim(), 2.0, false);
-    assert_ne!(n, 15, "upstream sweeps a 3-sided face at each corner");
 }
 
 #[test]
 fn boss_root_rounds_are_mitred_at_their_corners() {
     // The fork: r 4 15 faces 24299.233396 against 24299.233158.
-    let (n, v) = blend(true, bossed_plate, &boss_root(), 4.0, false);
+    let (n, v) = blend(bossed_plate, &boss_root(), 4.0, false);
     assert_eq!(n, 15);
     assert_close(v, BOSSED + round_mitred(80.0, 4.0), 4.0 * 1e-4);
-    let (n, _) = blend(false, bossed_plate, &boss_root(), 4.0, false);
-    assert_ne!(n, 15, "upstream sweeps a 3-sided face at each corner");
 }

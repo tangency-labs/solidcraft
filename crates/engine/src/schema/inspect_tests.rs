@@ -1,10 +1,11 @@
 use serde_json::{Value, json};
+use solidcraft_geom::Vec3Geom;
 
 use super::{
-    BodyFeaturesParams, BodyListParams, ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, DescribeParams,
-    DocumentInspectParams, DocumentInspectResult, DocumentRevisionParams, MaterialAssignParams, MaterialAssignResult, MaterialListParams,
-    MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges, ModelFaces, ModelThreads, ModelThreadsParams, RevisionResult,
-    SketchInspectParams, SketchInspected,
+    BodyFeaturesParams, BodyListParams, ClassifyPointsParams, ClassifyPointsResult, ColoredComponentsParams, ColoredComponentsResult, CommandEntry,
+    CommandsParams, DescribeParams, DocumentInspectParams, DocumentInspectResult, DocumentRevisionParams, MaterialAssignParams, MaterialAssignResult,
+    MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges, ModelFaces, ModelThreads,
+    ModelThreadsParams, RevisionResult, SketchInspectParams, SketchInspected,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -14,6 +15,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<DescribeParams>(), &["command"]);
     assert_keys(input_schema_for::<BodyListParams>(), &["body"]);
+    assert_keys(input_schema_for::<ClassifyPointsParams>(), &["body", "face", "points"]);
     assert_keys(input_schema_for::<ModelThreadsParams>(), &[]);
     assert_keys(input_schema_for::<BodyFeaturesParams>(), &["body"]);
     assert_keys(input_schema_for::<ColoredComponentsParams>(), &["enabled"]);
@@ -35,8 +37,8 @@ fn strict_keeps_todays_errors() {
 
 /// #10942: a body's edges and faces and the design's threads reply as their output schemas say,
 /// in Warn without warnings for good calls and with them for a misspelt key. A cylindrical face
-/// carries `cylinder` and a folded sheet's face `sheet_face`; strict refuses a `body` that isn't
-/// text, which the handlers read as no body.
+/// carries `cylinder`, and a folded sheet's faces are named by the model; strict refuses a `body`
+/// that isn't text, which the handlers read as no body.
 #[test]
 fn model_lists_reply_with_their_schemas() {
     let (edges, faces, threads) = (output_schema_for::<ModelEdges>(), output_schema_for::<ModelFaces>(), output_schema_for::<ModelThreads>());
@@ -64,7 +66,11 @@ fn model_lists_reply_with_their_schemas() {
     assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["cylinder"]["radius"].as_f64().is_some_and(|r| (r - 4.0).abs() < 1e-9)), "{r}");
     let r = run(&mut s, "model.faces", json!({"body": sheet}));
     matches(&faces, &r, false);
-    assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["sheet_face"].as_str().is_some_and(|n| n.starts_with("sheet:"))), "{r}");
+    // A sheet's faces are named by the model, after what made each (#7990).
+    assert!(
+        r["faces"].as_array().into_iter().flatten().any(|f| f["name"].as_str().is_some_and(|n| n.starts_with('F') && n.ends_with(":top"))),
+        "{r}"
+    );
     let r = run(&mut s, "model.threads", json!({}));
     matches(&threads, &r, false);
     assert_eq!((r["threads"][0]["designation"].as_str(), r["threads"][0]["hand"].as_str()), (Some("M8"), Some("right")), "{r}");
@@ -777,4 +783,100 @@ fn body_features_list_what_built_each_body() {
     let warned = run(&mut s, "model.body_features", json!({"bdy": "A"}));
     assert!(warned.get("param_warnings").is_some(), "{warned}");
     assert!(s.execute("model.body_features", &json!({"body": "Nope"})).is_err());
+}
+
+/// A 40 mm cube with a radius-3 through bore and a radius-4 boss: a hole is void,
+/// its wall points toward its axis, and the boss wall points away from its axis.
+#[test]
+fn classify_points_reads_material_and_outward_normals_without_editing() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    run(&mut s, "solid.box", json!({"length":40, "width":40, "height":40, "body_name":"Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius":3, "height":40, "base":[10,20,0], "operation":"cut", "targets":["Block"]}));
+    run(&mut s, "solid.cylinder", json!({"radius":4, "height":10, "base":[28,20,40], "operation":"join", "targets":["Block"]}));
+    let before = s.doc.clone();
+    let revision = s.design_token();
+    let id = "inspect.classify_points";
+    let r = run(&mut s, id, json!({"body":"Block", "points":[[5,5,5], [50,5,5], [10,20,20], [28,20,45], [10,23,20], [28,24,45]]}));
+    matches::<ClassifyPointsResult>(id, &r, false);
+    assert_eq!(r["body"], "Block");
+    assert_eq!(r["results"].as_array().unwrap().len(), 6);
+    for (i, class) in ["inside", "outside", "outside", "inside", "on", "on"].into_iter().enumerate() {
+        assert_eq!(r["results"][i]["class"], class, "{r}");
+    }
+    let faces = run(&mut s, "model.faces", json!({"body":"Block"}));
+    for (i, expected) in [(4, [0., -1., 0.]), (5, [0., 1., 0.])] {
+        let row = &r["results"][i];
+        let n = crate::params::vec3(&row["normal"]).unwrap();
+        let want = solidcore_record::Vec3::from(expected);
+        assert!((n - want).len() < 1e-9, "{row}");
+        assert!((n.len() - 1.0).abs() < 1e-12, "{row}");
+        assert!(faces["faces"].as_array().unwrap().iter().any(|f| f["name"] == row["face"]), "{row}");
+    }
+    for face in [r["results"][4]["face"].clone(), json!({"point":[10,23,25]})] {
+        let selected = run(&mut s, id, json!({"body":"Block", "points":[[10,23,20]], "face":face}));
+        matches::<ClassifyPointsResult>(id, &selected, false);
+        assert_eq!(selected["results"][0], r["results"][4]);
+    }
+    let warned = run(&mut s, id, json!({"body":"Block", "points":[[5,5,5]], "poins":[]}));
+    matches::<ClassifyPointsResult>(id, &warned, true);
+    assert_eq!(s.doc, before);
+    assert_eq!(s.design_token(), revision);
+}
+
+/// The body's tolerance defines `on`; a face's trim excludes its hole, and an edge's
+/// two normals can be requested by selecting either adjacent face.
+#[test]
+fn classify_points_honours_tolerance_trim_and_face_selection() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    run(&mut s, "solid.box", json!({"length":10, "width":10, "height":10, "body_name":"Block"}));
+    run(&mut s, "solid.hole", json!({"position":[5,5,10], "diameter":2}));
+    let tolerance = s.model.state().body("Block").unwrap().body.record().tolerance;
+    let id = "inspect.classify_points";
+    let r = run(
+        &mut s,
+        id,
+        json!({"body":"Block", "points":[[-tolerance*0.25,2,5], [tolerance*0.25,2,5], [-tolerance*1000.,2,5], [tolerance*1000.,2,5], [5,5,10]]}),
+    );
+    matches::<ClassifyPointsResult>(id, &r, false);
+    for (i, class) in ["on", "on", "outside", "inside", "outside"].into_iter().enumerate() {
+        assert_eq!(r["results"][i]["class"], class, "{r}");
+    }
+    for (face, expected) in [([0, 2, 5], [-1., 0., 0.]), ([2, 0, 5], [0., -1., 0.])] {
+        let edge = run(&mut s, id, json!({"body":"Block", "points":[[0,0,5]], "face":face}));
+        matches::<ClassifyPointsResult>(id, &edge, false);
+        let normal = crate::params::vec3(&edge["results"][0]["normal"]).unwrap();
+        assert!((normal - solidcore_record::Vec3::from(expected)).len() < 1e-12, "{edge}");
+    }
+    // The top plane extends over the hole; its trimmed face does not.
+    assert!(s.execute(id, &json!({"body":"Block", "points":[[6,5,5]], "face":[2,2,10]})).is_err());
+    assert!(s.execute(id, &json!({"body":"Block", "points":[[2,2,10]], "face":[5,5,10]})).is_err());
+}
+
+#[test]
+fn classify_points_refuses_hostile_inputs_in_every_check_mode() {
+    let schema = input_schema_for::<ClassifyPointsParams>();
+    assert_eq!(schema.as_value()["properties"]["points"]["maxItems"], 256);
+    let bad = [
+        json!({}),
+        json!({"body":5, "points":[[0,0,0]]}),
+        json!({"body":"Block", "points":null}),
+        json!({"body":"Block", "points":[]}),
+        json!({"body":"Block", "points":vec![[0,0,0]; 257]}),
+        json!({"body":"Block", "points":[[0,0]]}),
+        json!({"body":"Block", "points":[[0,"x",0]]}),
+        json!({"body":"Block", "points":[[1e100,0,0]]}),
+        json!({"body":"Block", "points":[[0,0,0]], "face":null}),
+        json!({"body":"Block", "points":[[0,0,0]], "face":{}}),
+        json!({"body":"Block", "points":[[0,0,0]], "face":"missing"}),
+    ];
+    for mode in ParamCheck::ALL {
+        let mut s = Session { param_check: mode, ..Session::default() };
+        run(&mut s, "solid.box", json!({"length":10, "width":10, "height":10, "body_name":"Block"}));
+        let before = s.doc.clone();
+        for params in &bad {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.execute("inspect.classify_points", params)));
+            assert!(result.is_ok_and(|r| matches!(r, Err(crate::EngineError::BadParams { .. }))), "{mode:?}: {params}");
+        }
+        assert_eq!(s.doc, before);
+    }
 }

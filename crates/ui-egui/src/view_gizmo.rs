@@ -124,10 +124,8 @@ impl Shape {
     /// caps.
     pub fn from_json(v: &Value) -> Option<Shape> {
         let name: String = v.get("name")?.as_str()?.chars().take(MAX_NAME).collect();
-        let points: Vec<i16> = unpack(v, "v", 9 * MAX_TRIANGLES * 2)?.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
-        let words = |key: &str, cap: usize| -> Option<Vec<u16>> {
-            Some(unpack(v, key, cap * 2)?.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect())
-        };
+        let points: Vec<i16> = numbers(v, "v", 9 * MAX_TRIANGLES)?;
+        let words = |key: &str, cap: usize| -> Option<Vec<u16>> { numbers(v, key, cap) };
         let tris = words("t", 3 * MAX_TRIANGLES)?;
         let faces = words("f", MAX_TRIANGLES)?;
         let point = |p: &[i16; 3]| Vec3::new(f64::from(p[0]) / UNIT, f64::from(p[1]) / UNIT, f64::from(p[2]) / UNIT);
@@ -164,8 +162,7 @@ impl Shape {
             mesh.tri_face.push(*face);
         }
         // Edges are optional: a snapshot without readable ones is drawn without its lines.
-        let edge_points: Vec<i16> =
-            unpack(v, "e", MAX_EDGE_POINTS * 6).unwrap_or_default().as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
+        let edge_points: Vec<i16> = numbers(v, "e", MAX_EDGE_POINTS * 3).unwrap_or_default();
         let mut edge_points = edge_points.as_chunks::<3>().0.iter().map(point);
         let edge_faces = words("ef", 2 * MAX_EDGES).unwrap_or_default();
         let lengths = v.get("en").and_then(Value::as_array).map(|a| a.iter().take(MAX_EDGES).collect::<Vec<_>>()).unwrap_or_default();
@@ -264,24 +261,37 @@ fn rgb(c: &Value) -> Option<[u8; 3]> {
     Some([ch(0)?, ch(1)?, ch(2)?])
 }
 
-/// The bytes of a packed field (`None`: missing, not base64, or over `cap` bytes).
-fn unpack(v: &Value, key: &str, cap: usize) -> Option<Vec<u8>> {
-    let text = v.get(key)?.as_str()?;
-    if text.len() > cap.div_ceil(3) * 4 {
-        return None;
+/// The 16-bit numbers of a stored list, at most `cap` of them (`None`: missing, not numbers of
+/// that kind, or over the cap). A list is plain numbers; one an older build stored as base64 text
+/// (little-endian words) still reads.
+fn numbers<T: TryFrom<i64> + Word>(v: &Value, key: &str, cap: usize) -> Option<Vec<T>> {
+    match v.get(key)? {
+        Value::Array(list) if list.len() <= cap => list.iter().map(|n| T::try_from(n.as_i64()?).ok()).collect(),
+        Value::String(text) if text.len() <= (cap * 2).div_ceil(3) * 4 => {
+            let bytes = solidcraft_engine::doc::canvas::base64_decode(text)?;
+            Some(bytes.as_chunks::<2>().0.iter().map(|b| T::from_le(*b)).collect())
+        }
+        _ => None,
     }
-    solidcraft_engine::doc::canvas::base64_decode(text)
 }
 
-/// Little-endian 16-bit words, as base64.
-fn pack<T: Copy>(words: &[T], bytes: impl Fn(T) -> [u8; 2]) -> String {
-    let raw: Vec<u8> = words.iter().flat_map(|w| bytes(*w)).collect();
-    solidcraft_engine::doc::canvas::base64_encode(&raw)
+/// A 16-bit word as an older build stored it, little-endian.
+trait Word {
+    fn from_le(bytes: [u8; 2]) -> Self;
+}
+impl Word for i16 {
+    fn from_le(bytes: [u8; 2]) -> Self {
+        i16::from_le_bytes(bytes)
+    }
+}
+impl Word for u16 {
+    fn from_le(bytes: [u8; 2]) -> Self {
+        u16::from_le_bytes(bytes)
+    }
 }
 
 /// The stored form of `mesh`, centred and scaled to longest side 2, in whole 1/10000s. Each
-/// list is little-endian 16-bit words as base64, about a third of the size of a JSON list:
-/// `v` the points (x, y, z), `t` three point indices per triangle, `f` each triangle's B-rep
+/// list is plain 16-bit numbers: `v` the points (x, y, z), `t` three point indices per triangle, `f` each triangle's B-rep
 /// face, `e` the points of every edge one after another with `en` the count of each, and `ef`
 /// the two faces each edge bounds ([`NO_FACE`]: none). `None` when the mesh is empty or flat to
 /// a point, or has a face number too large to store.
@@ -333,12 +343,12 @@ fn snapshot(name: &str, mesh: &Mesh, colour: Option<[u8; 3]>, faces: &BTreeMap<u
     let fc: Vec<Value> = faces.iter().map(|(f, c)| json!([f, c[0], c[1], c[2]])).collect();
     Some(json!({
         "name": name,
-        "v": pack(&v, i16::to_le_bytes),
-        "t": pack(&t, u16::to_le_bytes),
-        "f": pack(&f, u16::to_le_bytes),
-        "e": pack(&e, i16::to_le_bytes),
+        "v": v,
+        "t": t,
+        "f": f,
+        "e": e,
         "en": en,
-        "ef": pack(&ef, u16::to_le_bytes),
+        "ef": ef,
         "c": colour,
         "fc": fc,
     }))
@@ -639,10 +649,54 @@ mod tests {
         }
     }
 
+    /// The largest body a navigator stores, its lists full of the widest numbers, fits in a
+    /// settings profile with room to spare.
+    #[test]
+    fn the_largest_stored_body_fits_in_a_profile() {
+        let wide = |n: usize, x: i64| json!(vec![x; n]);
+        let largest = json!({
+            "name": "x".repeat(MAX_NAME),
+            "v": wide(9 * MAX_TRIANGLES, -10_000),
+            "t": wide(3 * MAX_TRIANGLES, 29_999),
+            "f": wide(MAX_TRIANGLES, i64::from(NO_FACE - 1)),
+            "e": wide(3 * MAX_EDGE_POINTS, -10_000),
+            "en": wide(MAX_EDGES, 50_000),
+            "ef": wide(2 * MAX_EDGES, i64::from(NO_FACE)),
+            "c": [255, 255, 255],
+            "fc": vec![json!([65_534, 255, 255, 255]); MAX_TRIANGLES],
+        });
+        let written = largest.to_string().len();
+        assert!(written + (256 << 10) < crate::settings_profiles::MAX_PROFILE_BYTES, "{written} bytes");
+    }
+
+    /// A stored body is plain numbers, never base64 text; one an older build stored as base64
+    /// (little-endian 16-bit words) reads the same.
+    #[test]
+    fn a_stored_body_is_plain_numbers_and_an_older_base64_one_still_reads() {
+        let shape = Shape::of("Body1", &box_mesh(), None, &BTreeMap::new()).unwrap();
+        let stored = shape.to_json();
+        for key in ["v", "t", "f", "e", "ef"] {
+            assert!(stored[key].is_array(), "{key}: {}", stored[key]);
+        }
+        let mut older = stored.clone();
+        for (key, signed) in [("v", true), ("t", false), ("f", false), ("e", true), ("ef", false)] {
+            let bytes: Vec<u8> = stored[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|n| if signed { (n.as_i64().unwrap() as i16).to_le_bytes() } else { (n.as_u64().unwrap() as u16).to_le_bytes() })
+                .collect();
+            older[key] = json!(solidcraft_engine::doc::canvas::base64_encode(&bytes));
+        }
+        let read = Shape::from_json(&older).unwrap();
+        assert_eq!(read.mesh.triangles.len(), shape.mesh.triangles.len());
+        assert_eq!(read.to_json(), stored, "read back, it stores as plain numbers again");
+    }
+
     #[test]
     fn hostile_snapshots_never_panic() {
         let good = Shape::of("Body1", &box_mesh(), None, &BTreeMap::new()).unwrap().to_json();
-        let words = |w: &[u16]| pack(w, u16::to_le_bytes);
+        let words = |w: &[u16]| json!(w);
         let triangle = words(&[0, 0, 0, 1, 0, 0, 0, 1, 0]);
         let mut cases = vec![
             json!(null),

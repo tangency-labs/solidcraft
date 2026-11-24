@@ -369,7 +369,7 @@ impl RowPlan {
     pub(super) fn folds(&self, app: &SolveApp) -> Folds {
         // A folder shows open here until it is folded (`timeline_folders::is_open`).
         let closed = self.fold_keys.iter().filter(|(_, key)| !crate::history_folds::is_open(app, key, true)).map(|(id, _)| *id).collect();
-        let open_hosts = self.host_keys.iter().filter(|(_, key)| crate::browser::is_open(app, key, false)).map(|(feature, _)| *feature).collect();
+        let open_hosts = self.host_keys.iter().filter(|(_, key)| crate::browser::fold_open(app, key, false)).map(|(feature, _)| *feature).collect();
         Folds { closed, open_hosts }
     }
 

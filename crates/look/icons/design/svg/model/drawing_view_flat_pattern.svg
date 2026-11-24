@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Flat pattern view</title>
+  <path d="M9 20L24 20L24 11L40 11L40 20L55 20L55 44L40 44L40 53L24 53L24 44L9 44Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 24L24 29M24 35L24 40M40 24L40 29M40 35L40 40" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

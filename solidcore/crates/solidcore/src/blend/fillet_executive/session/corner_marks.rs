@@ -19,6 +19,7 @@
 //! reads them from the target faces, and they go with the session. No recursion.
 
 use super::{invalid, FilletObject, FilletSession};
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeValue, Behavior, TagData};
 use crate::topology::brep::p1;
@@ -135,7 +136,12 @@ impl FilletSession<'_> {
                 .get(index)
                 .copied()
                 .filter(|&face| body.face(face).is_ok())
-                .ok_or_else(|| SolidError::blend_missing(OP, "the face of a recorded surface"))?;
+                // the corner's face build may give no face for a surface
+                // (`make_face` returning `None` is not an error there), so the search can come
+                // up empty
+                .ok_or_else(|| {
+                    SolidError::blend(OP, BlendFailure::CornerPatchFaceNotFound { surface: index })
+                })?;
             faces.push(face);
         }
         Ok(faces)
