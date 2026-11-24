@@ -2758,11 +2758,10 @@ mod tests {
             let body = json!({"data": rows}).to_string().into_bytes();
             let http: HttpFn = Arc::new(move |_: &HttpRequest| Ok((200, body.clone())));
             let list = model_list(&http, "https://api.openai.com/v1", None, false).unwrap();
-            assert_eq!(list.iter().map(|m| (m.id.as_str(), m.description.as_str())).collect::<Vec<_>>(), [
-                ("gpt-x", ""),
-                ("text-embedding-x", ""),
-                ("image-x", "Image X")
-            ]);
+            assert_eq!(
+                list.iter().map(|m| (m.id.as_str(), m.description.as_str())).collect::<Vec<_>>(),
+                [("gpt-x", ""), ("text-embedding-x", ""), ("image-x", "Image X")]
+            );
         }
     }
 
