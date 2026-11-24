@@ -21,7 +21,8 @@
 //! - [`is_nsrf_degenerate`] floors its tolerance with `max(1000 * SM_EFF_ZERO,
 //!   SM_EFF_ZERO * (1 + max |coord|))`, not `1000 * SM_EFF_ZERO * (1 + max |coord|)`
 //!   (#18634): the scaled part is the Level 2 check's coincidence resolution, so a net
-//!   far from the origin that the check accepts is not called a point.
+//!   far from the origin that the check accepts is not called a point. The floor is
+//!   never above upstream's and equals it at the origin.
 //! - [`srf_piece_box`] is not upstream: the box of the control points of the piece of
 //!   the surface over a parameter rectangle alone, which shrinks with the rectangle, for
 //!   clearance proofs that split a face's domain until its boxes are clear.

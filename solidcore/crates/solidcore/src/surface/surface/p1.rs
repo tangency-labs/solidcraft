@@ -65,14 +65,17 @@
 //!   tolerance with `max(1000 SM_EFF_ZERO, SM_EFF_ZERO (1 + max(|P0|, |P1|)))`, not
 //!   upstream's `1000 SM_EFF_ZERO (1 + |P0| + |P1|)`; the scaled part is the Level 2
 //!   check's own coincidence resolution (`SmBSplineCurve` tests 3 and 4,
-//!   `SM_EFF_ZERO (1 + max |coord|)`), and the value at the origin is kept. [`Surface::is_periodic`]
-//!   keeps upstream's seam gap test; when the squared gap exceeds `SM_EFF_ZERO` (the
-//!   allowance at the origin) it also needs the squared chord from the seam to the
-//!   middle of the domain to exceed the scaled allowance at some sample, so a surface
-//!   nowhere wider than the gap it allows far from the origin is not closed (every
-//!   periodic answer here is one upstream gives too, and every surface whose gap is
-//!   within `SM_EFF_ZERO` keeps upstream's answer). Upstream refused, or mis-seamed, faces far from the origin
-//!   that the check accepts (a box 1e-3 wide at 1e6, 2e-4 wide at 1e5).
+//!   `SM_EFF_ZERO (1 + max |coord|)`). The floor is never above upstream's, equals it at
+//!   `P = 0`, and near the origin the callers' `tol_3d` (at least 1e-6) dominates both.
+//!   [`Surface::is_periodic`] keeps upstream's seam gap test; when the squared gap
+//!   exceeds `SM_EFF_ZERO` (the allowance at the origin) it also needs the squared chord
+//!   from the seam to the middle of the domain to exceed the scaled allowance at some
+//!   sample, so a surface nowhere wider than the gap it allows far from the origin is
+//!   not closed (every periodic answer here is one upstream gives too, and every surface
+//!   whose gap is within `SM_EFF_ZERO` keeps upstream's answer). A wide surface far
+//!   out with a seam gap under upstream's allowance is still called periodic, as
+//!   upstream. Upstream refused, or mis-seamed, faces far from the origin (a box 1e-3
+//!   wide at 1e6, 2e-4 wide at 1e5).
 //! - **Nesting.** `StepSurface::new` returns `InvalidInput` when the base surface would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
@@ -3659,8 +3662,11 @@ pub fn base_is_degenerate_point(
 
 /// `SmSurface::IsDegenerateCurve` (base body): the domain is an iso-parameter line,
 /// or the corners, four interior points, four diagonal points and the centre all have
-/// parallel first derivatives, or all have a vanishing `Su` (or all a vanishing `Sv`)
-/// to `max(scaled zero, opt_3d_tol)`. A domain that is a point is not a curve.
+/// parallel first derivatives, or all have a vanishing `Su` (or all a vanishing `Sv`):
+/// within `max(opt_3d_tol, SM_EFF_ZERO)`, or within the scaled zero
+/// `SM_EFF_ZERO (1 + max |P|)` only when its length times the domain side is too
+/// (upstream: within `max(scaled zero, opt_3d_tol)`, #18634). A domain that is a point
+/// is not a curve.
 ///
 /// # Errors
 ///

@@ -2105,8 +2105,8 @@ mod tests {
                     continue;
                 }
                 // [tolerance, box min xyz, box max xyz]: the tolerance is kept and every
-                // coordinate is the origin box's moved by `shift`, within the rounding of
-                // that one sum (half an ulp of the far value)
+                // coordinate is the origin box's moved by `shift`: `EPS/2 |a|` is under one
+                // ulp of the far value, so this asserts `a` is the rounded sum itself
                 assert_eq!(fv.len(), 7, "{name} {key}");
                 assert_eq!(fv[0], nv[0], "{name} {key}");
                 for (a, b) in fv[1..].iter().zip(&nv[1..]) {
