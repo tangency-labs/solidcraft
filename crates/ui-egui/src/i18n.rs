@@ -1783,6 +1783,7 @@ mod tests {
         KitCall { name: "wide_primary_button", args: &[1], id: false, trim: &[] },
         KitCall { name: "action_menu", args: &[1], id: false, trim: &[] },
         KitCall { name: "compact_button", args: &[2], id: false, trim: &[] },
+        KitCall { name: "compact_toggle", args: &[2], id: false, trim: &[] },
         KitCall { name: "icon_label_button", args: &[1], id: false, trim: &[] },
         KitCall { name: "command_menu_button", args: &[2], id: false, trim: &[] },
         // choice.rs
@@ -2440,7 +2441,7 @@ mod tests {
         "use crate::ui_kit::{row, status_line, expr_row, hint_row, text_row, choice_row, section, section_count, ",
         "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
-        "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
+        "wide_primary_button, action_menu, compact_button, compact_toggle, icon_label_button, command_menu_button, ",
         "checkbox_grid, options, checkbox_row, action_row, toggle_icon, removable_header, bin_button, ",
         "Column, Menu, MenuItem, CommandSearch};"
     );
@@ -2488,6 +2489,7 @@ mod tests {
             ("wide_primary_button(ui, \"wide_primary_button\")", &["wide_primary_button"]),
             ("action_menu(ui, \"action_menu\", |ui| {})", &["action_menu"]),
             ("compact_button(ui, glyph, \"compact_button\", true, false)", &["compact_button"]),
+            ("compact_toggle(ui, glyph, \"compact_toggle\", true, false)", &["compact_toggle"]),
             ("icon_label_button(ui, \"icon_label_button\", icon, true, false)", &["icon_label_button"]),
             ("command_menu_button(ui, id, \"command_menu_button\", icon, shortcut, true)", &["command_menu_button"]),
             ("checkbox_grid(ui, &mut [(\"checkbox_grid\", value)], 1)", &["checkbox_grid"]),
