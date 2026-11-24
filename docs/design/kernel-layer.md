@@ -1,7 +1,10 @@
 # A swappable kernel layer in SolidCraft
 
-Status: a design for the owner's review. Nothing in it is built yet. No code lands until the
-owner says yes, and then only in the steps of §12.
+Status: approved by the owner on 2026-11-24 for **phase 1 only**: the seam (§12). Phase 1 is the
+kernel interface in SolidCraft, the solidcore adapter behind it, and SolidCraft calling the kernel
+only through that interface. No second kernel is planned or being built. The later sections
+describe what the seam must allow, so that the interface is right the first time; they are not
+a plan to add another kernel.
 
 The owner's brief (2026-11-24):
 
@@ -10,8 +13,8 @@ The owner's brief (2026-11-24):
 
 Later the same day the owner added these requirements:
 
-- the kernel is chosen at compile time: build features decide which backends are compiled in,
-  and a launch-time switch picks among them, with no hot swap in v1;
+- the kernel is chosen at compile time: build features decide which kernels are compiled in;
+  choosing among them at run time comes later, not now;
 - SolidCraft must use `solidcore-ops` fully, and only through the solidcore adapter.
 
 What follows from that:
@@ -20,20 +23,26 @@ What follows from that:
   operations API. It gains no trait, no "backend" and no SolidCraft type. Work this design asks
   of solidcore is new app-agnostic operations in `solidcore-ops`. Each one is documented and goes
   in its own `solidcore/` pull request (§10).
-- **SolidCraft owns the abstraction.** One trait says what SolidCraft needs from a kernel, and
-  one router picks which kernel runs each operation.
-- **There is one adapter per kernel.** solidcore's comes first and is the reference backend. Then
-  comes an adapter for an alternative pure-Rust B-rep kernel. Any further third-party Rust kernel
-  is added the same way, after the licence review in §13.
+- **Speed and features keep being fixed inside solidcore.** This layer is not a way around
+  solidcore's slow cases or missing features. Those are solidcore's to fix, in solidcore, and that
+  stays the kernel work's focus. Nothing here moves effort away from it.
+- **SolidCraft owns the interface.** One trait, in `crates/kernel-api`, says what SolidCraft needs
+  from a kernel. `crates/kernel` is the router behind it.
+- **We maintain exactly one adapter: solidcore's.** It adapts `solidcore-ops` to the interface. We
+  write it and keep it in SolidCraft, and it is the default.
+- **SolidCraft carries no compatibility layer for other kernels.** If anyone else wants their
+  kernel in SolidCraft, they write and maintain its adapter to our interface. To count, it must
+  pass our naming gate and an accuracy gate with a tolerance equal to or tighter than solidcore's
+  (§8), and it is listed in the kernel support matrix (§8). None is planned.
 - **The solidcore adapter is the only SolidCraft code that depends on solidcore crates.** The one
   exception is the record's data types, which are the body format itself (§10). `cargo xtask
-  layers` enforces this, as it once kept truck inside `crates/kernel`.
-- **Kernels are chosen at compile time.**
-  - Build features decide which backends are compiled in. solidcore is always in, and every other
-    backend is off by default.
-  - At launch, a switch picks among the compiled-in backends only, for the whole session or per
-    operation. Each operation can go to whichever backend measurement shows wins.
-  - Swapping kernels while the app runs (hot swap) is not in v1.
+  layers` enforces this, as it once kept truck inside `crates/kernel`. This also helps solidcore:
+  every call SolidCraft makes goes through `solidcore-ops`, so its public API ends up complete and
+  documented, which is what makes solidcore usable as a general kernel.
+- **Kernels are chosen at compile time.** Build features decide which kernels are compiled in.
+  solidcore is always in, and is the only one in any build we ship. Choosing a kernel at run time,
+  and swapping one while the app runs, come later, not in phase 1.
+- **STEP stays in solidcore.** Import and export are solidcore's, reached through `solidcore-ops`.
 - **solidcore stays the default,** and the default path stays byte-identical to today.
 
 ## Decisions
@@ -47,6 +56,10 @@ Decisions the owner has made. The rest of this document follows them; the open q
 | 2026-11-24 | **SolidCraft uses `solidcore-ops` fully, and only through the solidcore adapter.** In the end state the adapter is the only SolidCraft code that depends on solidcore crates, and `cargo xtask layers` enforces it (§10). |
 | 2026-11-24 | **Kernels are chosen at compile time, by build features.** Features decide which backends are compiled in. solidcore is always compiled in; every other backend is off by default. The launch-time switch (`SOLIDCRAFT_KERNEL`, `SOLIDCRAFT_KERNEL_ROUTE`, `--kernel`) picks only among the backends compiled in (§8). **Hot swap is not in v1:** changing kernels takes a restart (§11). |
 | 2026-11-24 | **solidcore is the default backend,** and the default path stays byte-identical (§4). |
+| 2026-11-24 | **Build it: phase 1 only.** Phase 1 is the seam: the `crates/kernel-api` trait, `crates/kernel` as the router, the solidcore adapter, and SolidCraft moved to call the kernel only through it, with a check that fails on new direct uses of solidcore outside the adapter. No second kernel (§12). |
+| 2026-11-24 | **We write and maintain the solidcore adapter, and only it.** It adapts `solidcore-ops`, solidcore's own API, and lives in SolidCraft. Anyone else writes and maintains their own kernel's adapter to our interface; it must pass our naming gate and an accuracy gate (tolerance equal to or tighter than solidcore's) and appear in the support matrix (§8). |
+| 2026-11-24 | **Run-time selection comes later.** In phase 1, build features alone decide which kernels are compiled in, and solidcore is the only one. The launch-time switch, per-operation routes and hot swap described below are later work. This supersedes the launch-time switch in the compile-time decision above. |
+| 2026-11-24 | **STEP stays in solidcore** (§2, §10). |
 
 Contents:
 0. [Decisions](#decisions)
@@ -89,14 +102,14 @@ Contents:
   items from outside the crate, in roughly 2,990 qualified references. `Body` has about 95 public
   methods, about 85 of them called from outside.
 
-### End state: four kinds of crate
+### End state: the crates
 
 | Crate | Holds | Depends on |
 |---|---|---|
 | `crates/kernel-api` (`solidcraft-kernel-api`, new) | the `Backend` trait, `OpKind`, `Route`, `Made`, `ExchangeLoss`, `BackendError`, and the neutral input types (profiles, path segments, extents) | `solidcore-record` (its data types only, §10), `thiserror` |
 | `crates/kernel` (`solidcraft-kernel`, as now) | the **router**: the same public functions as today, each picking its backend from the route; the `Body` type and its caches of backend forms; the record services' public face | `kernel-api`, and each adapter crate (solidcore's always; the others behind features) |
 | `crates/kernel-solidcore` (new; today's solidcore code in `crates/kernel` and `crates/smlib`, moved) | the solidcore adapter: `impl Backend for Solidcore`, plus every call SolidCraft makes into `solidcore-ops`, `-tess` and `-step` | `kernel-api`, the solidcore crates |
-| `crates/kernel-<name>` (new, one per alternative kernel) | that kernel's adapter | `kernel-api`, that kernel |
+| `crates/kernel-<name>` (only if someone brings another kernel; none is planned) | that kernel's adapter, written and maintained by whoever brings that kernel, not by us | `kernel-api`, that kernel |
 
 ### Why the trait doesn't go in `crates/kernel`
 
@@ -106,7 +119,7 @@ Contents:
 - **It would also make `crates/kernel` the place every adapter reaches into.** A trait in a small
   crate of its own gives each adapter only the contract it needs.
 - **`crates/kernel` only shrinks.** CONTRIBUTING ("Kernel work goes in solidcore/") says so. Here
-  it shrinks to a router once the solidcore code moves to `crates/kernel-solidcore` (§12, step 9).
+  it shrinks to a router once the solidcore code moves to `crates/kernel-solidcore` (§12, step 10).
 
 ### Why the router stays in `crates/kernel`
 
@@ -223,8 +236,8 @@ Each comes later as its own `OpKind`, once v1 is measured:
 What follows is the shape, not the final code; step 2 of §12 settles the details.
 
 ```rust
-/// One kernel, as SolidCraft uses it. Implemented by unit structs (`Solidcore`, one per
-/// alternative kernel). The router holds them in a closed enum (§9).
+/// One kernel, as SolidCraft uses it. Implemented by unit structs (`Solidcore`, and one per
+/// other kernel if anyone brings one). The router holds them in a closed enum (§9).
 pub trait Backend: Sized + Send + Sync + 'static {
     /// The backend's own body: built from a record, cached on `Body` (§3), shared by clones.
     type Form: Send + Sync + 'static;
@@ -281,6 +294,20 @@ Three choices in this shape:
   `PathSeg`, `SweepControl`, `FilletTurn`, `ChamferSide` and so on. `crates/kernel` re-exports
   them under their old paths.
 
+### What phase 1 builds of this
+
+Phase 1 has one kernel, so it builds the parts of this shape that the seam needs and no more:
+
+- **The operations take the inputs the app passes today:** points for picked edges and faces, a
+  plane and regions for a profile. Resolving picks to record indices belongs with the exchange
+  (§12, step 12), where it first matters; until then the solidcore arm stays the exact call it is
+  today.
+- **Each backend has its own error type,** mapped to and from `BackendError`. solidcore's is
+  `KernelError` itself, so the words a user sees can't change; another kernel's errors reach the
+  app through `BackendError`.
+- **Sweep and loft join the trait later** (§12, step 11): `PathSeg` and `SweepControl` compute
+  lengths and tangents of their own, so they can't move into a data-only crate yet.
+
 ---
 
 ## 3. The body exchange format
@@ -335,11 +362,11 @@ becomes a change for every adapter, and that pull request updates them. An adapt
 ### What each backend loses
 
 What matters for naming and saving is the trip into the record. What matters for the backend's
-own results is the trip into the backend. The "alternative kernel" column is written from that
+own results is the trip into the backend. The "another kernel" column is written from that
 kind of kernel's published design: one linear tolerance, analytic and NURBS geometry, and no
 procedural blend definitions. Its adapter pull request confirms it, case by case.
 
-| Record → backend → record | solidcore | loopback (§12, step 10) | alternative pure-Rust kernel |
+| Record → backend → record | solidcore | loopback (§12, step 12) | another kernel (illustration) |
 |---|---|---|---|
 | Plane, cylinder, cone, sphere, torus | exact | exact | exact, where it holds the same five in closed form; `PlaneThrough` gets its axes worked out from its three points (one rounding) |
 | `Spline`, `RationalSpline` | exact | exact | exact, up to the backend's degree limit; a higher degree is `Support::No` |
@@ -350,7 +377,7 @@ procedural blend definitions. Its adapter pull request confirms it, case by case
 | Tolerances per edge and vertex | exact | exact | lost where the backend holds one global tolerance. A record with looser edges is `Support::No`, so tolerant imports stay on solidcore. |
 | Face sources and certificates (`FaceSource`, `with_*_certificate`) | kept | kept, through history | carried through history (`BodyHistory::face_sources`, §4); not re-proved by the backend |
 
-| Backend → record | alternative pure-Rust kernel |
+| Backend → record | another kernel (illustration) |
 |---|---|
 | Analytic, B-spline and NURBS surfaces and curves | exact |
 | Extrusion and ruled surfaces of rational curves | exact, as `RationalSpline` |
@@ -490,7 +517,7 @@ That holds by construction and is checked on every pull request.
 - **The kernel rig** gives a `results.json` identical byte for byte to main's (an empty `diff`),
   and the ladder's `golden.json` is unchanged.
 - **Goldens and NLT** are unchanged, judged by their REGRESSION lines.
-- **The loopback backend** (§12, step 10) must give 180/180 identical names. Loopback is
+- **The loopback backend** (§12, step 12) must give 180/180 identical names. Loopback is
   solidcore forced through `export` → `import` and tag-and-read history on every operation. It
   proves the exchange and the renumbering exact before any foreign kernel is involved.
 
@@ -691,25 +718,32 @@ waited would show. This design fits that unchanged:
 
 | Level | How | Default | When |
 |---|---|---|---|
-| Build | Cargo features on `solidcraft-kernel`: `backend-solidcore` (always on), one `backend-<name>` per alternative kernel, and `backend-loopback` (tests only). The apps forward them. | solidcore only | v1 |
-| Run, whole session | `SOLIDCRAFT_KERNEL=<name>` or `solidcraft-cli --kernel <name>`: every routable `OpKind` the named backend supports goes to it; the rest stay on solidcore | unset (solidcore) | v1 |
-| Run, per operation | `SOLIDCRAFT_KERNEL_ROUTE=fillet=<name>,boolean=solidcore`, or `--kernel-route route.toml`; this wins over `SOLIDCRAFT_KERNEL` | none | v1 |
-| Shipped route | `crates/kernel/route.toml`, compiled in: the per-operation choices measurement supports | all solidcore | v1 (file), changes are the owner's (§13) |
+| Build | Cargo features on `solidcraft-kernel`: `backend-solidcore` (always on), one `backend-<name>` per other kernel whose authors bring an adapter, and `backend-loopback` (tests only). The apps forward them. | solidcore only | phase 1 has the solidcore feature only |
+| Run, whole session | `SOLIDCRAFT_KERNEL=<name>` or `solidcraft-cli --kernel <name>`: every routable `OpKind` the named backend supports goes to it; the rest stay on solidcore | unset (solidcore) | **later**, not phase 1 |
+| Run, per operation | `SOLIDCRAFT_KERNEL_ROUTE=fillet=<name>,boolean=solidcore`, or `--kernel-route route.toml`; this wins over `SOLIDCRAFT_KERNEL` | none | **later**, not phase 1 |
+| Shipped route | `crates/kernel/route.toml`, compiled in: the per-operation choices measurement supports | all solidcore | **later**; changes are the owner's (§13) |
 | Per design | the design's recorded route (§5), offered when the design opens on a build that has those backends | follow the running route | **future** |
 | Preferences | a kernel choice in Preferences, among the compiled backends | solidcore | **future**, a UX decision |
 
 These hold at every level:
 
-- **Compile time decides what can be chosen.** A launch-time switch picks only among the backends
-  this build compiled in (owner decision, see Decisions).
-- **The route is read once,** into a `OnceLock<Route>`. Switching takes a restart in v1, with no
-  hot swap (§11).
+- **Compile time decides what can be chosen** (owner decision, see Decisions). In phase 1 the
+  router's choice is a constant: solidcore is the only kernel compiled in, so there is nothing to
+  read at launch.
+- **When run-time selection comes,** the route is read once, into a `OnceLock<Route>`. Switching
+  takes a restart (§11).
 - **A bad name never crashes the app.** An unknown backend, or one this build doesn't have, is
   logged once and ignored.
-- **Every compiled backend is selectable without a rebuild.** A build with several backends
-  chooses among them at run time.
 - **The route enters the evaluation cache key** only when it isn't all-solidcore. Existing caches
   stay valid.
+
+### The kernel support matrix
+
+`docs/kernel-support.md` (added with the router, §12) lists every kernel with an adapter to our
+interface: who maintains its adapter, the commit it pins, each `OpKind` it supports, and its
+results on the naming gate and the accuracy gate below. In phase 1 it has one row, solidcore,
+maintained by us. A kernel that isn't in the matrix, or that fails either gate on an operation,
+isn't routed for that operation.
 
 ### One comparison table
 
@@ -752,9 +786,11 @@ per backend:
 Each row expands to its cases. A scheduled CI job (nightly, not per pull request) builds the
 non-default features and publishes the table. Nothing in it gates the default build.
 
-### When an operation may be routed
+### The gates another kernel's adapter must pass
 
-An `OpKind` may go to another backend only when all six hold on its rows:
+These apply only if someone brings another kernel; none is planned. The adapter is theirs to
+write and maintain. An `OpKind` may go to another backend only when all six hold on its rows.
+Rules 2 (the naming gate) and 5 (the accuracy gate) are the owner's hard requirements:
 
 1. **No new refusals.** No case solidcore passes is refused or wrong on that backend (§6).
 2. **Same names.** Verified names are identical on every corpus design that uses the operation.
@@ -964,7 +1000,7 @@ engine. They are all solidcore-adapter code or tests, so they move with it.
 | file:function | Item | Plan |
 |---|---|---|
 | kernel `body.rs:with_history_counts`, `with_checked_history`, `with_rounds_of`; `blend.rs:over_body_alone`, `corner_history`; `history.rs:check`; test | record `History::check_counts` | may stay: a structural check on record data (counts and indices), which is the record's job (layers.md §1) |
-| smlib `core/blend.rs:finish`, `core/boolean.rs:merged`, `core/measure.rs:check_scoped` | `validation::{validate_and_update_tolerances, update_tolerances_after_boolean, check_brep_scoped}` | `ops::check` and the ops families above (step 7 of §12) |
+| smlib `core/blend.rs:finish`, `core/boolean.rs:merged`, `core/measure.rs:check_scoped` | `validation::{validate_and_update_tolerances, update_tolerances_after_boolean, check_brep_scoped}` | `ops::check` and the ops families above (step 8 of §12) |
 | smlib, doc, geom tests | `Brep::validate`, `check_curve2`, `Budget::input` | may stay: the record's structural validation |
 
 #### Ops used outside `crates/kernel` and `crates/smlib` (bypasses of the boundary)
@@ -1058,89 +1094,97 @@ is a later optimisation. A full replay is simpler and is always correct.
 
 Rules for every step:
 
-- one pull request, landable alone;
-- opened only after the one before it merges, and rebased on main;
+- one pull request, landable alone; a series is stacked into `main`, bases first;
 - no change to the default path;
 - each one shows the checks from §4: an identical naming corpus, an identical rig `results.json`,
   the ladder golden unchanged, and NLT with no REGRESSION lines.
 
 The steps that move existing call sites don't change any function that runs.
 
-1. **This document**, docs only, for the owner's review.
-2. **`crates/kernel-api`.** It holds the trait, `OpKind`, `Route`, `Made`, `BackendError` and
-   `ExchangeLoss`. The input types move from `crates/kernel`, with re-exports under their old
-   paths. It also adds the architecture table row and the `xtask layers` edges. Nothing calls it
-   yet.
-3. **The solidcore adapter and the router, family by family.** `crates/kernel` implements
-   `Backend for Solidcore` by delegating to its existing functions, and adds the router with a
-   one-variant enum. Four pull requests:
-   - primitives and booleans;
-   - extrude and revolve;
-   - blends;
-   - the offset family, sweep and loft.
+### Phase 1: the seam (approved, being built)
 
-   Each moves no code and changes no result.
-4. **`solidcraft_kernel::services` and the bypasses.**
-   - First, `crates/kernel` re-exports the ops items the other crates use (§10).
-   - Then one pull request per crate, in this order: ui-egui, engine, io, doc, develop, sketch.
-     Each switches the crate's `use` lines and drops its `solidcore-ops` and `solidcore-tess`
-     dependencies.
-   - Each is the same functions under new paths.
-5. **geom's ops and seam uses move up.**
+1. **This document**, docs only.
+2. **`crates/kernel-api`.** The `Backend` trait, `OpKind`, `Support`, `BackendError` and the
+   neutral input types whose definitions are plain data (`BoolOp`, `FilletTurn`, `ChamferSide`,
+   the primitives and profile extents). `crates/kernel` re-exports the moved types under their old
+   paths and maps `KernelError` to and from `BackendError`. It also adds the architecture table
+   row and the `xtask layers` row. Nothing calls the trait yet.
+3. **The solidcore adapter and the router.** `crates/kernel` implements `Backend for Solidcore`
+   by delegating to its existing functions, and its public functions for each `OpKind` become the
+   router: a one-variant choice, fixed at compile time, whose solidcore arm is the existing call.
+   It adds `docs/kernel-support.md` with solidcore's row. It moves no code and changes no result.
+   With it, `crates/kernel` re-exports the `solidcore-ops` and `solidcore-tess` items the other
+   crates use (§10), grouped like ops' own modules, so every call site can move without the
+   interface changing again.
+4. **The bypasses, by area, in parallel.** One pull request per area, with no file shared between
+   areas (engine commands, sketch, sheet metal, assemblies and joints, drawings, import and export
+   glue, ui-egui, the MCP and CLI front ends, and so on). Each switches its `use` lines to
+   `crates/kernel` and, once a crate has no direct use left, drops its `solidcore-ops` and
+   `solidcore-tess` dependencies. Each is the same functions under new paths.
+5. **The check, last.** `cargo xtask layers` fails when a SolidCraft crate other than the adapter
+   (`crates/kernel`, `crates/smlib`) depends on a solidcore crate other than `solidcore-record`,
+   apart from the listed exceptions of the later phases (geom, the shared display crates), each
+   with its reason, in a list that only shrinks.
+
+Phase 1 ends when every crate but the adapter, geom (step 6) and the shared display crates
+(§13, question 2) reaches solidcore only through `crates/kernel`.
+
+### Later phases (not approved yet)
+
+These finish "solidcore only through ops" and make the seam usable by another kernel's adapter.
+They need the owner's yes before they start.
+
+6. **geom's ops and seam uses move up.**
    - Before any move, the missing `solidcore-ops` curve-evaluation entry points go in as their
      own solidcore pull request, which is RFC 0003 item 1.8.
    - Then one pull request per family moves geom's functions (placement, pcurve flux, hlr and
      section, network, the B-spline basis) into `crates/kernel`, and their callers follow.
    - The `crates/geom -> solidcore` seam line goes in the last one.
-6. **io's file-format uses.**
+7. **io's file-format uses.** STEP stays in solidcore.
    - First the solidcore pull requests that add the missing ops entry points: STEP read and
      write, IGES write, CADIR read and write.
    - Then one io pull request switches its `solidcore-step`, `-cadir` and record STEP uses to
      `crates/kernel`.
    - The `solidcore-cadir` line leaves the public list.
-7. **smlib below ops.** This is the existing stage 3b switch, one ops family per pull request
+8. **smlib below ops.** This is the existing stage 3b switch, one ops family per pull request
    (boolean, blend, offset, sweep, split, trim, measure and check, merge, convert and file,
    history, ssi, transform). Each family's missing ops entry points go to solidcore first. The
    `crates/smlib -> solidcore` seam line goes in the last one.
-8. **The kernel's own STEP and IGES code** switches to the new ops entry points. The
+9. **The kernel's own STEP and IGES code** switches to the new ops entry points. The
    `solidcore-step` line leaves the public list.
-9. **The split.**
-   - `git mv` the solidcore code of `crates/kernel`, together with all of `crates/smlib`, into
-     `crates/kernel-solidcore`, leaving `crates/kernel` as the router with the same public API.
-   - `xtask layers` switches to the end-state rule (§10). From here, only the adapter depends on
-     solidcore crates.
-   - This is the only large diff in the series, and it is purely mechanical: moves and paths,
-     with the same functions.
-10. **Exchange and loopback.**
+10. **The split.**
+    - `git mv` the solidcore code of `crates/kernel`, together with all of `crates/smlib`, into
+      `crates/kernel-solidcore`, leaving `crates/kernel` as the router with the same public API.
+    - `xtask layers` switches to the end-state rule (§10). From here, only the adapter depends on
+      solidcore crates.
+    - This is the only large diff in the series, and it is purely mechanical: moves and paths,
+      with the same functions.
+11. **Sweep and loft in the trait.** `PathSeg` and `SweepControl` carry geometry of their own
+    (lengths, tangents), so they join `kernel-api` once that geometry is solidcore's.
+12. **Exchange and loopback.**
     - The cfg-gated `foreign` slot, `export`/`import`, and history renumbering in the router.
     - `backend-loopback`, which forces solidcore through record → form → record and tag-and-read
       history on every operation.
     - A scheduled CI job runs the naming corpus and the rig under loopback; both must be
       identical to the default. Any difference is a bug in the exchange path, fixed here.
-11. **Measurement.** `--kernel` and strict mode on the rig, `NAMING_CORPUS_KERNEL`,
+13. **Measurement.** `--kernel` and strict mode on the rig, `NAMING_CORPUS_KERNEL`,
     `xtask kernel-compare`, and the brep-bench runner. The loopback table is the first table, and
     every row in it equals solidcore's.
-12. **Alternative kernel adapter, part 1** (`crates/kernel-<name>`, feature off by default).
-    - Primitives, extrude, revolve and boolean, with exchange in both directions and history.
-    - Licence and ATTRIBUTION rows, and the wasm build of the feature.
-    - The size and dependency report (§9), and the nightly comparison table.
-13. **Alternative kernel adapter, part 2.** Fillet, chamfer, shell, thicken, offset faces, sweep
-    and loft, each `OpKind` as far as the kernel's support goes. Operations it can't name exactly
-    stay `Support::No`.
-14. **Run-time routing.** `SOLIDCRAFT_KERNEL_ROUTE`, the route file, the fallback policy, and the
-    route in the cache key. The shipped route stays all-solidcore.
+14. **Run-time selection.** `SOLIDCRAFT_KERNEL`, `SOLIDCRAFT_KERNEL_ROUTE`, the route file, the
+    fallback policy, and the route in the cache key. The shipped route stays all-solidcore.
 15. **Designs record their kernel.** The `kernel` field (one pending format file), the name
     digests, the replay comparison and the kernel differences report (§5).
-16. **Further third-party kernels.** Each one comes only after the licence and provenance review
-    in §13.
-17. **Routing a winner by default.** One pull request per `OpKind`, each with its table, and each
-    the owner's decision.
-18. **Future: run-time UI.** A per-design choice and a Preferences choice, and switching without
-    a restart (§11). These are UX decisions for the owner, and they are not part of v1.
+16. **Future: run-time UI.** A per-design choice and a Preferences choice, and switching without
+    a restart (§11). These are UX decisions for the owner.
 
-Steps 2 to 11 stand on their own, even if no other kernel is ever routed. They finish "solidcore
-only through ops", and the loopback proves that the record and the history really are
-kernel-neutral, which the solidcore work has assumed so far.
+**Another kernel's adapter is not a step of this plan.** If someone brings one, they write it to
+the interface, behind a feature that is off by default, with its licence review (§13), its
+size and dependency report (§9), and its rows in the support matrix. It is routed for an
+operation only when it passes the gates in §8, and moving the shipped route off solidcore is
+always the owner's decision.
+
+Steps 2 to 10 stand on their own, even if no other kernel ever comes. They finish "solidcore only
+through ops", which makes `solidcore-ops` a complete, documented API.
 
 ---
 
@@ -1196,6 +1240,9 @@ How this design limits the cost:
 
 ### Open questions for the owner
 
+Only questions 1 and 2 touch phase 1, and phase 1 goes ahead on the leaning given for each. The
+others matter only if someone brings another kernel.
+
 1. **The record as the neutral format, allowed everywhere.** `solidcore-record` is solidcore's
    data crate, not its kernel. The recommendation is to use it as the exchange format and allow
    its data types in every crate (§10): it computes nothing, and a SolidCraft copy would be a
@@ -1242,7 +1289,7 @@ How this design limits the cost:
 2. **The shared display crates.** viewport, viewport-gpu and gpu are shared with other front ends
    and use `solidcore-tess` display types: `TessPlan`, `Mesh`, and the display-only plan
    evaluator. Keep them as a listed display-format exception, or route them through a
-   display-data crate?
+   display-data crate? Phase 1 keeps them as the listed exception, and changes nothing there.
 3. **Licence review for third-party kernels.** Each kernel gets a licence and provenance review
    before its adapter, covering its test kits and generated test suites. SolidCraft takes no
    GPL/LGPL code and doesn't read it, and a test kit derived from an LGPL kernel's suites
@@ -1263,7 +1310,8 @@ How this design limits the cost:
    `diagnostics.*` over MCP. Anything visible is a UX decision.
 7. **The run-time choice in the app.** The per-design and Preferences choices are marked as future
    work (§8, §11). When should they come, and which should come first?
-8. **How alternative kernels come in.** As git dependencies pinned by commit, behind
-   off-by-default features, or vendored like `solidcore/`? The recommendation is pinned git
-   dependencies, so the default build and `cargo deny` see nothing new until a backend is routed
-   by default.
+8. **How another kernel would come in.** Decided in part: whoever brings it writes and maintains
+   its adapter, behind an off-by-default feature, and it must pass the naming and accuracy gates
+   and appear in the support matrix (§8). Still open: a git dependency pinned by commit, or
+   vendored? The recommendation is a pinned git dependency, so the default build and `cargo deny`
+   see nothing new.
