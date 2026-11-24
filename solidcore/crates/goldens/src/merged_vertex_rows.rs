@@ -239,7 +239,7 @@ fn assert_sized(case: &str, bodies: &[Body], moves: &[(f64, f64)], is: impl Fn(f
                 .filter(|(_, tol, _, _)| is(*tol, new))
                 .map(|(v, tol, ..)| (*v, *tol))
                 .collect();
-            vertices.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            vertices.sort_unstable_by_key(|x| x.0);
             vertices.dedup_by_key(|x| x.0);
             for (v, tol) in vertices {
                 let at: Vec<&End> = body.ends.iter().filter(|(w, ..)| *w == v).collect();
