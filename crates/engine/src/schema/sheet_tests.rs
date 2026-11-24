@@ -78,7 +78,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RecognizeParams>(), &keys(&["bends", "body", "face", "new_rule", "rule", "skip"]));
     assert_keys(input_schema_for::<MeasureBodyParams>(), &["body", "face"]);
     assert_keys(input_schema_for::<PathFlangeParams>(), &keys(&["body", "curves", "edge", "radius", "sketch"]));
-    assert_keys(input_schema_for::<FlatPatternParams>(), &["body"]);
+    assert_keys(input_schema_for::<FlatPatternParams>(), &["body", "summary"]);
     assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
     assert_keys(
         input_schema_for::<ExportDxfParams>(),
@@ -710,6 +710,20 @@ fn flat_pattern_replies_match_the_output_schema() {
     assert_eq!(f["bores"].as_array().map(Vec::len), Some(1), "{f}");
     assert!((f["bores"][0]["diameter"].as_f64().unwrap_or_default() - 1.5).abs() < 1e-9, "{f}");
     assert_eq!(f["bend_zones"].as_array().map(Vec::len), Some(1), "{f}");
+    // Summary keeps the geometry descriptions and bend data, but no duplicate point lists.
+    let summary = quiet(&mut s, "sheet.flat_pattern", json!({"summary": true}));
+    assert!(conforms(schema, schema, &summary), "{summary} doesn't match {schema}");
+    assert!(summary.get("outline").is_none() && summary.get("cutouts").is_none(), "{summary}");
+    assert_eq!(summary["outline_shapes"].as_array().map(Vec::len), f["outline"].as_array().map(Vec::len));
+    for key in ["flat_size_mm", "cutout_shapes", "bends", "bend_zones", "perforations", "bores"] {
+        assert_eq!(summary[key], f[key], "{key}");
+    }
+    let pocket = &summary["pockets"][0];
+    assert!(pocket.get("outline").is_none() && pocket.get("cutouts").is_none());
+    assert!(pocket["outline_shape"].is_object());
+    assert_eq!(pocket["cutout_shapes"], f["pockets"][0]["cutout_shapes"]);
+    assert!(summary.to_string().len() < f.to_string().len());
+    assert_eq!(quiet(&mut s, "sheet.flat_pattern", json!({"summary": false})), f);
     // The same sheet by name, and with a null body.
     assert_eq!(quiet(&mut s, "sheet.flat_pattern", json!({"body": body})), f);
     assert_eq!(quiet(&mut s, "sheet.flat_pattern", json!({"body": null})), f);

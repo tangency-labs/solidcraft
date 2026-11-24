@@ -215,6 +215,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 json!({
                     "body": string("Body name, e.g. \"Body1\""),
                     "faces": {"type": "string", "enum": ["all", "cylinders"], "description": "\"all\" (default): every edge and face. \"cylinders\": only the cylindrical faces, merged, with their extent along the axis, and no edges"},
+                    "face_normal": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "Only planar faces with this outward normal [x,y,z]; omit edges unless requested"},
+                    "edges": {"type": "object", "properties": {
+                        "min_length": {"type": "number", "minimum": 0},
+                        "max_length": {"type": "number", "minimum": 0}
+                    }, "additionalProperties": false, "minProperties": 1, "description": "Edge length range in mm, inclusive; omit faces unless requested"},
                 }),
                 &["body"],
             ),
@@ -1085,12 +1090,59 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         }
         "body_topology" => {
             let p = pick(a, &["body"]);
-            let edges = exec(b, "model.edges", p.clone())?;
-            let faces = exec(b, "model.faces", p)?;
-            Ok(match str_arg(a, "faces") {
-                Some("cylinders") => json!({"body": a.get("body"), "cylinders": topology_cylinders(&faces["faces"], &edges["edges"])}),
-                _ => json!({"body": a.get("body"), "edges": edges["edges"], "faces": faces["faces"]}),
-            })
+            let normal_filter = a.get("face_normal").filter(|v| !v.is_null());
+            let length_filter = a.get("edges").filter(|v| !v.is_null());
+            if normal_filter.is_some() && a.get("faces").is_some_and(|v| !v.is_null()) {
+                return Err("face_normal cannot be combined with faces".into());
+            }
+            if normal_filter.is_none() && length_filter.is_none() {
+                let edges = exec(b, "model.edges", p.clone())?;
+                let faces = exec(b, "model.faces", p)?;
+                return Ok(match str_arg(a, "faces") {
+                    Some("cylinders") => json!({"body": a.get("body"), "cylinders": topology_cylinders(&faces["faces"], &edges["edges"])}),
+                    _ => json!({"body": a.get("body"), "edges": edges["edges"], "faces": faces["faces"]}),
+                });
+            }
+            if str_arg(a, "faces") == Some("cylinders") {
+                return Err("cylinders cannot be combined with an edge length filter".into());
+            }
+            let mut result = json!({"body": a.get("body")});
+            if let Some(filter) = normal_filter {
+                let normal = xyz(filter).ok_or("face_normal must have three finite coordinates")?;
+                let length = dot(normal, normal).sqrt();
+                if !length.is_finite() || length <= 1e-9 {
+                    return Err("normal must be a nonzero vector".into());
+                }
+                let n = normal.map(|x| x / length);
+                let faces = exec(b, "model.faces", p.clone())?;
+                result["faces"] = faces["faces"].as_array().into_iter().flatten().filter(|f| {
+                    xyz(&f["plane_normal"]).is_some_and(|v| dot(v, n) >= 1.0 - 1e-6)
+                }).cloned().collect::<Vec<Value>>().into();
+            } else if str_arg(a, "faces") == Some("all") {
+                let faces = exec(b, "model.faces", p.clone())?;
+                result["faces"] = faces["faces"].clone();
+            }
+            if let Some(filter) = length_filter {
+                let fields = filter.as_object().ok_or("edges must be a length range")?;
+                if fields.is_empty() || fields.keys().any(|k| k != "min_length" && k != "max_length") {
+                    return Err("edges needs min_length, max_length, or both".into());
+                }
+                let bound = |key: &str, default: f64| -> Result<f64, String> {
+                    fields.get(key).map_or(Ok(default), |value| {
+                        value.as_f64().filter(|n| n.is_finite() && *n >= 0.0).ok_or_else(|| format!("{key} must be a finite nonnegative length"))
+                    })
+                };
+                let min = bound("min_length", 0.0)?;
+                let max = bound("max_length", f64::INFINITY)?;
+                if min > max {
+                    return Err("min_length must not exceed max_length".into());
+                }
+                let edges = exec(b, "model.edges", p)?;
+                result["edges"] = edges["edges"].as_array().into_iter().flatten().filter(|e| {
+                    e["length"].as_f64().is_some_and(|length| length >= min && length <= max)
+                }).cloned().collect::<Vec<Value>>().into();
+            }
+            Ok(result)
         }
         "set_parameter" => {
             let mut p = pick(a, &["name", "unit", "comment"]);

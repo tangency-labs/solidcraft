@@ -842,6 +842,24 @@ fn body_topology_lists_merged_cylinders_with_their_extent() {
     assert!(r["error"]["message"].as_str().unwrap().contains("cylinders"), "{r}");
 }
 
+#[test]
+fn body_topology_filters_planar_normals_and_edge_lengths() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 40, "width": 20, "height": 10}}));
+    let full = tool(&mut s, "body_topology", json!({"body": "Body1"}));
+    let top = tool(&mut s, "body_topology", json!({"body": "Body1", "face_normal": [0,0,2]}));
+    assert!(top.get("edges").is_none(), "{top}");
+    assert_eq!(top["faces"].as_array().map(Vec::len), Some(1), "{top}");
+    assert_eq!(top["faces"][0]["plane_normal"], json!([0.0,0.0,1.0]));
+    let edges = tool(&mut s, "body_topology", json!({"body": "Body1", "edges": {"min_length": 19.9, "max_length": 20.1}}));
+    assert!(edges.get("faces").is_none(), "{edges}");
+    assert_eq!(edges["edges"].as_array().map(Vec::len), Some(4), "{edges}");
+    let both = tool(&mut s, "body_topology", json!({"body": "Body1", "face_normal": [0,0,1], "edges": {"min_length": 19.9, "max_length": 20.1}}));
+    assert_eq!(both["faces"], top["faces"]);
+    assert_eq!(both["edges"], edges["edges"]);
+    assert_eq!(tool(&mut s, "body_topology", json!({"body": "Body1"})), full);
+}
+
 /// `measure {summary: true}` keeps what a stage check needs, as a tool and as a batch step (#3380).
 #[test]
 fn measure_summary_keeps_only_the_check_fields() {

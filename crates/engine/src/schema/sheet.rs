@@ -1035,6 +1035,10 @@ pub struct FlatPatternParams {
     /// The sheet metal body. Default: the last sheet.
     #[serde(default)]
     pub body: Option<String>,
+    /// Return compact outlines and cut-outs instead of duplicate point lists. Default: false.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "bool")]
+    pub summary: Option<bool>,
 }
 
 /// Export a sheet's bend table: a row per bend, in mm and degrees, with the rule and the bend's
@@ -1346,10 +1350,15 @@ pub enum PocketSide {
 /// A pocket: material machined to a depth, not through the sheet.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct FlatPocket {
-    /// Its outer contour, as points within 0.001 mm.
-    pub outline: Vec<FlatPoint>,
-    /// Islands inside it that keep their material, as points within 0.001 mm.
-    pub cutouts: Vec<Vec<FlatPoint>>,
+    /// Its outer contour, as points within 0.001 mm (omitted in a summary).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Vec<FlatPoint>>,
+    /// Its compact outer contour, in a summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline_shape: Option<FlatShape>,
+    /// Islands inside it that keep their material, as points within 0.001 mm (omitted in a summary).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cutouts: Option<Vec<Vec<FlatPoint>>>,
     /// The same islands exactly, in the same order.
     pub cutout_shapes: Vec<FlatShape>,
     pub side: PocketSide,
@@ -1444,10 +1453,15 @@ pub struct FlatPatternResult {
     pub k_factor: f64,
     /// The flat pattern's width and height (its bounding box) and its thickness, in mm.
     pub flat_size_mm: [f64; 3],
-    /// The outer contours, one per piece, as points within 0.001 mm.
-    pub outline: Vec<Vec<FlatPoint>>,
-    /// The cut-outs through the sheet, as points within 0.001 mm.
-    pub cutouts: Vec<Vec<FlatPoint>>,
+    /// The outer contours, one per piece, as points within 0.001 mm (omitted in a summary).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Vec<Vec<FlatPoint>>>,
+    /// The compact outer contours, one per piece, in a summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline_shapes: Option<Vec<FlatShape>>,
+    /// The cut-outs through the sheet, as points within 0.001 mm (omitted in a summary).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cutouts: Option<Vec<Vec<FlatPoint>>>,
     /// The same cut-outs exactly, in the same order.
     pub cutout_shapes: Vec<FlatShape>,
     pub pockets: Vec<FlatPocket>,

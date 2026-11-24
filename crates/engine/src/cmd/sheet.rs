@@ -203,7 +203,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FLAT_PATTERN_CONTRACT)
         .output(output_schema_for::<FlatPatternResult>)
         .params(
-            "body? → flat size, outline loops and cut-outs (flat coordinates, as point lists), cutout_shapes (the same cut-outs exactly, in the same order: {circle: {center, radius}} for a round hole, else {segments: [{line: [a, b]} | {arc: {center, radius, start_deg, sweep_deg}} | {polyline: [...]}]}), pockets (with their own cutout_shapes), bend lines and the bend table",
+            "body?, summary?: bool (default false; replace outline and cutout point lists with compact shapes) → flat size, outline loops and cut-outs (flat coordinates, as point lists), cutout_shapes (the same cut-outs exactly, in the same order: {circle: {center, radius}} for a round hole, else {segments: [{line: [a, b]} | {arc: {center, radius, start_deg, sweep_deg}} | {polyline: [...]}]}), pockets (with their own cutout_shapes), bend lines and the bend table",
         ),
     CommandSpec::new("sheet.export_dxf", "Export Flat Pattern as DXF", crate::checked!("sheet.export_dxf", export_dxf)).icon("dxf")
         .noundo()
@@ -1225,7 +1225,7 @@ fn surfaces_named(s: &Session, body: Option<&str>, cmd: &str) -> Result<solidcra
 }
 
 /// A pocket of a flat as `sheet.flat_pattern` reports it, on a sheet `t` thick.
-fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64) -> Value {
+fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64, summary: bool) -> Value {
     let pt = |v: &Vec2| json!([v.x, v.y]);
     let side = if p.z0 == 0.0 {
         "bottom"
@@ -1234,21 +1234,30 @@ fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64) -> Value {
     } else {
         "internal"
     };
-    json!({"outline": p.region.outer.polyline(1e-3).iter().map(pt).collect::<Vec<_>>(),
-    "cutouts": p.region.holes.iter().map(|h| h.polyline(1e-3).iter().map(pt).collect::<Vec<_>>()).collect::<Vec<_>>(),
-    "cutout_shapes": p.region.holes.iter().map(loop_shape).collect::<Vec<_>>(),
-    "side": side, "depth_mm": p.z1-p.z0, "z0_mm": p.z0, "z1_mm": p.z1})
+    let mut out = json!({
+        "cutout_shapes": p.region.holes.iter().map(loop_shape).collect::<Vec<_>>(),
+        "side": side, "depth_mm": p.z1-p.z0, "z0_mm": p.z0, "z1_mm": p.z1
+    });
+    if summary {
+        out["outline_shape"] = json!(loop_shape(&p.region.outer));
+    } else {
+        out["outline"] = json!(p.region.outer.polyline(1e-3).iter().map(pt).collect::<Vec<_>>());
+        out["cutouts"] = json!(p.region.holes.iter().map(|h| h.polyline(1e-3).iter().map(pt).collect::<Vec<_>>()).collect::<Vec<_>>());
+    }
+    out
 }
 
 /// A converted body's flat as `sheet.flat_pattern` reports a sheet's, with how many of its panels are rolls
 /// and the largest stretch any panel's flat leaves.
 fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
+    surface_flat_json_with_summary(sk, false)
+}
+
+fn surface_flat_json_with_summary(sk: &solidcraft_doc::SurfaceSheet, summary: bool) -> Value {
     let sk = &sk.shown();
     let loops: Vec<Ring<Vec2>> = sk.regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
     let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
     let pt = |v: &Vec2| json!([v.x, v.y]);
-    let outline: Vec<Value> = loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect();
-    let holes: Vec<Value> = sk.regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect();
     let hole_shapes: Vec<FlatShape> = sk.regions.iter().flat_map(|r| &r.holes).map(loop_shape).collect();
     let bends: Vec<Value> = sk
         .bend_infos()
@@ -1266,7 +1275,7 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
             json!([z.min.x, z.max.x, z.min.y, z.max.y])
         })
         .collect();
-    let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness)).collect();
+    let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness, summary)).collect();
     let roll_lines: Vec<Value> =
         sk.roll_lines.iter().map(|l| json!({"panel": l.panel, "line": l.kind.name(), "start": pt(&l.start), "end": pt(&l.end)})).collect();
     // Holes drilled along a panel into its rim (in the panel's frame): drilled after cutting.
@@ -1291,8 +1300,14 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         .map(|r| json!({"roll": r.index, "panel": r.panel, "radius": r.radius, "angle_deg": r.angle_deg, "length": r.length, "width": r.width}))
         .collect();
     let mut out = json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
-        "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
+        "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
         "perforations": perforations, "bend_zones": bend_zones, "rolls": sk.rolls});
+    if summary {
+        out["outline_shapes"] = json!(sk.regions.iter().map(|r| loop_shape(&r.outer)).collect::<Vec<_>>());
+    } else {
+        out["outline"] = Value::Array(loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect());
+        out["cutouts"] = Value::Array(sk.regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect());
+    }
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);
     }
@@ -1354,7 +1369,15 @@ fn loop_shape(lp: &solidcore_record::Loop2) -> FlatShape {
 }
 
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
-    flat_reply(s, str_(p, "body"), "sheet.flat_pattern")
+    let cmd = "sheet.flat_pattern";
+    let summary = match p.get("summary") {
+        None => false,
+        Some(Value::Bool(summary)) => *summary,
+        _ => return Err(bad(cmd, "`summary` must be a boolean")),
+    };
+    let sk = surfaces_named(s, str_(p, "body"), cmd)?;
+    sk.flat_matches_body()?;
+    Ok(surface_flat_json_with_summary(&sk, summary))
 }
 
 /// `sheet.flat_pattern`'s reply for the sheet metal body `body` (else the last one): what the
