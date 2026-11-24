@@ -71,6 +71,7 @@ pub use design::write_design_container_with_preview;
 pub use design::write_design_container_with_provenance;
 pub use design::write_design_container_with_thumbnail;
 pub use design::write_drawing_container;
+pub use design::written_design_provenance_chain;
 pub use glb::DEFAULT_COLOR as GLB_DEFAULT_COLOR;
 pub use glb::GlbOptions;
 pub use glb::MAX_GLB_BYTES;
@@ -124,6 +125,7 @@ pub mod safe_zip;
 pub mod sdf;
 mod sketch2d;
 mod svg;
+mod svg_out;
 /// Explicit development-test seams; absent from ordinary production builds.
 #[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]
 pub mod test_support {
@@ -218,6 +220,9 @@ pub use svg::read_svg;
 pub use svg::read_svg_drawing;
 pub use svg::svg_nothing_to_import;
 pub use svg::svg_sheet;
+pub use svg_out::SvgShape;
+pub use svg_out::svg_unit;
+pub use svg_out::write_svg;
 mod gltf_in;
 pub use gltf_in::GltfImport;
 pub use gltf_in::Loader;
@@ -248,6 +253,7 @@ pub use kicad_in::is_kicad_path;
 pub use kicad_in::kicad_board_mesh;
 pub use kicad_in::kicad_board_path;
 pub use kicad_in::kicad_board_thickness;
+pub use kicad_in::kicad_file_thickness;
 pub use kicad_in::parse_kicad_board;
 pub use kicad_in::parse_kicad_board_with;
 pub use kicad_in::read_kicad;
@@ -1939,7 +1945,7 @@ pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
             binary.join(" and ")
         )));
     }
-    Ok(doc.to_json().into_bytes())
+    Ok(doc.to_json_checked()?.into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.

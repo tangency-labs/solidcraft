@@ -2158,7 +2158,9 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
-    s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
+    // The bytes just written, read back without the open-size limit: a save over it keeps its
+    // history for the next save (#18686).
+    s.provenance_chain = solidcraft_io::written_design_provenance_chain(&bytes);
     s.provenance = None;
     s.mark_saved();
     let bytes_len = bytes.len();
