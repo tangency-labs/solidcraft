@@ -305,7 +305,7 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
     if id == "sketch.intersect"
         && let Some(dialog) = crate::dialogs::Dialog::for_command(app, id)
     {
-        if dialog.wants_picks() && !app.session.selection.is_empty() {
+        if dialog.wants_picks() && !app.session.has_selection()==false {
             let _ = app.session.execute("select.clear", &json!({}));
         }
         app.dialog = Some(dialog);

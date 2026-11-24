@@ -130,7 +130,7 @@ pub(crate) fn tile(app: &mut SolveApp, look: Value, drag: bool) -> Result<(), St
         app.render_workspace.view.assign.painting = false;
         app.render_workspace.view.assign.sampling = false;
         Ok(())
-    } else if app.session.selection.is_empty() {
+    } else if app.session.has_selection()==false {
         arm(app, look)
     } else {
         apply(app, &look, targets(app, &app.session.selection)?)

@@ -145,6 +145,13 @@ pub(crate) fn in_drawing(s: &Session, p: &Value) -> bool {
 
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
+    // A whole-body selection is a scope: resolve it once, here, into the bodies it covers.
+    if p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false) {
+        let mut params = p.clone();
+        params["items"] = serde_json::to_value(s.selected_items()?).map_err(|e| bad(cmd, e.to_string()))?;
+        params["all_bodies"] = json!(false);
+        return apply(s, &params);
+    }
     let items: Vec<Sel> = match p.get("items") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) if a.len() <= 10_000 => {

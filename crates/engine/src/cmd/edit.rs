@@ -1814,6 +1814,8 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     if items.len() > 10_000 {
         return Err(bad("select.set", "too many items"));
     }
+    // Naming items replaces a whole-body selection: the user picked something particular.
+    s.selection_all_bodies = false;
     let mut sel: Vec<Sel> = Vec::new();
     for it in items {
         let one = selection_item(s, it)?;
@@ -1963,6 +1965,7 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
     if drawing.is_none() && request.sheet.is_some() {
         return Err(bad("select.all", "sheet: only with a drawing open"));
     }
+    let mut whole_bodies = false;
     let all: Vec<Sel> = match (s.active_sketch, drawing) {
         (None, Some(open)) => {
             let d = s.drawing("select.all")?;
@@ -1999,14 +2002,9 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
                     .collect()
             }
             None => {
-                let hidden = &s.visibility.hidden_bodies;
-                s.world_state()?
-                    .bodies
-                    .iter()
-                    .filter(|b| !hidden.contains(&b.name))
-                    .take(10_001)
-                    .map(|b| Sel::Body { name: b.name.clone() })
-                    .collect()
+                // A whole-body selection is a scope, not a list: see `Session::selection_all_bodies`.
+                whole_bodies = true;
+                Vec::new()
             }
         },
     };
@@ -2014,8 +2012,10 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("select.all", "too many items"));
     }
     s.selection = all;
+    s.selection_all_bodies = whole_bodies;
     s.refresh_display();
-    reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
+    let selected = s.selected_count()?;
+    reply("select.all", SelectSetResult { selected, param_warnings: Vec::new() })
 }
 
 fn select_mode(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -2030,6 +2030,7 @@ pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
+    s.selection_all_bodies = false;
     s.refresh_display();
     reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }

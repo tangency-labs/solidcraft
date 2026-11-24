@@ -2863,7 +2863,7 @@ impl SolveApp {
             if let Some(sketch) = finished_sketch {
                 d.take_sketch_profile(&self.session, sketch);
             }
-            if d.wants_picks() && !self.session.selection.is_empty() {
+            if d.wants_picks() && !self.session.has_selection()==false {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.view_windows.start_tool_panel(self.docs.current_tab());
@@ -2927,7 +2927,7 @@ impl SolveApp {
                     .collect();
                 let _ = self.session.execute("select.clear", &json!({}));
             }
-            if !self.session.selection.is_empty() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
+            if !self.session.has_selection()==false && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.tool = Some(t);
@@ -2939,7 +2939,7 @@ impl SolveApp {
                 d.take_sketch_profile(&self.session, sketch);
             }
             // The pre-selection now belongs to the dialog's inputs.
-            if d.wants_picks() && !self.session.selection.is_empty() {
+            if d.wants_picks() && !self.session.has_selection()==false {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });

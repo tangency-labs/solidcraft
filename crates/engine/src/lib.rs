@@ -754,6 +754,11 @@ pub struct Session {
     /// Sketch temporarily shown while editing a feature that consumes it. View state only.
     pub feature_edit_sketch: Option<u64>,
     pub selection: Vec<Sel>,
+    /// Every shown body of the design is selected: "select all" in the body scope is a *scope*
+    /// rather than a list of 56,100 names. [`Session::selected_items`] resolves it where an
+    /// operation needs the bodies; code that only asks whether anything is selected reads
+    /// [`Session::has_selection`]. Any explicit select replaces the scope.
+    pub selection_all_bodies: bool,
     pub path: Option<String>,
     /// Where the drawing commands' object ids come from: one source for the session, kept across
     /// a file change, so a session seeded alike and run alike gives the same ids
@@ -1306,6 +1311,7 @@ impl Session {
             sketch_entry: None,
             feature_edit_sketch: None,
             selection: Vec::new(),
+            selection_all_bodies: false,
             path: None,
             ids: solidcraft_doc::ids::IdSource::from_entropy(),
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -1928,6 +1934,36 @@ impl Session {
     /// The model placed in the world through component occurrences (and uncaptured moves): what
     /// to display, measure, pick and export. The same as `model.state()` without components.
     /// An error when the model cannot be placed (see [`solidcraft_doc::world_state`]).
+    /// Whether anything is selected: a list of items or the whole-body scope.
+    pub fn has_selection(&self) -> bool {
+        !self.selection.is_empty() || self.selection_all_bodies
+    }
+
+    /// The selection as the items an operation works on: the whole-body scope resolves to the
+    /// name of every shown body, in the world's order.
+    pub fn selected_items(&self) -> Result<Vec<Sel>> {
+        if !self.selection_all_bodies {
+            return Ok(self.selection.clone());
+        }
+        let hidden = &self.visibility.hidden_bodies;
+        Ok(self
+            .world_state()?
+            .bodies
+            .iter()
+            .filter(|b| !hidden.contains(&b.name))
+            .map(|b| Sel::Body { name: b.name.clone() })
+            .collect())
+    }
+
+    /// How many things are selected, resolving the whole-body scope against the world.
+    pub fn selected_count(&self) -> Result<usize> {
+        if !self.selection_all_bodies {
+            return Ok(self.selection.len());
+        }
+        let hidden = &self.visibility.hidden_bodies;
+        Ok(self.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).count())
+    }
+
     pub fn world_state(&self) -> Result<Arc<solidcraft_doc::ModelState>> {
         let st = self.model.state();
         if self.doc.occurrences.is_empty() {
@@ -3145,6 +3181,7 @@ impl Session {
             sketch_entry: None,
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
+            selection_all_bodies: self.selection_all_bodies,
             path: None,
             ids: self.ids.clone(),
             uid: self.uid,

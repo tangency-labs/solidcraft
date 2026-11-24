@@ -282,7 +282,7 @@ pub(in crate::render_workspace) fn footer_stacked(app: &SolveApp, ui: &egui::Ui)
 }
 
 pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui, stacked: bool) {
-    let enabled = !app.session.selection.is_empty();
+    let enabled = !app.session.has_selection()==false;
     let draw_save = |app: &mut SolveApp, ui: &mut egui::Ui| {
         let label = app.tr("render.inspector_save_library");
         let response = if ui_kit::icon_label_width(ui, label, Some("plus"), false) > ui.available_width() {
@@ -314,7 +314,7 @@ pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui,
 
 /// Returns false only when the explicit-target fallback should be shown.
 pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
-    if app.session.selection.is_empty() {
+    if app.session.has_selection()==false {
         app.render_workspace.view.inspector.selection_appearance = View::default();
         return false;
     }

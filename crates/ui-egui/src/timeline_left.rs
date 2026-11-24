@@ -2203,7 +2203,7 @@ mod tests {
         h.settle();
         assert!(row_y("timeline:Block") < row_y("timeline:Profile") && row_y("timeline:Profile") < row_y("timeline:Second"));
         assert!(handle_at("timeline:Pocket").is_none(), "only the opened feature shows its sketch");
-        assert!(h.app.session.selection.is_empty(), "the fold arrow only folds");
+        assert!(h.app.session.has_selection()==false, "the fold arrow only folds");
         // The fold is kept with the browser's folds, between runs.
         let mut restored = Harness::new();
         restored.app.load_prefs(&h.app.prefs());
@@ -2359,7 +2359,7 @@ mod tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert!(h.app.dialog.is_some() && h.app.session.active_sketch.is_none(), "the sketch row's click goes to the dialog too");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(h.app.session.has_selection()==false, "dialog picks leave the ordinary selection alone");
     }
 
     #[test]
