@@ -16,21 +16,4 @@ runs:
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      run: |
-        set -euo pipefail
-        fetch() { git fetch -q --no-tags "$@" origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" "$HEAD_SHA"; }
-        # The checkout is shallow; deepen until the PR's head and the base share a commit.
-        fetch --depth=100
-        for _ in 1 2 3 4 5; do
-          git merge-base "origin/$BASE_REF" "$HEAD_SHA" > /dev/null && break
-          fetch --deepen=500
-        done
-        git merge-base "origin/$BASE_REF" "$HEAD_SHA" > /dev/null || git fetch -q --no-tags --unshallow origin
-        base=$(git rev-parse "origin/$BASE_REF")
-        git checkout -q --detach "$base"
-        if ! git -c user.name=ci -c user.email=ci@localhost merge -q --no-ff --no-edit "$HEAD_SHA"; then
-          git merge --abort || true
-          echo "::error::This PR conflicts with $BASE_REF; merge $BASE_REF into your branch."
-          exit 1
-        fi
-        echo "Testing $(git rev-parse HEAD): PR head $HEAD_SHA merged onto $BASE_REF $base"
+      run: bash "$GITHUB_ACTION_PATH/merge-main.sh"

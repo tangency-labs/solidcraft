@@ -78,7 +78,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "color?: \"#rrggbb\" or [r, g, b] (board substrate colour); ",
             "representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); ",
             "read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); ",
-            "linked_bodies?: all|folder (a design saved without the bodies of its linked designs, file.save's `linked_bodies: false`: which linked design files are read for them as it opens; default all; folder: only files in the design's own folder or below it, and the other links have no bodies until component.update_links reads them; warnings name each link not read); ",
+            "linked_bodies?: all|folder (a design saved without the bodies of its linked designs and STEP files, file.save's `linked_bodies: false`: which linked files are read for them as it opens; default all; folder: only files in the design's own folder or below it, and the other links have no bodies until component.update_links reads them; warnings name each link not read); ",
             "verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); ",
             "newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving",
         )),
@@ -136,7 +136,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "format?: container|json (default: json for .json, otherwise container); ",
             "compression?: fast|compact (default: fast); ",
             "cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); ",
-            "linked_bodies?: bool (the bodies of linked designs; false: the file keeps each link without its bodies, opening the design reads them from the linked design files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
+            "linked_bodies?: bool (the bodies of linked designs and linked STEP files, with a linked design's mesh bodies; false: the file keeps each link without its bodies, opening the design reads them from the linked files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
             "preview?: bool (saved display meshes, default: false); ",
             "overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); ",
             "sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); ",
@@ -153,7 +153,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "format?: container|json (default: json for .json, otherwise container); ",
             "compression?: fast|compact (default: fast); ",
             "cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); ",
-            "linked_bodies?: bool (the bodies of linked designs; false: the file keeps each link without its bodies, opening the design reads them from the linked design files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
+            "linked_bodies?: bool (the bodies of linked designs and linked STEP files, with a linked design's mesh bodies; false: the file keeps each link without its bodies, opening the design reads them from the linked files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
             "preview?: bool (saved display meshes, default: false); ",
             "overwrite?: bool (as file.save, when `path` is the design's own file); ",
             "sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)",
@@ -2674,10 +2674,47 @@ impl Session {
                 thumbnail.as_deref(),
                 save,
             ),
-            None => {
-                solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
-            }
+            // The container the design was opened from: its blobs whose content has not changed
+            // are copied as they are, instead of being encoded and compressed again. A part is
+            // copied only when its name (the SHA-256 of its content), length and CRC-32 match what
+            // this save writes, so the file reads back the same either way.
+            None => match self.reuse_container().as_deref() {
+                Some(bytes) => solidcraft_io::write_design_container_reusing(
+                    &design,
+                    compression,
+                    preview.as_ref(),
+                    geometry.as_ref(),
+                    thumbnail.as_deref(),
+                    bytes,
+                ),
+                None => solidcraft_io::write_design_container_with_thumbnail(
+                    &design,
+                    compression,
+                    preview.as_ref(),
+                    geometry.as_ref(),
+                    thumbnail.as_deref(),
+                ),
+            },
         }
+    }
+
+    /// The container the design was opened from, read for a save to copy its unchanged blobs:
+    /// `None` when the design has never been saved, the file is not a container (a design script),
+    /// something else wrote the file since it was opened or saved here, or nothing is imported (an
+    /// import's source text is the part a save cannot encode cheaply). Each copied part is checked
+    /// against the content being saved as well, so a file replaced after this check is not copied
+    /// from either. Read here and dropped when the save returns, so nothing is kept between saves.
+    fn reuse_container(&self) -> Option<Vec<u8>> {
+        let path = self.path.as_deref()?;
+        let imported = self.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Import { .. }));
+        if !imported {
+            return None;
+        }
+        let known = self.disk.as_ref()?;
+        if solidcraft_io::design_lock::changed_since(path, known) {
+            return None;
+        }
+        solidcraft_io::read_container_bytes(path)
     }
 }
 
