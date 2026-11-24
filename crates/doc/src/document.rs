@@ -4181,6 +4181,13 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
+    /// Set in a file saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`): the Import feature of each link is saved with no STEP text and no
+    /// records, and opening the design reads those bodies from the linked files again. Only the
+    /// file carries it: the session keeps the choice, and a design in memory always holds the
+    /// bodies it could read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linked_bodies_left_out: bool,
     /// Configurations (rows of parameter values and suppressions).
     #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
     pub configs: crate::config::ConfigTable,
@@ -4535,6 +4542,7 @@ impl Document {
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),
+            linked_bodies_left_out: false,
             body_components: Default::default(),
             body_offsets: Default::default(),
             materials: Default::default(),
