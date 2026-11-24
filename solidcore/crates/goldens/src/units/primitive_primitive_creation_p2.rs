@@ -13,7 +13,6 @@ use solidcore::curve::composite_curve::OffsetCornerType;
 use solidcore::curve::curve::Curve;
 use solidcore::error::{Result, SolidError};
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
 use solidcore::primitive::primitive_creation::{
@@ -149,7 +148,7 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
     let mut ends = Vec::new();
     let mut extra = Vec::new();
     if i.op == 9 {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut model = PrimitiveModel::new(&mut k, fixture_brep(false)?);
         let profile_count = d[4] as usize;
         let profiles = curves(&d[6..6 + 7 * profile_count])?;
@@ -183,7 +182,7 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
             f64::from(result.is_ok()),
         ]);
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut model = PrimitiveModel::new(&mut k, fixture_brep(d[0] != 0.)?);
     let mut primitive = PrimitiveCreation::new(Some(RegionId::from_index(0)), 0, false);
     let result = match i.op {
@@ -528,6 +527,7 @@ mod moved_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use solidcore::error::sweep::SweepFailure;
+    use solidcore::kernel::Kernel;
 
     /// Why no requested body exists for the row.
     #[derive(Debug, Clone, Copy, PartialEq)]
