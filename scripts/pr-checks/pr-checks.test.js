@@ -36,6 +36,21 @@ test('parseDefaults', () => {
   assert.equal(pc.parseDefaults('Changes a default: yes - faster zoom').status, 'malformed');
 });
 
+test('parseDefaults takes a note after the separator', () => {
+  for (const sep of [',', '—', '–', '-', ':', ';']) {
+    assert.equal(pc.parseDefaults(`Changes a default: no${sep} only a corrected label`).status, 'no', sep);
+    assert.equal(pc.parseDefaults(`Changes a default: no ${sep} only a corrected label`).status, 'no', sep);
+    const r = pc.parseDefaults(`Changes a default: yes${sep} M opens Sketch Move, old behaviour kept behind preference shortcuts`);
+    assert.equal(r.status, 'yes', sep);
+    assert.equal(r.preference, 'shortcuts', sep);
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes, x, approved by the owner').approvedByOwner, true);
+  // A note alone still has to say how the old behaviour is kept, and "nothing" after "no," is not a note.
+  assert.equal(pc.parseDefaults('Changes a default: yes, faster zoom').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: no,').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: nope').status, 'malformed');
+});
+
 test('parseDefaults yes forms', () => {
   for (const sep of ['—', '–', '-', '->', '→', ':']) {
     const r = pc.parseDefaults(`Changes a default: yes ${sep} zoom speed doubled, old behaviour kept behind preference viewport.zoom_speed`);

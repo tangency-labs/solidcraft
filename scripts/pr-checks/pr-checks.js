@@ -51,8 +51,9 @@ function parseDefaults(body) {
   const m = stripNoise(body, { inlineCode: false }).replace(/\*\*/g, '').match(/^[ \t]*(?:[-*][ \t]+)?Changes a default:[ \t]*(.*?)[ \t]*$/im);
   if (!m) return { status: 'missing' };
   const value = m[1].replace(/\*\*/g, '').trim();
-  if (/^no\.?$/i.test(value)) return { status: 'no' };
-  const yes = value.match(/^yes\b[ \t]*(?:—|–|->|→|-{1,2}|:)[ \t]*(.+)$/i);
+  // `no` may be followed by a note after a separator: `no, only a fix`, `no — a new button`.
+  if (/^no\.?$/i.test(value) || /^no\b[ \t]*(?:—|–|->|→|-{1,2}|:|,|;)[ \t]*\S/i.test(value)) return { status: 'no' };
+  const yes = value.match(/^yes\b[ \t]*(?:—|–|->|→|-{1,2}|:|,|;)[ \t]*(.+)$/i);
   if (yes) {
     const pref = yes[1].match(/^(.*?)[ ,;]*\bold (?:behaviou?r|value) kept behind (?:preference|pref|setting)[ \t]+`?([\w.:/-]+)`?\.?$/i);
     if (pref && pref[1].trim() && !/^<.*>$/.test(pref[2])) {
