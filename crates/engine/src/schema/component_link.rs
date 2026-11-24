@@ -447,17 +447,16 @@ pub struct RelinkParams {
     /// component's own name stays yours. Not used when `occurrence` relinks one of several
     /// placements: that placement then shows a component made from the new source.
     #[serde(default, deserialize_with = "names_mode", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "RelinkNames")]
     pub names: Option<RelinkNames>,
 }
 
-/// Which names `component.relink` leaves on the linked bodies.
+/// Which names `component.relink` leaves on the linked bodies: `keep` (the names they have) or
+/// `sync` (the new source's names). The variants carry no docs of their own, so the schema is a
+/// plain `enum` of the two strings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RelinkNames {
-    /// The bodies keep the names they have.
     Keep,
-    /// The bodies take the new source's names.
     Sync,
 }
 
