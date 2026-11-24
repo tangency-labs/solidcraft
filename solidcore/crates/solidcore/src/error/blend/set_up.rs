@@ -13,6 +13,13 @@ use super::BlendFailure;
 pub enum FilletSetUp {
     /// The UV curves either side of a gap the fillet face's boundary loop caps.
     BoundaryUvCurve,
+    /// The B-spline centre line of the fillet geometry a copy is taken from.
+    CopySourceCentreLine,
+    /// The fillet solver of the fillet geometry a copy is taken from: it must be the
+    /// copy's own.
+    CopySourceSolver,
+    /// The B-spline fillet surface of the fillet geometry a copy is taken from.
+    CopySourceSurface,
     /// A fillet corner's extended surface of a side face.
     CornerExtendedSurface,
     /// The body vertex a fillet corner rounds.
@@ -89,6 +96,15 @@ impl FilletSetUp {
         match self {
             Self::BoundaryUvCurve => {
                 "a gap in the fillet face's boundary loop has no UV curve on one side to cap from"
+            }
+            Self::CopySourceCentreLine => {
+                "the fillet geometry copied from has no B-spline centre line"
+            }
+            Self::CopySourceSolver => {
+                "the fillet geometry copied from has another fillet solver than the copy"
+            }
+            Self::CopySourceSurface => {
+                "the fillet geometry copied from has no B-spline fillet surface"
             }
             Self::CornerExtendedSurface => {
                 "the fillet corner has no extended surface of the side face"
