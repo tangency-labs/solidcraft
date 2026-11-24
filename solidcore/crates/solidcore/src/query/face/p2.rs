@@ -185,7 +185,7 @@ use crate::surface::surface::p1::{
     make_trim_srf_cache_with_face,
 };
 use crate::surface::surface::{Surface, SurfaceKind, TrimCacheSlot};
-use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCache};
+use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCache, SurfaceCacheState};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
 use crate::topology::brep::validation::spatial::SpatialIndex;
 use crate::topology::edgeuse::p1 as eu1;
@@ -268,6 +268,10 @@ impl CacheFace<EntityRef> for BrepCacheFace<'_> {
                 .map(EntityRef::Loopuse)
                 .collect(),
         )
+    }
+
+    fn has_loopuses(&self) -> Result<bool> {
+        crate::topology::face::p4::has_loopuses(self.b, self.f)
     }
 
     fn loopuse_edgeuses(&self, loopuse: EntityRef) -> Result<Vec<EntityRef>> {
@@ -485,15 +489,21 @@ pub fn solve_surface_cache_of_face<O: Copy + PartialEq>(
     handle: Option<O>,
     map: impl Fn(EntityRef) -> Result<O>,
 ) -> Result<Option<SurfaceCache<O>>> {
-    surface_cache_copy_of_face(k, b, f, owner, surface, handle, map, true)
+    read_surface_cache_of_face(k, b, f, owner, surface, true, |cache| {
+        let mut copy = cache.map_handles(&map)?;
+        copy.base_mut().set_surface_handle(handle);
+        Ok(copy.into_base())
+    })
 }
 
-/// [`solve_surface_cache_of_face`] without the solve's `GetTree`: the surface's
-/// trimmed cache as `smsurf_GetSurfaceCache` hands it to a reader of its state bits
-/// only (`GlobalPointSolve`'s fast-drop face test). A kept cache is handed out as it
-/// is; a new one has its tree only when its factory builds it (not during a Boolean
-/// operation). Upstream also reuses a cache an earlier call built, with the built
-/// tree's bits; the port keeps no record of that.
+/// [`solve_surface_cache_of_face`] without the solve's `GetTree`, for a reader of the
+/// cache's state bits only (`GlobalPointSolve`'s fast-drop face test): the state of the
+/// surface's trimmed cache as `smsurf_GetSurfaceCache` hands it out, read in place as the
+/// copy in the solve's handle space (`map`) would read it
+/// ([`TrimSrfCache::mapped_state`]). A kept cache is read as it is; a new one has its
+/// tree only when its factory builds it (not during a Boolean operation). Upstream also
+/// reuses a cache an earlier call built, with the built tree's bits; the port keeps no
+/// record of that.
 /// Deviation: a cache left without tree gets the face's missing UV trim curves made
 /// now, which upstream's classification makes when it first needs them.
 ///
@@ -506,23 +516,26 @@ pub fn surface_cache_state_of_face<O: Copy + PartialEq>(
     f: FaceId,
     owner: crate::geom::object::ObjectRef,
     surface: &Surface,
-    handle: Option<O>,
-    map: impl Fn(EntityRef) -> Result<O>,
-) -> Result<Option<SurfaceCache<O>>> {
-    surface_cache_copy_of_face(k, b, f, owner, surface, handle, map, false)
+    map: impl Fn(EntityRef) -> O,
+) -> Result<Option<SurfaceCacheState<O>>> {
+    read_surface_cache_of_face(k, b, f, owner, surface, false, |cache| {
+        cache.mapped_state(map)
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn surface_cache_copy_of_face<O: Copy + PartialEq>(
+/// [`owned_surface_cache`] of face `f`'s `surface`, bound to the face, with its tree
+/// built when `get_tree` (else the face's missing UV trim curves made), read by `read`
+/// before the kept cache goes back to the surface. `None` when no trimmed cache could be
+/// made.
+fn read_surface_cache_of_face<T>(
     k: &Kernel,
     b: &mut Brep,
     f: FaceId,
     owner: crate::geom::object::ObjectRef,
     surface: &Surface,
-    handle: Option<O>,
-    map: impl Fn(EntityRef) -> Result<O>,
     get_tree: bool,
-) -> Result<Option<SurfaceCache<O>>> {
+    read: impl FnOnce(&TrimSrfCache<EntityRef>) -> Result<T>,
+) -> Result<Option<T>> {
     let mut lease = owned_surface_cache(k, b, f, surface)?;
     if !lease.trimmed {
         return Ok(None);
@@ -548,9 +561,7 @@ fn surface_cache_copy_of_face<O: Copy + PartialEq>(
             created?;
             refreshed?;
         }
-        let mut copy = lease.cache.map_handles(&map)?;
-        copy.base_mut().set_surface_handle(handle);
-        Ok(copy.into_base())
+        read(&lease.cache)
     })();
     lease.release();
     built.map(Some)
@@ -1024,6 +1035,39 @@ fn classify_trim_cache<O: Copy + PartialEq>(
     Ok(false)
 }
 
+/// Whether the trimmed cache `tsc` of a face surface (`face_owned`: the surface has its
+/// face) is up to date, so `PointClassify` classifies by it first.
+fn trim_cache_applies(tsc: &TrimSrfCache<EntityRef>, face_owned: bool) -> bool {
+    tsc.base().have_t_surface_cache
+        && tsc.base().face_containment_done == FaceContainment::Done
+        && !tsc.base().face_was_modified
+        && face_owned
+}
+
+/// Whether a [`point_classify`] of a point in face `f` with the default trim cache option
+/// would build the tree of the face surface's own trimmed cache, which
+/// [`point_classify_prepared`] does not: the cache applies ([`trim_cache_applies`]) and has
+/// no tree yet. A read of the surface's cache flags, its slot taken and returned at once as
+/// the classification takes it.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the surface's owner.
+pub(crate) fn classification_builds_tree(b: &Brep, f: FaceId) -> Result<bool> {
+    let Some(surface) = b.face(f)?.surface.as_ref() else {
+        return Ok(false);
+    };
+    let face_owned = surface.face()?.is_some();
+    Ok(match surface.take_trim_cache() {
+        TrimCacheSlot::Stored(cache) => {
+            let builds = trim_cache_applies(&cache, face_owned) && cache.base().tree().is_none();
+            Surface::store_trim_cache(*cache);
+            builds
+        }
+        TrimCacheSlot::Empty | TrimCacheSlot::CheckedOut => false,
+    })
+}
+
 /// `PointClassify`'s fast classification by the face surface's trimmed cache `tsc`
 /// when it is up to date (`own`: the surface's own cache, whose tree is built with the
 /// face when it has none): `true` when the cache decided the point.
@@ -1038,11 +1082,7 @@ fn classify_by_trim_cache(
     uv: Point2,
     pc: &mut PointClassification<EntityRef>,
 ) -> Result<bool> {
-    if !(tsc.base().have_t_surface_cache
-        && tsc.base().face_containment_done == FaceContainment::Done
-        && !tsc.base().face_was_modified
-        && face_owned)
-    {
+    if !trim_cache_applies(tsc, face_owned) {
         return Ok(false);
     }
     // get every TrimSrfCache leaf node intersecting the UVPoint
