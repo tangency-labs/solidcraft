@@ -32,6 +32,10 @@
 //! - **Range refinement (WR-383).** A refined range end is judged by its fraction's
 //!   distance from one after orienting both parameters; a start is judged from zero.
 //!   A root near the other endpoint cannot collapse the range.
+//! - **Shortest tested span (WR-21657).** `ApproximateCurve` force-passes a span
+//!   shorter than 1/1500 of the interval it fits (first to last break), where
+//!   `sm_TestSpanAccuracy` takes 1/1500 of the curve's natural interval. A fit no
+//!   longer depends on the parameter's scale.
 //! - **Objects.** Solutions name the caller's handles: `GlobalPointSolve` takes the
 //!   handle of the curve (named by the line drop and the tree solutions, upstream
 //!   `this`) and of its analytic replacement ([`GlobalPointSolveOptions`]; upstream
@@ -331,9 +335,16 @@ pub struct SpanAccuracy {
 /// `sm_TestSpanAccuracy`: whether the Hermite span between `last` and `curr`
 /// (position, first derivative at the parameters `last_t`, `curr_t`) lies within
 /// `approx_tol` of `curve` at 3 samples (7 when the span is forced to pass: shorter
-/// than `SM_EFF_ZERO` scaled or than 1/1500 of the curve's interval). With
-/// `match_parameterization` the distance is taken at equal relative parameters,
-/// else to the closest Hermite point (a failed drop counts as `2 approx_tol`).
+/// than `SM_EFF_ZERO` scaled or than 1/1500 of `fit_length`, the length of the
+/// interval being approximated). With `match_parameterization` the distance is taken
+/// at equal relative parameters, else to the closest Hermite point (a failed drop
+/// counts as `2 approx_tol`).
+///
+/// Upstream takes the curve's natural interval for `fit_length`. A fit over an
+/// interval much shorter than that (a curve on surface lifted over part of its UV
+/// curve, or over a fast parameterisation of it) then forces its spans to pass
+/// untested after the first halvings, so the same curve's fit depended on the
+/// parameter's scale.
 ///
 /// # Errors
 ///
@@ -341,6 +352,7 @@ pub struct SpanAccuracy {
 pub fn test_span_accuracy(
     k: &Kernel,
     curve: &Curve,
+    fit_length: f64,
     last_t: f64,
     last_pv: [Point3; 2],
     curr_t: f64,
@@ -358,7 +370,6 @@ pub fn test_span_accuracy(
     let mut force_pass = false;
     let this_span = curr_t - last_t;
     let t_scale = 1.0 + curr_t.abs();
-    let ivl = curve.natural_interval();
     let min_step = 1500.0;
     let mut num_test_points: u32 = 3;
 
@@ -367,8 +378,8 @@ pub fn test_span_accuracy(
         force_pass = true;
     }
 
-    // Don't let the interval get too small
-    if this_span < (ivl.length()) / min_step {
+    // Don't let the interval get too small (relative to the interval being fitted)
+    if this_span < fit_length / min_step {
         force_pass = true;
     }
 
@@ -580,6 +591,10 @@ impl Curve {
             });
         }
 
+        // the length of the interval being fitted: test_span_accuracy's shortest
+        // tested span is relative to it (upstream: to the curve's natural interval)
+        let fit_length = (last - first).abs();
+
         // locals
         let mut stack: Vec<f64> = Vec::with_capacity(256 * 4 * 2);
         let mut ctrl_poly: Vec<Point3> = Vec::with_capacity(256);
@@ -638,6 +653,7 @@ impl Curve {
                 let acc = test_span_accuracy(
                     k,
                     self,
+                    fit_length,
                     last_t,
                     last_pv,
                     curr_t,
@@ -2660,7 +2676,7 @@ mod tests {
             just_copy_bsplines: false,
         };
         // A negative tolerance still follows native subdivision and force-pass
-        // semantics over the natural interval; it is not replaced or rejected.
+        // semantics over the fitted interval; it is not replaced or rejected.
         let natural = c
             .approximate_curve_base(&k, &[0.0, 1.0], -1e300, &opts)
             .unwrap();
@@ -2670,12 +2686,16 @@ mod tests {
             Vec3::X * 0.5
         );
 
-        // The same stopping rule over an enormous clamped interval would need
-        // trillions of spans, despite this curve having only two control points.
-        assert!(matches!(
-            c.approximate_curve_base(&k, &[0.0, 1e100], -1e300, &opts),
-            Err(e) if crate::error::upstream_status(&e) == Some(1001)
-        ));
+        // The shortest tested span is relative to the fitted interval, so an
+        // enormous interval stops at the same depth as `[0, 1]` (#21657): the fit
+        // keeps the line, as over the natural interval.
+        let enormous = c
+            .approximate_curve_base(&k, &[0.0, 1e100], -1e300, &opts)
+            .unwrap();
+        assert_eq!(
+            format!("{:?}", enormous.curve),
+            format!("{:?}", natural.curve)
+        );
     }
 
     #[test]
@@ -3224,8 +3244,8 @@ mod tests {
         let c = cubic();
         let a = c.evaluate(k, 0.0, 1, true, false).unwrap();
         let b = c.evaluate(k, 1.0, 1, false, false).unwrap();
-        let r =
-            test_span_accuracy(k, &c, 0.0, [a[0], a[1]], 1.0, [b[0], b[1]], 1e-9, true).unwrap();
+        let r = test_span_accuracy(k, &c, 1.0, 0.0, [a[0], a[1]], 1.0, [b[0], b[1]], 1e-9, true)
+            .unwrap();
         assert!(r.passes);
         assert!(r.max_dist < 1e-12);
     }
