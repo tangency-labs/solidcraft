@@ -11,23 +11,15 @@
 //! ([`bead_body`], [`crate::blend::foot_blend`]); a span ([`BeadSpan`]) builds its share of
 //! the edge only, so an intermittent weld is one body per span.
 //!
-//! A span ends square to the edge, or tapers, or is rounded ([`BeadEnd`]); the last two only
-//! straight between two planes so far, cut from the span's own small planar body: the span is swept past its end first, so each cut crosses
-//! the bead's edges instead of passing through its corners, then
-//! - a taper is cut by the plane through the span's end on the edge at 45 degrees to the edge,
-//!   rising into the span along the bead's middle direction: a ramp as long as the bead is
-//!   high, the strips narrowing to the end's point;
-//! - a rounded end is cut by the sphere about the edge one bead reach inside the span's end:
-//!   the bead's outline on each plate ends in a round, the section shrinking to the end's
-//!   point on the edge.
+//! A span ends square to the edge, or tapers, or is rounded ([`BeadEnd`]), on any joint: a
+//! leg law over the end's zone inside the span ([`crate::blend::foot_blend::FootRamp`]).
 //!
 //! Refused before anything is built, the part left as it was, as
 //! [`BlendFailure::WeldNotBuilt`] (class `Unsupported`) naming the edge or vertex: a joint
-//! that is not a straight edge between two planes ([`WeldGap::CurvedJoint`]: the bead on any
-//! joint, the foot blend, comes with its certificate), beads that meet at a vertex
-//! ([`WeldGap::BeadsMeetAtVertex`]: their corner) and a bead with an obtuse toe
-//! ([`WeldGap::ObtuseToe`]). As too large (class `FilletTooLarge`), naming the size that
-//! builds: a toe past its face's trims ([`NoRoomReason::LegPastFace`], the leg) and a sagitta
+//! that is not a straight edge between two planes for the exact bead ([`beads_apart`],
+//! [`WeldGap::CurvedJoint`]), a corner of beads at a vertex not built yet
+//! ([`WeldGap::BeadsMeetAtVertex`]) and a bead with an obtuse toe ([`WeldGap::ObtuseToe`]).
+//! As too large (class `FilletTooLarge`), naming the size that builds: a toe past its face's trims ([`NoRoomReason::LegPastFace`], the leg) and a sagitta
 //! past its bound ([`NoRoomReason::BeadCutsFace`], the sagitta). As invalid input: an edge
 //! that is not an inside corner (an outside or a tangent edge), an edge listed twice, sizes
 //! not one per edge, and a leg below the body's resolution
@@ -781,8 +773,7 @@ pub fn beads_apart(
 /// and end, on any joint: square (a planar cap), or tapered or rounded, a leg law over the
 /// end's zone inside the span (the section scaled down to the root at the tip:
 /// [`crate::blend::foot_blend::FootRamp`]; a taper's zone as long as the bead is high, a
-/// rounded end's one bead reach). Nothing is cut: the planar sweep's shaped ends
-/// ([`beads_apart_in_spans`]) are another shape, not this one's.
+/// rounded end's one bead reach). Nothing is cut.
 ///
 /// Beads whose edges meet at a vertex are joined there (#17916): at an inside corner as they
 /// are, below 90 degrees each cut at the other's wall first; round an outside corner by the
@@ -1208,6 +1199,17 @@ fn corner_beads(
             else {
                 return Err(defect("a pair of a corner's beads named an end the corner does not hold, though the pairs are built from its ends"));
             };
+            // Two edges running on smoothly (a tangent line and arc, or two collinear pieces)
+            // already share one square end: joined as they are, with no piece. Edges leaving
+            // the vertex the same way overlap, and are refused. Taken first: collinear pieces
+            // share both their faces, which the corner below refuses.
+            let sine = ea.away.cross(eb.away).length();
+            if sine <= EFF_ZERO_RAD {
+                if ea.away.dot(eb.away) < 0.0 {
+                    continue;
+                }
+                return Err(refuse(v));
+            }
             // the face both beads lie on (the floor), and each bead's other face (its wall)
             let faces_a: Vec<FaceId> = ea.blend.sides.iter().filter_map(|s| s.face).collect();
             let common: Vec<FaceId> = eb
@@ -1226,16 +1228,6 @@ fn corner_beads(
             let (wa, wb) = (1 - ja, 1 - jb);
             let (ua, ub) = (ea.toward(ja)?, eb.toward(jb)?);
             let (wa_dir, wb_dir) = (ea.toward(wa)?, eb.toward(wb)?);
-            // Two edges running on smoothly (a tangent line and arc, or two collinear pieces)
-            // already share one square end: joined as they are, with no piece. Edges leaving
-            // the vertex the same way overlap, and are refused.
-            let sine = ea.away.cross(eb.away).length();
-            if sine <= EFF_ZERO_RAD {
-                if ea.away.dot(eb.away) < 0.0 {
-                    continue;
-                }
-                return Err(refuse(v));
-            }
             // Inside or outside, and below 90 degrees, by signs: on the floor `eb.away` leaves
             // the vertex at `sine` off `ea.away`'s line, so `eb.away . ua` is that sine, to the
             // feet's accuracy, past the angle zero (the smooth case is taken out above); at 90
@@ -1251,7 +1243,8 @@ fn corner_beads(
             };
             if inside_ab {
                 // below 90 degrees each bead runs into the other's wall: cut it there
-                if ea.away.dot(eb.away) > 0.0 {
+                // (90 degrees to rounding is the plain join, the same body)
+                if ea.away.dot(eb.away) > EFF_ZERO_RAD {
                     if !(ea.planar(wa) && eb.planar(wb)) {
                         return Err(refuse(v));
                     }

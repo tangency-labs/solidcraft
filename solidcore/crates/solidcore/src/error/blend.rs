@@ -2769,16 +2769,6 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the exact weld bead is built only along a straight edge between two planes; the bead body builds on any joint",
                 self.class()
             ),
-            Self::WeldNotBuilt(WeldGap::EndShapeOfFlatBead) => write!(
-                f,
-                "{}: a tapered or rounded end of a flat bead (sagitta 0) is not built yet; give the bead a sagitta",
-                self.class()
-            ),
-            Self::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint) => write!(
-                f,
-                "{}: a tapered or rounded bead end is built only straight between two planes so far",
-                self.class()
-            ),
             Self::WeldNotBuilt(WeldGap::ObtuseToe) => write!(
                 f,
                 "{}: a weld bead with an obtuse toe (one leg at most the other's cosine of the angle between the faces) is not built yet",
@@ -3191,14 +3181,6 @@ mod tests {
             ),
             (
                 BlendFailure::WeldNotBuilt(WeldGap::CurvedJoint),
-                ErrorKind::Unsupported,
-            ),
-            (
-                BlendFailure::WeldNotBuilt(WeldGap::EndShapeOfFlatBead),
-                ErrorKind::Unsupported,
-            ),
-            (
-                BlendFailure::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint),
                 ErrorKind::Unsupported,
             ),
             (

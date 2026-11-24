@@ -289,8 +289,7 @@ rolling-ball blend, which it leaves unchanged.
   in θ, where the toe moves smoothly to the tip (in the leader's parameter it would move as √x).
   The zone's length is measured by arc length on the whole section at the span's end (its height
   along the direction to the chord's middle, its reach from the root, at 65 points) and kept as
-  the leader's parameters. The same law on every joint, plates included; the planar sweep's
-  shaped ends (`beads_apart_in_spans`, cut by a plane or a sphere) are another shape.
+  the leader's parameters. The same law on every joint, plates included.
 - **Body.** The bead is a body of its own: per span the section face, a strip on each support
   between the root and its foot, and square end caps in the stations' planes (a shaped end has
   none: its faces close on the tip's point), stitched and oriented. A closed joint is built in four segments, so no face runs a full turn. A strip on a

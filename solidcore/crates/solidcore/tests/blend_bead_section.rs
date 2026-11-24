@@ -833,9 +833,6 @@ fn the_bead_face_is_the_chord_with_its_sagitta() {
     }
 }
 
-/// One span of the bead along `edge` of `b` at the square corner's setbacks with `ends` at
-/// both of its ends: tapered and rounded ends are the planar sweep cut at its ends
-/// ([`weld_bead_body`] straight between two planes).
 /// A point of a rational quadratic Bezier piece at `t`.
 fn rational_quadratic(p: [Point3; 3], w: [f64; 3], t: f64) -> Point3 {
     let b = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
