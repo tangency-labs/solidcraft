@@ -24,10 +24,16 @@ fn select_other_feedback_is_local_when_the_browser_hover_expires() {
             hit: crate::viewport::Hit::Face { body: "Body1".into(), index: 0, point: solidcore_record::Vec3::ZERO },
             sel: Sel::Body { name: "Body1".into() },
             label: "Body1".into(),
+            short_label: "Body1".into(),
             icon: "body",
+            category: super::Category::Bodies,
+            hierarchy: Vec::new(),
         }],
         total: 1,
         hovered: Some(0),
+        filter: None,
+        grouped: true,
+        collapsed: std::collections::HashSet::new(),
         revision: h.app.session.revision,
         dialog: false,
         include_hidden: h.app.preferences.select_other_hidden,
@@ -1224,4 +1230,153 @@ fn save_hidden_edge_evidence(h: &Harness, name: &str) {
     .expect("a GPU is required when evidence capture is requested");
     std::fs::create_dir_all(&dir).unwrap();
     image::save_buffer(std::path::Path::new(&dir).join(format!("{name}.png")), &rgba, size, size, image::ColorType::Rgba8).unwrap();
+}
+
+#[test]
+fn category_filter_chips_narrow_rows_without_closing_and_hide_for_single_category() {
+    // Single category (two coincident sketch lines): no filter bar is shown.
+    let (mut h, at) = two_lines();
+    h.step(&json!({"hold": at})).unwrap();
+    h.frames(2);
+    let desc = super::describe(&h.app);
+    assert_eq!(desc["categories"].as_array().unwrap().len(), 1, "{desc}");
+    assert!(crate::scenario::handle_at("select_other:filter:all").is_none(), "single-category popup omits filter chips");
+
+    // Multiple categories (faces, edges, bodies over a stacked pair of boxes): filter bar appears.
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0],"body_name":"Lower"})).unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,15],"body_name":"Upper"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    // Aim at a shared edge so edges, faces and bodies are all under the pointer.
+    let edge_pt = h.at(&json!({"world":[10,0,25]})).unwrap();
+    h.step(&json!({"hold": edge_pt})).unwrap();
+    h.frames(2);
+    let desc = super::describe(&h.app);
+    let cats: Vec<&str> = desc["categories"].as_array().unwrap().iter().filter_map(|c| c["key"].as_str()).collect();
+    assert!(cats.contains(&"edges") && cats.contains(&"faces") && cats.contains(&"bodies"), "cats={cats:?}");
+    let all_visible = desc["visible_rows"].as_array().unwrap().len();
+    assert!(crate::scenario::handle_at("select_other:filter:edges").is_some(), "Edges filter chip should be published");
+
+    // Clicking the Edges chip filters to edges only without closing the popup.
+    h.step(&json!({"click": {"handle": "select_other:filter:edges"}})).unwrap();
+    h.frames(2);
+    assert!(super::is_open(&h.app), "clicking a filter chip keeps the popup open");
+    let filtered = super::describe(&h.app);
+    assert_eq!(filtered["filter"], "edges");
+    let edge_rows: Vec<usize> = filtered["visible_rows"].as_array().unwrap().iter().filter_map(Value::as_u64).map(|n| n as usize).collect();
+    assert!(!edge_rows.is_empty() && edge_rows.len() < all_visible, "{filtered}");
+    let rows = filtered["rows"].as_array().unwrap();
+    assert!(edge_rows.iter().all(|&i| rows[i]["category"] == "edges"), "only edges remain visible: {filtered}");
+
+    // Clicking the active Edges chip again toggles back to All.
+    h.step(&json!({"click": {"handle": "select_other:filter:edges"}})).unwrap();
+    h.frames(2);
+    assert!(super::is_open(&h.app));
+    let restored = super::describe(&h.app);
+    assert!(restored["filter"].is_null());
+    assert_eq!(restored["visible_rows"].as_array().unwrap().len(), all_visible);
+
+    // Hostile filter key via control channel returns an error cleanly.
+    let err = h.call("ui.selectOther", json!({"filter": "not_a_real_category"}));
+    assert_eq!(err["ok"], false);
+    assert!(super::is_open(&h.app));
+}
+
+#[test]
+fn multi_body_tree_nests_bodies_front_to_back_and_toggles_collapse_and_flat() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0],"body_name":"Far"})).unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,15],"body_name":"Near"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    let pt = h.at(&json!({"world":[10,0,25]})).unwrap();
+    h.step(&json!({"hold": pt})).unwrap();
+    h.frames(2);
+
+    let desc = super::describe(&h.app);
+    assert_eq!(desc["can_group"], true, "{desc}");
+    assert_eq!(desc["grouped"], true, "{desc}");
+    let group_names: Vec<&str> = desc["groups"].as_array().unwrap().iter().filter_map(|g| g["name"].as_str()).collect();
+    assert_eq!(group_names, ["Near", "Far"], "nearest body group appears first: {desc}");
+
+    let before_count = desc["visible_rows"].as_array().unwrap().len();
+    // Collapsing Near hides its edges/faces while keeping Near itself selectable.
+    assert!(crate::scenario::handle_at("select_other:toggle:body:Near").is_some(), "Near chevron handle");
+    h.step(&json!({"click": {"handle": "select_other:toggle:body:Near"}})).unwrap();
+    h.frames(2);
+    assert!(super::is_open(&h.app), "toggling chevron keeps popup open");
+    let collapsed = super::describe(&h.app);
+    let after_collapse = collapsed["visible_rows"].as_array().unwrap().len();
+    assert!(after_collapse < before_count, "collapsing Near hides its children: {after_collapse} vs {before_count}");
+
+    // Switching to Flat view shows all rows without nesting.
+    h.step(&json!({"click": {"handle": "select_other:toggle_tree"}})).unwrap();
+    h.frames(2);
+    assert!(super::is_open(&h.app));
+    let flat = super::describe(&h.app);
+    assert_eq!(flat["grouped"], false);
+    assert_eq!(flat["visible_rows"].as_array().unwrap().len(), before_count);
+
+    // Switching back to Tree and clicking the Near body row selects Body Near.
+    h.step(&json!({"click": {"handle": "select_other:toggle_tree"}})).unwrap();
+    h.frames(2);
+    let rows = super::describe(&h.app)["rows"].as_array().unwrap().clone();
+    let near_body_idx =
+        rows.iter().position(|r| matches!(serde_json::from_value::<Sel>(r["sel"].clone()).ok(), Some(Sel::Body { name }) if name == "Near")).unwrap();
+    h.step(&json!({"move": {"handle": format!("select_other:{near_body_idx}")}})).unwrap();
+    assert_eq!(super::hovered_body(&h.app), Some("Near"), "hovering the selectable body parent highlights Near");
+    h.step(&json!({"click": {"handle": format!("select_other:{near_body_idx}")}})).unwrap();
+    assert!(!super::is_open(&h.app));
+    assert_eq!(h.app.session.selection, vec![Sel::Body { name: "Near".into() }]);
+}
+
+#[test]
+fn multi_component_assembly_nests_by_occurrence_tree_and_filters_cleanly() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    // Outer assembly component with a nested child component, plus a sibling component.
+    let housing = h.app.run("component.create", json!({"name":"Housing"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":8,"corner":[0,0,0],"body_name":"Base"})).unwrap();
+    let lid = h.app.run("component.create", json!({"name":"Lid"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":4,"corner":[0,0,10],"body_name":"Cover"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let bracket = h.app.run("component.create", json!({"name":"Bracket"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":4,"corner":[0,0,20],"body_name":"Plate"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    let pt = h.at(&json!({"world":[10,0,24]})).unwrap();
+    h.step(&json!({"hold": pt})).unwrap();
+    h.frames(2);
+
+    let desc = super::describe(&h.app);
+    assert_eq!(desc["grouped"], true, "{desc}");
+    let groups = desc["groups"].as_array().unwrap();
+    let has_occ = |key: &str, expected_depth: u64| groups.iter().any(|g| g["key"] == key && g["depth"] == expected_depth);
+    assert!(has_occ(&format!("occ:{bracket}"), 0), "Bracket occurrence at depth 0: {groups:?}");
+    assert!(has_occ(&format!("occ:{housing}"), 0), "Housing occurrence at depth 0: {groups:?}");
+    assert!(has_occ(&format!("occ:{housing}/{lid}"), 1), "nested Lid occurrence at depth 1: {groups:?}");
+
+    // Filtering to Edges keeps the component + body hierarchy with non-selectable body headers.
+    h.call("ui.selectOther", json!({"filter": "edges"}));
+    h.frames(2);
+    let edge_desc = super::describe(&h.app);
+    assert_eq!(edge_desc["filter"], "edges");
+    assert_eq!(edge_desc["grouped"], true);
+    let edge_groups = edge_desc["groups"].as_array().unwrap();
+    assert!(edge_groups.iter().any(|g| g["key"] == format!("occ:{housing}/{lid}") && g["depth"] == 1), "{edge_groups:?}");
+
+    // Collapsing the Housing occurrence hides all nested Lid and Base rows.
+    let before = edge_desc["visible_rows"].as_array().unwrap().len();
+    let housing_handle = format!("select_other:group:occ:{housing}");
+    assert!(crate::scenario::handle_at(&housing_handle).is_some(), "Housing group header handle");
+    h.step(&json!({"click": {"handle": housing_handle}})).unwrap();
+    h.frames(2);
+    assert!(super::is_open(&h.app));
+    let after = super::describe(&h.app)["visible_rows"].as_array().unwrap().len();
+    assert!(after < before, "collapsing Housing hides nested rows: {after} vs {before}");
 }
