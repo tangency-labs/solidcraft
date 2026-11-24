@@ -1106,13 +1106,13 @@ fn project_box_beside_the_model_still_takes_curves_of_other_sketches_14927() {
 }
 
 /// Dialog previews and deferred submissions carry the same explicit policy and displayed path.
-/// Execute their JSON directly on the engine to prove it does not need UI preferences.
+/// Execute their JSON directly on the engine to prove it does not need UI session state.
 #[test]
 fn projection_dialog_preview_and_apply_keep_explicit_policy_and_displayed_copy() {
     for enhanced in [false, true] {
         for command in ["sketch.project", "sketch.intersect"] {
             let mut h = Harness::new();
-            h.app.preferences.projection_workflow_ui = enhanced;
+            h.app.ui.project_link_tools = enhanced;
             let a1 = h.app.run("component.create", json!({"name":"A"})).unwrap()["occurrence"].as_u64().unwrap();
             let source =
                 h.app.run("sketch.create", json!({"plane":if command == "sketch.intersect" {"XZ"} else {"XY"}})).unwrap()["sketch"].as_u64().unwrap();
@@ -1149,4 +1149,42 @@ fn projection_dialog_preview_and_apply_keep_explicit_policy_and_displayed_copy()
             assert!(!stored.lost);
         }
     }
+}
+
+/// Project owns this opt-in; neither saving preferences nor an older preference enables it.
+#[test]
+fn project_link_tools_are_a_session_option_in_the_project_panel() {
+    let mut h = fixture();
+    assert!(!h.app.ui.project_link_tools);
+    let before = h.app.session.doc.to_json();
+    h.app.start("sketch.project");
+    h.frames(4);
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { .. }));
+    h.step(&json!({"click":{"handle":"project:link-tools"}})).unwrap();
+    assert!(h.app.ui.project_link_tools);
+    assert_eq!(h.app.session.doc.to_json(), before, "choosing a UI policy edits no design");
+    assert_eq!(h.call("ui.set", json!({"showGrid":false}))["ok"], true);
+    assert!(h.app.ui.project_link_tools, "other UI changes retain the session option");
+    assert_eq!(h.call("ui.set", json!({"projectLinkTools":"yes"}))["ok"], false);
+    assert!(h.app.ui.project_link_tools, "a malformed update keeps the previous option");
+    assert_eq!(h.call("ui.prefs", json!({"projection_workflow_ui":true}))["ok"], false);
+
+    let exported = h.app.prefs();
+    let prefs: Value = serde_json::from_str(&exported).unwrap();
+    assert!(prefs["preferences"].get("projection_workflow_ui").is_none());
+    assert!(prefs.get("projectLinkTools").is_none());
+    assert!(prefs["preferences"].get("project_link_tools").is_none());
+    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&exported);
+    assert!(!restored.ui.project_link_tools);
+    restored.load_prefs(r#"{"preferences":{"projection_workflow_ui":true}}"#);
+    assert!(!restored.ui.project_link_tools, "the removed preference cannot enable Project's option");
+
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.ui.project_link_tools, "the choice lasts for the session after closing Project");
+    h.app.start("sketch.project");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"project:link-tools"}})).unwrap();
+    assert!(!h.app.ui.project_link_tools);
+    assert_eq!(h.app.session.doc.to_json(), before);
 }

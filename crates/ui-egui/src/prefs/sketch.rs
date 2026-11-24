@@ -122,7 +122,6 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "ui.project_face_edges_sketch",
             "ui.project_references_construction",
             "prefs.sketch.project_options",
-            "prefs.sketch.projection_workflow_ui",
             "prefs.sketch.cursor_coordinates",
         ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
@@ -255,13 +254,6 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "prefs.sketch.project_options",
                     Some("prefs.project_options_dialog_note"),
                     &mut app.preferences.project_options_dialog,
-                );
-                check(
-                    ui,
-                    "projection_workflow_ui",
-                    "prefs.sketch.projection_workflow_ui",
-                    Some("prefs.sketch.projection_workflow_ui_note"),
-                    &mut app.preferences.projection_workflow_ui,
                 );
                 check(
                     ui,

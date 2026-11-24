@@ -33,7 +33,7 @@ struct PlanKey {
     marker: Option<usize>,
     features: usize,
     groups: usize,
-    projection_workflow_ui: bool,
+    project_link_tools: bool,
     under_feature: bool,
 }
 
@@ -47,7 +47,7 @@ impl PlanKey {
             marker: doc.marker,
             features: doc.features.len(),
             groups: doc.timeline_groups.len(),
-            projection_workflow_ui: app.preferences.projection_workflow_ui,
+            project_link_tools: app.ui.project_link_tools,
             under_feature,
         }
     }
@@ -167,7 +167,7 @@ impl RowPlan {
             .iter()
             .map(|feature| {
                 index_of.get(&feature.0).and_then(|index| doc.features.get(*index)).is_some_and(
-                    |feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { sketch, .. } if !sketch.patterns.is_empty() || (app.preferences.projection_workflow_ui && sketch.links.iter().any(crate::sketch_link_tree::listed))),
+                    |feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { sketch, .. } if !sketch.patterns.is_empty() || (app.ui.project_link_tools && sketch.links.iter().any(crate::sketch_link_tree::listed))),
                 )
             })
             .collect();

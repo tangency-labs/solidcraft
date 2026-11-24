@@ -1704,7 +1704,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.extend(explode_text(app));
     }
     // The opt-in groups Break Link with the projection's actions; otherwise keep its old place.
-    if !app.preferences.projection_workflow_ui || selected_links(&ss.sketch, &ents).is_empty() {
+    if !app.ui.project_link_tools || selected_links(&ss.sketch, &ents).is_empty() {
         v.extend(break_link(app, &ss.sketch, &ents));
     }
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
@@ -1756,7 +1756,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.link_visibility", "Hide Projection").with(json!({"links": links, "visible": false})));
         v.push(cmd(app, "sketch.remove_link", "Remove Projection").with(p));
         // Break Link frees every member of the projection, not only the ones selected.
-        if app.preferences.projection_workflow_ui {
+        if app.ui.project_link_tools {
             let partial =
                 links.iter().any(|l| ss.sketch.link_curves(l).iter().filter_map(|c| ss.sketch.curves.get(*c)).any(|c| !ents.contains(&c.id)));
             v.push(
@@ -1820,7 +1820,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             |c| ss.sketch.is_linked_curve(c),
         )
     });
-    v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })).on(!app.preferences.projection_workflow_ui || !projected));
+    v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })).on(!app.ui.project_link_tools || !projected));
     // The clipboard beside Delete, as in every menu.
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
     v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
@@ -4189,7 +4189,7 @@ mod tests {
 
         for enhanced in [false, true] {
             let mut h = crate::scenario::Harness::new();
-            h.app.preferences.projection_workflow_ui = enhanced;
+            h.app.ui.project_link_tools = enhanced;
             h.app.home.open = false;
             h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();

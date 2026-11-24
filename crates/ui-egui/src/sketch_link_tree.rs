@@ -1,8 +1,8 @@
 //! A sketch's projections (links to model geometry) are children of their sketch, beside its
 //! patterns: one row per link naming its source and the placement it reads, its status when it
 //! is not current, an eye that hides it, and a menu to update, freeze, remove or break it. The
-//! rows require the Projection display and picking preference, read the stored document and
-//! run commands.
+//! rows require Project's session-only Projection display and picking option, read the stored
+//! document and run commands.
 
 use serde_json::json;
 use solidcraft_engine::Sel;
@@ -22,7 +22,7 @@ pub(crate) fn listed(link: &Link) -> bool {
 }
 
 pub(crate) fn has_links(app: &SolveApp, sketch: u64) -> bool {
-    app.preferences.projection_workflow_ui && app.session.doc.sketch(sketch).is_ok_and(|sk| sk.links.iter().any(listed))
+    app.ui.project_link_tools && app.session.doc.sketch(sketch).is_ok_and(|sk| sk.links.iter().any(listed))
 }
 
 /// What a link's row says: its source (its kind too when it is not a projection, which the
@@ -72,7 +72,7 @@ struct Entry {
 }
 
 fn entries(app: &SolveApp, sketch: u64) -> Vec<Entry> {
-    if !app.preferences.projection_workflow_ui {
+    if !app.ui.project_link_tools {
         return Vec::new();
     }
     let Ok(sk) = app.session.doc.sketch(sketch) else { return Vec::new() };
@@ -160,7 +160,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.ui.show_browser = true;
-        h.app.preferences.projection_workflow_ui = enhanced;
+        h.app.ui.project_link_tools = enhanced;
         let a1 = h.app.run("component.create", json!({"name":"A"})).unwrap()["occurrence"].as_u64().unwrap();
         h.app.run("solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Plate"})).unwrap();
         h.app.run("solid.cylinder", json!({"radius":5,"height":10,"base":[20,20,0],"operation":"cut","targets":["Plate"]})).unwrap();
@@ -179,12 +179,12 @@ mod tests {
     }
 
     #[test]
-    fn projection_compatibility_inputs_follow_the_preference_and_explicit_inputs_win() {
+    fn projection_compatibility_inputs_follow_the_project_option_and_explicit_inputs_win() {
         for enhanced in [false, true] {
             for policy in [None, Some(false), Some(true)] {
                 let mut h = Harness::new();
                 h.app.home.open = false;
-                h.app.preferences.projection_workflow_ui = enhanced;
+                h.app.ui.project_link_tools = enhanced;
                 let a = h.app.run("component.create", json!({"name":"A"})).unwrap();
                 let a1 = a["occurrence"].as_u64().unwrap();
                 let source = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
@@ -244,7 +244,7 @@ mod tests {
             let pending = h.app.menu.confirm.as_ref().expect("the extrusion depends on this closed boundary");
             assert_eq!(pending.params["preserve_projection_link"], enhanced);
             assert_eq!(h.app.session.doc.to_json(), before, "the dry-run changes nothing");
-            h.app.preferences.projection_workflow_ui = !enhanced;
+            h.app.ui.project_link_tools = !enhanced;
             assert!(crate::delete::confirm(&mut h.app, true));
             let sk = h.app.session.doc.sketch(sketch).unwrap();
             assert!(sk.curve_index(&victim).is_none());
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_ui_delete_honours_explicit_preservation_in_both_preference_modes() {
+    fn direct_ui_delete_honours_explicit_preservation_in_both_project_option_modes() {
         for enhanced in [false, true] {
             for policy in [None, Some(false), Some(true)] {
                 let (mut h, sketch, face, _, _) = harness(enhanced);
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn projection_rows_and_folds_require_the_preference_in_browser_and_history() {
+    fn projection_rows_and_folds_require_the_project_option_in_browser_and_history() {
         for left_history in [false, true] {
             for with_pattern in [false, true] {
                 let (mut h, sketch, face, edge, _) = harness(false);
@@ -295,26 +295,26 @@ mod tests {
                 let before = serde_json::to_value(h.app.session.doc.sketch(sketch).unwrap()).unwrap();
                 // Start with the default, enable, then disable again with both folds already open.
                 for enhanced in [false, true, false, true] {
-                    assert!(h.call("ui.prefs", json!({"projection_workflow_ui":enhanced}))["ok"].as_bool().unwrap());
+                    assert!(h.call("ui.set", json!({"projectLinkTools":enhanced}))["ok"].as_bool().unwrap());
                     h.frames(6);
                     assert!(crate::scenario::handle_at("row:Receiver").is_some(), "browser sketch remains visible");
                     assert_eq!(
                         crate::scenario::handle_at("fold:Receiver").is_some(),
                         with_pattern || enhanced,
-                        "browser fold: left_history={left_history}, pattern={with_pattern}, preference={enhanced}"
+                        "browser fold: left_history={left_history}, pattern={with_pattern}, option={enhanced}"
                     );
                     if left_history {
                         assert!(crate::scenario::rect_of("history:feature:Receiver").is_some(), "history sketch remains visible");
                         assert_eq!(
                             crate::scenario::handle_at("timeline-sketch-fold:Receiver").is_some(),
                             with_pattern || enhanced,
-                            "history fold: pattern={with_pattern}, preference={enhanced}"
+                            "history fold: pattern={with_pattern}, option={enhanced}"
                         );
                     }
                     for scope in if left_history { &["browser", "timeline"][..] } else { &["browser"][..] } {
                         for link in [&face, &edge] {
                             let handle = format!("{scope}:sketch-link:{sketch}:{link}");
-                            assert_eq!(crate::scenario::handle_at(&handle).is_some(), enhanced, "{handle}, preference={enhanced}");
+                            assert_eq!(crate::scenario::handle_at(&handle).is_some(), enhanced, "{handle}, option={enhanced}");
                         }
                         if let Some(pattern) = &pattern {
                             assert!(crate::scenario::handle_at(&format!("{scope}:sketch-pattern:{sketch}:{pattern}")).is_some());
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn projection_display_preference_does_not_change_the_constraint_command_policy() {
+    fn projection_display_option_does_not_change_the_constraint_command_policy() {
         for enhanced in [false, true] {
             let (mut h, sketch, _, edge, _) = harness(enhanced);
             h.app.edit_sketch(sketch);

@@ -934,7 +934,7 @@ pub fn delete_glyph(app: &mut SolveApp) -> bool {
             _ => None,
         })
         .collect();
-    let _ = app.run("sketch.delete", json!({ "entities": entities, "preserve_projection_link": app.preferences.projection_workflow_ui }));
+    let _ = app.run("sketch.delete", json!({ "entities": entities, "preserve_projection_link": app.ui.project_link_tools }));
     true
 }
 
@@ -1142,21 +1142,21 @@ pub(crate) fn start_repair(app: &mut SolveApp, link: &str) {
     app.start("sketch.repair_link");
 }
 
-/// Translate the default-off UI choice into explicit command inputs. Shared by dialog preview,
+/// Translate Project's default-off session choice into explicit command inputs. Shared by dialog preview,
 /// deferred requests and immediate commands; an explicit caller's choice is kept.
 pub(crate) fn projection_policy(app: &SolveApp, command: &str, params: &mut Value) {
     if matches!(command, "sketch.project" | "sketch.intersect" | "sketch.include_3d") {
         if let Some(object) = params.as_object_mut() {
-            object.entry("strict_occurrence_references").or_insert(json!(app.preferences.projection_workflow_ui));
+            object.entry("strict_occurrence_references").or_insert(json!(app.ui.project_link_tools));
         }
-        if app.preferences.projection_workflow_ui && params.get("strict_occurrence_references").and_then(Value::as_bool) == Some(true) {
+        if app.ui.project_link_tools && params.get("strict_occurrence_references").and_then(Value::as_bool) == Some(true) {
             projection_paths(app, params);
         }
     }
     if matches!(command, "sketch.delete" | "selection.delete")
         && let Some(object) = params.as_object_mut()
     {
-        object.entry("preserve_projection_link").or_insert(json!(app.preferences.projection_workflow_ui));
+        object.entry("preserve_projection_link").or_insert(json!(app.ui.project_link_tools));
     }
 }
 

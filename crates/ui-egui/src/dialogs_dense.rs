@@ -528,6 +528,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
         }
         Kind::SketchProject { bodies, projection_link } => {
+            let response =
+                ui_kit::row(ui, solidcraft_ui_text::tr("ui.project_link_tools"), |ui| ui_kit::checkbox(ui, "", &mut app.ui.project_link_tools));
+            crate::scenario::publish_handle("project:link-tools", response.rect.center());
+            response.on_hover_text(solidcraft_ui_text::tr("ui.project_link_tools_note"));
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
                 ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())

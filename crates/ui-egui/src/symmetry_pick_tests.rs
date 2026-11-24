@@ -220,7 +220,7 @@ fn coincident_onto_a_model_edge_projects_the_edge_first() {
 fn another_sketchs_curve_uses_legacy_picks_or_the_enhanced_projection_workflow() {
     for enhanced in [false, true] {
         let mut h = Harness::new();
-        h.app.preferences.projection_workflow_ui = enhanced;
+        h.app.ui.project_link_tools = enhanced;
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":10})).unwrap();
         h.app.finish_sketch();
@@ -253,7 +253,7 @@ fn fix_keeps_the_generic_constraint_hint_with_projection_ui_off_or_on() {
     for enhanced in [false, true] {
         let mut h = Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        h.app.preferences.projection_workflow_ui = enhanced;
+        h.app.ui.project_link_tools = enhanced;
         h.app.start("sketch.constraint.fix");
         assert_eq!(h.app.status.as_ref().unwrap().0, h.app.tr("sketch.hint.constraint.generic"));
     }

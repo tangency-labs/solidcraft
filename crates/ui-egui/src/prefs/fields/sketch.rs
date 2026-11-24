@@ -79,8 +79,6 @@ macro_rules! sketch_preferences {
             prefer_free_sketch_points: bool = true, PAGE_SKETCH;
             /// Open Project's options before picking; off restores its previous direct-pick workflow.
             project_options_dialog: bool = true, PAGE_SKETCH;
-            /// Show projection link management and use occurrence-aware projection picking. Off preserves the existing workflow.
-            projection_workflow_ui: bool = false, PAGE_SKETCH;
             /// A click inside a region for the Entities of Transform, Move/Copy, Scale, Mirror and the
             /// sketch patterns also picks the curves of the region's holes (#8390). Off (the default):
             /// it picks the region's outline, and a shape inside it is picked by a click inside that

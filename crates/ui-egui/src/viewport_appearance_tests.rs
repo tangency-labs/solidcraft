@@ -596,7 +596,7 @@ fn projected_and_lost_point_colours_show_with_the_projection_ui_option_off_or_on
             h.app.edit_sketch(sketch);
         }
         for enhanced in [false, true, false] {
-            h.call("ui.prefs", json!({"projection_workflow_ui":enhanced}));
+            h.call("ui.set", json!({"projectLinkTools":enhanced}));
             h.settle();
             let expected = if lost { egui::Color32::from_rgb(0xef, 0x12, 0x56) } else { egui::Color32::from_rgb(0x12, 0xab, 0x34) };
             assert!(points_in(&h.shapes, expected) >= 4, "lost={lost}, enhanced={enhanced}: projected corners show their reference status");

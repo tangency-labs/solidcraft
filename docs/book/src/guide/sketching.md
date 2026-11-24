@@ -304,11 +304,12 @@ they bound no profile but stay linked and keep following their source.
 **Constraining to the model.** Projected geometry is fixed where its source puts it, so
 constrain and dimension the sketch's own geometry to it. The constraint tools and Dimension
 take a model edge or vertex directly. Turn on **Projection display and picking** in
-Preferences > Sketch to also pick another sketch's curve directly: the click projects it into
+the Project tool's options panel to also pick another sketch's curve directly: the click projects it into
 the sketch first (the status line says so) and uses the projection. This option also gives
 projected points their projection or lost colors, groups Break Link with the projection's
 actions, and lists projections under their sketch in the browser and history.
-It is off by default, preserving the previous colors, menu, picking and row layout.
+It is off by default and lasts for the current app session only. It is not a Preferences setting.
+With it off, the previous menu, picking and row layout remain. Opening a saved design does not enable it.
 A consistent constraint only between projections is kept and reported as redundant, as on
 other fixed geometry. Commands can request `if_redundant: "refuse"` to refuse it instead.
 A conflicting constraint is always refused. A dimension on projected geometry alone can

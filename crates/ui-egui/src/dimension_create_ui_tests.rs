@@ -75,7 +75,7 @@ fn dimensioning_another_sketchs_curve_requires_the_projection_ui_option() {
     for enhanced in [false, true] {
         crate::dim_view::cancel();
         let mut h = Harness::new();
-        h.app.preferences.projection_workflow_ui = enhanced;
+        h.app.ui.project_link_tools = enhanced;
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.line", json!({"points":[[-10,-10],[-10,10]],"infer":false})).unwrap();
         h.app.finish_sketch();
