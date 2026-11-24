@@ -42,6 +42,7 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
         Target::HistoryControls,
         Target::Workspace,
         Target::NamedViews,
+        Target::DisplayStates,
         Target::ViewGizmo,
         Target::InsertDesign,
         Target::VisualStyle,
@@ -53,6 +54,7 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
     for name in &bodies {
         take_items(out, &context_menu::items(app, &Target::Body { name: name.clone() }));
     }
+    app_display_states(app, out);
     for name in ["Named View1", "Front detail"] {
         take_items(out, &context_menu::items(app, &Target::NamedView { name: name.to_string() }));
     }
@@ -147,4 +149,9 @@ fn command_done_echo_follows_the_language_preference_without_a_render_scope() {
     assert_eq!(echo, &expected);
     assert!(echo.contains("完成"), "{echo}");
     assert!(!echo.ends_with("done"), "{echo}");
+}
+
+/// The menu of a display state, for one the design has.
+fn app_display_states(app: &SolveApp, out: &mut BTreeSet<String>) {
+    take_items(out, &context_menu::items(app, &Target::DisplayState { name: "Plexi".to_string() }));
 }
