@@ -3705,10 +3705,10 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
         },
         ..crate::kernel::KernelOptions::default()
     });
-    // the caller's random state carries over; the caller's `context` (marks, notify
+    // the caller's seed carries over; the caller's `context` (marks, notify
     // callbacks owned by boxed trait objects) cannot be cloned and nothing on the trim
     // path reads it
-    tk.rng = k.rng.clone();
+    tk.seed = k.seed;
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     b.edge_mut(rail)?
