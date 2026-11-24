@@ -260,8 +260,10 @@ impl<O: ClassObject> CurveClassification<O> {
     /// part beyond keeps upstream's label only when the samples agree with it. So any
     /// other class, an edge without a curve, an object the adapter does not resolve to
     /// topology (a stand-in adapter without B-reps), and a failed drop or classification
-    /// are "not on" (the split), except a defect (`InvalidInput`, `PortInvariant`) and an
-    /// unported, cancelled or uncertified call, which propagate.
+    /// are "not on" (the split), except a defect (`is_defect`, `InvalidInput`,
+    /// `PortInvariant`) and an unported, cancelled or uncertified call, which propagate.
+    /// Residual risk: a drop that fails on a part that does lie on the object splits it, as
+    /// upstream never does, and a split there can still fail a later stage.
     fn part_lies_on(
         &self,
         a: &mut impl Imprint<O>,
@@ -283,6 +285,7 @@ impl<O: ClassObject> CurveClassification<O> {
             Ok(on) => Ok(on),
             Err(e)
                 if e.is_unported_or_cancelled()
+                    || e.is_defect()
                     || matches!(
                         e,
                         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
