@@ -65,6 +65,8 @@ mod fork_cae8618_l_box_corner_patch;
 mod fork_e36feb1_boundary_row_trim_pace;
 #[path = "../heal_edge_tolerance_covers_edge_face_gap.rs"]
 mod heal_edge_tolerance_covers_edge_face_gap;
+#[path = "../intersect_faces_read_only.rs"]
+mod intersect_faces_read_only;
 #[path = "../iso_curve_continuity.rs"]
 mod iso_curve_continuity;
 #[path = "../issue_1054_tight_box_interval_knots.rs"]

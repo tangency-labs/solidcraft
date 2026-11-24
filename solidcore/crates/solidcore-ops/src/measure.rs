@@ -1662,6 +1662,28 @@ impl Body {
         Ok(Some(SquareFaceLevel { level, tolerance }))
     }
 
+    /// How far record face `face` strays across `direction`, when the kernel proves a bound
+    /// ([`solidcore::prism::measure::face_straying`]): the face lies within it of a surface swept
+    /// along `direction`, taken over the face's own size. Within the zone tolerance
+    /// ([`crate::sweep::zone_tolerance`]) the face runs straight along `direction`. `None` where
+    /// no bound is proved (see the kernel's list), or for a `direction` of no length.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or a `direction` that is not finite; the
+    /// errors of the session.
+    pub fn face_straying(
+        &self,
+        order: &Order,
+        face: usize,
+        direction: [f64; 3],
+    ) -> Result<Option<f64>> {
+        let f = order::face(order, face)?;
+        let d = point(direction)?;
+        read_body("face_straying", self, |k, b| {
+            Ok(solidcore::prism::measure::face_straying(k, b, f, d))
+        })
+    }
+
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
     /// the kernel's contract takes it (ops passes it on as given).
     ///
