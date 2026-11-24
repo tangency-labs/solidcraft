@@ -369,6 +369,166 @@ fn outer_edge_round_either_side_of_the_hole_contact_stays_valid() {
     }
 }
 
+/// A cylinder of `radius` and `height` placed on the frame of origin `origin`, local x
+/// `x_axis` (where its seam lies) and local y `y_axis`: its axis is `x_axis × y_axis`.
+fn placed_cylinder(
+    k: &mut Kernel,
+    origin: [f64; 3],
+    x_axis: [f64; 3],
+    y_axis: [f64; 3],
+    radius: f64,
+    height: f64,
+) -> Brep {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::math::Vec3;
+    let mut b = create_cylinder(k, Point3::ZERO, radius, height).unwrap();
+    let frame = Axis2Placement::new(
+        Point3::new(origin[0], origin[1], origin[2]),
+        Vec3::new(x_axis[0], x_axis[1], x_axis[2]),
+        Vec3::new(y_axis[0], y_axis[1], y_axis[2]),
+    );
+    solidcore::topology::brep::p5::transform(k, &mut b, &frame, None, false).unwrap();
+    b
+}
+
+/// The closed edge of `b` that is the circle of `radius` about the z axis at height `z`.
+fn circle_edge(k: &Kernel, b: &Brep, z: f64, radius: f64) -> EdgeId {
+    b.edges()
+        .ids()
+        .find(|&e| {
+            if !edge::is_closed(b, e).unwrap() {
+                return false;
+            }
+            let curve = edge::curve(b, e).unwrap().unwrap();
+            let p = curve
+                .evaluate_point(k, edge::interval(b, e).unwrap().evaluate(0.5))
+                .unwrap();
+            (p.z - z).abs() < 1e-9 && (p.x.hypot(p.y) - radius).abs() < 1e-9
+        })
+        .unwrap_or_else(|| panic!("no circle of radius {radius} at z {z}"))
+}
+
+/// Whether `b` has a vertex at `p`.
+fn has_vertex_at(b: &Brep, p: [f64; 3]) -> bool {
+    b.vertices().ids().any(|v| {
+        let q = b.vertex(v).unwrap().point;
+        (q.x - p[0]).abs() < 1e-6 && (q.y - p[1]).abs() < 1e-6 && (q.z - p[2]).abs() < 1e-6
+    })
+}
+
+/// `∫ 2 sqrt(h² − x²) (outer(x) − inner(x)) dx` over `|x| <= h`: the volume a round hole
+/// of radius `h` takes from a wall whose depth at `x` is `outer − inner`. With
+/// `x = h sin t` the integrand is smooth in `t`; composite Simpson on 2000 spans.
+fn hole_through_wall(h: f64, depth: impl Fn(f64) -> f64) -> f64 {
+    let n = 2000;
+    let (a, b) = (-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
+    let step = (b - a) / f64::from(n);
+    let f = |t: f64| 2.0 * h * h * t.cos() * t.cos() * depth(h * t.sin());
+    let mut sum = f(a) + f(b);
+    for i in 1..n {
+        let weight = if i % 2 == 1 { 4.0 } else { 2.0 };
+        sum += weight * f(a + step * f64::from(i));
+    }
+    sum * step / 3.0
+}
+
+/// The reporter's tube of #21748: outer radius 11, inner 8, z 0 to 30, with a cross hole
+/// of radius 3 about the line x = 0, z = 26 through its wall at y < 0. The hole's top
+/// (z = 29) is 1 mm below the top face. With `vertex_at_contact` the hole tool's seam
+/// runs along that top line, so the hole's edge on the outer cylinder has a vertex at
+/// (0, −11, 29), as the reporter's sketch line puts one there; otherwise the seam is at
+/// the hole's side (x = 3) and the top point is inside an edge.
+fn tube_with_cross_hole(k: &mut Kernel, vertex_at_contact: bool) -> Brep {
+    let outer = create_cylinder(k, Point3::ZERO, 11.0, 30.0).unwrap();
+    let bore = create_cylinder(k, Point3::new(0.0, 0.0, -1.0), 8.0, 32.0).unwrap();
+    let tube = boolean_difference(k, outer, bore).unwrap();
+    // the tool runs from y = -20 to 0 (its axis +y), its seam on local x
+    let (x_axis, y_axis) = if vertex_at_contact {
+        ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
+    } else {
+        ([1.0, 0.0, 0.0], [0.0, 0.0, -1.0])
+    };
+    let hole = placed_cylinder(k, [0.0, -20.0, 26.0], x_axis, y_axis, 3.0, 20.0);
+    boolean_difference(k, tube, hole).unwrap()
+}
+
+/// A round of 1 on the tube's outer top edge (#21748): its contact line on the outer
+/// cylinder is the circle z = 29, which touches the cross hole's edge at its top point
+/// and nowhere else; the round's material (z 29 to 30, r 10 to 11) does not overlap the
+/// hole (z at most 29). It builds one valid solid: the tube less the hole's part of the
+/// wall less the round's spandrel, `(1 − π/4)` swept round the axis at its centroid's
+/// radius `11 − (1 − 1/(6 (1 − π/4)))` (Pappus).
+#[test]
+fn closed_round_touching_a_hole_edge_at_one_point_builds() {
+    let pi = std::f64::consts::PI;
+    for vertex_at_contact in [true, false] {
+        let mut k = kernel(|f| *f = UpstreamFixes::all());
+        let mut b = tube_with_cross_hole(&mut k, vertex_at_contact);
+        assert_eq!(has_vertex_at(&b, [0.0, -11.0, 29.0]), vertex_at_contact);
+        let top = circle_edge(&k, &b, 30.0, 11.0);
+        let result = fillet_edges(&mut k, &mut b, &[top], 1.0, 1, 1, 1.0);
+        assert!(result.is_ok(), "vertex {vertex_at_contact}: {result:?}");
+        assert!(is_manifold_solid(&b).unwrap(), "vertex {vertex_at_contact}");
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "vertex {vertex_at_contact}: {lines:?}");
+
+        let wall = hole_through_wall(3.0, |x| (121.0 - x * x).sqrt() - (64.0 - x * x).sqrt());
+        let area = 1.0 - pi / 4.0;
+        let centroid = 11.0 - (1.0 - 1.0 / (6.0 * area));
+        let expected = pi * (121.0 - 64.0) * 30.0 - wall - 2.0 * pi * area * centroid;
+        let got = volume(&k, &mut b);
+        // the round takes 14.53 mm^3; its construction tolerance and the integrator's
+        // 1e-6 move the volume by far less than 0.01
+        assert!(
+            (got - expected).abs() < 0.01,
+            "vertex {vertex_at_contact}: volume {got}, expected {expected}"
+        );
+    }
+}
+
+/// The chamfer twin of #21748: a shaft of radius 12.5, z 0 to 60, with a round pocket of
+/// radius 4 about the line x = 0, z = 5, from y = 8.5 out through the shaft's side at
+/// y > 0. A chamfer of 1 on the bottom edge has its contact line z = 1 on the cylinder,
+/// which touches the pocket's edge at its lowest point. It builds: the shaft less the
+/// pocket less the chamfer's triangle (area 1/2) swept at its centroid's radius
+/// `12.5 − 1/3` (Pappus).
+#[test]
+fn closed_chamfer_touching_a_pocket_edge_at_one_point_builds() {
+    let pi = std::f64::consts::PI;
+    for vertex_at_contact in [true, false] {
+        let mut k = kernel(|f| *f = UpstreamFixes::all());
+        let shaft = create_cylinder(&mut k, Point3::ZERO, 12.5, 60.0).unwrap();
+        // the tool runs from y = 14 down to 8.5 (its axis -y), its seam on local x
+        let (x_axis, y_axis) = if vertex_at_contact {
+            ([0.0, 0.0, -1.0], [1.0, 0.0, 0.0])
+        } else {
+            ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+        };
+        let pocket = placed_cylinder(&mut k, [0.0, 14.0, 5.0], x_axis, y_axis, 4.0, 5.5);
+        let mut b = boolean_difference(&mut k, shaft, pocket).unwrap();
+        assert_eq!(has_vertex_at(&b, [0.0, 12.5, 1.0]), vertex_at_contact);
+        let bottom = circle_edge(&k, &b, 0.0, 12.5);
+        let result = fillet_edges(&mut k, &mut b, &[bottom], 1.0, 0, 1, 1.0);
+        assert!(result.is_ok(), "vertex {vertex_at_contact}: {result:?}");
+        assert!(is_manifold_solid(&b).unwrap(), "vertex {vertex_at_contact}");
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "vertex {vertex_at_contact}: {lines:?}");
+
+        let pocket = hole_through_wall(4.0, |x| (156.25 - x * x).sqrt() - 8.5);
+        let expected = pi * 156.25 * 60.0 - pocket - 2.0 * pi * 0.5 * (12.5 - 1.0 / 3.0);
+        let got = volume(&k, &mut b);
+        // the chamfer takes 38.22 mm^3
+        assert!(
+            (got - expected).abs() < 0.01,
+            "vertex {vertex_at_contact}: volume {got}, expected {expected}"
+        );
+    }
+}
+
 // ---- WR-303: the end of a round that crosses more than one face at a three-edge vertex ----
 
 // ---- WR-300: a variable round whose rail ends at a rounded corner's arc ----
