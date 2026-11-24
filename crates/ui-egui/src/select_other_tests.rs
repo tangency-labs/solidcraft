@@ -1313,13 +1313,17 @@ fn multi_body_tree_nests_bodies_front_to_back_and_toggles_collapse_and_flat() {
     let after_collapse = collapsed["visible_rows"].as_array().unwrap().len();
     assert!(after_collapse < before_count, "collapsing Near hides its children: {after_collapse} vs {before_count}");
 
-    // Switching to Flat view shows all rows without nesting.
+    // Switching to Flat view shows all rows without nesting, and persists across reopen.
     h.step(&json!({"click": {"handle": "select_other:toggle_tree"}})).unwrap();
     h.frames(2);
     assert!(super::is_open(&h.app));
     let flat = super::describe(&h.app);
     assert_eq!(flat["grouped"], false);
     assert_eq!(flat["visible_rows"].as_array().unwrap().len(), before_count);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.step(&json!({"hold": pt})).unwrap();
+    h.frames(2);
+    assert_eq!(super::describe(&h.app)["grouped"], false, "Flat choice persists for the session");
 
     // Switching back to Tree and clicking the Near body row selects Body Near.
     h.step(&json!({"click": {"handle": "select_other:toggle_tree"}})).unwrap();

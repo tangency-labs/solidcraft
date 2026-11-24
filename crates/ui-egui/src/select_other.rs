@@ -199,6 +199,8 @@ pub struct State {
     /// The current press belongs to Select Other (it opened or closed the list): the viewport
     /// doesn't also click, drag or box-select with it.
     held: bool,
+    /// User toggled Select Other to flat mode during this session (default false = grouped tree).
+    flat: bool,
     cycle: Option<Cycle>,
 }
 
@@ -671,7 +673,7 @@ fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2, held: Held) -> bool {
         hovered: None,
         hovered_occurrence: None,
         filter: None,
-        grouped: true,
+        grouped: !app.viewport.select_other.flat,
         collapsed: HashSet::new(),
         revision: app.session.revision,
         dialog: app.dialog.is_some(),
@@ -743,8 +745,9 @@ pub fn describe(app: &SolveApp) -> Value {
             let groups: Vec<Value> = display
                 .iter()
                 .filter_map(|d| match d {
-                    DisplayRow::Group { key, name, depth, count, collapsed, .. } => {
-                        Some(json!({ "key": key, "name": name, "depth": depth, "count": count, "collapsed": collapsed }))
+                    DisplayRow::Group { key, name, depth, count, collapsed, occurrence_path, .. } => {
+                        let selectable = occurrence_path.is_some() && !p.dialog;
+                        Some(json!({ "key": key, "name": name, "depth": depth, "count": count, "collapsed": collapsed, "selectable": selectable }))
                     }
                     DisplayRow::Item { label, depth, toggle: Some((key, collapsed, count)), .. } => {
                         Some(json!({ "key": key, "name": label, "depth": depth, "count": count, "collapsed": collapsed, "selectable": true }))
@@ -815,6 +818,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         return Ok(describe(app));
     }
     if let Some(grouped) = p.get("grouped").and_then(Value::as_bool) {
+        app.viewport.select_other.flat = !grouped;
         let Some(pop) = app.viewport.select_other.popup.as_mut() else { return Err("Select Other is not open".into()) };
         pop.grouped = grouped;
         return Ok(describe(app));
@@ -829,6 +833,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     if let Some(i) = p.get("hover").and_then(Value::as_u64) {
         let Some(pop) = app.viewport.select_other.popup.as_mut() else { return Err("Select Other is not open".into()) };
         pop.hovered = Some(i as usize).filter(|i| *i < pop.rows.len());
+        pop.hovered_occurrence = None;
         hover_override(app);
         return Ok(describe(app));
     }
@@ -1493,6 +1498,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
         });
     crate::scenario::publish_rect("select_other", resp.response.rect);
+    let mut new_flat = None;
     if let Some(pop) = app.viewport.select_other.popup.as_mut() {
         let mut changed = false;
         if pop.hovered != hovered {
@@ -1511,6 +1517,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
         if toggle_grouped {
             pop.grouped = !pop.grouped;
+            new_flat = Some(!pop.grouped);
             changed = true;
         }
         if let Some(key) = toggled_group {
@@ -1522,6 +1529,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         if changed {
             ctx.request_repaint();
         }
+    }
+    if let Some(flat) = new_flat {
+        app.viewport.select_other.flat = flat;
     }
     let (pressed, pointer, mods) = ctx.input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos(), i.modifiers));
     if let Some(i) = picked {
