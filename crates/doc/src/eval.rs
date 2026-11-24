@@ -9394,9 +9394,20 @@ fn feature_tools_with_constructor(
             // The curved (or slanted) To face the tool is cut back to, with a taper or without
             // (#15820): see the straight path below. Not when the extrude runs From a slanted
             // face To a flat one, which ends on the To face's plane.
+            // A taper that grows the profile reaches a wall that runs along the extrusion, which
+            // the profile itself does not cross: the wall lies within the growth of the profile
+            // and trims the tool to the body (#10711). A taper that narrows the profile reaches
+            // less of the wall, so it changes nothing.
+            let growth = match &extent.taper {
+                Some(tp) => {
+                    let taper = val(vals, tp, Kind::Angle)?;
+                    if taper > 0.0 { d.abs() * taper.tan() } else { 0.0 }
+                }
+                None => 0.0,
+            };
             let curved = curved_face(&tst, to_end_face, Some(n))
                 .filter(|_| toward_to && from_to.is_none())
-                .filter(|_| !to_end_face.is_some_and(|face| runs_along(&tst, face, n) && !meets_footprint(&tst, face, &ss.plane, &regions)));
+                .filter(|_| !to_end_face.is_some_and(|face| runs_along(&tst, face, n) && !meets_footprint(&tst, face, &ss.plane, &regions, growth)));
             let to_offset = match (&extent.to, &extent.to_offset) {
                 (Some(_), Some(e)) => val(vals, e, Kind::Length)?,
                 _ => 0.0,
@@ -13301,8 +13312,9 @@ fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
 /// Whether a face that runs along the normal of `plane` ([`runs_along`]), seen along that
 /// normal, meets one of the profile `regions`. Seen so, the face is the curve its boundary edges
 /// make: their exact curves, sampled finely, meet a region where a sample lies in it or a step
-/// between two samples crosses one of its loops (a profile narrower than the steps).
-fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
+/// between two samples crosses one of its loops (a profile narrower than the steps). `growth` is
+/// how far a taper grows the profile: the face meets it when it lies that close to it (#10711).
+fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2], growth: f64) -> bool {
     let Some(b) = st.bodies.get(bi) else { return false };
     let tol = (b.body.size() * 1e-4).max(1e-4);
     let Ok(edges) = b.body.edges(tol) else { return true };
@@ -13312,7 +13324,41 @@ fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, reg
         return true;
     }
     let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
-    curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b))))
+    if curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b)))) {
+        return true;
+    }
+    // A taper that grows the profile reaches a wall the profile itself does not cross: the wall
+    // is met when it lies within the growth of the profile (#10711).
+    growth > 0.0 && curves.iter().flatten().any(|q| distance_to_regions(*q, regions) <= growth)
+}
+
+/// How far `q` lies from the outline of the regions `regions`: 0 inside one of them.
+fn distance_to_regions(q: Vec2, regions: &[Region2]) -> f64 {
+    if regions.iter().any(|r| r.contains(q)) {
+        return 0.0;
+    }
+    let mut best = f64::INFINITY;
+    for r in regions {
+        for l in std::iter::once(&r.outer).chain(&r.holes) {
+            for (a, b) in l.polyline(1e-3).edges() {
+                best = best.min(distance_point_segment(q, *a, *b));
+            }
+        }
+    }
+    best
+}
+
+/// How far `p` lies from the segment `a`-`b`.
+fn distance_point_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let (ux, uy) = (b.x - a.x, b.y - a.y);
+    let len2 = ux * ux + uy * uy;
+    let t = if len2 <= 0.0 {
+        0.0
+    } else {
+        (((p.x - a.x) * ux + (p.y - a.y) * uy) / len2).clamp(0.0, 1.0)
+    };
+    let (dx, dy) = (p.x - (a.x + t * ux), p.y - (a.y + t * uy));
+    (dx * dx + dy * dy).sqrt()
 }
 
 /// Whether segments `p`-`q` and `a`-`b` cross or touch.
