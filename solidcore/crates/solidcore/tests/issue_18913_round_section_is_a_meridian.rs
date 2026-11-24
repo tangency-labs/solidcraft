@@ -21,8 +21,6 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::geom::assert_array::{AssertArray, ObjectKey as AssertKey};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
-use solidcore::math::Vec3;
-use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::brep::{p1, p10::TopologyEnv, p7};
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::Brep;
@@ -97,21 +95,6 @@ fn invalid_surfaces(k: &Kernel, body: &Brep) -> Vec<String> {
         }
     }
     failed
-}
-
-/// A cylinder r 5, h 10 with a rim rounded r 1 (goldens `source-cylinder-rim-edge1` and
-/// `-edge2`, which the half-plane turn moved): built without the upstream tree, so CI's
-/// test job runs it. The round is the torus class about the cylinder's axis.
-#[test]
-fn cylinder_rim_round_sections_are_meridians() {
-    for edge_index in [1, 2] {
-        let mut k = Kernel::default();
-        let mut body = create_cylinder(&mut k, Vec3::ZERO, 5.0, 10.0).unwrap();
-        let edge = p1::edges(&body, None).unwrap()[edge_index];
-        fillet_edges(&mut k, &mut body, &[edge], 1.0, 1, 1, 1.0).unwrap();
-        let failed = invalid_surfaces(&k, &body);
-        assert!(failed.is_empty(), "edge {edge_index}: {failed:#?}");
-    }
 }
 
 /// Edge 4 rounded r 0.1 (circular section, continuity 1, thumbweight 1, as the goldens

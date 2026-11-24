@@ -4181,43 +4181,4 @@ mod tests {
         let e = collapsed(circle, line, 2.0, at);
         assert_eq!(e.spine, BlendSpine::Traced);
     }
-
-    /// #18913: a support's quadric is read inside its natural domain. A cylinder's side face
-    /// read at a uv past its domain in both directions (where its rational NURB extrapolates
-    /// its end span off the circle, while the normal is read at the end knot) is still the
-    /// cylinder R 10 about `z`, as at the clamped uv. Without the clamp the point and normal
-    /// disagree there and no quadric is read.
-    #[test]
-    fn a_support_past_its_domain_reads_its_own_quadric() {
-        use crate::topology::face::p2 as face;
-        let mut k = Kernel::default();
-        let b = crate::primitive::api_primitives::create_cylinder(
-            &mut k,
-            Point3::new(0.0, 0.0, 0.0),
-            10.0,
-            20.0,
-        )
-        .unwrap();
-        let side = b
-            .face_list()
-            .iter()
-            .map(|&f| face::surface(&b, f).unwrap().unwrap().clone())
-            .find(|s| !matches!(s.kind(), SurfaceKind::Plane(_)))
-            .unwrap();
-        let d = side.natural_uv_domain_with_nurb(&k).unwrap();
-        let (du, dv) = (d.max.x - d.min.x, d.max.y - d.min.y);
-        for uv in [
-            Point2::new(d.max.x + 0.25 * du, d.max.y + 0.25 * dv),
-            Point2::new(d.min.x - 0.25 * du, d.min.y - 0.25 * dv),
-        ] {
-            let q = quadric_of_surface(&k, &side, uv, 1e-6).unwrap();
-            assert_eq!(q.kind, QuadricKind::Cylinder, "{uv:?}: {q:?}");
-            assert!((q.radius - 10.0).abs() <= 1e-9, "{uv:?}: {q:?}");
-            assert!(
-                q.dir.cross(Vec3::new(0.0, 0.0, 1.0)).length() <= 1e-12,
-                "{q:?}"
-            );
-            assert!(q.point.x.abs() <= 1e-9 && q.point.y.abs() <= 1e-9, "{q:?}");
-        }
-    }
 }

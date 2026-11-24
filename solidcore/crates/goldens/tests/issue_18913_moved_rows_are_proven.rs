@@ -658,7 +658,7 @@ fn filleted_boxes(v: &Value, out: &mut Vec<([f64; 3], [f64; 3], f64)>) {
                     out.push(([0.0; 3], [s[0], s[1], s[2]], r));
                 }
             } else if let (Some(l), Some(r)) = (m.get("length"), fillet) {
-                let o = m.get("origin").map_or(vec![0.0; 3], nums);
+                let o = m.get("origin").map_or_else(|| vec![0.0; 3], nums);
                 out.push((
                     [o[0], o[1], o[2]],
                     [num(l), num(&m["width"]), num(&m["height"])],
@@ -701,9 +701,9 @@ fn rounded_box(tag: &str, (origin, size, r): ([f64; 3], [f64; 3], f64), bad: &mu
             // an edge round carried as a cone of semi-angle exactly 0 is a cylinder
             Some(AnalyticSupport::Cone {
                 base_radius,
-                semi_angle_deg,
+                semi_angle_deg: 0.0,
                 ..
-            }) if semi_angle_deg == 0.0 => radii.push(("cylinder", base_radius)),
+            }) => radii.push(("cylinder", base_radius)),
             Some(AnalyticSupport::Sphere { radius, .. }) => radii.push(("corner", radius)),
             None => radii.push(("corner", r)),
             Some(other) => bad.push(format!("{tag}: a face {other:?}")),

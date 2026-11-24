@@ -216,6 +216,31 @@ fn issue_18913_one_half_chamfers_at_other_offsets() {
     }
 }
 
+/// #18913: the other rim half chamfered by the equal offsets 0.6926... the setbacks 1 and 1 give it
+/// (the goldens' `issue-880-half-arc-rim-1-setbacks-1-1`, refused with 1001 before) builds a closed
+/// solid (4 faces to 7) that the check passes. Its trace runs on past a seam vertex onto the wall's
+/// extension, past the wall's B-spline domain; there the support's point extrapolates the end span
+/// while its normal reads the end knot, so no quadric was read there and the chamfer was refused
+/// with 1001 (`QuadricReadbackMismatch`, normal dot 0.94). The support's quadric is read inside the
+/// natural domain, where the wall is the cylinder it is.
+#[test]
+fn issue_18913_other_half_chamfers_at_equal_setbacks() {
+    let d = 0.692_649_959_179_774;
+    let mut k = Kernel::default();
+    let mut b = cut_cylinder(&mut k);
+    let before = p1::faces(&b, None).unwrap().len();
+    let e = rims(&k, &b)[1];
+    let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+    let built = chamfer(&mut k, &mut b, &[(e, u)], (d, d));
+    assert!(built.is_ok(), "{built:?}");
+    let outcome = finish(&mut k, &mut b, before);
+    assert_eq!(outcome, (4, 7, true));
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+}
+
 /// The volume of `b`, by the mass integrator.
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     use solidcore::geom::attribute::{AttributeStore, ObjectKey};
