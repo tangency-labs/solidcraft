@@ -1238,7 +1238,7 @@ impl Marks {
                     let width = ((width_mm * at.scale) as f32).max(hair);
                     let points: Vec<Pos2> = points.iter().map(|p| at.screen(*p)).collect();
                     let stroke = Stroke::new(width, ink);
-                    painter.add(if *closed { egui::Shape::closed_line(points, stroke) } else { egui::Shape::line(points, stroke) });
+                    painter.add(if *closed { closed_line(points, stroke) } else { egui::Shape::line(points, stroke) });
                 }
                 Mark::Fill { triangles, outlines, bounds } => {
                     if !bounds.meets(&visible) {
@@ -1253,7 +1253,7 @@ impl Marks {
                     }
                     for outline in outlines {
                         let points: Vec<Pos2> = outline.iter().map(|p| at.screen(*p)).collect();
-                        painter.add(egui::Shape::closed_line(points, Stroke::new(hair * 0.5, ink)));
+                        painter.add(closed_line(points, Stroke::new(hair * 0.5, ink)));
                     }
                 }
                 Mark::Picture { source, rect, opacity, clip, within } => {
@@ -1297,6 +1297,44 @@ impl Marks {
             }
         }
         flush(painter, &mut mesh);
+    }
+}
+
+/// The paper's miter limit ([`solidcraft_engine::geom::paper`]): a join whose miter is longer than
+/// this many line widths is bevelled.
+const MITER_LIMIT: f32 = 4.0;
+
+/// A closed line through `points`, joined as the paper joins it. egui joins a closed line's
+/// corners by miter with no limit, so a corner where the line turns back on itself (an edge loop
+/// seen almost edge-on, a thin sliver of a face) draws a spike far off the line, out of all
+/// proportion to its width. A loop with a join past the miter limit is drawn instead as an open
+/// line from the middle of its first side round to it again, whose sharp joins egui bevels; the
+/// two ends meet square in the middle of a straight side. Any other loop is drawn as before.
+fn closed_line(mut points: Vec<Pos2>, stroke: Stroke) -> egui::Shape {
+    // A point repeated on screen has no direction to join by.
+    points.dedup();
+    while points.len() > 2 && points.first() == points.last() {
+        points.pop();
+    }
+    let n = points.len();
+    let normal = |a: Pos2, b: Pos2| (b - a).normalized().rot90();
+    let past_limit = (0..n).any(|i| {
+        let (before, at, after) = (points[(i + n - 1) % n], points[i], points[(i + 1) % n]);
+        let join = (normal(before, at) + normal(at, after)) * 0.5;
+        // egui puts a miter's corner 1 / |join| half widths from the point.
+        join.length_sq() * MITER_LIMIT * MITER_LIMIT < 1.0
+    });
+    match points.as_slice() {
+        [first, second, ..] if n > 1 && past_limit => {
+            let middle = first.lerp(*second, 0.5);
+            let mut open = Vec::with_capacity(n + 2);
+            open.push(middle);
+            open.extend_from_slice(&points[1..]);
+            open.push(*first);
+            open.push(middle);
+            egui::Shape::line(open, stroke)
+        }
+        _ => egui::Shape::closed_line(points, stroke),
     }
 }
 
