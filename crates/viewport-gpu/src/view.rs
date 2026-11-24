@@ -8446,13 +8446,10 @@ mod glass_tests {
         }
     }
 
-    /// Desktop OpenGL draws the scene at the saved anti-aliasing count, and the startup check
-    /// decides on it as on every other backend: it passes where the OpenGL device draws the
-    /// multisampled view and falls back to 1x on a blank resolve. Mesa's llvmpipe OpenGL (CI's
-    /// software adapter) draws 4x. Skipped where no OpenGL adapter qualifies; on Linux with
-    /// `VIEWPORT_TEST_REQUIRE_GPU=1`, as in CI, a missing one fails.
-    #[test]
-    fn opengl_startup_msaa_check_decides_from_what_it_draws() {
+    /// An OpenGL adapter under the tests' policy, with the window's device as egui-wgpu asks for it
+    /// (WebGL2 limits, textures up to 8192). `None` where no OpenGL adapter qualifies; on Linux with
+    /// `VIEWPORT_TEST_REQUIRE_GPU=1`, as in CI (Mesa's llvmpipe), a missing one fails.
+    fn opengl_window_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
         let mut descriptor = crate::instance_descriptor_from_env();
         descriptor.backends = wgpu::Backends::GL;
         // As in `opengl_draws_grid_lines_in_every_direction_and_at_a_point` (#15410).
@@ -8465,33 +8462,77 @@ mod glass_tests {
             let why = format!("no OpenGL adapter qualifies under {}", policy.name());
             assert!(!(cfg!(target_os = "linux") && crate::test_env::required()), "{why}");
             eprintln!("skipped: {why}");
-            return;
+            return None;
         };
         assert_eq!(adapter.get_info().backend, wgpu::Backend::Gl);
-        // The window's OpenGL device, as egui-wgpu asks for it.
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_limits:
                 wgpu::Limits { max_texture_dimension_2d: 8192, ..wgpu::Limits::downlevel_webgl2_defaults() }.using_resolution(adapter.limits()),
             ..Default::default()
         }))
         .expect("the OpenGL adapter opens a device");
+        Some((adapter, device, queue))
+    }
+
+    /// The window formats `adapter` multisamples 4x together with `depth`, as viewport targets.
+    fn opengl_4x_windows(adapter: &wgpu::Adapter, depth: wgpu::TextureFormat) -> Vec<GpuTarget> {
+        [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb]
+            .into_iter()
+            .filter(|format| [*format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(4)))
+            .map(|format| GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false })
+            .collect()
+    }
+
+    /// Desktop OpenGL draws the scene at the saved anti-aliasing count, and the startup check
+    /// keeps it where the OpenGL device draws the multisampled view: Mesa's llvmpipe OpenGL (CI's
+    /// software adapter) draws 4x in every window format.
+    #[test]
+    fn opengl_startup_msaa_check_decides_from_what_it_draws() {
+        let Some((adapter, device, queue)) = opengl_window_device() else { return };
         let depth = crate::depth_format(&device, true);
-        let mut checked = 0;
-        for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb] {
-            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
-            if ![format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(4)) {
-                continue;
-            }
-            let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..window }, window, None);
-            assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed, "{} {format:?} draws 4x", adapter.get_info().name);
-            assert_eq!(renderer.target().samples, 4);
-            assert_eq!(renderer.check_msaa_with(&device, &queue, 4).unwrap(), super::MsaaCheck::Fallback, "a blank 4x resolve falls back");
-            assert_eq!(renderer.target().samples, 1);
-            assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed);
-            checked += 1;
+        let windows = opengl_4x_windows(&adapter, depth);
+        for window in &windows {
+            let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            assert_eq!(
+                renderer.check_msaa(&device, &queue).unwrap(),
+                super::MsaaCheck::Passed,
+                "{} {:?} draws 4x",
+                adapter.get_info().name,
+                window.format
+            );
+            assert_eq!(renderer.target().samples, 4, "4x kept where it draws");
         }
-        eprintln!("OpenGL anti-aliasing check: {:?}, {checked} formats at 4x", adapter.get_info());
-        assert!(checked > 0 || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
+        eprintln!("OpenGL anti-aliasing check: {:?}, {} formats at 4x", adapter.get_info(), windows.len());
+        assert!(!windows.is_empty() || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
+    }
+
+    /// The black frames OpenGL multisampling once gave (#5605): a driver whose 4x resolve comes out
+    /// black. The check's test seam (`check_msaa_with`'s blank count) clears the multisampled
+    /// resolve to black after the scene is drawn, as such a driver leaves it, on a real OpenGL
+    /// device. The check must see the blank picture and replace the renderer with a 1x one that
+    /// draws; the app then runs at 1x for the session (`build_wgpu`'s `MsaaCheck::Fallback`).
+    #[test]
+    fn opengl_a_black_multisampled_resolve_falls_back_to_1x() {
+        let Some((adapter, device, queue)) = opengl_window_device() else { return };
+        let depth = crate::depth_format(&device, true);
+        let windows = opengl_4x_windows(&adapter, depth);
+        for window in &windows {
+            let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            assert_eq!(
+                renderer.check_msaa_with(&device, &queue, 4).unwrap(),
+                super::MsaaCheck::Fallback,
+                "{:?}: a black 4x resolve is caught",
+                window.format
+            );
+            assert_eq!(renderer.target().samples, 1, "{:?}: the session draws 1x", window.format);
+            // The 1x replacement really draws.
+            assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed, "{:?}: 1x draws", window.format);
+            assert_eq!(renderer.target().samples, 1);
+            // Black at 1x too: nothing proves another count, so the check changes nothing.
+            let mut both = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            assert_eq!(both.check_msaa_with(&device, &queue, 1).unwrap(), super::MsaaCheck::FailedAtOne);
+        }
+        assert!(!windows.is_empty() || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
     }
 
     /// Two see-through squares, one at z = 5 (near) and one at z = -5, in `near` and `far`
