@@ -651,10 +651,13 @@ mod tests {
 
         // Back on the panel, with Escape, or a folder: nothing is inserted or opened.
         press_and_move(&mut h, at, panel);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::NotAllowed, "the document browser takes no drop");
         h.frame_with(vec![button(panel, false)]);
         until_idle(&mut h);
+        assert_ne!(h.output.cursor_icon, egui::CursorIcon::NotAllowed, "the drag is over");
         press_and_move(&mut h, at, view);
         h.step(&json!({"key":"Escape"})).unwrap();
+        assert_ne!(h.output.cursor_icon, egui::CursorIcon::NotAllowed, "Escape ended the drag");
         h.frame_with(vec![button(view, false)]);
         until_idle(&mut h);
         press_and_move(&mut h, folder_at, view);
@@ -666,6 +669,15 @@ mod tests {
 
         press_and_move(&mut h, at, view);
         assert!(crate::scenario::rect_of("library:drag_label").is_some(), "the dragged design's name follows the pointer");
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Copy, "the model view takes the drop");
+        // Over the application bar and back: it is the place under the pointer that counts.
+        let bar = egui::pos2(view.x, 4.0);
+        for (to, cursor) in [(bar, egui::CursorIcon::NotAllowed), (view, egui::CursorIcon::Copy)] {
+            for _ in 0..2 {
+                h.frame_with(vec![egui::Event::PointerMoved(to)]);
+            }
+            assert_eq!(h.output.cursor_icon, cursor);
+        }
         h.frame_with(vec![button(view, false)]);
         until_idle(&mut h);
         assert_eq!(h.app.session.doc.links.len(), 1, "the dropped design is a linked component");

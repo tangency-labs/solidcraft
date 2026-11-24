@@ -185,6 +185,8 @@ pub struct LibraryState {
     action_dialog: Option<actions::Dialog>,
     /// A design dropped on the model view, inserted in the next frame.
     dropped: Option<Entry>,
+    /// A design dragged this frame is over a place where it can be dropped.
+    drop_ready: bool,
     folders_expanded: bool,
     folder_menu: Option<(PathBuf, egui::Response, egui::Pos2)>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -780,6 +782,7 @@ pub(crate) fn drop_on_view(app: &mut SolveApp, view: &egui::Response) -> bool {
     }
     let pointer = view.ctx.input(|i| i.pointer.latest_pos());
     if view.contains_pointer() && pointer.is_some_and(|p| !crate::shell::covered(app, p)) {
+        app.library.drop_ready = true;
         view.ctx.set_cursor_icon(egui::CursorIcon::Copy);
         if let Some(entry) = view.dnd_release_payload::<Entry>() {
             app.library.dropped = Some(entry.as_ref().clone());
@@ -787,6 +790,15 @@ pub(crate) fn drop_on_view(app: &mut SolveApp, view: &egui::Response) -> bool {
         }
     }
     true
+}
+
+/// The pointer says that a dragged design can't be dropped where it is. Called last in the frame:
+/// what is drawn after the model view may have set a cursor of its own.
+pub(crate) fn drag_cursor(app: &mut SolveApp, ctx: &egui::Context) {
+    let ready = std::mem::take(&mut app.library.drop_ready);
+    if !ready && egui::DragAndDrop::has_payload_of_type::<Entry>(ctx) {
+        ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+    }
 }
 
 /// The name of the design being dragged, beside the pointer.
@@ -1109,6 +1121,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Home owns the full File view. Keep focus tracking, but defer folder work until Design returns.
     if app.home.open {
         actions::dialog(app, ui.ctx());
+        drag_cursor(app, ui.ctx());
         return;
     }
     app.library.poll(ui.ctx(), app.preferences.show_document_browser);
