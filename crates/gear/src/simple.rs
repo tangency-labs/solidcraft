@@ -457,8 +457,8 @@ fn smooth(x: f64, a: f64, b: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Hypoid offsets: full score up to this fraction of the ring gear's pitch diameter (ISO 23509 /
-/// MITcalc's limit, 25 % of de2), none from [`HYPOID_OFFSET_NONE`] (where a line drawn through
+/// Hypoid offsets: full score up to this fraction of the ring gear's pitch diameter (25 % of
+/// de2, the usual limit in published hypoid design guidance), none from [`HYPOID_OFFSET_NONE`] (where a line drawn through
 /// the ring gear's circle leaves it).
 pub const HYPOID_OFFSET_FULL: f64 = 0.25;
 pub const HYPOID_OFFSET_NONE: f64 = 0.5;
@@ -1799,7 +1799,7 @@ fn hypoid(c: &mut Ctx) -> Result<(), String> {
     c.spec.shaft_angle = sigma;
     c.spec.offset = s.offset.unwrap_or(c.spec.offset).abs();
     // Teeth: kept when they give the ratio; otherwise a hunting pair, the pinion about 42 / ratio
-    // (MITcalc's recommended counts: 14:42 at 3, 11:41 at 3.7).
+    // (about 56 teeth in all at common ratios: 14:42 at 3, 11:41 at 3.7).
     let keep = c.same && (f64::from(c.spec.teeth2) / f64::from(c.spec.teeth) / ratio - 1.0).abs() < 1e-9 && s.teeth.is_none_or(|z| z == c.spec.teeth);
     if !keep {
         let want = (42.0 / ratio).round().clamp(6.0, 30.0) as u32;

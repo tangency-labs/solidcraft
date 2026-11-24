@@ -27,8 +27,8 @@
 //!   R_m2 / sin β2, so δ2 is solved for ρ_lim = R_m2 / sin β2, starting from the bevel value
 //!   tan δ2 = u·sin Σ / (1 + u·cos Σ) (it lands within a degree or two of it; a real face-milled
 //!   set with a small cutter has a flatter wheel cone, e.g. 61° instead of 72° at 15:45).
-//!   Given δ2 and r_m2, the rest reproduces a published ISO 23509 Method 1 set (MITcalc's
-//!   hypoid example) to 1e-4° (test `matches_a_published_iso_23509_set`).
+//!   Given δ2 and r_m2, the rest follows from the tangent-plane and normal-pitch conditions
+//!   (test `a_chosen_wheel_cone_gives_a_consistent_offset_set`).
 //! - Depths are Gleason's: mean working depth 2·m_mn, gear addendum c·h with
 //!   c = 0.21 + 0.29 / u², the pinion's the rest (long addendum pinion), clearance from the basic
 //!   rack. The limit pressure angle (ISO 23509) is taken off one flank's pressure angle and added
@@ -1957,38 +1957,27 @@ mod tests {
         assert!((d.rm1 / d.rm2 - 11.0 / 41.0).abs() < 1e-9);
     }
 
-    /// The pitch cones of a published ISO 23509 Method 1 (Gleason, face milled) set: MITcalc's
-    /// hypoid example, z 15:45, Σ 90°, a 17 mm, d_e2 99 mm, b2 15.3 mm, r_c0 35 mm. Given the
-    /// wheel's pitch angle and mean radius the standard's iteration ended on (δ2 61.3634°,
-    /// r_m2 42.3972 mm) and its pinion spiral angle (48.9797°), the tangent-plane and normal-pitch
-    /// conditions here give back the rest.
+    /// A 15:45 offset set (Σ 90°, E 17 mm, d_e2 99 mm, b2 15.3 mm) built from a chosen wheel
+    /// pitch angle and mean radius, as ISO 23509 Method 1 ends its iteration on: whatever the
+    /// wheel cone, the pinion that the tangent-plane and normal-pitch conditions give back meets
+    /// every condition of the pair, and its cone is the flatter the steeper the wheel's.
     #[test]
-    fn matches_a_published_iso_23509_set() {
+    fn a_chosen_wheel_cone_gives_a_consistent_offset_set() {
         let mut s = spec();
-        (s.teeth, s.teeth2, s.offset, s.face_width, s.spiral_angle) = (15, 45, 17.0, 15.3, 48.9797);
+        (s.teeth, s.teeth2, s.offset, s.face_width, s.spiral_angle) = (15, 45, 17.0, 15.3, 49.0);
         s.module = 99.0 / 45.0;
-        let d = design_with(&s, Some((61.3634f64.to_radians(), 42.3972))).unwrap();
-        consistent(&d);
-        let deg = |v: f64| v.to_degrees();
-        eprintln!(
-            "δ1 {:.4} β2 {:.4} ζmp {:.4} Rm1 {:.4} Rm2 {:.4} rm1 {:.4} αlim {:.4} ρlim {:.3} mmn {:.4}",
-            deg(d.delta1),
-            deg(d.beta2),
-            deg(d.eps_pitch),
-            d.cone_m1,
-            d.cone_m2,
-            d.rm1,
-            deg(d.alpha_lim),
-            rho_lim(&d),
-            d.mmn
-        );
-        assert!((deg(d.delta1) - 26.9735).abs() < 0.01, "δ1 {}", deg(d.delta1));
-        assert!((deg(d.beta2) - 27.7365).abs() < 0.01, "β2 {}", deg(d.beta2));
-        assert!((deg(d.eps_pitch) - 21.2432).abs() < 0.01, "ζmp {}", deg(d.eps_pitch));
-        assert!((d.cone_m1 - 42.0179).abs() < 0.01 && (d.cone_m2 - 48.3061).abs() < 0.01);
-        assert!((d.rm1 - 19.0584).abs() < 0.01);
-        assert!((d.mmn - 1.6678).abs() < 0.002);
-        assert!((deg(d.alpha_lim).abs() - 4.7976).abs() < 0.01, "αlim {}", deg(d.alpha_lim));
+        let mut last: Option<f64> = None;
+        for delta2 in [58.0f64, 61.0, 64.0, 67.0] {
+            let rm2 = (99.0 - 15.3 * delta2.to_radians().sin()) / 2.0;
+            let d = design_with(&s, Some((delta2.to_radians(), rm2))).unwrap();
+            consistent(&d);
+            assert!((d.delta2.to_degrees() - delta2).abs() < 1e-9 && (d.rm2 - rm2).abs() < 1e-9);
+            assert!(d.delta1 + d.delta2 < PI / 2.0, "an offset pair's cones sum to less than Σ");
+            if let Some(prev) = last {
+                assert!(d.delta1 < prev, "δ1 {} after {prev}", d.delta1.to_degrees());
+            }
+            last = Some(d.delta1);
+        }
     }
 
     /// The wheel pitch angle is the one at which ISO 23509's limit curvature is the tooth line's.

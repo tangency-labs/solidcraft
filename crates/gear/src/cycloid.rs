@@ -64,7 +64,8 @@ pub fn cycloidal_outline(c: &Cycloidal, phase: f64) -> (Outline, ToothFlank) {
     let half_pitch = (PI * c.module / 2.0 - c.backlash) / (2.0 * r);
     let (ra_full, rf) = (r + c.addendum * c.module, r - c.dedendum * c.module);
     let a_add = c.rolling_radius_addendum.max(1e-6);
-    let a_ded = c.rolling_radius_dedendum.clamp(1e-6, r * 0.999);
+    // Not clamp: at a tiny module r * 0.999 is below 1e-6 (and clamp panics when min > max).
+    let a_ded = c.rolling_radius_dedendum.min(r * 0.999).max(1e-6);
     // Highest radius the epicycloid reaches: r + 2a.
     let mut ra = ra_full.min(r + 2.0 * a_add * 0.999);
     let half = |rr: f64| -> f64 {

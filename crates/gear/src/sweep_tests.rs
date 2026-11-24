@@ -749,6 +749,7 @@ fn sweep_cycloidal_kinds() {
 
 /// `plan` stays interactive for big gears: under 50 ms for 400 teeth of any kind.
 #[test]
+#[ignore = "timing: run alone with --ignored (other tests running alongside slow it)"]
 fn big_gears_plan_quickly() {
     for kind in Kind::ALL.iter().copied() {
         let mut s = Spec::defaults_for(kind);
@@ -798,6 +799,7 @@ fn big_gears_plan_quickly() {
 
 /// The slowest shapes the sweeps found (a bevel wheel near a crown gear, a fine herringbone).
 #[test]
+#[ignore = "timing: run alone with --ignored (other tests running alongside slow it)"]
 fn awkward_gears_plan_quickly() {
     let mut bevel = Spec::defaults_for(Kind::Bevel);
     (bevel.teeth, bevel.teeth2) = (15, 100);

@@ -1,6 +1,6 @@
 [package]
 name = "solidcraft-gear"
-description = "Gear geometry: involute (spur, helical, internal, rack), cycloidal, bevel, worm, crossed and skew gears, their mesh and checks; pure math, no dependencies"
+description = "Gear geometry: involute (spur, helical, internal, rack), cycloidal, bevel, hypoid, worm, crossed and skew gears, their mesh, checks and the planning of a whole set; pure math (only the profiler's spans)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

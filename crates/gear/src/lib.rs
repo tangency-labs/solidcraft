@@ -99,6 +99,8 @@ mod diff_tests;
 #[cfg(test)]
 mod fused_tests;
 #[cfg(test)]
+mod hostile_tests;
+#[cfg(test)]
 mod sweep_tests;
 #[cfg(test)]
 mod test_util;

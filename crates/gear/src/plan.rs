@@ -2741,6 +2741,19 @@ fn worm(s: &Spec, p: &mut Plan) {
     p.fact("wheel face width", face, Unit::Mm);
     let length =
         if s.worm_length > 0.0 { s.worm_length } else { (2.0 * (outside.powi(2) - (r2 - m).powi(2)).max(0.0).sqrt() + lead).max(4.0 * PI * m) };
+    // Planning time grows with the turns of the thread: a worm far longer than any wheel engages
+    // is refused rather than built for minutes.
+    const MOST_WORM_TURNS: f64 = 1000.0;
+    if length / lead > MOST_WORM_TURNS {
+        p.refuse(format!(
+            "worm: a {} mm worm is {} turns of its thread, over the {} that can be built: use a worm length of at most {} mm",
+            num(length),
+            num((length / lead).round()),
+            num(MOST_WORM_TURNS),
+            num((MOST_WORM_TURNS * lead).floor())
+        ));
+        return;
+    }
     p.fact("worm length", length, Unit::Mm);
     // The thread in axial section: straight sides at the axial pressure angle (a ZA worm). The
     // worm's thread is thinner by half the backlash, the hob's (the wheel's spaces) wider.
