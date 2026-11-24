@@ -453,7 +453,10 @@ Whatever you typed before signing in is sent once the agent is ready.
 The agent reaches the open design only through SolidCraft's own tools (the
 [MCP server](mcp.md)), which SolidCraft hands it when the chat starts. That server is named
 `solidcraft-app`, so an MCP server you set up yourself under the name `solidcraft` (as in
-[client configuration](mcp.md#client-configuration)) doesn't take its place:
+[client configuration](mcp.md#client-configuration)) doesn't take its place. Claude Code gets no
+other MCP server in the chat: not the connectors of your claude.ai account (Google Drive and
+the like), nor the servers in your own Claude Code configuration. Other coding agents may still
+load servers you configured for them:
 
 - **Read the design:** list commands, inspect features, sketches and parameters, measure,
   take pictures of the view.
@@ -473,7 +476,7 @@ The agent reaches the open design only through SolidCraft's own tools (the
   while you do; click it to open the viewer (the message's pictures one at a time, with **‹** and
   **›** or the arrow keys, closed with Esc or a click outside). A long message scrolls inside its
   box, so **Send** and the buttons beside it stay in view.
-- **Attach selection:** tick it to send what is selected in the model with your message, so the
+- **Attach selection:** on by default (untick it for a message that should go without); it sends what is selected in the model with your message, so the
   agent knows what "this edge" or "that feature" is. The box shows how many things are selected, counted as you clicked them (the two halves of a rim you clicked once are one).
   Faces and edges go with the names and numbers the agent's tools take and with their size and
   place (so they can be found again after an edit), features with their name and kind, bodies with
@@ -543,8 +546,8 @@ follow the agent's own mode, which you pick in the panel's header. When an agent
 using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
 (`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
 and notes it in the chat as *Auto-allowed*. Any other question appears in the panel, including
-a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to the agent
-yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
+a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to an agent
+other than Claude Code yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
 same way and noted too.
 
 What counts as "a command given a file name": a parameter that holds a file or folder (`file`,
@@ -569,7 +572,9 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
   chat itself.
 - **Its own tools stay off where we can turn them off.** SolidCraft declares no file system and
   no terminal to the agent, runs it in an empty working folder of its own, and asks the Claude
-  Code adapter to turn off its shell, file and web tools for the session.
+  Code adapter for a session with none of its own tools but the one that ends plan mode, and with
+  SolidCraft's MCP server as its only one. Your claude.ai connectors, your own MCP servers, and
+  Claude Code's shell, file, web, scheduling and messaging tools aren't there.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.

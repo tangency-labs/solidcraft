@@ -574,6 +574,8 @@ pub enum FileAction {
     Undo,
     /// Redo the active design's last undone command.
     Redo,
+    /// Read the active design again from its file, dropping its unsaved changes after asking.
+    Revert,
     /// Save a JSON design using the existing save-as flow.
     SaveJson,
     /// Check the signatures of the active design's saved file.
@@ -603,7 +605,15 @@ impl FileAction {
     pub fn enabled(&self, app: &SolveApp) -> bool {
         let needs_design = matches!(
             self,
-            Self::NewDrawing | Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature
+            Self::NewDrawing
+                | Self::Save
+                | Self::SaveAs
+                | Self::Revert
+                | Self::Undo
+                | Self::Redo
+                | Self::ExportMesh(_)
+                | Self::Command(_)
+                | Self::VerifySignature
         ) || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
@@ -615,6 +625,7 @@ impl FileAction {
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
+            Self::Revert => app.session.path.is_some(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
@@ -645,6 +656,7 @@ impl FileAction {
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
             Self::SaveJson => save_as_with_extension(app, "json"),
+            Self::Revert => crate::documents::revert(app),
             Self::VerifySignature => {
                 crate::verify_job::start(app);
             }
@@ -738,6 +750,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    rows.push(row("revert", app.tr("ui.revert_to_saved"), "", "open", shown && app.session.path.is_some()));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
     rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
@@ -841,6 +854,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
+        "revert" => FileAction::Revert.run(app),
         "save_json" => FileAction::SaveJson.run(app),
         "file.verify" => FileAction::VerifySignature.run(app),
         "download" => download_design(app),
@@ -981,6 +995,12 @@ pub(crate) fn export(app: &mut SolveApp, ext: &str) {
 /// does what that File › Export item does: STEP, OBJ and URDF ask where to save, STL and 3MF
 /// open the mesh dialog with the format chosen. `false`: `id` is no such command.
 pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
+    if id == "file.export_urdf_options" {
+        if FileAction::Export("urdf").enabled(app) {
+            crate::dialogs_urdf::open(app);
+        }
+        return true;
+    }
     let (extension, mesh) = match id {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),
@@ -3229,6 +3249,9 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
             Key::F6 => app.animate_view("fit"),
+            // With Preferences open, Delete belongs to it (a saved layout, #17129), never to the
+            // design selection behind it.
+            Key::Delete | Key::Backspace if app.prefs_window.shell.open => {}
             Key::Backspace if crate::tools::undo_spline_point(app) => {}
             Key::Delete | Key::Backspace => {
                 if !crate::timeline_left::delete_selected_folders(app) {
@@ -6012,6 +6035,10 @@ mod app_bar_tests {
         // Tall enough for the whole File menu (Export SDF Model made it a row longer), so the
         // plugin's row at its foot is on screen without scrolling the menu.
         h.call("ui.resize", json!({"width":1600,"height":1600}));
+        h.frames(3);
+        // The plugin slot is the File menu's last row, and Revert to Saved made the menu one row taller:
+        // in the default 1600 x 1000 window it would sit below the fold, so give the window room.
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();

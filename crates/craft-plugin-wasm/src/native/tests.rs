@@ -1150,6 +1150,56 @@ fn a_write_into_a_missing_sub_folder_makes_it_and_a_discarded_run_removes_it_aga
 }
 
 #[test]
+#[cfg(unix)]
+fn a_link_in_the_middle_of_a_new_folder_path_is_refused_before_anything_is_made() {
+    // #20493: `link/New/x.json` where `link` points outside the grant makes no folder, inside or outside.
+    use files::Host;
+    let base = std::env::temp_dir().join(format!("craft-plugin-midlink-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    let root = base.join("grant");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+    for path in ["link/New/x.json", "link/New/Deeper/x.json"] {
+        let mut state = state(App::default());
+        state.folders.insert(
+            "data".into(),
+            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        );
+        let refused = state.write_file("data".into(), path.into(), b"{}".to_vec()).unwrap_err();
+        assert!(matches!(refused, PluginError::PermissionDenied(_)), "{path}: {refused:?}");
+        assert!(state.created_dirs.is_empty() && state.staged.is_empty(), "{path}");
+    }
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0, "nothing made outside the grant");
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing made inside it but the link");
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_path_of_more_than_64_components_is_refused_before_any_folder_is_made() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-deep-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut state = state(App::default());
+    state.folders.insert(
+        "data".into(),
+        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+    );
+    let deep = |folders: usize| format!("{}x.json", "d/".repeat(folders));
+    // 63 folders and the file are 64 components: allowed.
+    state.write_file("data".into(), deep(63), b"{}".to_vec()).unwrap();
+    // 64 folders and the file are 65: refused as a wrong path, naming the limit.
+    let refused = state.write_file("data".into(), deep(64).replacen("d/", "e/", 1), b"{}".to_vec()).unwrap_err();
+    assert!(
+        matches!(&refused, PluginError::InvalidInput(types::FieldFailure { field, reason }) if field == "path" && reason.contains("at most 64")),
+        "{refused:?}"
+    );
+    assert!(!root.join("e").exists(), "no folder made for a refused path");
+    state.discard_writes();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn every_file_operation_refuses_hidden_names_inside_a_granted_folder() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-hidden-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));

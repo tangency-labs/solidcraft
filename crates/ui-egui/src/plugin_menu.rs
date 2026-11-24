@@ -2232,7 +2232,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     }
     if let Some(key) = browse {
         let id = dialog.id;
-        app.pick_folder(move |app, path| {
+        app.pick_folder("", move |app, path| {
             if let Some(path) = path {
                 apply_browsed_folder(app, id, &key, path);
             }

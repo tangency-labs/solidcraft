@@ -2141,7 +2141,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
 
     let picked = outside.to_string_lossy().into_owned();
     let answer = picked.clone();
-    h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+    h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(Some(answer.clone())))));
     h.frames(2);
     assert_eq!(h.widgets(&browse).len(), 1, "only the directory field has Browse");
     let y = |label: &str| h.widgets(label)[0][1];

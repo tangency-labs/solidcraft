@@ -70,6 +70,13 @@
 //!   of that drop's own passages the one farthest from the curve's ends, `middle_passage`),
 //!   not whichever rounding leaves nearest the base vertex. Solidcore-native, no fork
 //!   commit.
+//! - **An edge between coplanar planes, at its vertex's image.** `trim_extended_edge` takes
+//!   the vertex's image as an end candidate, as for a lamina edge, for an edge between two
+//!   planar faces on one plane whose tangent neighbours at the vertex run between the same
+//!   two faces, not the crossings of their extended UV curves: those continue one another,
+//!   and on one circle (a capped footprint split where it touches its face's rim) they
+//!   coincide and crossed at thousands of points within the tolerance. Solidcore-native, no
+//!   fork commit.
 //! - **A tangent edge's ends and its other UV curve (#17514).** `trim_extended_edge` takes a
 //!   grazing cut by a neighbour's offset as a crossing where the end has no tangent
 //!   neighbour and the curve meets the offset at more than the tangency tolerance (the
@@ -1659,6 +1666,15 @@ fn middle_passage(
 /// point lies within `tol` of its first is no such span (its middle is near both ends,
 /// or the curve is not closed): that point stays a candidate.
 ///
+/// Such a span leaves out only a short arc across the curve's seam, between its ends.
+/// Where the edge's own two ends lie within `tol` of each other (`ends_apart` false),
+/// that short arc is where the edge runs, the mirror of a short span on one side of the
+/// seam, and the point at `t` is a real second point, however near the first: only the
+/// first point's own other parameter is passed over, the span then the whole natural
+/// interval (the arc across the seam has no parameter length, [`are_same`], as a
+/// candidate at `t_first` itself has none). Where the edge's ends are apart, its two
+/// trim points cannot be one point, and every such span is the first point again.
+///
 /// # Errors
 ///
 /// Those of [`Curve::is_closed`] and [`is_closed_base`].
@@ -1668,12 +1684,37 @@ pub fn is_first_point_again(
     t_first: f64,
     t: f64,
     tol: f64,
+    ends_apart: bool,
 ) -> Result<bool> {
-    if !curve.is_closed(k, &curve.natural_interval(), tol)? {
+    let natural = curve.natural_interval();
+    if !curve.is_closed(k, &natural, tol)? {
         return Ok(false);
     }
     let span = Extent1d::from_min_max(smos_min(t_first, t), smos_max(t_first, t));
+    if !ends_apart && !are_same(span.length(), natural.length()) {
+        return Ok(false);
+    }
     is_closed_base(k, curve, &span, tol)
+}
+
+/// Not upstream (WR-673): whether an open edge's two vertices lie more than `tol` apart
+/// (see [`is_first_point_again`]).
+///
+/// # Errors
+///
+/// Those of the topology queries.
+fn open_edge_ends_apart<O: ClassObject>(
+    brep: &impl OffsetBrep<O>,
+    edge: O,
+    tol: f64,
+) -> Result<bool> {
+    let v0 = brep
+        .edge_vertex(edge)?
+        .ok_or(dangling("edge without vertex"))?;
+    let v1 = brep
+        .edge_other_vertex(edge, v0)?
+        .ok_or(dangling("edge without other vertex"))?;
+    Ok(distance(brep.vertex_point(v0)?, brep.vertex_point(v1)?) > tol)
 }
 
 /// Not upstream (WR-530): whether a tangent edge's new curve, dropped onto the other
@@ -2586,13 +2627,15 @@ fn move_within(distance: f64, allowed: f64) -> bool {
 ///   bounds ends within that of the new point ([`vertex_move_fits`]); otherwise every
 ///   changed edge at that vertex keeps its marched curve, and the check is made again
 ///   over the remaining ones;
-/// * an edge whose exact curve cannot be found or checked (any error but a missing callee or
-///   a cancellation, [`exact_edge`]) keeps its marched curve rather than fail the shell.
+/// * an edge whose exact curve cannot be found or checked keeps its marched curve rather
+///   than fail the shell: a grown copy refused, the intersection failing, the edge's
+///   trimmed curve not built, no line or conic through its three points, or the piece
+///   failing its validity check ([`exact_edge`]).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from the intersections; [`SolidError::Cancelled`]; those of
-/// the vertex checks and moves, of the curve replacement and of `CreateUVTrimCurves`.
+/// Those of [`exact_edge`]; those of the vertex checks and moves, of the curve
+/// replacement and of `CreateUVTrimCurves`.
 pub fn make_edges_on_analytics_exact(
     k: &mut Kernel,
     b: &mut Brep,
@@ -2604,15 +2647,8 @@ pub fn make_edges_on_analytics_exact(
     let margin = tol + 2.0 * approx_tol3d(k, ssi_tol);
     let mut exact_edges: Vec<ExactEdge> = Vec::new();
     for e in bp1::edges(b, None)? {
-        // Not upstream (WR-545 retired): an edge whose exact curve cannot be found or checked
-        // keeps its marched curve rather than fail the shell; only a missing callee or a
-        // cancellation stops the pass. Nothing has changed the body yet.
-        match exact_edge(k, b, e, tol, ssi_tol, deg20_rad, margin) {
-            Ok(Some(x)) => exact_edges.push(x),
-            Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                return Err(err)
-            }
-            Ok(None) | Err(_) => {}
+        if let Some(x) = exact_edge(k, b, e, tol, ssi_tol, deg20_rad, margin)? {
+            exact_edges.push(x);
         }
     }
 
@@ -2679,11 +2715,18 @@ pub fn make_edges_on_analytics_exact(
 }
 
 /// The exact curve [`make_edges_on_analytics_exact`] gives the edge `e`, or `None` where it
-/// keeps its marched curve.
+/// keeps its marched curve: the edge is outside the pass, or its exact curve cannot be
+/// found or checked (a grown copy refused, the intersection or the trimmed curve failing,
+/// no line or conic through its three points, the piece failing its validity check).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from the intersections; those of the evaluations.
+/// [`SolidError::Unported`] and [`SolidError::Cancelled`] from the growth, the
+/// intersection and the trimmed curve; those of the topology reads, the surface copies
+/// and domains and the evaluations; a defect where an evaluation gives no tangent.
+/// `exact_piece`'s [`SolidError::NotConverged`] is its turn-count guard, not a failed
+/// match: the STEP parameters it counts come from the conic's own inversion, within a
+/// turn, so only a broken conic reaches it, and that propagates.
 fn exact_edge(
     k: &mut Kernel,
     b: &mut Brep,
@@ -4741,7 +4784,26 @@ impl OffsetGeometryCreation {
             // the turn its middle drops onto, the same for both ends
             // ([`passages_on_one_turn`]). A closed edge's one vertex is both its ends, and
             // its passages all stay candidates for the search below.
-            let vertex_image = !tan_eus.is_empty() && brep.edge_is_lamina(base_edge)?;
+            // Not upstream: the same end candidate, for the same reason, where the base edge
+            // runs between two planar faces on one plane (a face capped on another's plane)
+            // and each tangent neighbour runs on between the same two faces. Both faces
+            // offset onto one plane, which carries the vertex's image, and the edges' offsets
+            // meet there; a neighbouring face's offset that cuts the curve still gives its
+            // cuts below, and the nearest candidate is taken as ever. The crossing of the
+            // extended UV curves has no point to give: the curves continue one another, and
+            // where they lie on one circle (a capped footprint's circle, split where it
+            // touches its face's rim) their extensions, each wound round the circle many
+            // times, coincide and cross within the tolerance at thousands of points, each
+            // then weighed for moving to a curve end.
+            let vertex_image = !tan_eus.is_empty()
+                && (brep.edge_is_lamina(base_edge)?
+                    || Self::runs_on_between_planes(
+                        brep,
+                        base_edge,
+                        base_edgeuse,
+                        other_base_edgeuse,
+                        &tan_eus,
+                    )?);
             if vertex_image {
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let image = self.offset_vertex_image(k, brep, base_edgeuse, base_vertex)?;
@@ -5109,14 +5171,23 @@ impl OffsetGeometryCreation {
             // cap's rim) the first point's twin across the curve's seam is another parameter
             // but the same point: taken, it gave the half edge the whole circle and the loop
             // a gap. Only that twin is passed over ([`is_first_point_again`]): an open edge
-            // that is short now keeps its real second point, however near the first.
+            // that is short now keeps its real second point, however near the first, on
+            // either side of the seam.
             let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
             let same_tol = 10.0 * self.this_approx_tol_3d;
+            let ends_apart = open_second && open_edge_ends_apart(brep, base_edge, same_tol)?;
             let first_again = |t: f64| -> Result<bool> {
                 if !open_second {
                     return Ok(false);
                 }
-                is_first_point_again(k, curve_of(brep, curve_3d)?, trim_ivl.min(), t, same_tol)
+                is_first_point_again(
+                    k,
+                    curve_of(brep, curve_3d)?,
+                    trim_ivl.min(),
+                    t,
+                    same_tol,
+                    ends_apart,
+                )
             };
             // (not upstream, #14062) a closed edge's second trim point is its one vertex
             // again: where that point is the seam of a closed 3D curve (a loft's floor circle
@@ -5258,8 +5329,16 @@ impl OffsetGeometryCreation {
                 let lo = curve.evaluate_point(k, trim_ivl.min())?;
                 let hi = curve.evaluate_point(k, trim_ivl.max())?;
                 // two trim points at one place with the whole curve between them bound no
-                // other arc: its middle is at its ends
-                let other_arc = distance(out_mid, hi) > tol;
+                // other arc: its middle is at its ends. Unless the base edge's own ends are
+                // at one place too (within the "same point" tolerance of the search above,
+                // the follow-up to #17806): then the trim points are its two ends, the
+                // other arc, short as it is, is an arc as long as it has a parameter
+                // length, and which arc the edge runs is left to its middle below. The
+                // test is on the base edge, so it holds at any offset distance.
+                let other_len = nat_ivl.length() - trim_ivl.length();
+                let other_arc = distance(out_mid, hi) > tol
+                    || (other_len > seam_tol
+                        && !open_edge_ends_apart(brep, base_edge, 10.0 * tol)?);
                 if other_arc && distance(out_mid, base_mid) < distance(in_mid, base_mid) {
                     let seam = curve.evaluate_point(k, nat_ivl.min())?;
                     if distance(lo, seam) <= tol {
@@ -5357,6 +5436,7 @@ impl OffsetGeometryCreation {
         // closed 3D curve (WR-673, [`is_first_point_again`], as in `trim_extended_edge_ends`)
         let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
         let same_tol = 10.0 * self.this_approx_tol_3d;
+        let ends_apart = open_second && open_edge_ends_apart(brep, base_edge, same_tol)?;
 
         let mut convex = true;
         let mut concave = true;
@@ -5425,6 +5505,7 @@ impl OffsetGeometryCreation {
                             trim_ivl.min(),
                             t,
                             same_tol,
+                            ends_apart,
                         )?)
                 {
                     best = dist;
@@ -5504,6 +5585,51 @@ impl OffsetGeometryCreation {
         .map(|drop| drop.start.param(0))
         .collect::<Result<Vec<f64>>>()?;
         middle_passage(k, curve_of(brep, curve_3d)?, &drops, mid, same_tol)
+    }
+
+    /// Not upstream: whether `edge` (its edge use `edgeuse`, and `other` on its other face)
+    /// runs between two faces that both lie on planes, and each of the edge uses `next`
+    /// (its tangent neighbours at a vertex) lies on an edge between the same two faces.
+    /// `false` without `other` (a lamina edge) or without neighbours.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for dangling topology.
+    fn runs_on_between_planes<O: ClassObject + SolutionObject>(
+        brep: &impl OffsetBrep<O>,
+        edge: O,
+        edgeuse: O,
+        other: Option<O>,
+        next: &[O],
+    ) -> Result<bool> {
+        let Some(other) = other else {
+            return Ok(false);
+        };
+        let faces = brep.edge_faces(edge)?;
+        if next.is_empty() || faces.len() != 2 {
+            return Ok(false);
+        }
+        for &eu in next {
+            let next_edge = brep
+                .edgeuse_edge(eu)?
+                .ok_or(dangling("edge use without edge"))?;
+            let next_faces = brep.edge_faces(next_edge)?;
+            if next_faces.len() != 2 || !next_faces.iter().all(|f| faces.contains(f)) {
+                return Ok(false);
+            }
+        }
+        for eu in [edgeuse, other] {
+            let face = brep
+                .edgeuse_face(eu)?
+                .ok_or(dangling("edge use without face"))?;
+            let sur = brep
+                .face_surface(face)?
+                .ok_or(dangling("face without surface"))?;
+            if !matches!(surface_of(brep, sur)?.kind(), SurfaceKind::Plane(_)) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Not upstream (WR-736, #2611, #2769): the
@@ -8921,7 +9047,7 @@ mod tests {
             line.evaluate_point(&k, t).unwrap(),
         );
         assert!(near > 0.0 && near <= tol, "{near}");
-        assert!(!is_first_point_again(&k, &line, t0, t, tol).unwrap());
+        assert!(!is_first_point_again(&k, &line, t0, t, tol, false).unwrap());
 
         // a closed circle of radius 10: the seam twin of its start is the first point
         // again; a point 5e-6 along the circle from the start is a real second point
@@ -8944,8 +9070,10 @@ mod tests {
             circle.evaluate_point(&k, twin).unwrap(),
         );
         assert!(same <= tol, "{same}");
-        assert!(is_first_point_again(&k, &circle, t0, twin, tol).unwrap());
-        assert!(is_first_point_again(&k, &circle, twin, t0, tol).unwrap());
+        for ends_apart in [false, true] {
+            assert!(is_first_point_again(&k, &circle, t0, twin, tol, ends_apart).unwrap());
+            assert!(is_first_point_again(&k, &circle, twin, t0, tol, ends_apart).unwrap());
+        }
         let step = 5e-6 / (10.0 * 2.0 * PI) * (ivl.max() - ivl.min());
         let short = t0 + step;
         let near = distance(
@@ -8953,9 +9081,22 @@ mod tests {
             circle.evaluate_point(&k, short).unwrap(),
         );
         assert!(near > 0.0 && near <= tol, "{near}");
-        assert!(!is_first_point_again(&k, &circle, t0, short, tol).unwrap());
+        assert!(!is_first_point_again(&k, &circle, t0, short, tol, false).unwrap());
+        // reversed: the first point at the natural end and the second 5e-6 across the
+        // seam, the edge's ends as near as above. The span from the second point to the
+        // first runs round the curve, its ends within the tolerance, but the edge is the
+        // short arc across the seam: a real second point, kept as on the other side.
+        assert!(!is_first_point_again(&k, &circle, twin, short, tol, false).unwrap());
+        let before = twin - step;
+        assert!(!is_first_point_again(&k, &circle, t0, before, tol, false).unwrap());
+        // where the edge's own ends are apart, a span round the curve is its first
+        // point again (WR-673 as merged)
+        assert!(is_first_point_again(&k, &circle, twin, short, tol, true).unwrap());
         // a point half way round is not the first point at all
-        assert!(!is_first_point_again(&k, &circle, t0, ivl.evaluate(0.5), tol).unwrap());
+        for ends_apart in [false, true] {
+            let half = ivl.evaluate(0.5);
+            assert!(!is_first_point_again(&k, &circle, t0, half, tol, ends_apart).unwrap());
+        }
 
         // an open half circle whose ends are apart: never the first point again
         let arc = Curve::from(
@@ -8971,7 +9112,8 @@ mod tests {
             .unwrap(),
         );
         let ivl = arc.natural_interval();
-        assert!(!is_first_point_again(&k, &arc, ivl.min(), ivl.min() + step / 2.0, tol).unwrap());
+        let t = ivl.min() + step / 2.0;
+        assert!(!is_first_point_again(&k, &arc, ivl.min(), t, tol, true).unwrap());
     }
 
     /// WR-530: a tangent edge's drop passes only within its limit; a drop or limit that

@@ -163,10 +163,22 @@ impl Request {
         params.insert("path".into(), json!(self.path));
         Value::Object(params)
     }
+    /// [`Self::params`] for `doc.open`. A design saved without the bodies of its linked designs
+    /// reads only the linked files in its own folder or below it as it opens here: the others
+    /// wait for the question the app asks before it loads linked files from another folder
+    /// (`linked_source::update_changed`). A caller that names `linked_bodies` keeps its choice.
+    fn open_params(&self) -> Value {
+        let mut params = self.options.clone();
+        params.insert("path".into(), json!(self.path));
+        if solidcraft_engine::io::is_design_path(&self.path) {
+            params.entry("linked_bodies").or_insert_with(|| json!("folder"));
+        }
+        Value::Object(params)
+    }
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open if self.plugin_import => ("file.import", self.params()),
-            Kind::Open => ("doc.open", self.params()),
+            Kind::Open => ("doc.open", self.open_params()),
             Kind::Insert if self.gerber => {
                 let mut params = self.options.clone();
                 params.insert("set".into(), json!(self.path));
@@ -176,7 +188,8 @@ impl Request {
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::InsertDesign => ("component.insert_design", self.params()),
-            Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
+            // As an open: a link in another folder that the copy has no bodies of waits for Load.
+            Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir, "linked_bodies": "folder"})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
             // Printing writes the whole drawing's PDF that asks for actual size.
             Kind::ExportSheet if self.print => ("drawing.print", Value::Object(self.options.clone())),
@@ -942,7 +955,7 @@ fn start(app: &mut SolveApp) {
                 let began = std::time::Instant::now();
                 let picture = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| partial_picture(&partial.world, &stop))).ok().flatten();
                 if solidcraft_engine::geom::env::var_os("PROFILE_OPEN").is_some() {
-                    eprintln!(
+                    solidcraft_engine::note!(
                         "SolidCraft partial picture: features={} bodies={} drawn={} ms={:.1}",
                         partial.features,
                         partial.world.bodies.len(),
@@ -983,7 +996,7 @@ fn start(app: &mut SolveApp) {
                     if let Some(picture) = picture.filter(|_| !progress.is_cancelled()) {
                         let _ = preview_tx.send(picture);
                         if solidcraft_engine::geom::env::var_os("PROFILE_OPEN").is_some() {
-                            eprintln!("SolidCraft saved preview: ready_ms={:.3}", preview_began.elapsed().as_secs_f64() * 1000.0);
+                            solidcraft_engine::note!("SolidCraft saved preview: ready_ms={:.3}", preview_began.elapsed().as_secs_f64() * 1000.0);
                         }
                     }
                 }
@@ -1466,7 +1479,7 @@ fn compute(
     phase.store(2, Ordering::Relaxed);
     let view_ms = view_began.elapsed().as_secs_f64() * 1000.0;
     if profile {
-        eprintln!(
+        solidcraft_engine::note!(
             "SolidCraft open phases: geometry_ms={geometry_ms:.3} placement_ms={placement_ms:.3} tessellation_ms={tessellation_ms:.3} display_warmup_ms={view_ms:.3} total_ms={:.3}",
             began.elapsed().as_secs_f64() * 1000.0
         );
