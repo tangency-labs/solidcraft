@@ -1172,30 +1172,6 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// The kernel-to-ops typing of compute_point_parameters' ambiguous point solve: the typed
-/// refusal carries its count and keeps its status; the union_all retry in SolidCraft fires on
-/// it and on nothing else.
-#[cfg(test)]
-mod not_one_foot_tests {
-    use super::{status, Error};
-    use solidcore::error::{intersect::IntersectFailure, Failure, Reason};
-
-    #[test]
-    fn the_kernel_refusal_becomes_the_typed_error() {
-        let e = Failure::new(
-            "intersect::compute_point_parameters",
-            Reason::Intersect(IntersectFailure::NotOneFoot { found: 2 }),
-        )
-        .into_error();
-        let typed = status(e);
-        assert_eq!(typed, Error::NotOneFoot { found: 2 });
-        assert_eq!(
-            typed.to_string(),
-            "a classification found 2 nearest points on the face's surface, where one is needed"
-        );
-    }
-}
-
 /// An operation's result.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -1256,5 +1232,29 @@ fn typed(e: SolidError) -> Error {
             }
             _ => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
         },
+    }
+}
+
+/// The kernel-to-ops typing of `compute_point_parameters`' ambiguous point solve: the typed
+/// refusal carries its count and keeps its status; the `union_all` retry in SolidCraft fires on
+/// it and on nothing else.
+#[cfg(test)]
+mod not_one_foot_tests {
+    use super::{status, Error};
+    use solidcore::error::{intersect::IntersectFailure, Failure, Reason};
+
+    #[test]
+    fn the_kernel_refusal_becomes_the_typed_error() {
+        let e = Failure::new(
+            "intersect::compute_point_parameters",
+            Reason::Intersect(IntersectFailure::NotOneFoot { found: 2 }),
+        )
+        .into_error();
+        let typed = status(e);
+        assert_eq!(typed, Error::NotOneFoot { found: 2 });
+        assert_eq!(
+            typed.to_string(),
+            "a classification found 2 nearest points on the face's surface, where one is needed"
+        );
     }
 }
