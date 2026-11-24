@@ -963,6 +963,11 @@ fn c1_collect_points(
         }
     }
 
+    // Not upstream: the rail ends' feet named nearer their edge use's trim end (below), and
+    // the rail ends on each base surface whose edge use names one
+    let mut renamed: Vec<(TsRef, SrfIndex, Point2)> = Vec::new();
+    let mut named_ends = [0_usize; 2];
+
     // Process rail_ends: rail[i]->edgeuse[jj]->FilletVertexuse->TsectPnt
     let geom0 = st.geom0;
     for which_rail in 0..2 {
@@ -1021,22 +1026,48 @@ fn c1_collect_points(
             // period, and a corner solves it with the name its own solve lands on (a mitre's
             // crossing just past a sphere's seam is named at the seam's other side, a period
             // away from the edge use). The trace runs along the edge use's parameters, and the
-            // sort drops each point onto its trim curve, so the foot takes the name nearest
-            // the trim curve's end at the rail's end (its start for a rail edge use of the
-            // same orientation, its end for the opposite one, as the points are put in
-            // front or behind above): the same point of the surface.
+            // sort drops each point onto its trim curve, so the foot's name nearest the trim
+            // curve's end at the rail's end (its start for a rail edge use of the same
+            // orientation, its end for the opposite one, as the points are put in front or
+            // behind above) is noted, and taken below where the feet need it.
             let at = usize::from(orientation != OrientType::Same);
-            for (srf, (base, ends)) in [SrfIndex::First, SrfIndex::Second]
+            for ((srf, count), (base, ends)) in [SrfIndex::First, SrfIndex::Second]
                 .into_iter()
+                .zip(named_ends.iter_mut())
                 .zip(st.base_surfaces.iter().zip(trim_ends))
             {
                 let Some(near) = ends.and_then(|ends| ends.get(at).copied()) else {
                     continue;
                 };
+                *count += 1;
                 let uv = st.store.get(cx.fillets, r)?.uv_pos(srf);
                 let named = rail_end_named_by_trim_end(cx.k, base, uv, near)?;
-                *st.store.get_mut(cx.fillets, r)?.uv_pos_mut(srf) = named;
+                if named != uv {
+                    renamed.push((r, srf, named));
+                }
             }
+        }
+    }
+
+    // Not upstream: the noted names are taken on a base surface only where some of its rail
+    // ends' feet lie across its seam from their edge use and some do not: the ball's contact
+    // crosses the seam between the rail's ends, and the trace must reach both on one side.
+    // Where every one lies across it (a round rolled over a cylinder's seam all along its
+    // edge) the contact runs on the seam's far side throughout, its names there are
+    // continuous already, and the trace runs on them; a name a period away would lie outside
+    // the surface's natural domain, where its definition evaluates as an extension, not as
+    // the closed surface (0.007 off on a cylinder of radius 30 at 0.008 past its seam), and
+    // the round's exact surface through such feet is off its class.
+    for (srf, count) in [SrfIndex::First, SrfIndex::Second]
+        .into_iter()
+        .zip(named_ends)
+    {
+        let on_srf = || renamed.iter().filter(move |(_, s, _)| *s == srf);
+        if on_srf().count() == count {
+            continue;
+        }
+        for &(r, _, named) in on_srf() {
+            *st.store.get_mut(cx.fillets, r)?.uv_pos_mut(srf) = named;
         }
     }
 
@@ -1046,9 +1077,10 @@ fn c1_collect_points(
 /// Not upstream: the name of the rail end's foot `uv` on the closed base surface `base`
 /// nearest `near`, its edge use's trim curve at the rail's end ([`super::p1::period_name_nearest`]),
 /// taken only where it lies nearer `near` than `uv` does: a foot already named on the trim
-/// curve's side keeps its name (on a closed edge, whose trim curve's ends name one point a
-/// period apart, each end's foot keeps its own). On a surface that does not close, `uv`
-/// itself.
+/// curve's side keeps its name. On a closed edge, whose trim curve's ends name one point a
+/// period apart, each end's foot can be named at the other end's name (a round on a
+/// cylinder's rim: the feet at 0 and 2 pi r named 2 pi r and 0); both are then across, and
+/// [`c1_collect_points`] keeps both names. On a surface that does not close, `uv` itself.
 ///
 /// # Errors
 ///
