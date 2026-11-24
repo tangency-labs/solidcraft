@@ -2245,7 +2245,7 @@ fn bisected_surface_gap_bound(
         }
     }
     let feet: Vec<Point2> = feet.into_iter().flatten().collect();
-    let Some(net) = NetSurface::of(k, &surface, &feet)? else {
+    let Some(net) = NetSurface::of(k, surface, &feet)? else {
         return Ok(None);
     };
     // (the bound of the curve data `cn` against the net `net`, with the pieces closing at
@@ -2314,7 +2314,7 @@ fn bisected_surface_gap_bound(
     // (#20373 review r4: the pieces bound the net's image; the net's own distance to the
     // surface ([`bisection_residual`]) is taken off `enough` and added to the bound, rounded
     // up, so a bound past the net's is not taken for the surface's)
-    let Some(to_surface) = bisection_residual(&surface, &net) else {
+    let Some(to_surface) = bisection_residual(surface, &net) else {
         return Ok(None);
     };
     let net_enough = if to_surface > 0.0 {

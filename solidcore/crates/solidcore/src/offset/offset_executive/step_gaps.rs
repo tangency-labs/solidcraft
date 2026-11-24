@@ -2334,7 +2334,7 @@ fn curved_side_coincides(b: &Brep, e: EdgeId, bridge: &BSplineCurve, tol: f64) -
 /// `c` run the other way on its own domain `[lo, hi]`: its control points in reverse order on
 /// the knots `lo + hi - u` taken in reverse, the curve `C(lo + hi - t)`, where every one of
 /// those knots is exact in floating point (the sum `lo + hi` and each difference, checked by
-/// the error-free transformation TwoSum: Knuth, TAOCP vol. 2, §4.2.2); `None` where one would
+/// the error-free transformation `TwoSum`: Knuth, TAOCP vol. 2, §4.2.2); `None` where one would
 /// round, so the reversed form is the same point set and no rounding goes uncounted.
 ///
 /// # Errors
@@ -3078,7 +3078,7 @@ mod tests {
             assert!(piece.evaluate_point(ivl.max()).unwrap().distance(ends[1]) <= tol);
         }
         assert!(matches!(
-            held_section(&k, &[leaving.clone()], ends, &off, tol).unwrap(),
+            held_section(&k, std::slice::from_ref(&leaving), ends, &off, tol).unwrap(),
             Held::None
         ));
         assert!(matches!(
