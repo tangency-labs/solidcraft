@@ -614,6 +614,33 @@ fn a_face_extrude_keeps_the_picked_body_when_faces_coincide() {
     assert_eq!(after.body("Wall").unwrap().body.classify_point(Vec3::new(49.0, 15.0, 10.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
 }
 
+/// #14456: the Sweep tool takes a planar face of a body as its profile, as Extrude and Revolve
+/// do. The dialog sends the face and the body it is on, and the sweep runs from that face.
+#[test]
+fn a_sweep_takes_a_body_face_as_its_profile() {
+    let mut app = app_with(json!([
+        {"command":"solid.box","params":{"corner":[-5,-5,0],"length":10,"width":10,"height":10,"body_name":"Block"}},
+        {"command":"sketch.create","params":{"plane":"XZ","name":"P"}},
+        {"command":"sketch.line","params":{"points":[[0,-10],[0,-50]]}},
+        {"command":"sketch.finish","params":{}}
+    ]));
+    let face = crate::dialogs::face_sel(&app.session, Vec3::new(0.0, 0.0, 10.0)).unwrap();
+    let curve = app.session.world_state().unwrap().sketches.last().unwrap().sketch.curves.first().unwrap().id.clone();
+    let d = start(&mut app, vec![face, Sel::SketchCurve { id: curve, sketch: None }], "solid.sweep");
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(command, "solid.sweep");
+    assert_eq!(params["face_body"], json!("Block"));
+    assert_eq!(params["face"], json!([0.0, 0.0, 10.0]));
+    app.session.execute(&command, &params).unwrap();
+    let state = app.session.world_state().unwrap();
+    // The design has a body, so the sweep joins: the column stands on the face it was swept
+    // from, and the block it stands on grows into it.
+    assert_eq!(state.bodies.len(), 1);
+    let block = state.body("Block").unwrap();
+    assert_eq!(block.body.classify_point(Vec3::new(0.0, 0.0, 30.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+    assert_eq!(block.body.classify_point(Vec3::new(0.0, 0.0, 5.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+}
+
 #[test]
 fn path_plane_click_retains_source_and_previews_then_edits_in_place() {
     let mut h = crate::scenario::Harness::new();
@@ -1225,6 +1252,23 @@ fn press_pull_dialog_is_titled_press_pull() {
     h.step(&json!({"start": "solid.extrude"})).unwrap();
     h.frames(2);
     assert!(label_in(&h, "dialog:header", "Extrude"), "a plain Extrude header is Extrude");
+}
+
+/// The Q shortcut starts Press Pull, so Press Pull is the command the app shows as running: the
+/// ribbon does not show Extrude pressed, and Repeat repeats a Press Pull (#14359).
+#[test]
+fn press_pull_leaves_press_pull_as_the_running_command() {
+    let mut app = boxed();
+    crate::keymap::press(&mut app, "Q", false);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.press_pull), "Q opens the Press Pull panel");
+    assert_eq!(app.last_command.as_ref().map(|c| c.0.as_str()), Some("solid.press_pull"), "Q leaves Press Pull as the running command");
+    assert!(crate::toolbar::shows_pressed(&app, "solid.press_pull"), "the Press Pull button is pressed");
+    assert!(!crate::toolbar::shows_pressed(&app, "solid.extrude"), "the Extrude button is not pressed");
+
+    // A plain Extrude still leaves the Extrude running.
+    let mut app = boxed();
+    crate::keymap::press(&mut app, "E", false);
+    assert_eq!(app.last_command.as_ref().map(|c| c.0.as_str()), Some("solid.extrude"), "E leaves Extrude running");
 }
 
 /// Press Pull on a fillet's round face reopens the fillet to change its radius, as the
@@ -2953,9 +2997,38 @@ fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     assert!((area(&app, "Floor") - 200.0).abs() < 1e-6 && app.session.world_state().unwrap().body("Wall").is_none());
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
-    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { stitch: true, extend: false, direction: None })));
+    assert!(matches!(
+        back.kind,
+        Kind::Surface(crate::dialogs_surface::Surf::Trim { stitch: true, extend: false, direction: None, face_normal: false })
+    ));
     let counts: Vec<usize> = back.inputs.iter().map(|i| i.items.len()).collect();
     assert_eq!(counts, [1, 0, 1, 1, 1]);
+}
+
+/// A trim whose curves are projected along the surface's normal is made by a script (the
+/// dialog has no control for it). Edit Feature keeps the choice: the dialog sends
+/// `direction: "face_normal"` again, so OK does not turn the trim into a sweep along the
+/// sketch's normal.
+#[test]
+fn trim_dialog_keeps_a_projection_along_the_surface_normal_through_edit_feature() {
+    // A 20 × 10 sheet on XY cut along the sketch line x = 3, keeping x > 3: 7 × 10.
+    let app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "F"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [-10, 0], "p1": [10, 10]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "surface.patch", "params": {"sketch": "F", "body_name": "Floor"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Cut"}},
+        {"command": "sketch.line", "params": {"points": [[3, -5], [3, 15]], "ids": ["c1"]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "surface.trim", "params": {"body": "Floor", "curves": {"sketch": "Cut", "direction": "face_normal"}, "keep": [5, 5, 0]}}
+    ]));
+    let area = app.session.world_state().unwrap().body("Floor").unwrap().mesh().measure().area;
+    assert!((area - 70.0).abs() < 1e-6, "{area}");
+    let fid = app.session.doc.features.last().unwrap().id;
+    let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
+    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { face_normal: true, direction: None, .. })));
+    let (_, p) = apply_commands(&app, &back).unwrap().remove(0);
+    assert_eq!(p["params"]["curves"]["direction"], json!("face_normal"), "{p}");
 }
 
 #[test]
@@ -5204,6 +5277,37 @@ fn split_face_dialog_keeps_a_sketch_split_and_its_loops() {
     assert_eq!(p["loops"], json!(true));
     let (_, p) = commands_for("ByPlane");
     assert!(p.get("sketch").is_none() && p.get("loops").is_none(), "{p}");
+}
+
+/// #17555: Split Face takes a sketch as its splitting tool, so a sketch's curves divide a face,
+/// the way the command does from the command line.
+#[test]
+fn split_face_dialog_takes_a_sketch_as_its_splitting_tool() {
+    let mut app = app_with(json!([
+        {"command":"solid.box", "params":{"length":40,"width":30,"height":20,"body_name":"B"}},
+        {"command":"sketch.create", "params":{"plane":"XY","name":"Loop"}},
+        {"command":"sketch.line", "params":{"points":[[10,5],[30,5],[20,25]],"closed":true}},
+        {"command":"sketch.finish", "params":{}}
+    ]));
+    let sketch = app.session.doc.find_feature("Loop").unwrap().id;
+    let mut d = crate::dialogs::Dialog::for_command(&app, "solid.split_face").unwrap();
+    // The splitting tool takes a sketch: a curve of it, picked in the viewport.
+    assert!(
+        crate::dialogs::fits(d.inputs[1].accept, &Sel::ExternalSketchCurve { sketch, id: "l1".into() }),
+        "the splitting tool does not take a sketch"
+    );
+    // The face to split, and the sketch that divides it.
+    let face = crate::dialogs::face_sel(&app.session, Vec3::new(20.0, 12.0, 20.0)).expect("the top face");
+    d.pick(&app.session, face);
+    d.active = 1;
+    d.pick(&app.session, Sel::ExternalSketchCurve { sketch, id: "l1".into() });
+    let (command, params) = crate::dialogs::apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(command, "solid.split_face");
+    assert_eq!(params["sketch"], json!(sketch), "{params}");
+    // The face is divided: the triangle is cut out of the top of the box.
+    app.session.execute(&command, &params).unwrap();
+    let measured = app.run("inspect.measure", json!({"bodies": ["B"]})).unwrap();
+    assert_eq!(measured["bodies"][0]["kernel"]["faces"], json!(7), "{measured}");
 }
 
 /// #16400: Plane Through Three Points takes a point on a mesh body's surface, the exact point of

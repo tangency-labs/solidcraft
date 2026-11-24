@@ -158,6 +158,25 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     crate::smlib_sweeps::loft_to_point(plane, &crate::smlib_sweeps::pieces([&base]), apex)
 }
 
+/// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),
+/// `fit` saying how they reshape the section on the way (#20985). Without rails, the plain loft to
+/// a point.
+pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    if rails.is_empty() {
+        return loft_to_point(plane, lp, apex);
+    }
+    let _span = solidcraft_profile::span("kernel", "loft_to_point_with_rails");
+    if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
+        return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
+    }
+    if ((apex - plane.origin).dot(plane.normal())).abs() < 1e-9 {
+        return Err(KernelError::Invalid("the apex lies in the section's plane".into()));
+    }
+    let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
+    let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
+    crate::smlib_sweeps::loft_to_point_with_rails(plane, &crate::smlib_sweeps::pieces([&base]), apex, rails, fit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

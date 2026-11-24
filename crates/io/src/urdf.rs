@@ -380,7 +380,7 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, decals: &[UrdfDecal], name
 
 /// The placement `occurrence_world` resolves for an occurrence: through the first occurrence of
 /// each parent component.
-fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
+pub(crate) fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
     let mut path = Vec::new();
     let mut cur = doc.occurrences.iter().find(|o| o.id == occ);
     for _ in 0..1000 {
@@ -633,6 +633,8 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     if options.mesh_prefix.chars().any(unwritable) {
         return Err(IoError::Invalid("`mesh_prefix` has a character XML cannot hold".into()));
     }
+    let active = doc.active_assembly();
+    let doc = &*active;
     let mut names = Names::default();
     let mut out = UrdfPackage { xml: String::new(), meshes: Vec::new(), model: UrdfModel::default(), warnings: Vec::new() };
     let base = names.take("base_link");
