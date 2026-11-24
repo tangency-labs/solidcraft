@@ -834,7 +834,10 @@ impl PluginHost for SolidCraftHost {
     }
     fn authorize_file_path(&self, path: &Path, write: bool) -> craft_plugin::Result<()> {
         if let Some(scope) = solidcraft_io::vfs::current_scope() {
-            return scope.check(&path.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
+            // A write may make folders that do not exist yet (`write-file`): its nearest existing
+            // ancestor must be in scope, as with `check_new`. A read needs the whole path to exist.
+            let allowed = if write { scope.check_new(&path.to_string_lossy()) } else { scope.check(&path.to_string_lossy()) };
+            return allowed.map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
         }
         grant_covers(&self.session.plugin_state.file_grants, path, write)
     }
