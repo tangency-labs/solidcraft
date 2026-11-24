@@ -1483,6 +1483,10 @@ fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQ
 /// chord from `size`, with its notes, each led by the body's name. A mesh it cannot make is an
 /// error led by the body's name too, so an export of several bodies says whose face it is.
 fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size, part): &Placed, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    #[cfg(test)]
+    if test_unmeshable::is(&b.name) {
+        return Err(IoError::Invalid(format!("{}: tessellation: face 7 (cylinder): boundary crosses itself", b.name)));
+    }
     let named = |e: IoError| match e {
         IoError::Kernel(k) => IoError::Invalid(format!("{}: {k}", b.name)),
         other => other,
@@ -2030,6 +2034,22 @@ pub fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
     (yoe + era * 400 + i64::from(m <= 2), m, d, rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
+/// Tests: the name of a body that [`body_mesh`] fails on, as a body the kernel cannot tessellate does.
+#[cfg(test)]
+mod test_unmeshable {
+    static NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    pub(super) fn set(name: Option<&str>) {
+        if let Ok(mut n) = NAME.lock() {
+            *n = name.map(str::to_string);
+        }
+    }
+
+    pub(super) fn is(name: &str) -> bool {
+        NAME.lock().is_ok_and(|n| n.as_deref() == Some(name))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2379,6 +2399,28 @@ mod tests {
         });
         assert!(err_res.is_err(), "single failing body must fail the export");
         Ok(())
+    }
+
+    /// A body that cannot be meshed does not stop the export: the file is written with the other
+    /// bodies and the note names the one left out (#19215), in each mesh format.
+    #[test]
+    fn an_unmeshable_body_is_named_and_the_rest_is_still_written() {
+        let (_, m) = model();
+        let mut state = (*m.state()).clone();
+        let mut broken = state.bodies[0].clone();
+        broken.name = "BrokenSliver".into();
+        state.bodies.push(broken);
+        let alone = export(&m.state(), &[], Format::StlBinary, "t").unwrap();
+        test_unmeshable::set(Some("BrokenSliver"));
+        for format in [Format::StlBinary, Format::StlAscii, Format::Obj, Format::ThreeMf, Format::ThreeMfTagged] {
+            let (bytes, notes) = export_with_parts_noted(&state, &[], &[], format, "t", &Metadata::default(), MeshQuality::default(), None)
+                .unwrap_or_else(|e| panic!("{format:?}: {e}"));
+            assert!(!bytes.is_empty(), "{format:?}");
+            assert!(notes.iter().any(|n| n.starts_with("BrokenSliver: skipped: meshing failed") && n.contains("face 7")), "{format:?}: {notes:?}");
+        }
+        let (stl, _) = export_with_parts_noted(&state, &[], &[], Format::StlBinary, "t", &Metadata::default(), MeshQuality::default(), None).unwrap();
+        assert_eq!(read_stl(&stl).unwrap().len(), read_stl(&alone).unwrap().len(), "only the body that meshed is in the file");
+        test_unmeshable::set(None);
     }
 
     #[test]
