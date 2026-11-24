@@ -254,10 +254,9 @@ pub fn assembly(name: &str) -> Option<bool> {
 /// The built-in template `name` ([`BUILT_INS`]), made now; none for another name.
 pub fn built_in(name: &str) -> Option<Result<Drawing>> {
     let (size, title, assembly) = parse(name)?;
-    // A4 is used upright (ISO 5457); the larger sizes lie flat.
-    let orientation = if size == PaperSize::A4 { Orientation::Portrait } else { Orientation::Landscape };
     let (note, kind) = if assembly { (ASSEMBLY_NOTE, ASSEMBLY_TYPE) } else { (PART_NOTE, PART_TYPE) };
-    Some(made(&title, drawing_sheet::Sheet::standard(size, orientation), note, kind))
+    // Every size lies flat, A4 too: a sheet stands upright only when Portrait is chosen (#21676).
+    Some(made(&title, drawing_sheet::Sheet::standard(size, Orientation::Landscape), note, kind))
 }
 
 /// One sheet of `paper` with the ISO border and the built-in title block, `note` typed over its
