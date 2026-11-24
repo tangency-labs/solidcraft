@@ -35,17 +35,29 @@ impl std::fmt::Display for BackendId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OpKind {
+    /// An axis-aligned box ([`Primitive::Box`]).
     Box,
+    /// A cylinder ([`Primitive::Cylinder`]).
     Cylinder,
+    /// A sphere ([`Primitive::Sphere`]).
     Sphere,
+    /// A torus ([`Primitive::Torus`]).
     Torus,
+    /// Planar regions extruded along their plane's normal ([`Backend::extrude`]).
     Extrude,
+    /// Planar regions turned about an axis ([`Backend::revolve`]).
     Revolve,
+    /// Union, cut or intersection of two bodies ([`Backend::boolean`]).
     Boolean,
+    /// Constant-radius rounds of edges ([`Backend::fillet`]).
     Fillet,
+    /// Equal and unequal chamfers of edges ([`Backend::chamfer`], [`Backend::chamfer_sides`]).
     Chamfer,
+    /// A body hollowed to a wall ([`Backend::shell`]).
     Shell,
+    /// A sheet thickened into a solid ([`Backend::thicken`]).
     Thicken,
+    /// Faces moved along their normals ([`Backend::offset_faces`]).
     OffsetFaces,
 }
 
@@ -98,17 +110,23 @@ impl OpKind {
 /// Whether a kernel takes an operation, asked before any conversion.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Support {
+    /// The kernel takes the operation.
     Yes,
+    /// The kernel doesn't take the operation; it stays on another kernel.
     No,
     /// Taken only in part; the reason says which part.
     Some(String),
 }
 
+/// Which boolean: the names are saved in designs, so they never change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BoolOp {
+    /// Material in either body.
     Union,
+    /// The first body with the second taken away.
     Cut,
+    /// Material in both bodies.
     Intersect,
 }
 
@@ -129,7 +147,9 @@ pub enum FilletTurn {
 /// chamfer makes with the first face.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChamferSide {
+    /// The setback along the other face, in millimetres.
     Distance(f64),
+    /// The angle the chamfer makes with the first face, in radians.
     Angle(f64),
 }
 
@@ -138,24 +158,36 @@ pub enum ChamferSide {
 pub enum Primitive {
     /// The axis-aligned box between two opposite corners.
     Box {
+        /// One corner.
         a: Vec3,
+        /// The opposite corner.
         b: Vec3,
     },
     /// A cylinder standing on `base`, along `axis`, `height` long.
     Cylinder {
+        /// The centre of its base.
         base: Vec3,
+        /// The direction it stands along.
         axis: Vec3,
+        /// Its radius.
         radius: f64,
+        /// Its length along `axis`.
         height: f64,
     },
+    /// A sphere about `center`.
     Sphere {
+        /// Its centre.
         center: Vec3,
+        /// Its radius.
         radius: f64,
     },
     /// A ring torus about the z axis through `center`.
     Torus {
+        /// Its centre.
         center: Vec3,
+        /// The radius of the ring's centre line.
         major: f64,
+        /// The radius of the ring's section.
         minor: f64,
     },
 }
@@ -163,7 +195,9 @@ pub enum Primitive {
 /// The axis a profile turns about, in the profile plane's coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Axis2 {
+    /// A point on the axis.
     pub origin: Vec2,
+    /// The axis's direction.
     pub dir: Vec2,
 }
 
@@ -171,7 +205,9 @@ pub struct Axis2 {
 /// its operands in the record's indices (`None` where the kernel can't report it exactly).
 #[derive(Clone, Debug)]
 pub struct Exported {
+    /// The body's record, in canonical order.
     pub record: Brep,
+    /// The operation's history over its operands, in the record's indices.
     pub history: Option<History>,
 }
 
@@ -190,10 +226,20 @@ pub enum BackendError {
     /// A size too large for the geometry around it, with the largest size that builds where the
     /// kernel names one.
     #[error("{why}")]
-    TooLarge { why: String, largest: Option<f64> },
+    TooLarge {
+        /// What was too large, in words.
+        why: String,
+        /// The largest size that builds, where the kernel names one.
+        largest: Option<f64>,
+    },
     /// No room: an inward offset leaves none, walls touch, a wall folds.
     #[error("{why}")]
-    NoRoom { why: String, largest: Option<f64> },
+    NoRoom {
+        /// Where there was no room, in words.
+        why: String,
+        /// The largest size that builds, where the kernel names one.
+        largest: Option<f64>,
+    },
     /// A numerical step failed: no convergence, a singular system.
     #[error("{0}")]
     Numerical(String),
@@ -242,6 +288,7 @@ pub trait Backend: Send + Sync + 'static {
     /// The form as a record in canonical order, with the history that made it.
     fn export(&self, form: &Self::Form) -> Result<Exported, Self::Error>;
 
+    /// A primitive solid.
     fn primitive(&self, p: &Primitive) -> Result<Self::Form, Self::Error>;
     /// `regions` on `plane`, extruded from `start` to `end` along its normal: one body per region
     /// that stays apart.

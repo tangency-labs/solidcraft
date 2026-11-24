@@ -1,6 +1,6 @@
 //! solidcore's services that the application uses beside the body-making operations: 2D and
 //! curve helpers, projection, hatching, affine maps, sheet development, frame members, the
-//! display plan, STEP's string and parser helpers and CADIR. They read records and data; none
+//! display plan, and STEP's string and parser helpers. They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
 //! The rest of SolidCraft takes them from here, never from solidcore's crates directly: this
@@ -85,11 +85,4 @@ pub mod tess {
 pub mod step {
     pub use solidcore_record::step::p21;
     pub use solidcore_step::write::string;
-}
-
-/// CADIR bodies, read into records and written from them (`solidcore-cadir`).
-pub mod cadir {
-    pub use solidcore_cadir::Written;
-    pub use solidcore_cadir::read_bodies;
-    pub use solidcore_cadir::write_body;
 }
