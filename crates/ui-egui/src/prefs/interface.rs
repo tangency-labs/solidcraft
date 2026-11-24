@@ -111,8 +111,10 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.logo_accent = selected == 1;
                     }
                 });
-                // A theme file another tool writes, reloaded when it changes (#7573).
-                follow_row(app, ui);
+                // A theme file another tool writes, reloaded when it changes (#7573); or the
+                // organization's (the `ThemeFile` policy), which the person cannot change.
+                let locked = app.policy.locks("theme_follow");
+                crate::policy::row(ui, locked, |ui| follow_row(app, ui));
             });
         });
         ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {

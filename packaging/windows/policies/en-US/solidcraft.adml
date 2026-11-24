@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.4" schemaVersion="1.0">
+<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.5" schemaVersion="1.0">
   <displayName>SolidCraft</displayName>
   <description>Settings an organization sets for the people who use SolidCraft on its computers.</description>
   <resources>
@@ -7,6 +7,7 @@
       <string id="SolidCraft">SolidCraft</string>
       <string id="SUPPORTED_SolidCraft_0_44">SolidCraft 0.44 or later</string>
       <string id="SUPPORTED_SolidCraft_0_46">SolidCraft 0.46 or later</string>
+      <string id="SUPPORTED_SolidCraft_0_48">SolidCraft 0.48 or later</string>
       <string id="CheckForUpdates">Check for updates</string>
       <string id="CheckForUpdates_Explain">Controls whether SolidCraft asks GitHub for the latest release at start and once a day.
 
@@ -149,6 +150,16 @@ Disabled: SolidCraft adds itself to no AI app and takes out the entries it added
 Not configured: each person chooses in Preferences.
 
 In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="ThemeFile">Theme file</string>
+      <string id="ThemeFile_Explain">A SolidCraft theme file (.json) that sets the colours for everyone, for example your organization's colours (Preferences, Interface, Theme, Follow a theme file).
+
+Enabled: enter the full path of the file, for example C:\ProgramData\ACME\solidcraft-theme.json or a file on a network share. SolidCraft follows it: its colours replace the chosen theme, and a change to the file shows within a second, without a restart. People cannot stop following it or follow another file, not even with the --theme-file option. Keep the file where people cannot change it.
+
+If the file is missing or is not a theme file, the last theme that loaded stays on, and Preferences says why the file was not applied.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
@@ -179,6 +190,11 @@ In Preferences the setting shows as set by the organization. The person's own ch
       </presentation>
       <presentation id="AiToolbarButton" />
       <presentation id="ConnectAiApps" />
+      <presentation id="ThemeFile">
+        <textBox refId="ThemeFile">
+          <label>Theme file path:</label>
+        </textBox>
+      </presentation>
     </presentationTable>
   </resources>
 </policyDefinitionResources>

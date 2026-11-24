@@ -1373,11 +1373,17 @@ pub fn follow_theme_file_for_run(app: &mut SolveApp, path: &str) -> Result<(), S
     Ok(())
 }
 
+const THEME_FOLLOW_LOCKED: &str = "`theme_follow` is set by your organization's policy and cannot be changed here";
+
 const FOLLOW_UNAVAILABLE: &str = "`theme_follow` is not available in the browser: it follows a file on this computer; import the theme instead";
 
 /// Stop following a theme file: the preference and this run's launch flag. The chosen theme
 /// takes over again, with its own dark or light.
 fn stop_following(app: &mut SolveApp) {
+    // The organization's theme file stays on; the chosen theme waits underneath it.
+    if app.policy.locks("theme_follow") {
+        return;
+    }
     let following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty();
     app.preferences.theme_follow.clear();
     app.prefs_window.follow.launch = None;
@@ -1421,6 +1427,9 @@ fn set_theme_follow(app: &mut SolveApp, value: &serde_json::Value, available: bo
     }
     let path = value.as_str().ok_or("`theme_follow` must be a theme file's path, or \"\" to stop following")?;
     let path = crate::theme_files::follow_path(path)?;
+    if app.policy.locks("theme_follow") {
+        return Err(THEME_FOLLOW_LOCKED.into());
+    }
     if path.is_empty() {
         stop_following(app);
         return Ok(());
@@ -2978,7 +2987,14 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             staged.theme = if gone.base.is_dark() { "dark" } else { "light" }.into();
         }
     }
+    let follow_locked = app.policy.locks("theme_follow");
     match rest.remove("theme_follow") {
+        // Writing back what was read is not a change (as for every other locked preference).
+        Some(value) if follow_locked => {
+            if !crate::policy::unchanged(app, "theme_follow", &value) {
+                return Err(THEME_FOLLOW_LOCKED.into());
+            }
+        }
         Some(value) => {
             if !FOLLOW_AVAILABLE {
                 return Err(FOLLOW_UNAVAILABLE.into());
@@ -2995,7 +3011,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") => {
+        None if rest.contains_key("theme") && !follow_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);

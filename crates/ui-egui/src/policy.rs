@@ -50,6 +50,9 @@ enum Kind {
     Number { max: u32 },
     /// A `REG_SZ`: one of the agent permission modes (`ask`, `edits`, `all`).
     Permission,
+    /// A `REG_SZ`: the path of a theme file to follow, as `theme_follow` takes it (at most
+    /// [`crate::theme_files::MAX_FOLLOW_PATH`] bytes, no control characters, never empty).
+    ThemeFile,
 }
 
 /// A preference an organization can set: the policy's value name, the preference's `ui.prefs`
@@ -74,7 +77,12 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "ReopenDesigns", pref: "reopen_designs", kind: Kind::Switch },
     Lock { policy: "ShowDiscordButton", pref: "show_discord_button", kind: Kind::Switch },
     Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
+    Lock { policy: THEME_FILE, pref: "theme_follow", kind: Kind::ThemeFile },
 ];
+
+/// The theme file everyone on this computer follows: its colours replace the chosen theme, and a
+/// change to the file shows within a second. Locks `theme_follow` and the theme picker.
+pub const THEME_FILE: &str = "ThemeFile";
 
 /// A preference's value, as a policy sets it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -212,6 +220,7 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
         (Kind::Permission, Value::Text(text)) if text.len() <= MAX_CHOICE => {
             crate::agent_chat::agents::Mode::parse(&text.trim().to_ascii_lowercase()).map(|mode| Setting::Text(mode.id().into()))
         }
+        (Kind::ThemeFile, Value::Text(text)) => crate::theme_files::follow_path(text).ok().filter(|path| !path.is_empty()).map(Setting::Text),
         _ => None,
     }
 }
@@ -231,6 +240,7 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "reopen_designs" => Setting::Switch(p.reopen_designs),
         "show_discord_button" => Setting::Switch(p.show_discord_button),
         "show_donate_button" => Setting::Switch(p.show_donate_button),
+        "theme_follow" => Setting::Text(p.theme_follow.clone()),
         _ => return None,
     })
 }
@@ -254,6 +264,7 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("reopen_designs", Setting::Switch(on)) => p.reopen_designs = *on,
         ("show_discord_button", Setting::Switch(on)) => p.show_discord_button = *on,
         ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
+        ("theme_follow", Setting::Text(path)) => p.theme_follow.clone_from(path),
         _ => {}
     }
 }
@@ -364,6 +375,10 @@ pub fn enforce_after_reset(app: &mut SolveApp) {
 fn enforce_keeping(app: &mut SolveApp, keep_own: bool) {
     if app.policy.mandatory.settings.is_empty() {
         return;
+    }
+    // The organization's theme file wins over the `--theme-file` launch flag too.
+    if app.policy.locks("theme_follow") {
+        app.prefs_window.follow.launch = None;
     }
     let mut units = false;
     for (pref, setting) in app.policy.mandatory.settings.clone() {
@@ -748,6 +763,22 @@ mod tests {
     }
 
     #[test]
+    fn the_theme_file_is_one_line_path_and_anything_else_is_not_set() {
+        assert_eq!(one(THEME_FILE, Value::Text(r"  C:\ProgramData\ACME\theme.json ".into())), text(r"C:\ProgramData\ACME\theme.json"));
+        assert_eq!(one(THEME_FILE, Value::Text("/etc/solidcraft/acme-theme.json".into())), text("/etc/solidcraft/acme-theme.json"));
+        for hostile in [
+            Value::Text(String::new()),
+            Value::Text("  ".into()),
+            Value::Text("a\nb".into()),
+            Value::Text("a\u{0}b".into()),
+            Value::Text("x".repeat(5000)),
+            Value::Number(1),
+        ] {
+            assert_eq!(one(THEME_FILE, hostile), None);
+        }
+    }
+
+    #[test]
     fn any_mandatory_value_makes_the_computer_managed_and_a_recommended_one_does_not() {
         crate::i18n::install();
         let _language = solidcraft_ui_text::scope("en");
@@ -878,6 +909,77 @@ mod tests {
             assert_eq!(boxes[0].1.toggled(), Some(if on { Toggled::True } else { Toggled::False }), "{label} shows the organization's value");
         }
         assert!(h.widget("Set by your organization").is_some(), "the rows say who set them");
+    }
+
+    #[test]
+    fn a_theme_file_policy_is_followed_and_cannot_be_stopped_or_changed() {
+        use egui::Color32;
+        use serde_json::json;
+        use solidcraft_theme::Tokens;
+        crate::i18n::install();
+        let dir = std::env::temp_dir().join(format!("solidcraft-policy-theme-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("acme-theme.json");
+        let path = file.to_string_lossy().to_string();
+        let write = |panel: &str| {
+            let text = format!(r##"{{"format":"solidcraft-theme/1","name":"ACME","base":"light","colors":{{"panel":"{panel}"}}}}"##);
+            std::fs::write(&file, text).unwrap();
+        };
+        write("#203040");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        // A file followed with --theme-file gives way to the organization's.
+        let other = dir.join("own.json").to_string_lossy().to_string();
+        std::fs::write(&other, r##"{"format":"solidcraft-theme/1","name":"Own","base":"dark","colors":{"panel":"#010203"}}"##).unwrap();
+        crate::prefs::follow_theme_file_for_run(&mut h.app, &other).unwrap();
+        h.app.policy = Policy::from_json(&json!({ "ThemeFile": path }).to_string());
+        h.frames(2);
+        assert!(h.app.prefs_window.follow.launch.is_none(), "the launch flag no longer applies");
+        assert_eq!(h.app.preferences.theme_follow, path);
+        assert_eq!(Tokens::get().panel, Color32::from_rgb(0x20, 0x30, 0x40), "the organization's colours are on");
+        assert_eq!(saved(&h.app)["theme_follow"], json!(""), "the person's own choice is kept");
+
+        // The control channel refuses to stop following or to follow another file.
+        for value in [json!(""), json!(other)] {
+            let refused = h.call("ui.prefs", json!({ "theme_follow": value }));
+            assert_eq!(refused["ok"], json!(false), "{refused}");
+            assert!(refused["error"].as_str().unwrap_or_default().contains("set by your organization's policy"), "{refused}");
+        }
+        let read = h.call("ui.prefs", json!({}));
+        assert_eq!(h.call("ui.prefs", json!({ "theme_follow": read["result"]["theme_follow"] }))["ok"], json!(true), "sending back what was read is no change");
+        // Picking a theme records the person's choice and keeps following the file.
+        let picked = h.call("ui.prefs", json!({"theme": "dark"}));
+        assert_eq!(picked["result"]["theme_followed"].as_str(), Some(path.as_str()), "{picked}");
+        h.frames(2);
+        assert_eq!(Tokens::get().panel, Color32::from_rgb(0x20, 0x30, 0x40));
+
+        // The organization replaces the file: shown without a restart.
+        write("#506070");
+        h.frames(70);
+        assert_eq!(Tokens::get().panel, Color32::from_rgb(0x50, 0x60, 0x70));
+        // A missing file keeps the last good theme and says why.
+        std::fs::remove_file(&file).unwrap();
+        h.frames(70);
+        assert_eq!(Tokens::get().panel, Color32::from_rgb(0x50, 0x60, 0x70));
+        let out = h.call("ui.prefs", json!({}));
+        assert!(out["result"]["theme_follow_error"].is_string(), "{out}");
+        assert!(out["result"]["policy"]["locked"].as_array().is_some_and(|l| l.contains(&json!("theme_follow"))), "{out}");
+
+        // Preferences shows the row greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Appearance"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "prefs:theme_follow_toggle");
+        assert!(h.widget("Set by your organization").is_some(), "the row says who set it");
+        let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+        let boxes: Vec<_> = tree
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == egui::accesskit::Role::CheckBox && n.label() == Some("Follow a theme file"))
+            .collect();
+        assert_eq!(boxes.len(), 1);
+        assert!(boxes[0].1.is_disabled(), "the follow row is locked");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
