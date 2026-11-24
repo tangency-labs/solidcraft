@@ -2783,6 +2783,34 @@ fn a_hole_position_edited_with_an_expression_follows_it() {
     assert_eq!(s.model.result(id).and_then(|r| r.error.clone()), None, "the hole rebuilds");
 }
 
+/// #11258: a feature name belongs to the component that holds it. Two components may hold
+/// features with the same name, and a name already taken inside the same component is still
+/// refused.
+#[test]
+fn two_components_may_hold_features_with_the_same_name() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Left"}));
+    let left = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Mid"}))["feature"].as_u64().unwrap();
+    run(&mut s, "component.create", json!({"name": "Right", "parent": 0}));
+    let right = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Mid"}))["feature"].as_u64().unwrap();
+    assert_ne!(s.doc.feature(left).unwrap().component, s.doc.feature(right).unwrap().component, "the two planes are in two components");
+    assert_eq!(s.doc.feature(left).unwrap().name, "Mid");
+    assert_eq!(s.doc.feature(right).unwrap().name, "Mid");
+    // A name another component holds is free in this one: a rename takes it.
+    let other = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 30, "name": "Upper"}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.feature(other).unwrap().component, s.doc.feature(right).unwrap().component);
+    run(&mut s, "timeline.rename", json!({"feature": other, "name": "Left's plane"}));
+    assert_eq!(s.doc.feature(other).unwrap().name, "Left's plane");
+    // A name the same component holds is still refused.
+    let error = s.execute("timeline.rename", &json!({"feature": other, "name": "Mid"})).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `Mid`"), "{error}");
+    assert_eq!(s.doc.feature(other).unwrap().name, "Left's plane");
+    // The name finds the feature of the component that asks for it.
+    run(&mut s, "timeline.rename", json!({"feature": "Mid", "name": "Middle"}));
+    assert_eq!(s.doc.feature(right).unwrap().name, "Middle", "the plane of the active component is renamed");
+    assert_eq!(s.doc.feature(left).unwrap().name, "Mid", "the plane of the other component keeps its name");
+}
+
 /// `select.mode` (#4255) names every selection mode and gives it back; anything else is refused.
 /// A window setting: the design, its history and the selection are untouched.
 #[test]
