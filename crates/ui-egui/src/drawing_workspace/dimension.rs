@@ -92,6 +92,9 @@ struct Preview {
     at: Vec2,
     /// The dimension alone on its sheet, as the sheet will draw it once placed.
     marks: Option<crate::drawing_sheet_page::Marks>,
+    /// Why the engine won't place it here, when it won't (#20181): the panel says so before the
+    /// click, where the preview would otherwise just be missing.
+    refused: Option<String>,
 }
 
 /// What a stroke drawn on paper is: one line (its pieces on one line, as hidden-line removal
@@ -238,15 +241,36 @@ pub(crate) fn kind_for(app: &SolveApp, picks: &[Picked], at: Vec2) -> Option<Val
 
 pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let picked = app.drawing_workspace.dimension.as_ref().is_some_and(|draft| !draft.picks.is_empty());
-    let key = if picked { "ui.drawing_dimension_tool.place" } else { "ui.drawing_dimension_tool.pick" };
+    let refused = refusal(app).map(str::to_owned);
+    let key = match (picked, &refused) {
+        (true, Some(_)) => "ui.drawing_dimension_tool.refused",
+        (true, None) => "ui.drawing_dimension_tool.place",
+        (false, _) => "ui.drawing_dimension_tool.pick",
+    };
+    let text = match &refused {
+        Some(reason) => solidcraft_ui_text::format(key, &[("reason", reason)]),
+        None => solidcraft_ui_text::tr(key),
+    };
     let close = super::inset(ui, |ui| {
-        ui_kit::text(ui, solidcraft_ui_text::tr(key), ui_kit::Text::Note(key));
+        ui_kit::text(ui, text, ui_kit::Text::Note(key));
         ui.separator();
         ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), Button::Normal).clicked()
     });
     if close {
         close_panel(app);
     }
+}
+
+/// Why the dimension can't go where the pointer is, as the engine says, while it can't (#20181).
+pub(crate) fn refusal(app: &SolveApp) -> Option<&str> {
+    app.drawing_workspace.dimension.as_ref()?.preview.as_ref()?.refused.as_deref()
+}
+
+/// The engine's reason without the command's name in front, in the user's language where known.
+fn reason(error: &solidcraft_engine::EngineError) -> String {
+    let text = error.to_string();
+    let prefix = format!("invalid parameters for `{COMMAND}`: ");
+    crate::i18n::tr_diagnostic(text.strip_prefix(&prefix).unwrap_or(&text))
 }
 
 /// Whether the tool has picked something for the dimension it is making.
@@ -285,8 +309,10 @@ fn params_for(app: &SolveApp, draft: &Draft, at: Vec2) -> Option<Value> {
 /// group from the same layout, at its paper size, so the preview is what the click places.
 fn preview(app: &mut SolveApp, draft: &Draft, at: Vec2) -> Option<Preview> {
     let params = params_for(app, draft, at)?;
-    let scene = solidcraft_engine::cmd::drawing_dimension_preview(&app.session, &params).ok();
-    Some(Preview { at, marks: scene.map(|scene| crate::drawing_sheet_page::Marks::of(&scene, 0, PREVIEW_TOLERANCE_MM)) })
+    Some(match solidcraft_engine::cmd::drawing_dimension_preview(&app.session, &params) {
+        Ok(scene) => Preview { at, marks: Some(crate::drawing_sheet_page::Marks::of(&scene, 0, PREVIEW_TOLERANCE_MM)), refused: None },
+        Err(error) => Preview { at, marks: None, refused: Some(reason(&error)) },
+    })
 }
 
 /// Paints a picked edge's stroke, so the picks show.
@@ -341,18 +367,25 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
             // A first pick, or another edge of the same view as the first.
             (None, Some((view, picked))) => draft = Some(Draft { sheet, revision, view, picks: vec![picked], preview: None }),
             (Some(d), Some((view, picked))) if view == d.view && !d.picks.iter().any(|p| p.same(&picked)) => {
-                d.picks.push(picked);
-                d.preview = None;
-            }
-            // Anywhere else: the dimension the picks make goes where the pointer is.
-            (Some(d), _) => {
-                if let Some(params) = params_for(app, d, point) {
-                    match app.run(COMMAND, params) {
-                        Ok(_) => draft = None,
-                        Err(error) => app.set_status(error, true),
-                    }
+                // A second pick that makes no dimension with the first is refused with a reason,
+                // rather than taken and then a place on the sheet asked for in vain (#20181).
+                let mut picks = d.picks.clone();
+                picks.push(picked);
+                if kind_for(app, &picks, point).is_some() {
+                    d.picks = picks;
+                    d.preview = None;
+                } else {
+                    app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"), true);
                 }
             }
+            // Anywhere else: the dimension the picks make goes where the pointer is.
+            (Some(d), _) => match params_for(app, d, point) {
+                Some(params) => match app.run(COMMAND, params) {
+                    Ok(_) => draft = None,
+                    Err(error) => app.set_status(error, true),
+                },
+                None => app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"), true),
+            },
             (None, None) => {}
         }
     }
