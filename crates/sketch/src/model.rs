@@ -866,6 +866,34 @@ pub struct Sketch {
     pub view: SketchView,
 }
 
+impl Sketch {
+    /// Everything of the sketch a numerical solve's residuals can read besides its constraints
+    /// (which a solve reads through its residual blocks, with the values it is solving for), as
+    /// text that tells any two such states apart: for remembering the solver's runs
+    /// (`solver::lm_memo`). Every field is named, so a new one has to be decided on here.
+    pub(crate) fn solve_fingerprint(&self) -> String {
+        let Sketch {
+            points,
+            curves,
+            constraints: _,
+            patterns,
+            links,
+            offsets,
+            freeform_offsets,
+            freeform_chain_offsets,
+            wires,
+            wire_constraints,
+            wires_joined,
+            equations,
+            counters: _,
+            view: _,
+        } = self;
+        format!(
+            "{points:?}{curves:?}{patterns:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}"
+        )
+    }
+}
+
 fn is_default_view(v: &SketchView) -> bool {
     *v == SketchView::default()
 }
