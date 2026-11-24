@@ -489,7 +489,7 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
-    s.selection.clear();
+    s.clear_selection();
     // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
     if display_only {
         s.refresh_display();
@@ -600,7 +600,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if s.active_component != 0 && !s.doc.components.iter().any(|c| c.id == s.active_component) {
         s.active_component = 0;
     }
-    s.selection.clear();
+    s.clear_selection();
     s.refresh();
     let failing: Vec<FailingFeature> = s
         .model
@@ -1077,7 +1077,7 @@ fn step_marker(s: &mut Session, cmd: &str, direction: i32) -> Result<Value> {
         k if k < n => Some(k),
         _ => None,
     };
-    s.selection.clear();
+    s.clear_selection();
     reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
 }
 
@@ -1124,7 +1124,7 @@ fn move_marker(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         Some(k) if k < n => Some(k),
         _ => None,
     };
-    s.selection.clear();
+    s.clear_selection();
     reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
 }
 
@@ -1891,9 +1891,21 @@ fn selection_item(s: &Session, value: Value) -> Result<Sel> {
     Ok(if face { Sel::Face { body, index, point } } else { Sel::Edge { body, index, point } })
 }
 
+/// The most items a selection lists: `select.set` refuses more, and Select All lists the shown
+/// bodies up to this many. Above it Select All selects them as a scope
+/// ([`Session::selection_all_bodies`]) instead of a list.
+pub(crate) const MAX_SELECTION: usize = 10_000;
+
+/// Select All's bodies: the shown ones as a list, as always, up to [`MAX_SELECTION`]; `None` when
+/// there are more, for the whole-body scope.
+pub(crate) fn listed_bodies(shown: impl Iterator<Item = Sel>) -> Option<Vec<Sel>> {
+    let listed: Vec<Sel> = shown.take(MAX_SELECTION + 1).collect();
+    (listed.len() <= MAX_SELECTION).then_some(listed)
+}
+
 fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     let items = p.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
-    if items.len() > 10_000 {
+    if items.len() > MAX_SELECTION {
         return Err(bad("select.set", "too many items"));
     }
     let mut sel: Vec<Sel> = Vec::new();
@@ -1921,9 +1933,22 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         sel.push(one);
     }
-    if !bool_(p, "add").unwrap_or(false) {
+    if bool_(p, "add").unwrap_or(false) {
+        if s.all_bodies_selected() {
+            // Adding shown bodies to a whole-body selection changes nothing: the scope stays,
+            // without listing its bodies. Anything else is added to the bodies it covers.
+            if sel.iter().all(|x| matches!(x, Sel::Body { name } if s.body_visible(name))) {
+                s.refresh_display();
+                return reply("select.set", SelectSetResult { selected: s.selected_count()?, param_warnings: Vec::new() });
+            }
+            s.selection = s.selected_items()?;
+        }
+    } else {
         s.selection.clear();
     }
+    // Named items replace the whole-body scope (only once every item checked out, so a refused
+    // select leaves the selection as it was).
+    s.selection_all_bodies = false;
     for x in sel {
         if !s.selection.contains(&x) {
             s.selection.push(x);
@@ -2045,6 +2070,7 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
     if drawing.is_none() && request.sheet.is_some() {
         return Err(bad("select.all", "sheet: only with a drawing open"));
     }
+    let mut whole_bodies = false;
     let all: Vec<Sel> = match (s.active_sketch, drawing) {
         (None, Some(open)) => {
             let d = s.drawing("select.all")?;
@@ -2059,7 +2085,7 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
                 .chain(&on.balloons)
                 .chain(&on.notes)
                 .filter(|object| d.has_object(**object))
-                .take(10_001)
+                .take(MAX_SELECTION + 1)
                 .map(|object| Sel::Drawing { drawing: open, object: *object })
                 .collect()
         }
@@ -2077,27 +2103,33 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
                             .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
                             .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
                     )
-                    .take(10_001)
+                    .take(MAX_SELECTION + 1)
                     .collect()
             }
             None => {
+                // The shown bodies, listed, as on any design; past the cap a list would be refused
+                // (and slow to show), so they are selected as a scope: see
+                // `Session::selection_all_bodies`.
                 let hidden = &s.visibility.hidden_bodies;
-                s.world_state()?
-                    .bodies
-                    .iter()
-                    .filter(|b| !hidden.contains(&b.name))
-                    .take(10_001)
-                    .map(|b| Sel::Body { name: b.name.clone() })
-                    .collect()
+                let st = s.world_state()?;
+                match listed_bodies(st.bodies.iter().filter(|b| !hidden.contains(&b.name)).map(|b| Sel::Body { name: b.name.clone() })) {
+                    Some(listed) => listed,
+                    None => {
+                        whole_bodies = true;
+                        Vec::new()
+                    }
+                }
             }
         },
     };
-    if all.len() > 10_000 {
+    if all.len() > MAX_SELECTION {
         return Err(bad("select.all", "too many items"));
     }
     s.selection = all;
+    s.selection_all_bodies = whole_bodies;
     s.refresh_display();
-    reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
+    let selected = s.selected_count()?;
+    reply("select.all", SelectSetResult { selected, param_warnings: Vec::new() })
 }
 
 fn select_mode(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -2115,7 +2147,13 @@ pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
 /// body selected together with faces or edges of it is the body they invert in, not a body to
 /// swap for the others. Bodies swap for the other shown bodies. Other items stay as they are.
 fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
-    const MAX: usize = 10_000;
+    const MAX: usize = MAX_SELECTION;
+    // Select All holds every shown body: inverted, nothing shown is left to select.
+    if s.all_bodies_selected() {
+        s.clear_selection();
+        s.refresh_display();
+        return reply("select.invert", SelectSetResult { selected: 0, param_warnings: Vec::new() });
+    }
     let state = s.world_state()?;
     let mut picked_faces: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     let mut picked_edges: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
@@ -2173,12 +2211,13 @@ fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
         return Err(bad("select.invert", "too many items"));
     }
     s.selection = sel;
+    s.selection_all_bodies = false;
     s.refresh_display();
     reply("select.invert", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
-    s.selection.clear();
+    s.clear_selection();
     s.refresh_display();
     reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }
@@ -2722,6 +2761,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let FeatureKind::SurfaceRevolve { faced, .. } = &old.kind
         && cid == "surface.revolve"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("faced").or_insert_with(|| json!(faced));
+    }
+    if let FeatureKind::SurfaceLoft { faced, .. } = &old.kind
+        && cid == "surface.loft"
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("faced").or_insert_with(|| json!(faced));

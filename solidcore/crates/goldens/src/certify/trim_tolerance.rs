@@ -200,7 +200,11 @@ fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
 ///   tolerance moves its estimate): the new value is within [`MASS_ACCURACY`] of its scale of
 ///   every point of a certified enclosure of the exact property of the body
 ///   (`mass::enclosure::enclose_mass_properties`), so of the exact value, the accuracy the
-///   runner asks ([`MassBands`]); EQUAL at the case's own accuracy, PROVEN;
+///   runner asks ([`MassBands`]); EQUAL at the case's own accuracy, PROVEN
+///   (`stubs4-delete-edge-bottle-e8-r0.1`'s centroid x, `Izz` and products zx and xy also
+///   carry, by at most 1e-15, the move of the integration's origin, the middle of the body's
+///   exact box, 1.53e-5 in x once the round's exact box divides at its net's knots and no
+///   longer counts a point outside the face: checked the same way);
 /// - `padding`: a box coordinate padded by an edge's tolerance (`query.brep`'s tight box
 ///   expanded by its entities' tolerances): it moved inward by exactly a moved edge's
 ///   `o - n` (to four units in the last place), that edge certified as every other;

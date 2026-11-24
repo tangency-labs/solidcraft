@@ -2120,10 +2120,16 @@ const FILLET_MAIN: [u64; 29] = [
 /// integrator fits the trims it integrates over to the edges' tolerances);
 /// [`BOTTLE_E8_BEFORE`] holds main's bits and
 /// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
-/// within the case's accuracy of a certified enclosure of the exact properties. WR-732's
-/// retirement (#18934) moves entry 14's area and its tenth value again (from
-/// `0x40408bcce08a27a7` and `0x3f6aed5192670b82`, 4.5e-9 of the area); that proof holds the
-/// new values within the accuracy as well.
+/// within the case's accuracy of a certified enclosure of the exact properties. The round's
+/// exact box dividing at its net's knots (`query::face::p3::face_directed_max_with`) moves
+/// entry 14's centroid x, `Izz` and products zx and xy (3, 8, 10, 11) by at most 1e-15: the
+/// round's (face 17's) tight box no longer counts a point outside the face, so its least x
+/// is its edges' (-1.0899095252927, was -1.0899401372791), the body's exact box's least x is
+/// the side wall's and its middle, the integration's origin, moves 1.53e-5 in x; that test
+/// holds the new values within the accuracy of the enclosure too. WR-732's retirement
+/// (#18934) moves entry 14's area and its tenth value again (from `0x40408bcce08a27a7` and
+/// `0x3f6aed5192670b82`, 4.5e-9 of the area); that proof holds the new values within the
+/// accuracy as well.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -2182,7 +2188,7 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
             0x40408bccdf46e312,
             0x402621896ddff26a,
             0x402621896ddff26a,
-            0x3f10d1d4e45e31cd,
+            0x3f10d1d4e45e2340,
             0x3f13efa0c2faa837,
             0x4000a10fe9b1ffdc,
             0x4050316570dd0323,

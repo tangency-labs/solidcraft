@@ -2342,6 +2342,12 @@ pub enum FeatureKind {
         /// How the rails reshape the sections between.
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
+        /// The walls through planar sketch sections face the side Surface Extrude's would at the
+        /// first section: out of the region closed sections bound, as a solid loft's faces do,
+        /// and along an open section's direction crossed with its sketch normal. New surface
+        /// lofts save it; designs saved before it keep each wall along its skinned surface's normal.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        faced: bool,
     },
     /// The faces at `faces` copied out at a signed `distance` along their normals as a new
     /// surface body (0 copies them); `chain` takes each pick's whole smooth chain of faces;
@@ -4272,9 +4278,10 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
-    /// Set in a file saved without the bodies of its linked designs (`file.save`'s
-    /// `linked_bodies: false`): the Import feature of each link is saved with no STEP text and no
-    /// records, and opening the design reads those bodies from the linked files again. Only the
+    /// Set in a file saved without the bodies of its linked designs and linked STEP files
+    /// (`file.save`'s `linked_bodies: false`): the Import feature of each link is saved with no
+    /// STEP text and no records, the Mesh Import feature beside a linked design's link with no
+    /// meshes, and opening the design reads those bodies from the linked files again. Only the
     /// file carries it: the session keeps the choice, and a design in memory always holds the
     /// bodies it could read.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

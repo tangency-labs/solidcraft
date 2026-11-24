@@ -8026,10 +8026,16 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
 /// component under the opening (#17358). A body the hole cuts further along the axis still takes
 /// it. When the hole cuts every body, or none, every body counts.
 pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
+    let scope = hole_drill_scope(f);
+    // A spot already on a named solid's face stays there. Prove that before asking a
+    // nearby reference mesh to classify the spot or intersect the drill axis.
+    if !scope.is_empty() && st.bodies.iter().any(|b| b.body.is_mesh()) && on_a_brep_face(st, p, scope) {
+        return p;
+    }
     let anywhere = hole_on_surface(st, p, dir, &[]);
     // `hole_on_surface` hands `p` itself back when `p` is on a body's boundary (or meets no body
     // at all); the B-rep also says whether it is on a face within the chord tolerance.
-    if anywhere == p || on_a_brep_face(st, p) {
+    if anywhere == p || on_a_brep_face(st, p, &[]) {
         return p;
     }
     let targets = hole_targets(st, f);
@@ -8044,9 +8050,9 @@ pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
 /// ([`ModelBody::display_tol`], so the face's mesh is within reach): solidcore decides it on the
 /// face's surface and trim ([`solidcraft_kernel::Body::point_lies_on_face`]); the mesh only
 /// names the faces to ask.
-fn on_a_brep_face(st: &ModelState, p: Vec3) -> bool {
+fn on_a_brep_face(st: &ModelState, p: Vec3, scope: &[String]) -> bool {
     let reach = st.bodies.iter().map(ModelBody::display_tol).fold(0.0, f64::max);
-    faces_near(st, p, reach, &[])
+    faces_near(st, p, reach, scope)
         .into_iter()
         .any(|(_, i, face, _)| st.bodies.get(i).is_some_and(|b| matches!(b.body.point_lies_on_face(face as usize, p, b.display_tol()), Ok(Some(_)))))
 }
@@ -8346,16 +8352,15 @@ fn hole_feature_tools(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
         return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
     }
     let kept_inside = !hole_from_inside(doc, f);
+    let mesh_scope = hole_mesh_scope(st, hole_drill_scope(f));
     let mut tools = Vec::new();
     for spot in spots {
         let depth = hole_depth_to(st, &spot.at, dir, &to.map(Vec3::from), depth)?;
         let prefix = spot.point.map(hole_point_role);
         tools.extend(
-            hole_tools_and_prisms(vals, st, &spot.at, dir, diameter, &depth, hole, kept_inside)?.into_iter().map(|(tool, prism)| HoleTool {
-                traced: tool.with_part_prefix(prefix.as_deref()),
-                prism,
-                point_role: prefix.clone(),
-            }),
+            hole_tools_and_prisms(vals, st, &spot.at, dir, diameter, &depth, hole, kept_inside, mesh_scope)?
+                .into_iter()
+                .map(|(tool, prism)| HoleTool { traced: tool.with_part_prefix(prefix.as_deref()), prism, point_role: prefix.clone() }),
         );
     }
     Ok(tools)
@@ -8386,11 +8391,17 @@ fn may_hold(b: &ModelBody, p: Vec3) -> bool {
         && (bb.min.z - pad..=bb.max.z + pad).contains(&p.z)
 }
 
-/// Where a hole meets the part at `p`: the exact class of `p` in each body that [`may_hold`] it.
-/// The other bodies are outside and are not classified: in a design of many parts, classifying
-/// `p` in each one cost far more than the hole (#19946).
-fn hole_point_classes(st: &ModelState, p: Vec3) -> impl Iterator<Item = kernel::Result<kernel::PointClass>> + '_ {
-    st.bodies.iter().filter(move |b| may_hold(b, p)).map(move |b| {
+/// Use explicit cut targets to decide which meshes take part in material checks. A
+/// Combine can consume a target and the cut can follow it to its new body, so retain the
+/// full set when any name is missing. An empty scope also covers all-body and implicit cuts.
+fn hole_mesh_scope<'a>(st: &ModelState, targets: &'a [String]) -> &'a [String] {
+    if targets.iter().all(|name| st.body(name).is_some()) { targets } else { &[] }
+}
+
+/// The exact class of `p` in bodies whose bounds [`may_hold`] it. Other solids can back
+/// the cut at its exit. Mesh bodies take part when the hole's scope includes them (#21255).
+fn hole_point_classes<'a>(st: &'a ModelState, p: Vec3, mesh_scope: &'a [String]) -> impl Iterator<Item = kernel::Result<kernel::PointClass>> + 'a {
+    st.bodies.iter().filter(move |b| (!b.body.is_mesh() || in_hole_scope(mesh_scope, b)) && may_hold(b, p)).map(move |b| {
         #[cfg(test)]
         cost_tests::count(|c| c.hole_points += 1);
         b.body.classify_point(p)
@@ -8522,8 +8533,9 @@ fn hole_tools_and_prisms(
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
     kept_inside: bool,
+    mesh_scope: &[String],
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
-    let reach = hole_reach(vals, st, position, dir, diameter, depth, hole, kept_inside)?;
+    let reach = hole_reach(vals, st, position, dir, diameter, depth, hole, kept_inside, mesh_scope)?;
     hole_tools_reaching(vals, st, position, dir, diameter, depth, hole, &reach)
 }
 
@@ -8568,6 +8580,7 @@ fn hole_reach(
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
     kept_inside: bool,
+    mesh_scope: &[String],
 ) -> Result<HoleReach> {
     let r = val(vals, diameter, Kind::Length)? / 2.0;
     if !(r > 1e-6) {
@@ -8579,7 +8592,7 @@ fn hole_reach(
     // #11538) starts there: the reach above a face, there so the tool's top never lies on that
     // face, would cut the material above the plane. Judged at the spot itself, so a plane just
     // under a face keeps the thin roof above it.
-    if kept_inside && hole_point_classes(st, *position).any(|c| matches!(c, Ok(kernel::PointClass::Inside))) {
+    if kept_inside && hole_point_classes(st, *position, mesh_scope).any(|c| matches!(c, Ok(kernel::PointClass::Inside))) {
         top = size * 1e-4;
     }
     // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
@@ -8612,7 +8625,7 @@ fn hole_reach(
     // cannot tell.
     let at = |h: f64| *position + dir * (-h);
     let eps = size * 1e-6;
-    let classes = |h: f64| hole_point_classes(st, at(h)).collect::<std::result::Result<Vec<_>, _>>();
+    let classes = |h: f64| hole_point_classes(st, at(h), mesh_scope).collect::<std::result::Result<Vec<_>, _>>();
     let exits = depth.is_some()
         && classes(bottom + eps).is_ok_and(|c| c.contains(&kernel::PointClass::Inside))
         && classes(bottom - eps).is_ok_and(|c| c.iter().all(|c| *c == kernel::PointClass::Outside));
@@ -8724,7 +8737,7 @@ fn hole_tools_reaching(
                 // must end inside a body (exact classification), short of the exit face.
                 if depth.is_none() {
                     let past = *position + dir * (dc + 2.0 * layer + size * 1e-6);
-                    let classes = hole_point_classes(st, past).collect::<std::result::Result<Vec<_>, _>>()?;
+                    let classes = hole_point_classes(st, past, &[]).collect::<std::result::Result<Vec<_>, _>>()?;
                     if !classes.contains(&kernel::PointClass::Inside) {
                         return Err(bridge_too_deep(layer, "make the counterbore shallower or the bridge thinner"));
                     }
@@ -12597,6 +12610,7 @@ fn replay(
             let prefixes: Vec<_> = spots.iter().map(|spot| spot.point.map(hole_point_role)).collect();
             let shown = if named_from.is_some() { targets_as_shown(st, src, &targets)? } else { from };
             let st: &ModelState = &shown;
+            let mesh_scope = hole_mesh_scope(st, if targets.is_empty() { hole_drill_scope(f) } else { &targets });
             // Copies start where the original does (#11538).
             let from_inside = hole_from_inside(doc, src);
             // A hole at sketch points drills into the material, judged at each copy's spots as
@@ -12643,7 +12657,7 @@ fn replay(
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     reach_of.push(depth.as_ref().map_or(Ok(f64::INFINITY), |e| val(vals, e, Kind::Length))?);
-                    let reach = hole_reach(vals, st, &at, d, diameter, &depth, hole, !from_inside)?;
+                    let reach = hole_reach(vals, st, &at, d, diameter, &depth, hole, !from_inside, mesh_scope)?;
                     let tools = match built.as_ref().filter(|b| movable && b.dir == d && b.depth == depth && b.reach.moves_to(&reach)) {
                         Some(b) => {
                             let to_here = translation(at - b.at);
@@ -15307,7 +15321,7 @@ fn eval_feature_kind(
             // A linked design's bodies left out of the file, and not read back when it opened.
             if records.is_none() && step.is_empty() && doc.links.values().any(|link| link.feature == f.id) {
                 return Err(DocError::Invalid(format!(
-                    "the bodies of the linked design {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
+                    "the bodies of the linked file {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
                 )));
             }
             let (imp, digest) = match records {
