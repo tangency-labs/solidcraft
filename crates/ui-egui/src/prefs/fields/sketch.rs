@@ -140,7 +140,6 @@ macro_rules! sketch_preferences {
             sketch_open_look_at: bool = true, PAGE_SKETCH;
             /// Reopen an edited sketch at its last view or only its last finished view (#18998).
             /// Face retains the existing behaviour; new sketches always use the old choice.
-            sketch_open_view: SketchOpenView = SketchOpenView::default(), PAGE_SKETCH;
             /// Snap a drawing point to where the two most recent centre or midpoint guides cross.
             /// Off: the guides stay visual and the cursor does not move (#8694).
             sketch_recent_snap: bool = false, PAGE_SKETCH;

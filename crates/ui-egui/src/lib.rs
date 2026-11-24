@@ -478,6 +478,10 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Which camera to reuse when reopening an existing sketch; chosen in the Sketch Palette.
+    /// The saved design and Preferences remain unchanged.
+    #[serde(skip)]
+    pub sketch_open_view: sketch_palette::SketchOpenView,
     /// Dark theme (the default); a preference kept between runs.
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
@@ -524,6 +528,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            sketch_open_view: Default::default(),
             dark: true,
             pick_off: Vec::new(),
             render_pick: "face".into(),
@@ -3469,7 +3474,7 @@ impl SolveApp {
         // The preference only changes how a person opens an existing sketch.
         // Scripted edits and new sketches retain the previous view behaviour.
         let remembered = if turn {
-            self.sketch_last_views.to_open(sketch, self.preferences.sketch_open_view).filter(|camera| camera.up == self.ui.up_axis)
+            self.sketch_last_views.to_open(sketch, self.ui.sketch_open_view).filter(|camera| camera.up == self.ui.up_axis)
         } else {
             None
         };

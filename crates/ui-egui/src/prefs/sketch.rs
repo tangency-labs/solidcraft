@@ -319,16 +319,6 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
             Some("prefs.sketch_open_look_at_note"),
             &mut app.preferences.sketch_open_look_at,
         );
-        ui_kit::row(ui, app.tr("prefs.sketch_open_view"), |ui| {
-            let mut selected = SketchOpenView::ALL.iter().position(|choice| *choice == app.preferences.sketch_open_view).unwrap_or(0);
-            let choices = SketchOpenView::ALL.map(|choice| app.tr(choice.label_id()));
-            let response =
-                ui_kit::dropdown(ui, "sketch_open_view", &mut selected, &choices).backing_on_hover_text(app.tr("prefs.sketch_open_view_note"));
-            crate::scenario::publish_target("prefs:sketch_open_view", response.rect);
-            if let Some(choice) = SketchOpenView::ALL.get(selected) {
-                app.preferences.sketch_open_view = *choice;
-            }
-        });
         check(
             ui,
             "escape_twice_finishes_sketch",

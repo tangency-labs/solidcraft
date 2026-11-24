@@ -809,18 +809,18 @@ mod open_view_preference {
 /// per-design view state in the running app, never an edit to the sketch's saved geometry.
 mod remembered_sketch_views {
     use super::*;
-    use crate::prefs::SketchOpenView;
+    use crate::sketch_palette::SketchOpenView;
     use crate::scenario::Harness;
     use solidcraft_engine::Session;
 
     #[test]
     fn three_modes_keep_the_old_default_and_distinguish_finish_from_cancel() {
-        assert_eq!(crate::prefs::Prefs::default().sketch_open_view, SketchOpenView::Face);
+        assert_eq!(crate::UiState::default().sketch_open_view, SketchOpenView::Face);
         let mut h = Harness::new();
         h.app = sample_app();
         h.app.home.open = false;
         let id = first_sketch(&h.app);
-        h.app.preferences.sketch_open_view = SketchOpenView::LastFinished;
+        h.app.ui.sketch_open_view = SketchOpenView::LastFinished;
 
         // The first edit of this sketch still faces the sketch: it has no saved camera.
         h.app.edit_sketch(id);
@@ -849,19 +849,19 @@ mod remembered_sketch_views {
         assert_eq!(h.app.sketch_last_views.finished.get(&id), Some(&finished), "Cancel never replaces a finished view");
 
         // Last uses a cancelled edit's camera; LastFinished ignores it.
-        h.app.preferences.sketch_open_view = SketchOpenView::Last;
+        h.app.ui.sketch_open_view = SketchOpenView::Last;
         h.app.edit_sketch(id);
         assert_eq!(h.app.settled_cam(), cancelled);
         h.app.cancel_sketch();
         h.settle();
-        h.app.preferences.sketch_open_view = SketchOpenView::LastFinished;
+        h.app.ui.sketch_open_view = SketchOpenView::LastFinished;
         h.app.edit_sketch(id);
         assert_eq!(h.app.settled_cam(), finished);
         h.app.finish_sketch();
         h.settle();
 
         // The current default can be chosen again and still faces the plane.
-        h.app.preferences.sketch_open_view = SketchOpenView::Face;
+        h.app.ui.sketch_open_view = SketchOpenView::Face;
         h.app.edit_sketch(id);
         assert_ne!(h.app.settled_cam(), finished);
         h.app.finish_sketch();
@@ -873,7 +873,7 @@ mod remembered_sketch_views {
         let mut h = Harness::new();
         h.app = sample_app();
         h.app.home.open = false;
-        h.app.preferences.sketch_open_view = SketchOpenView::Last;
+        h.app.ui.sketch_open_view = SketchOpenView::Last;
         let id = first_sketch(&h.app);
         h.app.edit_sketch(id);
         h.app.cam = h.app.settled_cam();
@@ -896,7 +896,7 @@ mod remembered_sketch_views {
         h.app = sample_app();
         h.app.home.open = false;
         let id = first_sketch(&h.app);
-        h.app.preferences.sketch_open_view = SketchOpenView::Last;
+        h.app.ui.sketch_open_view = SketchOpenView::Last;
         h.app.preferences.sketch_open_look_at = false;
         let before = h.app.settled_cam();
         let mut stale = before;
@@ -944,21 +944,18 @@ mod remembered_sketch_views {
     }
 
     #[test]
-    fn the_open_view_choice_is_a_saved_preference_and_refuses_unknown_modes() {
+    fn sketch_open_view_mode_is_session_scoped_and_keeps_face_as_default() {
         use serde_json::json;
         let mut h = Harness::new();
+        assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Face);
         assert_eq!(serde_json::to_value(SketchOpenView::Face).unwrap(), json!("face"));
         assert_eq!(serde_json::to_value(SketchOpenView::Last).unwrap(), json!("last"));
         assert_eq!(serde_json::to_value(SketchOpenView::LastFinished).unwrap(), json!("last_finished"));
-        for choice in ["last", "last_finished", "face"] {
-            let changed = h.call("ui.prefs", json!({"sketch_open_view":choice}));
-            assert_eq!(changed["ok"], true, "{changed}");
-            assert_eq!(serde_json::to_value(h.app.preferences.sketch_open_view).unwrap(), json!(choice));
-        }
-        let refused = h.call("ui.prefs", json!({"sketch_open_view":"never"}));
-        assert_eq!(refused["ok"], false, "{refused}");
-        assert_eq!(h.app.preferences.sketch_open_view, SketchOpenView::Face);
+        h.app.ui.sketch_open_view = SketchOpenView::Last;
+        assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Last);
+        assert_eq!(crate::UiState::default().sketch_open_view, SketchOpenView::Face);
     }
+
 }
 
 #[test]

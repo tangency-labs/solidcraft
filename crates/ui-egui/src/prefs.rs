@@ -795,32 +795,6 @@ impl TrackpadZoomModifier {
     }
 }
 
-/// Which saved camera, if any, a sketch reuses when it opens (#18998). Recorded cameras are
-/// scoped to the open design; on a first edit with no record it faces the sketch as before.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SketchOpenView {
-    /// The existing behaviour: turn to face the sketch if the separate look-at option is on.
-    #[default]
-    Face,
-    /// Use the view left at Finish or Cancel.
-    Last,
-    /// Use only the last view left at Finish; Cancel does not replace it.
-    LastFinished,
-}
-
-impl SketchOpenView {
-    pub const ALL: [Self; 3] = [Self::Face, Self::Last, Self::LastFinished];
-
-    pub fn label_id(self) -> &'static str {
-        match self {
-            Self::Face => "prefs.sketch_open_view.face",
-            Self::Last => "prefs.sketch_open_view.last",
-            Self::LastFinished => "prefs.sketch_open_view.last_finished",
-        }
-    }
-}
-
 /// Where the view goes when a sketch ends (Preferences: "When a sketch ends", #7038).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
