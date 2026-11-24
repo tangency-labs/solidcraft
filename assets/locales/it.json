@@ -2678,8 +2678,6 @@
   "prefs.ribbon_click_ends_tool": "Un clic sul pulsante dello strumento in uso lo termina",
   "prefs.ribbon_click_ends_tool_note": "Un clic sul pulsante evidenziato nella barra multifunzione dello strumento di schizzo in uso termina lo strumento, così i clic nella vista tornano a selezionare. Disattivato: il clic avvia di nuovo lo strumento.",
   "prefs.saving": "Salvataggio automatico e ripristino",
-  "prefs.select_hidden_edges": "Seleziona gli spigoli nascosti in Ombreggiato con spigoli nascosti",
-  "prefs.select_hidden_edges_help": "Seleziona gli spigoli attraverso le facce quando è attivo Ombreggiato con spigoli nascosti, anche per Raccordo. Disattivato: mantiene la selezione della v0.30.1. I corpi nascosti restano non selezionabili.",
   "prefs.select_one_item": "Seleziona un elemento",
   "prefs.select_other_hidden": "Seleziona la geometria nascosta con Seleziona altro",
   "prefs.select_other_hidden_help": "Attivo: include i corpi e gli schizzi nascosti e gli spigoli occlusi vicino al puntatore. Disattivato: usa l'elenco originale della geometria visibile sotto il puntatore.",

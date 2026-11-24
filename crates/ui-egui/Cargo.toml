@@ -74,6 +74,8 @@ nix = { workspace = true }
 winreg = "0.56"
 
 [dev-dependencies]
+# Tests report a context locked inside its own lock (#21091).
+egui = { workspace = true, features = ["lock_nesting_report"] }
 # The kit's test fixtures for SolidCraft's tests of the kit with its data.
 solidcraft-ui-kit = { workspace = true, features = ["test-support"] }
 solidcraft-engine = { workspace = true, features = ["bundled-render-library", "profile"] }
@@ -96,3 +98,5 @@ pollster = { workspace = true }
 
 [build-dependencies]
 serde_json = { workspace = true }
+# Packs the message catalogs the app embeds (build.rs).
+flate2 = { workspace = true }

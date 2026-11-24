@@ -399,23 +399,11 @@ fn resolve_uncached(
             let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
             match kind {
-                LinkKind::Intersect
-                    if matches!(
-                        ss.sketch.curves.get(ci).map(|c| &c.kind),
-                        Some(CurveKind::Line { .. } | CurveKind::Circle { .. } | CurveKind::Arc { .. })
-                    ) =>
-                {
-                    let mut points = Vec::new();
-                    for piece in sketch_curves(ss, ci) {
-                        let hits = solidcore_ops::curve::plane_crossings(&piece.curve, piece.interval, plane)
-                            .map_err(|e| DocError::Invalid(e.to_string()))?;
-                        points.extend(hits.into_iter().map(LinkGeom::Point));
-                    }
-                    points
-                }
                 LinkKind::Intersect => {
-                    let pts: Vec<Vec3> = ss.sketch.segs(ci).iter().flat_map(|s| s.polyline(1e-3)).map(|p| ss.plane.to_world(p)).collect();
-                    section_of_polyline(plane, &pts)
+                    let curves = sketch_curves(ss, ci);
+                    let pieces: Vec<_> = curves.iter().map(|piece| (&piece.curve, piece.interval)).collect();
+                    let hits = solidcore_ops::curve::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+                    hits.into_iter().map(LinkGeom::Point).collect()
                 }
                 LinkKind::Include => {
                     let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
@@ -1488,12 +1476,7 @@ fn refresh_links_in(
             Ok(r) => {
                 // An edge or vertex link saved without a name takes the name of the geometry it was
                 // found on. A sketch that is edited stores it; evaluation leaves the design as it is.
-                if l.edge_name.is_none()
-                    && let Some(name) = resolved_edge_name(st, &r)
-                    && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
-                {
-                    link.edge_name = Some(name);
-                }
+                let new_edge_name = l.edge_name.is_none().then(|| resolved_edge_name(st, &r)).flatten();
                 if l.vertex_name.is_none()
                     && let Some(name) = resolved_vertex_name(st, &r)
                     && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
@@ -1513,6 +1496,13 @@ fn refresh_links_in(
                 // the link recorded them (#18711).
                 let updated =
                     if l.kind == LinkKind::Project { sk.update_link_named(&l.id, &r.geom, &r.edge_names) } else { sk.update_link(&l.id, &r.geom) };
+                // A name captured from a point on this rebuild did not identify
+                // the saved curve. Publish it only after matching the old link.
+                if let Some(name) = new_edge_name
+                    && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
+                {
+                    link.edge_name = Some(name);
+                }
                 match updated {
                     Ok(true) if words_follow => {}
                     // A rebuilt projection is only worth a warning when it took something of

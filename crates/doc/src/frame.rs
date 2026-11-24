@@ -40,7 +40,7 @@ pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
 /// How far from vertical (radians) a member's line may lean and still count as vertical for its
 /// orientation ([`member_axes`]).
-pub const VERTICAL_TOLERANCE: f64 = 1e-6;
+pub const VERTICAL_TOLERANCE: f64 = solidcore_ops::frame_member::VERTICAL_TOLERANCE;
 
 /// A built-in profile and its dimensions (mm). `Option` dimensions take a default worked out from
 /// the profile's size ([`Profile::filled`] says which).
@@ -349,10 +349,12 @@ impl crate::walk::Walk for ProfileSpec {
 }
 
 pub use crate::eval::frame_member::{
-    LaterPieces, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line, is_member_wire,
-    member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies, overlap_parent,
+    LaterPieces, SectionView, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line,
+    is_member_wire, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies,
+    overlap_parent, section_view,
 };
 pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
+pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};
 
 /// A frame member between two points (#15705): its id, which names the member as a line's id
 /// does (`names`, End Caps), and its two ends, found again on every evaluation so the member
@@ -417,6 +419,23 @@ pub enum Anchor {
     BottomLeft,
     Bottom,
     BottomRight,
+}
+
+impl Anchor {
+    /// Every anchor, in the order the Frame Member dialog lists them.
+    pub const ALL: &[Anchor] = &[
+        Anchor::Origin,
+        Anchor::Center,
+        Anchor::Centroid,
+        Anchor::TopLeft,
+        Anchor::Top,
+        Anchor::TopRight,
+        Anchor::Left,
+        Anchor::Right,
+        Anchor::BottomLeft,
+        Anchor::Bottom,
+        Anchor::BottomRight,
+    ];
 }
 
 /// A profile's section properties (mm², mm, mm⁴). Second moments are about axes through the
@@ -900,15 +919,7 @@ pub fn mirrored(region: &Region2) -> Region2 {
 /// profile counter-clockwise about the line, seen looking back from its end. `None` for a
 /// direction of no length.
 pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
-    let d = d.normalized()?;
-    let up = Vec3::Z - d * Vec3::Z.dot(d);
-    // `up` is as long as the sine of the line's lean from vertical.
-    let (x, y) = match up.normalized().filter(|_| up.len() > VERTICAL_TOLERANCE) {
-        Some(y) => (y.cross(d), y),
-        None => (Vec3::X, d.cross(Vec3::X)),
-    };
-    let (c, s) = (angle.cos(), angle.sin());
-    Some((x * c + y * s, y * c - x * s))
+    solidcore_ops::frame_member::member_axes(d, angle).ok().flatten()
 }
 
 /// [`member_axes`] for a member running along `dir` with its `up` given (#4003 Auto's lined-up sections): the

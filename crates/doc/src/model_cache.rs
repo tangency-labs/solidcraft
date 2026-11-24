@@ -102,12 +102,14 @@ struct BodyKey {
     component: u64,
     transferred: bool,
     envelope: bool,
+    frame_member_line: Option<Arc<str>>,
     name: String,
     source_name: Option<String>,
     source_transform: [u64; 16],
 }
 
 impl BodyKey {
+    /// Deduplicate states only when their geometry, names and member provenance agree.
     fn of(b: &ModelBody) -> Self {
         let mut source_transform = [0; 16];
         for (bits, v) in source_transform.iter_mut().zip(b.source_transform.iter().flatten()) {
@@ -122,6 +124,7 @@ impl BodyKey {
             component: b.component,
             transferred: b.transferred,
             envelope: b.envelope,
+            frame_member_line: b.frame_member_line.clone(),
             name: b.name.clone(),
             source_name: b.source_name.clone(),
             source_transform,
@@ -271,6 +274,9 @@ impl Writer {
         }
         if b.source_transform != crate::IDENTITY {
             r["source_transform"] = json!(b.source_transform);
+        }
+        if let Some(line) = &b.frame_member_line {
+            r["frame_member_line"] = json!(line.as_ref());
         }
         if b.transferred {
             r["transferred"] = json!(true);
@@ -581,6 +587,7 @@ impl SavedModel {
                 }
                 b.source_transform = m;
             }
+            b.frame_member_line = r.get("frame_member_line").map(|v| text(Some(v)).map(Arc::from)).transpose()?;
             b.transferred = r.get("transferred").and_then(Json::as_bool).unwrap_or(false);
             b.envelope = r.get("envelope").and_then(Json::as_bool).unwrap_or(false);
             // Measured once here, so every state holding it adds it up for the cache's budget.
@@ -1198,25 +1205,38 @@ impl Model {
                     before = r.state.clone();
                     continue;
                 }
-                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
-                    ^ placement_digest(doc, f, Some(&before))
-                    ^ construct_digest(doc, &vals, f, Some(&before))
-                    ^ turns_digest(doc, &vals, f).unwrap_or(0);
-                cache.states.put(
-                    cache_key(f, r.fingerprint, local, ctx, &before),
-                    CachedEval {
-                        error: None,
-                        error_code: None,
-                        warning: crate::eval::without_retained_notes(r.warning.clone()),
-                        import_report: r.import_report.clone(),
-                        repair: r.repair.clone(),
-                        lost_projections: None,
-                        ms: r.ms,
-                        state: r.state.clone(),
-                    },
-                    r.state.retained_bytes(),
-                    r.ms,
-                );
+                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, &before, &model.import_digests, 0);
+                let whole = CachedEval {
+                    error: None,
+                    error_code: None,
+                    warning: crate::eval::without_retained_notes(r.warning.clone()),
+                    import_report: r.import_report.clone(),
+                    repair: r.repair.clone(),
+                    lost_projections: None,
+                    ms: r.ms,
+                    state: r.state.clone(),
+                };
+                // And what it changed, by what it read, as an evaluation keeps it: the first edit
+                // after opening then evaluates only the features that read what the edit changed,
+                // as every later edit does, not every feature after the edit. An import's key also
+                // digests the features before it, so an import is left out (evaluated as before),
+                // as is a feature that names its pieces as later features pick them. So is one
+                // whose bodies were not stamped with this key (saved by a version that keyed them
+                // otherwise, or stamped by the whole model): `stamp` would work their names out
+                // afresh, with no lineage to work them from. It is evaluated again instead.
+                if let Some((k, read)) = &key.reads
+                    && !matches!(f.kind, FeatureKind::Import { .. })
+                    && !f.shell_piece_order
+                    && let Some(change) = r.state.change_from(&before, f.id, read)
+                    && change.bodies.iter().all(|b| match b {
+                        Changed::Made(b) => b.key == made_body_key(*k, &b.name),
+                        Changed::Kept(_) => true,
+                    })
+                {
+                    let bytes = change.retained_bytes();
+                    cache.changes.put(*k, whole.with(change), bytes, r.ms);
+                }
+                cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
                 before = r.state.clone();
             }
         }

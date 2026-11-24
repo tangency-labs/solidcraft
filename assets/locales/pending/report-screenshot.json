@@ -1,0 +1,66 @@
+{
+  "en": {
+    "ui.report_screenshot_copied": "Screenshot copied. It is NOT attached yet: in the GitHub issue form, click in the text box and press Ctrl+V (Cmd+V on macOS).",
+    "ui.report_screenshot_drag": "The screenshot is NOT attached yet. Paste the report text into the issue form, then drag the PNG file {file} onto the form to attach it.",
+    "ui.report_screenshot_open": "Opens your browser and copies the screenshot. Paste the screenshot into the GitHub issue form to attach it.",
+    "ui.report_screenshot_paste": "The screenshot is NOT attached yet. Click in this box and press Ctrl+V to attach it.",
+    "ui.report_screenshot_paste_mac": "The screenshot is NOT attached yet. Click in this box and press Cmd+V to attach it.",
+    "ui.report_screenshot_save_failed": "Could not save screenshot: {error}. Attach the reviewed screenshot or a short example showing the problem."
+  },
+  "ar": {
+    "ui.report_screenshot_copied": "نُسخت لقطة الشاشة. لم تُرفق بعد: في نموذج المشكلة على GitHub، انقر داخل مربع النص واضغط Ctrl+V (أو Cmd+V على macOS).",
+    "ui.report_screenshot_drag": "لم تُرفق لقطة الشاشة بعد. الصق نص التقرير في نموذج المشكلة، ثم اسحب ملف PNG ‏{file} إلى النموذج لإرفاقه.",
+    "ui.report_screenshot_open": "يفتح المتصفح وينسخ لقطة الشاشة. الصق لقطة الشاشة في نموذج المشكلة على GitHub لإرفاقها.",
+    "ui.report_screenshot_paste": "لم تُرفق لقطة الشاشة بعد. انقر داخل هذا المربع واضغط Ctrl+V لإرفاقها.",
+    "ui.report_screenshot_paste_mac": "لم تُرفق لقطة الشاشة بعد. انقر داخل هذا المربع واضغط Cmd+V لإرفاقها.",
+    "ui.report_screenshot_save_failed": "تعذر حفظ لقطة الشاشة: {error}. أرفق لقطة الشاشة التي راجعتها أو مثالًا قصيرًا يوضح المشكلة."
+  },
+  "de": {
+    "ui.report_screenshot_copied": "Screenshot kopiert. Er ist NOCH NICHT angehängt: Klicken Sie im GitHub-Problemformular in das Textfeld und drücken Sie Ctrl+V (Cmd+V unter macOS).",
+    "ui.report_screenshot_drag": "Der Screenshot ist NOCH NICHT angehängt. Fügen Sie den Berichtstext in das Problemformular ein und ziehen Sie dann die PNG-Datei {file} auf das Formular, um sie anzuhängen.",
+    "ui.report_screenshot_open": "Öffnet Ihren Browser und kopiert den Screenshot. Fügen Sie den Screenshot in das GitHub-Problemformular ein, um ihn anzuhängen.",
+    "ui.report_screenshot_paste": "Der Screenshot ist NOCH NICHT angehängt. Klicken Sie in dieses Feld und drücken Sie Ctrl+V, um ihn anzuhängen.",
+    "ui.report_screenshot_paste_mac": "Der Screenshot ist NOCH NICHT angehängt. Klicken Sie in dieses Feld und drücken Sie Cmd+V, um ihn anzuhängen.",
+    "ui.report_screenshot_save_failed": "Screenshot konnte nicht gespeichert werden: {error}. Hängen Sie den geprüften Screenshot oder ein kurzes Beispiel an, das das Problem zeigt."
+  },
+  "he": {
+    "ui.report_screenshot_copied": "צילום המסך הועתק. הוא עדיין לא צורף: בטופס הבעיה ב־GitHub יש ללחוץ בתוך תיבת הטקסט ולהקיש Ctrl+V (או Cmd+V ב־macOS).",
+    "ui.report_screenshot_drag": "צילום המסך עדיין לא צורף. יש להדביק את טקסט הדיווח בטופס הבעיה ואז לגרור את קובץ ה־PNG ‏{file} אל הטופס כדי לצרף אותו.",
+    "ui.report_screenshot_open": "פותח את הדפדפן ומעתיק את צילום המסך. יש להדביק את צילום המסך בטופס הבעיה ב־GitHub כדי לצרף אותו.",
+    "ui.report_screenshot_paste": "צילום המסך עדיין לא צורף. יש ללחוץ בתוך תיבה זו ולהקיש Ctrl+V כדי לצרף אותו.",
+    "ui.report_screenshot_paste_mac": "צילום המסך עדיין לא צורף. יש ללחוץ בתוך תיבה זו ולהקיש Cmd+V כדי לצרף אותו.",
+    "ui.report_screenshot_save_failed": "לא ניתן לשמור את צילום המסך: {error}. יש לצרף את צילום המסך שנבדק או דוגמה קצרה שמציגה את הבעיה."
+  },
+  "ja": {
+    "ui.report_screenshot_copied": "スクリーンショットをコピーしました。まだ添付されていません。GitHub の issue フォームでテキスト欄をクリックし、Ctrl+V（macOS では Cmd+V）を押してください。",
+    "ui.report_screenshot_drag": "スクリーンショットはまだ添付されていません。問題の報告フォームに本文を貼り付けてから、PNG ファイル {file} をフォームにドラッグして添付してください。",
+    "ui.report_screenshot_open": "ブラウザーを開き、スクリーンショットをコピーします。GitHub の問題の報告フォームにスクリーンショットを貼り付けて添付してください。",
+    "ui.report_screenshot_paste": "スクリーンショットはまだ添付されていません。この欄をクリックし、Ctrl+V を押して添付してください。",
+    "ui.report_screenshot_paste_mac": "スクリーンショットはまだ添付されていません。この欄をクリックし、Cmd+V を押して添付してください。",
+    "ui.report_screenshot_save_failed": "スクリーンショットを保存できませんでした: {error}。確認済みのスクリーンショット、または問題を示す短い例を添付してください。"
+  },
+  "ko": {
+    "ui.report_screenshot_copied": "스크린샷을 복사했습니다. 아직 첨부되지 않았습니다. GitHub 이슈 양식에서 텍스트 상자를 클릭하고 Ctrl+V(macOS에서는 Cmd+V)를 누르세요.",
+    "ui.report_screenshot_drag": "스크린샷이 아직 첨부되지 않았습니다. 문제 양식에 보고서 텍스트를 붙여넣은 다음 PNG 파일 {file}을(를) 양식으로 끌어 첨부하세요.",
+    "ui.report_screenshot_open": "브라우저를 열고 스크린샷을 복사합니다. GitHub 문제 양식에 스크린샷을 붙여넣어 첨부하세요.",
+    "ui.report_screenshot_paste": "스크린샷이 아직 첨부되지 않았습니다. 이 상자를 클릭하고 Ctrl+V를 눌러 첨부하세요.",
+    "ui.report_screenshot_paste_mac": "스크린샷이 아직 첨부되지 않았습니다. 이 상자를 클릭하고 Cmd+V를 눌러 첨부하세요.",
+    "ui.report_screenshot_save_failed": "스크린샷을 저장할 수 없습니다: {error}. 검토한 스크린샷이나 문제를 보여 주는 짧은 예제를 첨부하세요."
+  },
+  "vi": {
+    "ui.report_screenshot_copied": "Đã sao chép ảnh chụp màn hình. Ảnh CHƯA được đính kèm: trong biểu mẫu sự cố trên GitHub, nhấp vào ô văn bản và nhấn Ctrl+V (Cmd+V trên macOS).",
+    "ui.report_screenshot_drag": "Ảnh chụp màn hình CHƯA được đính kèm. Dán nội dung báo cáo vào biểu mẫu vấn đề, sau đó kéo tệp PNG {file} vào biểu mẫu để đính kèm.",
+    "ui.report_screenshot_open": "Mở trình duyệt và sao chép ảnh chụp màn hình. Dán ảnh chụp màn hình vào biểu mẫu vấn đề trên GitHub để đính kèm.",
+    "ui.report_screenshot_paste": "Ảnh chụp màn hình CHƯA được đính kèm. Nhấp vào ô này và nhấn Ctrl+V để đính kèm.",
+    "ui.report_screenshot_paste_mac": "Ảnh chụp màn hình CHƯA được đính kèm. Nhấp vào ô này và nhấn Cmd+V để đính kèm.",
+    "ui.report_screenshot_save_failed": "Không thể lưu ảnh chụp màn hình: {error}. Đính kèm ảnh chụp màn hình đã xem lại hoặc ví dụ ngắn minh họa vấn đề."
+  },
+  "zh": {
+    "ui.report_screenshot_copied": "截图已复制，但尚未附加：请在 GitHub 问题表单中点击文本框，然后按 Ctrl+V（macOS 上按 Cmd+V）。",
+    "ui.report_screenshot_drag": "截图尚未附加。请将报告文本粘贴到问题表单中，然后将 PNG 文件 {file} 拖到表单上以附加截图。",
+    "ui.report_screenshot_open": "打开浏览器并复制截图。请将截图粘贴到 GitHub 问题表单中以附加截图。",
+    "ui.report_screenshot_paste": "截图尚未附加。请点击此文本框并按 Ctrl+V 来附加截图。",
+    "ui.report_screenshot_paste_mac": "截图尚未附加。请点击此文本框并按 Cmd+V 来附加截图。",
+    "ui.report_screenshot_save_failed": "无法保存截图：{error}。请附加已检查的截图或展示问题的简短示例。"
+  }
+}
