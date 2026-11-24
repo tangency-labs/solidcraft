@@ -1056,7 +1056,7 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
 fn plugin_approvals_are_kept_between_runs_only_when_asked() {
     let scratch = Scratch::new();
     let plugins = scratch.0.join("plugins");
-    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":1_000_000,"memory_mib":256,"deadline_ms":30000}}});
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":10_000_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
     let zip = scratch.0.join("sample.zip");
     let bytes = solidcraft_engine::io::safe_zip::write(&[("plugin.json", manifest.to_string().as_bytes()), ("plugin.wasm", b"inert bytes")]).unwrap();
     std::fs::write(&zip, bytes).unwrap();
@@ -1071,15 +1071,16 @@ fn plugin_approvals_are_kept_between_runs_only_when_asked() {
     let exec = |command: &str, params: Value| run(true, command, params);
     let inspect = json!({"path": plugins.join("sample")});
     // The default: approved for that run only, nothing stored.
-    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"memory_mib": 256}})));
+    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"fuel":10_000_000_000_000_u64,"memory_mib": 256}})));
     assert!(plugins.join("sample").is_dir() && !plugins.join(".grants").exists());
     assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false);
-    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"memory_mib": 256}})));
+    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"fuel":10_000_000_000_000_u64,"memory_mib": 256}})));
     assert!(plugins.join(".grants/sample.json").is_file());
     assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false, "not read without the flag");
-    assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved memory, in a later run");
+    assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved fuel and memory, in a later run");
     let listed = json_output(exec("plugin.grants", json!({})));
     assert_eq!((listed["grants"][0]["status"].as_str(), listed["grants"][0]["memory_mib"].as_u64()), (Some("current"), Some(256)));
+    assert_eq!(listed["grants"][0]["fuel"], 10_000_000_000_000_u64);
     assert_eq!(json_output(exec("plugin.revoke", json!({"id": "sample"})))["revoked"], true);
     assert_eq!(json_output(exec("plugin.inspect", inspect))["within_host_limits"], false, "revoked: the app's ceiling again");
     assert_eq!(json_output(exec("plugin.grants", json!({})))["grants"], json!([]));

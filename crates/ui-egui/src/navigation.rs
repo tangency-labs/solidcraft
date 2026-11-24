@@ -12,7 +12,7 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
-use solidcore_ops::{point_displacement, point_distance, point_set_summary};
+use solidcore_ops::{centroid_and_mean_radius, point_displacement, point_distance};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_viewport::Camera;
@@ -501,6 +501,49 @@ fn zoom_point(app: &mut SolveApp, rect: Rect, point: Option<Pos2>, surface: bool
     })
 }
 
+/// The navigation modes a shortcut turns on and off (Preferences › Keyboard Shortcuts, no key by
+/// default): plain pointer motion over the view pans, orbits or zooms while one is on.
+pub(crate) const TOGGLE_MODES: [(&str, NavMode); 3] =
+    [("view.pan_mode", NavMode::Pan), ("view.orbit_mode", NavMode::Orbit), ("view.zoom_mode", NavMode::Zoom)];
+
+/// The mode `command` turns on, if it is one of [`TOGGLE_MODES`] (in any case, as the engine
+/// accepts command ids).
+pub(crate) fn toggle_mode(command: &str) -> Option<NavMode> {
+    TOGGLE_MODES.iter().find(|(id, _)| id.eq_ignore_ascii_case(command)).map(|(_, mode)| *mode)
+}
+
+/// A navigation mode's key: pressed with the pointer over the view it turns that mode on (and any
+/// other off); pressed again, anywhere, it turns it off. Away from the view it starts nothing.
+/// Returns whether the key was one of theirs.
+pub(crate) fn toggle_mode_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, mods: egui::Modifiers, repeat: bool) -> bool {
+    let name = crate::keymap::key_name(key, mods);
+    let Some(&(id, mode)) = TOGGLE_MODES.iter().find(|(id, _)| crate::keymap::keys(app, id).contains(&name)) else {
+        return false;
+    };
+    if crate::keymap::command_for(app, &name) != Some(id) {
+        return false;
+    }
+    if repeat {
+        return true;
+    }
+    if app.viewport.nav_toggle == Some(mode) {
+        let _ = app.run(id, json!({"on": false}));
+        return true;
+    }
+    // Over the view, or over the navigation bar at its foot, whose own drags and gestures move
+    // the view too; not over the other toolbars, panels or windows.
+    let at = ctx.pointer_hover_pos().filter(|p| {
+        app.viewport.rect.is_some_and(|rect| rect.contains(*p))
+            && (app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(*p))
+                || ctx.layer_id_at(*p).is_none_or(|layer| layer.order == egui::Order::Background))
+    });
+    if at.is_some() && !view_keys_blocked(app, ctx, None) {
+        app.viewport.nav_toggle_at = at;
+        let _ = app.run(id, json!({"on": true}));
+    }
+    true
+}
+
 /// Modifier-only navigation never borrows pointer movement from another widget or gesture.
 /// Tool fields keep keyboard focus without blocking motion over the exposed viewport.
 pub(crate) fn modifier_motion(
@@ -523,8 +566,11 @@ pub(crate) fn modifier_motion(
         && !(picking
             && !crate::render_workspace::active(app)
             && hover.is_some_and(|p| app.viewport.rect.is_some_and(|rect| crate::canvas::owns_pointer(app, &projection(app, rect), p))))
-        && !hover.is_some_and(|p| app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(p)));
-    let next = crate::prefs::nav_preset(&app.preferences.nav).motion_mode(mods).zip(hover.filter(|p| owns && p.is_finite()));
+        // Pan, Orbit and Zoom Mode go on over the navigation bar, as its own tools' drags do.
+        && (app.viewport.nav_toggle.is_some()
+            || !hover.is_some_and(|p| app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(p))));
+    let wanted = app.viewport.nav_toggle.or_else(|| crate::prefs::nav_preset(&app.preferences.nav).motion_mode(mods));
+    let next = wanted.zip(hover.filter(|p| owns && p.is_finite()));
     let previous = app.viewport.modifier_nav;
     if previous.map(|(m, _)| m) != next.map(|(m, _)| m) {
         app.viewport.orbit_pivot = None;
@@ -820,20 +866,18 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             i.pointer.delta(),
         )
     });
-    let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
+    let hover = hover.filter(|_| !crate::frame::dock_dragging(ui.ctx()));
+    // Pan, Orbit and Zoom Mode follow the pointer over the toolbars and panels around the view
+    // too, as their key still turns them off there; only the view's own input stops at them.
+    let toggled_hover = hover.filter(|_| app.viewport.nav_toggle.is_some());
+    let hover = hover.filter(|p| !crate::shell::covered(app, *p));
     // A drag that starts this frame starts where its button went down: the pointer's motion before
     // it (frames skipped over a still view, #17104, bring it all in one) is not the drag's (#19477).
     // Only a start: a button pressed while another is already held keeps the running drag's motion.
     let delta = ui
         .input(|i| {
-            let buttons = [
-                egui::PointerButton::Primary,
-                egui::PointerButton::Secondary,
-                egui::PointerButton::Middle,
-                egui::PointerButton::Extra1,
-                egui::PointerButton::Extra2,
-            ];
-            let starts = i.pointer.any_pressed() && buttons.iter().all(|b| !i.pointer.button_down(*b) || i.pointer.button_pressed(*b));
+            let starts =
+                i.pointer.any_pressed() && egui::PointerButton::ALL.iter().all(|b| !i.pointer.button_down(*b) || i.pointer.button_pressed(*b));
             starts.then(|| i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from)).flatten()
         })
         .filter(|d| d.is_finite())
@@ -1085,9 +1129,11 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         (drag, i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from))
     });
     // A side button the user mapped to a drag in Preferences works the same way: it navigates once
-    // the press can no longer be a click, so a plain click on it still goes Back.
-    let extra_drag = [(egui::PointerButton::Extra1, crate::prefs::NavButton::Extra1), (egui::PointerButton::Extra2, crate::prefs::NavButton::Extra2)]
-        .into_iter()
+    // the press can no longer be a click, so a plain click on it still goes Back. So does a
+    // further button (6 and up) of a mouse with many.
+    let extra_drag = egui::PointerButton::ALL[3..]
+        .iter()
+        .map(|pointer| (*pointer, crate::prefs::NavButton::of_pointer(*pointer)))
         .find(|(pointer, nav)| {
             ui.input(|i| i.pointer.button_down(*pointer) && !i.pointer.could_any_button_be_click())
                 && (crate::prefs::nav_mode(app, *nav, mods).is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == *nav))
@@ -1132,7 +1178,11 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     };
     // Without orbit (a flat page), bindings that orbit do nothing.
     let allowed = |m: NavMode| caps.orbit || m != NavMode::Orbit;
-    let motion = modifier_motion(app, ui, inside, hover, mods, picking).filter(|(m, _)| allowed(*m));
+    let motion = match toggled_hover {
+        Some(p) => modifier_motion(app, ui, ui.is_enabled(), Some(p), mods, picking),
+        None => modifier_motion(app, ui, inside, hover, mods, picking),
+    }
+    .filter(|(m, _)| allowed(*m));
     let mode = motion
         .map(|(m, _)| m)
         .or_else(|| {
@@ -1164,7 +1214,24 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             zoom_in_view(app, f64::from(touch.zoom).powf(-crate::prefs::zoom_sign(app)), anchor);
         }
     } else if let Some((mode, delta)) = motion {
-        if delta != egui::Vec2::ZERO {
+        if app.viewport.nav_toggle == Some(mode) {
+            ui.ctx().set_cursor_icon(match mode {
+                NavMode::Pan => egui::CursorIcon::Move,
+                NavMode::Orbit => egui::CursorIcon::Grab,
+                NavMode::Zoom => egui::CursorIcon::ResizeVertical,
+            });
+        }
+        if mode == NavMode::Zoom {
+            // As a Zoom tool drag (up zooms in unless the preset or the invert-zoom preference
+            // turns it round), on what was under the pointer when the mode began.
+            if delta.y != 0.0 {
+                app.cancel_view_animation();
+                app.viewport.orbit_free = None;
+                let anchor = model_zoom_anchor(app, rect, app.viewport.nav_toggle_at.or(hover), caps.orbit);
+                let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
+                zoom_in_view(app, (f64::from(delta.y) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
+            }
+        } else if delta != egui::Vec2::ZERO {
             let mut params = json!({"motion":if mode == NavMode::Pan {"pan"} else {"orbit"},"delta":[delta.x,delta.y]});
             if mode == NavMode::Orbit {
                 let at = hover.unwrap_or(rect.center()) - delta;
@@ -1605,13 +1672,13 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
 /// clicks count: a press that moves (a pan or orbit drag) or is held is not one, and the two
 /// clicks must both be the middle button's, close together in time and place.
 pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: bool) {
-    use egui::PointerButton::{Extra1, Extra2, Middle, Primary, Secondary};
+    use egui::PointerButton::Middle;
     let (double, releases, middle, other, dragging) = ui.input(|i| {
         (
             i.pointer.button_double_clicked(Middle),
             i.events.iter().filter(|e| matches!(e, egui::Event::PointerButton { button: Middle, pressed: false, .. })).count(),
             i.pointer.button_clicked(Middle),
-            [Primary, Secondary, Extra1, Extra2].into_iter().any(|b| i.pointer.button_clicked(b)),
+            egui::PointerButton::ALL.into_iter().any(|b| b != Middle && i.pointer.button_clicked(b)),
             i.pointer.is_decidedly_dragging(),
         )
     });
@@ -1953,7 +2020,7 @@ impl TouchNavigation {
                 return TouchMotion::default();
             }
             let current_points: Vec<_> = self.contacts.iter().map(|(_, _, point)| screen_point(*point)).collect();
-            let current_summary = match point_set_summary(&current_points) {
+            let current_summary = match centroid_and_mean_radius(&current_points) {
                 Ok(summary) => summary,
                 Err(_) => {
                     *self = Self::default();
@@ -1996,7 +2063,7 @@ impl TouchNavigation {
             let needs_prior = out.mode.is_some() || self.contacts.len() >= 2;
             let prior_summary = if needs_prior {
                 let prior_points: Vec<_> = before.iter().map(|(_, _, point)| screen_point(*point)).collect();
-                match point_set_summary(&prior_points) {
+                match centroid_and_mean_radius(&prior_points) {
                     Ok(summary) => Some(summary),
                     Err(_) => {
                         *self = Self::default();
@@ -3031,10 +3098,60 @@ mod tests {
         assert_ne!(h.app.cam.back(), before.back());
     }
 
+    /// A mouse with more than five buttons: button 6 and up reach the app (egui-winit passes them
+    /// on as `Extra3`…`Extra13`), do nothing until mapped, and drag the view once mapped by
+    /// number, while the names saved before (`extra1`, `extra2`) keep meaning the side buttons.
+    #[test]
+    fn a_further_mouse_button_drags_the_view_once_mapped_by_number() {
+        use crate::prefs::{NavButton, nav_mode};
+        use crate::viewport::NavMode;
+        use egui::{Modifiers, PointerButton};
+        assert_eq!(NavButton::from_id("extra1"), Some(NavButton::Extra1), "an older saved name keeps its meaning");
+        assert_eq!(NavButton::from_id("extra2"), Some(NavButton::Extra2));
+        for button in PointerButton::ALL {
+            let nav = NavButton::of_pointer(button);
+            assert_eq!(nav.pointer(), Some(button));
+            assert_eq!(NavButton::from_id(nav.id()), Some(nav), "{button:?} round-trips through its saved name");
+        }
+        assert_eq!(NavButton::of_pointer(PointerButton::Extra3).id(), "button6");
+        assert_eq!(NavButton::of_pointer(PointerButton::Extra13).id(), "button16");
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+        h.frames(2);
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra3, Modifiers::NONE);
+        assert_eq!(h.app.cam, before, "an unmapped button 6 leaves the view alone");
+        assert_eq!(nav_mode(&h.app, NavButton::Numbered(6), Modifiers::NONE), None);
+
+        let reply = h.call("ui.prefs", serde_json::json!({"nav_button_map": {"button6": "orbit", "button9": "shift+pan", "extra1": "zoom"}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(nav_mode(&h.app, NavButton::Numbered(6), Modifiers::NONE), Some(NavMode::Orbit));
+        assert_eq!(nav_mode(&h.app, NavButton::Extra1, Modifiers::NONE), Some(NavMode::Zoom), "extra1 is still the back button");
+        drag_with(&mut h, PointerButton::Extra3, Modifiers::NONE);
+        assert_ne!(h.app.cam.back(), before.back(), "button 6 orbits");
+        let orbited = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra6, Modifiers::NONE);
+        assert_eq!(h.app.cam, orbited, "button 9 needs Shift");
+        drag_with(&mut h, PointerButton::Extra6, Modifiers::SHIFT);
+        assert_ne!(h.app.cam.target, orbited.target, "with Shift button 9 pans");
+        assert_eq!(h.app.cam.back(), orbited.back());
+        let panned = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra4, Modifiers::NONE);
+        assert_eq!(h.app.cam, panned, "button 7, unmapped, does nothing");
+    }
+
     #[test]
     fn a_bad_button_mapping_is_refused() {
         let mut h = crate::scenario::Harness::new();
-        for bad in [serde_json::json!({"extra3": "orbit"}), serde_json::json!({"extra1": "spin"}), serde_json::json!({"extra1": "meta+pan"})] {
+        for bad in [
+            serde_json::json!({"extra3": "orbit"}),
+            serde_json::json!({"button5": "orbit"}),
+            serde_json::json!({"button17": "orbit"}),
+            serde_json::json!({"extra1": "spin"}),
+            serde_json::json!({"extra1": "meta+pan"}),
+        ] {
             let reply = h.call("ui.prefs", serde_json::json!({"nav_button_map": bad}));
             assert_eq!(reply["ok"], false, "{reply}");
         }
@@ -3208,20 +3325,14 @@ mod tests {
     /// Reverse zoom must affect mouse drags as well as the wheel (#10354).
     #[test]
     fn drag_zoom_respects_reverse_on_every_canvas() {
-        use crate::prefs::{NAV_PRESETS, NavButton};
+        use crate::prefs::NAV_PRESETS;
         use egui::{Event, Modifiers, PointerButton, pos2, vec2};
         use serde_json::json;
 
         let mut bindings = Vec::new();
         for preset in NAV_PRESETS {
             for binding in preset.bindings.iter().filter(|binding| binding.mode == super::NavMode::Zoom) {
-                let button = match binding.button {
-                    NavButton::Left => PointerButton::Primary,
-                    NavButton::Middle => PointerButton::Middle,
-                    NavButton::Right => PointerButton::Secondary,
-                    NavButton::Extra1 => PointerButton::Extra1,
-                    NavButton::Extra2 => PointerButton::Extra2,
-                };
+                let button = binding.button.pointer().expect("a preset binds a button egui reports");
                 let keys = binding.keys;
                 let mods = Modifiers { shift: keys.shift, ctrl: keys.ctrl, command: keys.ctrl, alt: keys.alt, ..Default::default() };
                 bindings.push((preset.id, button, mods, false));
@@ -3871,7 +3982,7 @@ mod tests {
 
     #[test]
     fn maya_zoom_axis_keeps_other_presets_and_the_zoom_tool_vertical() {
-        use crate::prefs::{NAV_PRESETS, NavButton};
+        use crate::prefs::NAV_PRESETS;
         use crate::viewport::NavMode;
         use serde_json::json;
         for preset in NAV_PRESETS {
@@ -3881,13 +3992,7 @@ mod tests {
                     h.call("ui.prefs", json!({"nav":preset.id,"maya_horizontal_zoom":horizontal}));
                     let at = h.app.viewport.rect.expect("viewport").center();
                     let before = h.app.cam;
-                    let button = match binding.button {
-                        NavButton::Left => "left",
-                        NavButton::Middle => "middle",
-                        NavButton::Right => "right",
-                        NavButton::Extra1 => "extra1",
-                        NavButton::Extra2 => "extra2",
-                    };
+                    let button = binding.button.id();
                     let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
                         let out = h.call(
                             "ui.drag",
@@ -4500,7 +4605,7 @@ mod tests {
         let legacy_centre = points.iter().fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2()) / points.len() as f32;
         let legacy_mean = points.iter().map(|point| point.distance(legacy_centre.to_pos2())).sum::<f32>() / points.len() as f32;
         let kernel_points: Vec<_> = points.iter().map(|point| super::screen_point(*point)).collect();
-        let kernel_mean = solidcore_ops::point_set_summary(&kernel_points).unwrap().mean_distance;
+        let kernel_mean = solidcore_ops::centroid_and_mean_radius(&kernel_points).unwrap().mean_distance;
         assert!(
             (f64::from(legacy_mean) - kernel_mean).abs() <= f64::from(f32::EPSILON) * kernel_mean.max(1.0),
             "legacy f32 {legacy_mean} vs f64 query {kernel_mean}"

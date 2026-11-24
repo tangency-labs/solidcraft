@@ -611,6 +611,83 @@ mod smlib {
         assert!(e.contains("the 1.5 mm walls would meet along a line"), "{e}");
     }
 
+    /// A wall refused for folding names a thinner wall only after building it (#20781): the
+    /// walls tried run from just under the largest the kernel names, and the first that builds
+    /// is the one the message gives; where none builds, the message says the wall is not the
+    /// obstacle and shows no kernel internals.
+    #[test]
+    fn a_refused_shell_names_only_a_wall_that_builds() {
+        use crate::offset_backend::{thinner_shell_hint, thinner_walls};
+        use solidcraft_smlib::Error as SmError;
+        let walls = thinner_walls(2.0, Some(0.8));
+        assert_eq!(walls.len(), 3);
+        assert!(walls.iter().all(|w| *w < 0.8 && *w > 0.0), "{walls:?}");
+        assert!(thinner_walls(2.0, None).iter().all(|w| *w <= 1.0));
+        let folds = SmError::WallFolds { largest: Some(0.8) };
+        let first = || crate::KernelError::Invalid("fold".into());
+        // The 0.95 wall fails, the 0.75 wall builds: that is the one named.
+        let e = thinner_shell_hint(2.0, &folds, first(), |w| w < 0.8 * 0.8).to_string();
+        assert!(e.contains("a wall of 0.6 mm builds"), "{e}");
+        let e = thinner_shell_hint(2.0, &folds, first(), |_| false).to_string();
+        assert!(e.contains("no thinner wall builds either"), "{e}");
+        assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
+    }
+
+    /// A tube of outer radius 1 shelled open at the top by 2 mm cannot fit; whatever wall the
+    /// refusal offers builds when used (#20781).
+    #[test]
+    fn a_shell_hint_on_a_thin_rod_builds_when_used() {
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 1.0, 10.0).unwrap();
+        let top = Vec3::new(0.2, 0.2, 10.0);
+        match offset_backend::shell(&rod, &[top], 2.0) {
+            Ok(_) => {}
+            Err(e) => {
+                let e = e.to_string();
+                if let Some(at) = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds").map(|j| (i + 10, i + 10 + j))) {
+                    let w: f64 = e[at.0..at.1].parse().unwrap();
+                    assert!(offset_backend::shell(&rod, &[top], w).is_ok(), "{e}");
+                } else {
+                    assert!(!e.contains("shell_brep") && !e.contains("status 1001"), "{e}");
+                }
+            }
+        }
+    }
+
+    /// #20781's situation: the largest wall the kernel names is a face's own radius of
+    /// curvature, a wall that itself collapses. A post of radius 0.8276550758693992 stands on a
+    /// plate whose rim is many small flat faces (a curve cut as flat pieces). Shelled 2 mm
+    /// open at the post's top, the wall is refused, and whatever the refusal offers is strictly under
+    /// that radius and builds when used; where no wall builds it says so plainly.
+    #[test]
+    fn a_shell_wall_named_under_a_radius_limit_builds_when_used() {
+        const R: f64 = 0.8276550758693992;
+        let rim: Vec<Vec2> = (0..96)
+            .map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 96.0;
+                Vec2::new(8.0 * a.cos(), 8.0 * a.sin())
+            })
+            .collect();
+        let plate = extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&rim), holes: vec![] }], 0.0, 10.0).unwrap().pop().unwrap();
+        let post = cylinder(Vec3::new(0.0, 0.0, 9.0), Vec3::Z, R, 7.0).unwrap();
+        let body = boolean(&plate, &post, BoolOp::Union).unwrap().unwrap();
+        let top = Vec3::new(0.1, 0.1, 16.0);
+        // The wall that is the radius itself collapses: it is never a wall to name.
+        assert!(offset_backend::shell(&body, &[top], R).is_err(), "a wall of the post's own radius builds");
+        let e = offset_backend::shell(&body, &[top], 2.0).unwrap_err().to_string();
+        let named = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds").map(|j| e[i + 10..i + 10 + j].to_string()));
+        match named {
+            Some(w) => {
+                let w: f64 = w.parse().unwrap();
+                assert!(w > 0.0 && w < R, "the wall named is not under the radius: {e}");
+                assert!(offset_backend::shell(&body, &[top], w).is_ok(), "the wall named does not build: {e}");
+            }
+            None => {
+                assert!(e.contains("no thinner wall builds either"), "{e}");
+                assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
+            }
+        }
+    }
+
     #[test]
     fn draft_tilts_a_side_and_keeps_its_name() {
         let b = cube();

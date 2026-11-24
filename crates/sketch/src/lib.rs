@@ -16,6 +16,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod cancel;
 mod construct;
 mod curves;
 mod decompose;
@@ -42,6 +43,7 @@ mod profiles3d;
 pub mod profiling;
 mod shape;
 mod solver;
+mod sparse;
 mod spline_points;
 mod text;
 mod thin;
@@ -177,6 +179,7 @@ pub use profiles::MAX_PROFILE_EDGES;
 pub use profiles::Profile;
 pub use profiles::ProfileSearch;
 pub use profiles::distinct_curves;
+pub use profiles::enclosed_gaps;
 pub use profiles::find_drawn_profiles;
 pub use profiles::find_profiles;
 pub use profiles::find_profiles_checked;
@@ -229,13 +232,17 @@ pub use thin::MAX_THIN_SEGMENTS;
 pub use thin::thin_wall_regions;
 pub use wire::MAX_FIT_POINTS;
 pub use wire::MAX_WIRE_POINTS;
+pub use wire::MIN_CONTROL_POINTS;
 pub use wire::Wire;
 pub use wire::WireArc;
+pub use wire::WireControl;
 pub use wire::WireCurve;
 pub use wire::WireSpace;
 pub use wire::arc_from_3_points;
 pub use wire::arc_polyline;
 pub use wire::arc_sweep;
+pub use wire::control_curve;
+pub use wire::control_polyline;
 pub use wire::fit_polyline;
 pub use wire_solve::Axis;
 pub use wire_solve::MAX_WIRE_LENGTH;

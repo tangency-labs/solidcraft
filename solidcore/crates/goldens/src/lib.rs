@@ -23,11 +23,15 @@ pub mod constructor;
 pub mod dump;
 pub mod fixtures;
 pub mod flat;
+#[cfg(test)]
+pub(crate) mod g1r_cert;
 pub mod golden;
 #[cfg(test)]
 pub(crate) mod interval;
 pub mod jobs;
 pub mod json;
+#[cfg(test)]
+mod merged_vertex_rows;
 #[cfg(test)]
 mod operand_trim_rows;
 pub mod output;
@@ -51,6 +55,8 @@ pub mod util;
 pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr57_replay;
+#[cfg(test)]
+mod wr587_replay;
 
 pub use case::Case;
 pub use case::CaseContext;

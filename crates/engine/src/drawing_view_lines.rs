@@ -374,6 +374,35 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
     (Group { object, kind: ObjectKind::View, items }, drew)
 }
 
+/// ISO 128-20's narrow long-dashed dotted lines in line `group`, with its Table 3 lengths: a long dash
+/// of 24 widths of the narrow line, then `dots` dots of half a width, each after a gap of 3, and a gap
+/// of 3 to end. One dot is ISO 128 type 04; two, type 05.
+pub(super) fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
+    let d = LineKind::Thin.width_mm(group);
+    let mut lengths = vec![24.0 * d, 3.0 * d];
+    for _ in 0..dots {
+        lengths.extend([0.5 * d, 3.0 * d]);
+    }
+    lengths
+}
+
+/// A chain line `length_mm` long with `dots` dots in line `group` ([`chain_dashes_mm`]), its pattern
+/// started so the first long dash is centred on the line's middle.
+pub(super) fn chain_line(dots: usize, group: LineGroup, length_mm: f64) -> Dashes {
+    centred(chain_dashes_mm(dots, group), length_mm)
+}
+
+/// `lengths_mm` started where a line `length_mm` long has its first, long dash at its middle. A
+/// length that isn't a finite number of 0 or more is taken as a line with no length.
+fn centred(lengths_mm: Vec<f64>, length_mm: f64) -> Dashes {
+    let period: f64 = lengths_mm.iter().sum();
+    let long = lengths_mm.first().copied().unwrap_or_default();
+    let length = if length_mm.is_finite() { length_mm.max(0.0) } else { 0.0 };
+    let phase = (long / 2.0 - length / 2.0).rem_euclid(period);
+    // Rounding can land on the period itself, which a pattern's phase stays below.
+    Dashes { lengths_mm, phase_mm: if phase < period { phase } else { 0.0 } }
+}
+
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
 /// short to sweep is drawn as its chord.
 pub(super) fn drawable(seg: Seg2) -> Option<Seg2> {
@@ -441,7 +470,7 @@ fn one_arc(pieces: &[PlanarPiece]) -> Option<Seg2> {
         if !continues((center, radius, start, sweep), next) {
             return None;
         }
-        sweep += next.3;
+        sweep = joined_sweep(sweep, next.3)?;
     }
     Some(Seg2::Arc { center, radius, start, sweep })
 }
@@ -452,6 +481,19 @@ pub(super) fn continues((center, radius, start, sweep): (Vec2, f64, f64, f64), (
     let on_from_last = (start + sweep - s).rem_euclid(std::f64::consts::TAU);
     let on_from_last = on_from_last.min(std::f64::consts::TAU - on_from_last);
     c.dist(center) <= radius * 1e-9 && (r - radius).abs() <= radius * 1e-9 && on_from_last <= 1e-9
+}
+
+/// The sweep of an arc of `sweep` and the arc of `turn` that [`continues`] it, joined: `None` past a
+/// whole turn. Each joint is only within 1e-9 of the last arc's end, so the rounded sum of the pieces'
+/// sweeps can fall either side of a whole turn when they close the circle; a sum within 1e-9 of one
+/// is the whole turn, exactly ±2π, as a circle's own sweep is (#212).
+pub(super) fn joined_sweep(sweep: f64, turn: f64) -> Option<f64> {
+    let full = std::f64::consts::TAU;
+    let sum = sweep + turn;
+    if (sum.abs() - full).abs() <= 1e-9 {
+        return Some(full.copysign(sum));
+    }
+    (sum.abs() < full).then_some(sum)
 }
 
 /// A placement's turn: its matrix's rotation, bit for bit.
@@ -1029,5 +1071,32 @@ mod tests {
         let long = &runs[2].1;
         let ends = [long[0], long[3]];
         assert!(ends.contains(&p(0.0, 0.0)) && ends.contains(&p(3.0, 1.0)), "{long:?}");
+    }
+
+    /// A chain line's pattern is Table 3's lengths, started so its first long dash is centred on the
+    /// line however long it is: shorter than the dash, one dash, a whole number of periods. A length
+    /// that isn't a finite number of 0 or more is taken as a line with no length.
+    #[test]
+    fn a_chain_line_centres_its_long_dash_on_the_line() {
+        for group in [LineGroup::DEFAULT, LineGroup::Mm0_25] {
+            for dots in [1, 2] {
+                let lengths = chain_dashes_mm(dots, group);
+                let (long, period) = (lengths[0], lengths.iter().sum::<f64>());
+                for length in [0.0, 0.5 * long, long, 100.0, 7.0 * period, -3.0, f64::NAN] {
+                    let dashes = chain_line(dots, group, length);
+                    let case = format!("{group:?}, {dots} dots, {length} mm: {dashes:?}");
+                    assert_eq!(dashes.lengths_mm, lengths, "{case}");
+                    assert!((0.0..period).contains(&dashes.phase_mm), "{case}");
+                    // At the line's middle the pattern is halfway along its long dash.
+                    let drawn = if length.is_finite() { length.max(0.0) } else { 0.0 };
+                    let off = ((dashes.phase_mm + drawn / 2.0).rem_euclid(period) - long / 2.0).abs();
+                    assert!(off.min(period - off) < 1e-9, "{case}");
+                    let path = vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::new(100.0, 0.0) }];
+                    let stroke = Item::Stroke { path, closed: false, width_mm: LineKind::Thin.width_mm(group), pattern: Some(dashes) };
+                    let group = Group { object: 1, kind: ObjectKind::View, items: vec![stroke] };
+                    solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]).validate().unwrap_or_else(|e| panic!("{case}: {e}"));
+                }
+            }
+        }
     }
 }
