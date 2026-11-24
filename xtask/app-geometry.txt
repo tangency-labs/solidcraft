@@ -143,11 +143,11 @@ crates/doc/src/eval_frame.rs:add_corner dot,normalized
 crates/doc/src/eval_frame.rs:along dot
 crates/doc/src/eval_frame.rs:built dot
 crates/doc/src/eval_frame.rs:cut_members dot
-crates/doc/src/eval_frame.rs:member_section dot,normalized
 crates/doc/src/eval_frame.rs:ordered dot
 crates/doc/src/eval_frame.rs:plane_up cross,dot,normalized
 crates/doc/src/eval_frame.rs:section_view normalized
 crates/doc/src/eval_frame.rs:straight dot,normalized
+crates/doc/src/eval_frame.rs:untrimmed_member_section dot,normalized
 crates/doc/src/eval_more.rs:FaceSlice::outline dot,triangles
 crates/doc/src/eval_more.rs:chain_loops cross
 crates/doc/src/eval_more.rs:cone cross,normalized
@@ -435,7 +435,7 @@ crates/engine/src/cmd/browser.rs:keep_facing dot
 crates/engine/src/cmd/canvas_sketch.rs:segments atan2
 crates/engine/src/cmd/clearance.rs:clearance triangles
 crates/engine/src/cmd/clipboard_foreign.rs:onto_plane dot
-crates/engine/src/cmd/clipboard_foreign.rs:paste dot
+crates/engine/src/cmd/clipboard_foreign.rs:reframe_wires dot
 crates/engine/src/cmd/compare.rs:compare_bodies triangles
 crates/engine/src/cmd/compare.rs:enclosed_volume cross,dot,triangles
 crates/engine/src/cmd/component.rs:absolute_target normalized
@@ -552,8 +552,6 @@ crates/engine/src/cmd/sketch.rs:arc_center normalized
 crates/engine/src/cmd/sketch.rs:dimension_result atan2,cross,dot,normalized
 crates/engine/src/cmd/sketch.rs:edge_direction normalized
 crates/engine/src/cmd/sketch.rs:ellipse_half_axis cross,dot
-crates/engine/src/cmd/sketch.rs:face_contains cross,dot,normalized,triangles
-crates/engine/src/cmd/sketch.rs:face_triangles triangles
 crates/engine/src/cmd/sketch.rs:infer_at_start dot,normalized
 crates/engine/src/cmd/sketch.rs:polygon_edge normalized
 crates/engine/src/cmd/sketch.rs:rect_edge_center dot
@@ -583,7 +581,7 @@ crates/engine/src/cmd/sketch_drag.rs:Dragged::at dot
 crates/engine/src/cmd/sketch_drag.rs:LineGrab::new cross,dot
 crates/engine/src/cmd/sketch_drag.rs:drag_entity dot
 crates/engine/src/cmd/sketch_drag.rs:plan cross,normalized
-crates/engine/src/cmd/sketch_face.rs:capture_impl dot,normalized,triangles
+crates/engine/src/cmd/sketch_face.rs:capture_impl dot,normalized
 crates/engine/src/cmd/sketch_freeform.rs:support_hits normalized
 crates/engine/src/cmd/sketch_inspect.rs:closest_on_triangle cross,dot
 crates/engine/src/cmd/sketch_inspect.rs:face_at closest_on_triangle,triangles
