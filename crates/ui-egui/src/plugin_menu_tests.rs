@@ -2142,19 +2142,22 @@ fn importer_entry(name: &str) -> solidcraft_engine::plugin::Entry {
 #[test]
 fn importer_options_are_remembered_per_entry_on_run_and_survive_preferences_reload() {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.plugin_remember_importer_options = true;
     h.app.plugin_menu.listed =
         vec![listed("gears", vec![importer_entry("open"), importer_entry("other")]), listed("other", vec![importer_entry("open")])];
     h.app.plugin_menu.loaded = true;
     let before = h.app.session.doc.to_json();
     open_entry(&mut h.app, 0, 0);
     h.frames(2);
+    assert!(!h.app.plugin_menu.dialogs[0].remember, "Remember these options starts off");
     set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    h.step(&json!({"click":{"handle":"plugin_dialog:remember"}})).unwrap();
+    assert!(h.app.plugin_menu.dialogs[0].remember, "the checkbox has its own scenario handle");
     // Cancel and a cancelled file picker both leave memory alone.
     h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
     assert!(h.app.preferences.plugin_importer_options.is_empty());
     open_entry(&mut h.app, 0, 0);
     set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    h.app.plugin_menu.dialogs[0].remember = true;
     h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::ready(None))));
     run(&mut h.app).unwrap();
     h.frames(2);
@@ -2163,34 +2166,57 @@ fn importer_options_are_remembered_per_entry_on_run_and_survive_preferences_relo
     // A chosen file starts the import with the exact options on the form.
     open_entry(&mut h.app, 0, 0);
     set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    h.app.plugin_menu.dialogs[0].remember = true;
     let path = h.dir.join("gear.sample").to_string_lossy().into_owned();
     h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(path.clone())))));
     run(&mut h.app).unwrap();
     h.frames(2);
-    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 42);
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"].values["teeth"], 42);
+    assert!(h.app.preferences.plugin_importer_options["gears"]["open"].remember);
     assert_eq!(h.app.session.doc.to_json(), before, "options are user bookkeeping, outside the design");
 
     let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     restored.load_prefs(&h.app.prefs());
     restored.plugin_menu.listed = h.app.plugin_menu.listed.clone();
     open_entry(&mut restored, 0, 0);
+    assert!(restored.plugin_menu.dialog().unwrap().remember);
     assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 42);
     open_entry(&mut restored, 0, 1);
+    assert!(!restored.plugin_menu.dialog().unwrap().remember, "each entry has its own checkbox");
     assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 20);
     open_entry(&mut restored, 1, 0);
     assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 20);
 }
 
 #[test]
+fn running_with_the_checkbox_off_forgets_the_entry_and_leaves_the_others() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.loaded = true;
+    h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open"), importer_entry("other")])];
+    remember_options(&mut h.app, "gears", "open", &json!({"teeth":42}), true);
+    remember_options(&mut h.app, "gears", "other", &json!({"teeth":30}), true);
+    open_entry(&mut h.app, 0, 0);
+    assert!(h.app.plugin_menu.dialog().unwrap().remember);
+    h.app.plugin_menu.dialogs[0].remember = false;
+    h.app.plugin_menu.dialogs[0].import_path = Some(h.dir.join("gear.sample").to_string_lossy().into_owned());
+    run(&mut h.app).unwrap();
+    let saved = &h.app.preferences.plugin_importer_options["gears"];
+    assert!(!saved.contains_key("open"), "unticked: the entry keeps nothing");
+    assert_eq!(saved["other"].values["teeth"], 30);
+    remember_options(&mut h.app, "gears", "other", &json!({"teeth":30}), false);
+    assert!(h.app.preferences.plugin_importer_options.is_empty());
+}
+
+#[test]
 fn stale_importer_values_fall_back_individually_to_the_current_schema_defaults() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-    app.preferences.plugin_remember_importer_options = true;
     app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
     remember_options(
         &mut app,
         "gears",
         "open",
         &json!({"module":0,"teeth":42,"pressure_angle":"removed","hub":null,"name":"too long a name","gone":true}),
+        true,
     );
     app.load_prefs(&app.prefs());
     open_entry(&mut app, 0, 0);
@@ -2217,17 +2243,17 @@ fn remembered_importer_choices_validate_against_the_remembered_controller() {
 }
 
 #[test]
-fn restore_importer_defaults_changes_the_form_and_only_a_run_changes_memory() {
+fn restore_importer_defaults_changes_the_form_keeps_the_checkbox_and_only_a_run_changes_memory() {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.plugin_remember_importer_options = true;
     h.app.plugin_menu.loaded = true;
     h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
-    remember_options(&mut h.app, "gears", "open", &json!({"teeth":42,"module":3,"hub":true,"pressure_angle":"25","name":"Gear","bore":4}));
+    remember_options(&mut h.app, "gears", "open", &json!({"teeth":42,"module":3,"hub":true,"pressure_angle":"25","name":"Gear","bore":4}), true);
     let memory = h.app.preferences.plugin_importer_options.clone();
     open_entry(&mut h.app, 0, 0);
     h.frames(2);
     h.step(&json!({"click":{"handle":"plugin_dialog:defaults"}})).unwrap();
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"module":2.0,"teeth":20,"pressure_angle":"20","hub":false}));
+    assert!(h.app.plugin_menu.dialog().unwrap().remember, "Restore defaults keeps the checkbox as it is");
     assert_eq!(h.app.preferences.plugin_importer_options, memory);
     h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
     open_entry(&mut h.app, 0, 0);
@@ -2235,29 +2261,43 @@ fn restore_importer_defaults_changes_the_form_and_only_a_run_changes_memory() {
     restore_defaults(&mut h.app.plugin_menu.dialogs[0]);
     h.app.plugin_menu.dialogs[0].import_path = Some(h.dir.join("gear.sample").to_string_lossy().into_owned());
     run(&mut h.app).unwrap();
-    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 20);
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"].values["teeth"], 20);
+    assert!(h.app.preferences.plugin_importer_options["gears"]["open"].remember);
 }
 
 #[test]
-fn remember_importer_options_is_opt_in_and_page_reset_disables_it() {
+fn remembering_importer_options_is_a_per_entry_checkbox_off_by_default_not_a_preferences_row() {
     let mut h = crate::scenario::Harness::new();
-    assert!(!h.app.preferences.plugin_remember_importer_options, "new users keep schema defaults");
-    assert!(!crate::prefs::lenient(&json!({})).plugin_remember_importer_options, "older preferences keep schema defaults");
-    crate::prefs::control(&mut h.app, &json!({"plugin_remember_importer_options":true})).unwrap();
+    let defaults = serde_json::to_value(crate::prefs::Prefs::default()).unwrap();
+    assert!(defaults.get("plugin_remember_importer_options").is_none(), "the Preferences row is gone");
+    assert!(crate::prefs::lenient(&json!({"plugin_remember_importer_options":true})).plugin_importer_options.is_empty());
+    assert!(h.app.preferences.plugin_importer_options.is_empty(), "nothing is remembered by default");
     h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
-    remember_options(&mut h.app, "gears", "open", &json!({"teeth":42}));
-    crate::prefs::control(&mut h.app, &json!({"plugin_remember_importer_options":false})).unwrap();
+
+    // The old stored shape, a plain option map, loads with remembering off: the dialog shows defaults.
+    let old = json!({"plugin_importer_options":{"gears":{"open":{"teeth":42}}}});
+    let loaded = crate::prefs::lenient(&old);
+    let memory = &loaded.plugin_importer_options["gears"]["open"];
+    assert_eq!((memory.remember, &memory.values), (false, &json!({"teeth":42})));
+    h.app.load_prefs(&serde_json::to_value(&loaded).unwrap());
     open_entry(&mut h.app, 0, 0);
-    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 20);
-    remember_options(&mut h.app, "gears", "open", &json!({"teeth":30}));
-    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 42, "off does not update memory");
-    let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-    restored.load_prefs(&h.app.prefs());
-    assert!(!restored.preferences.plugin_remember_importer_options);
-    crate::prefs::control(&mut h.app, &json!({"plugin_remember_importer_options":true})).unwrap();
+    assert!(!h.app.plugin_menu.dialog().unwrap().remember);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 20, "checkbox off: the entry's defaults");
+    h.app.plugin_menu.dialogs.clear();
+    assert!(!open_importer_file(&mut h.app, "gear.sample"), "checkbox off: File > Open imports directly");
+
+    // The new shape round-trips, and it is what gets saved.
+    h.app.preferences.plugin_importer_options.get_mut("gears").unwrap().get_mut("open").unwrap().remember = true;
+    let saved = serde_json::to_value(&h.app.preferences).unwrap();
+    assert_eq!(saved["plugin_importer_options"]["gears"]["open"], json!({"remember":true,"values":{"teeth":42}}));
+    let again = crate::prefs::lenient(&saved);
+    assert_eq!(again.plugin_importer_options, h.app.preferences.plugin_importer_options);
+    open_entry(&mut h.app, 0, 0);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 42);
+
+    // A page reset keeps last-run bookkeeping.
     crate::prefs::control(&mut h.app, &json!({"open":"Plugins","button":"defaults"})).unwrap();
-    assert!(!h.app.preferences.plugin_remember_importer_options, "page defaults restore the opt-in behaviour");
-    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 42, "page reset keeps last-run bookkeeping");
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"].values["teeth"], 42);
 }
 
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]

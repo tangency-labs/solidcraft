@@ -1,57 +1,46 @@
 {
   "ar": {
-    "prefs.plugin_remember_importer_options": "تذكّر خيارات المستورد",
-    "prefs.plugin_remember_importer_options_help": "إعادة استخدام آخر خيارات شُغّل بها كل مستورد. أوقف هذا الخيار للبدء دائماً بالقيم الافتراضية للمخطط.",
+    "ui.plugin_importer_remember": "تذكّر هذه الخيارات",
     "ui.plugin_importer_restore_defaults": "استعادة القيم الافتراضية"
   },
   "de": {
-    "prefs.plugin_remember_importer_options": "Importoptionen merken",
-    "prefs.plugin_remember_importer_options_help": "Die zuletzt verwendeten Optionen jedes Importers wiederverwenden. Ausschalten, um immer mit den Schema-Standardwerten zu beginnen.",
+    "ui.plugin_importer_remember": "Diese Optionen merken",
     "ui.plugin_importer_restore_defaults": "Standardwerte wiederherstellen"
   },
   "en": {
-    "prefs.plugin_remember_importer_options": "Remember importer options",
-    "prefs.plugin_remember_importer_options_help": "Reuse the last options run with each importer entry. Turn off to always start from schema defaults.",
+    "ui.plugin_importer_remember": "Remember these options",
     "ui.plugin_importer_restore_defaults": "Restore defaults"
   },
   "en-GB": {
-    "prefs.plugin_remember_importer_options": "Remember importer options",
-    "prefs.plugin_remember_importer_options_help": "Reuse the last options run with each importer entry. Turn off to always start from schema defaults.",
+    "ui.plugin_importer_remember": "Remember these options",
     "ui.plugin_importer_restore_defaults": "Restore defaults"
   },
   "es": {
-    "prefs.plugin_remember_importer_options": "Recordar las opciones del importador",
-    "prefs.plugin_remember_importer_options_help": "Reutilizar las últimas opciones usadas con cada entrada del importador. Desactívalo para empezar siempre con los valores predeterminados del esquema.",
+    "ui.plugin_importer_remember": "Recordar estas opciones",
     "ui.plugin_importer_restore_defaults": "Restaurar valores predeterminados"
   },
   "he": {
-    "prefs.plugin_remember_importer_options": "זכירת אפשרויות היבואן",
-    "prefs.plugin_remember_importer_options_help": "שימוש חוזר באפשרויות האחרונות שהופעלו בכל פעולת יבוא. כיבוי האפשרות מתחיל תמיד מברירות המחדל של הסכמה.",
+    "ui.plugin_importer_remember": "זכירת האפשרויות האלה",
     "ui.plugin_importer_restore_defaults": "שחזור ברירות המחדל"
   },
   "ja": {
-    "prefs.plugin_remember_importer_options": "インポーターのオプションを記憶",
-    "prefs.plugin_remember_importer_options_help": "各インポーターエントリで最後に実行したオプションを再利用します。オフにすると常にスキーマの既定値から開始します。",
+    "ui.plugin_importer_remember": "これらのオプションを記憶",
     "ui.plugin_importer_restore_defaults": "既定値に戻す"
   },
   "ko": {
-    "prefs.plugin_remember_importer_options": "가져오기 옵션 기억",
-    "prefs.plugin_remember_importer_options_help": "각 가져오기 항목에서 마지막으로 실행한 옵션을 다시 사용합니다. 끄면 항상 스키마 기본값으로 시작합니다.",
+    "ui.plugin_importer_remember": "이 옵션 기억",
     "ui.plugin_importer_restore_defaults": "기본값 복원"
   },
   "uk": {
-    "prefs.plugin_remember_importer_options": "Запам’ятовувати параметри імпортера",
-    "prefs.plugin_remember_importer_options_help": "Повторно використовувати останні параметри запуску кожної дії імпортера. Вимкніть, щоб завжди починати зі стандартних значень схеми.",
+    "ui.plugin_importer_remember": "Запам’ятати ці параметри",
     "ui.plugin_importer_restore_defaults": "Відновити стандартні значення"
   },
   "vi": {
-    "prefs.plugin_remember_importer_options": "Ghi nhớ tuỳ chọn trình nhập",
-    "prefs.plugin_remember_importer_options_help": "Dùng lại các tuỳ chọn chạy gần nhất cho từng mục của trình nhập. Tắt để luôn bắt đầu với giá trị mặc định của lược đồ.",
+    "ui.plugin_importer_remember": "Ghi nhớ các tuỳ chọn này",
     "ui.plugin_importer_restore_defaults": "Khôi phục mặc định"
   },
   "zh": {
-    "prefs.plugin_remember_importer_options": "记住导入器选项",
-    "prefs.plugin_remember_importer_options_help": "为每个导入器条目重用上次运行的选项。关闭后始终从架构默认值开始。",
+    "ui.plugin_importer_remember": "记住这些选项",
     "ui.plugin_importer_restore_defaults": "恢复默认值"
   }
 }

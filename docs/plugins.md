@@ -966,21 +966,21 @@ Only an importer may say `open`.
    "permissions": {"input_folder": true}}}
 ```
 
-With **Preferences > Plugins > Remember importer options** enabled, importer options dialogs
-remember the last values used to start an import, separately for each plugin id and entry name.
-These values live in the app's user preferences, outside every design.
+An importer's options dialog has a **Remember these options** checkbox next to **Restore defaults**.
+It is off by default and belongs to that one entry (a plugin id and entry name). When you start an
+import with it on, the entry keeps the values you used, in the app's user preferences
+(`plugin_importer_options`), outside every design. With it off the entry keeps nothing.
 The next dialog keeps remembered fields that still satisfy the current input schema; missing or
 invalid fields start from the schema defaults. Changing a field or cancelling the dialog or file
-picker does not change the stored values. **Restore defaults** resets the whole form; the stored
-values change only when the next import starts.
+picker does not change the stored values. **Restore defaults** resets the values and leaves the
+checkbox as it is; the stored values change only when the next import starts.
 
-**Remember importer options** (`plugin_remember_importer_options`) is off by default. With it off,
-menu dialogs start from schema defaults, and **File > Open** and drag-and-drop start the import
-directly, preserving the previous interaction. With it on, File > Open and drag-and-drop show the
-same options dialog after choosing a file for an importer. The dialog's Run button opens that file
-without asking for it again. If the form cannot render the importer's schema, the file still opens
-directly with schema defaults. Native readers retain priority for formats SolidCraft already supports.
-The Plugins page's defaults turn remembering off without clearing the last-run values.
+With the checkbox off, the entry's dialog starts from schema defaults, and **File > Open** and
+drag-and-drop start the import directly, as before. With it on, File > Open and drag-and-drop show
+that entry's dialog, filled in with the remembered values, after choosing a file for the importer.
+The dialog's Run button opens that file without asking for it again. If the form cannot render the
+importer's schema, the file still opens directly with schema defaults. Native readers retain
+priority for formats SolidCraft already supports.
 Removing a plugin forgets all of its entries' remembered values, including when Preferences is cancelled.
 
 Scripts, CLI and MCP opens never read or update this memory and never open an options dialog.

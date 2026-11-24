@@ -1115,11 +1115,6 @@ pub(crate) fn follow_view_fov(app: &mut SolveApp) {
     }
 }
 
-pub(crate) fn importer_options_control(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let response = setting::plugin_remember_importer_options(app, ui);
-    crate::scenario::publish_target("prefs:plugin_remember_importer_options", response.rect);
-}
-
 /// The browser sidebar's first width, and the width [`Prefs::default`] restores; the panel
 /// itself clamps what the user drags to its own range.
 pub const DEFAULT_BROWSER_WIDTH: f32 = 250.0;
@@ -3822,7 +3817,7 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
         p.max_sketch_points = Prefs::default().max_sketch_points;
     }
     p.plugin_importer_options.retain(|id, entries| {
-        entries.retain(|name, value| crate::plugin_menu::valid_saved_options(name, value));
+        entries.retain(|name, memory| crate::plugin_menu::valid_saved_options(name, &memory.values));
         crate::plugins::valid_id(id) && entries.len() <= crate::plugins::MAX_DISABLED
     });
     p.plugin_importer_options = p.plugin_importer_options.into_iter().take(crate::plugins::MAX_DISABLED).collect();
@@ -4062,7 +4057,7 @@ fn prepare_preferences(
         || new.plugin_importer_options.iter().any(|(id, entries)| {
             !crate::plugins::valid_id(id)
                 || entries.len() > crate::plugins::MAX_DISABLED
-                || entries.iter().any(|(name, value)| !crate::plugin_menu::valid_saved_options(name, value))
+                || entries.iter().any(|(name, memory)| !crate::plugin_menu::valid_saved_options(name, &memory.values))
         })
     {
         return Err("`plugin_importer_options` needs bounded plugin ids, entry names and option objects".into());

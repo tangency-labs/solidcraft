@@ -789,7 +789,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         if app.preferences.plugin_limits_expanded {
             resource_controls(app, ui);
         }
-        crate::prefs::importer_options_control(app, ui);
         crate::ui_kit::checkbox(
             ui,
             solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),

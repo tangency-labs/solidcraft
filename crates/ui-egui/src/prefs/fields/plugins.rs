@@ -19,9 +19,6 @@ macro_rules! plugins_preferences {
             /// Remember a moved plugin command window's position for the current design, until the
             /// application closes (#18684). Off keeps the previously centred reopen behaviour.
             plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
-            /// Opt in to reusing last-run options and asking for them on File > Open and drop.
-            /// Off starts menu dialogs from schema defaults and opens chosen files directly.
-            plugin_remember_importer_options: bool = false, PAGE_PLUGINS => check_id_help("prefs.plugin_remember_importer_options", "prefs.plugin_remember_importer_options_help");
         }
     };
 }

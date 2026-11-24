@@ -1702,10 +1702,18 @@ fn importer_with_expected_options(h: &mut crate::scenario::Harness, expected: se
         "limits":{"fuel":10000000,"memory_mib":2,"deadline_ms":5000,"stack_kib":16384}}});
     std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
     h.app.session.plugin_state.plugins_dir = Some(h.dir.join("plugins"));
-    h.app.preferences.plugin_importer_options.insert("sample".into(), [("convert".into(), json!({"size":7}))].into());
+    h.app
+        .preferences
+        .plugin_importer_options
+        .insert("sample".into(), [("convert".into(), crate::plugin_menu::ImporterMemory::new(json!({"size":7}), false))].into());
     let path = h.dir.join("bracket.smp");
     std::fs::write(&path, solidcraft_engine::io::write_design(&Session::default().doc).unwrap()).unwrap();
     path.to_string_lossy().into_owned()
+}
+
+/// Turn the sample importer entry's own **Remember these options** choice on or off.
+fn remember_importer(h: &mut crate::scenario::Harness, on: bool) {
+    h.app.preferences.plugin_importer_options.get_mut("sample").unwrap().get_mut("convert").unwrap().remember = on;
 }
 
 #[test]
@@ -1713,7 +1721,7 @@ fn importer_with_expected_options(h: &mut crate::scenario::Harness, expected: se
 fn file_open_and_drop_share_the_remembered_importer_dialog_and_run_its_options() {
     let mut h = crate::scenario::Harness::new();
     let path = importer_with_expected_options(&mut h, json!({"size":7}));
-    crate::prefs::set(&mut h.app, &json!({"plugin_remember_importer_options":true})).unwrap();
+    remember_importer(&mut h, true);
     h.app.open_chosen_file(&path);
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"size":7}));
     assert!(h.app.file_load.idle(), "choosing a file only opens the form");
@@ -1729,14 +1737,18 @@ fn file_open_and_drop_share_the_remembered_importer_dialog_and_run_its_options()
 #[test]
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
 fn file_open_and_drop_import_directly_until_remembering_is_enabled() {
-    for explicitly_disabled in [false, true] {
+    // 0: stored values with the checkbox never ticked; 1: ticked then unticked; 2: nothing stored.
+    for variant in 0..3 {
+        let explicitly_disabled = variant == 1;
         for dropped in [false, true] {
             let mut h = crate::scenario::Harness::new();
             let path = importer_with_expected_options(&mut h, json!({"size":2}));
-            assert!(!h.app.preferences.plugin_remember_importer_options);
+            if variant == 2 {
+                h.app.preferences.plugin_importer_options.clear();
+            }
             if explicitly_disabled {
-                crate::prefs::set(&mut h.app, &json!({"plugin_remember_importer_options":true})).unwrap();
-                crate::prefs::set(&mut h.app, &json!({"plugin_remember_importer_options":false})).unwrap();
+                remember_importer(&mut h, true);
+                remember_importer(&mut h, false);
             }
             let memory = h.app.preferences.plugin_importer_options.clone();
             assert!(!crate::plugin_menu::open_importer_file(&mut h.app, &path));
@@ -1760,7 +1772,7 @@ fn unrenderable_importer_schemas_keep_file_open_and_drop_on_the_direct_route() {
     for dropped in [false, true] {
         let mut h = crate::scenario::Harness::new();
         let path = importer_with_expected_options(&mut h, json!({"size":2}));
-        h.app.preferences.plugin_remember_importer_options = true;
+        remember_importer(&mut h, true);
         let manifest_path = h.dir.join("plugins/sample/plugin.json");
         let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
         let schema = &mut manifest["runtime"]["entries"][0]["input_schema"];
@@ -1791,7 +1803,7 @@ fn programmatic_imports_use_only_explicit_options_and_schema_defaults() {
             let expected = if options == json!({}) { json!({"size":2}) } else { options.clone() };
             let mut h = crate::scenario::Harness::new();
             let path = importer_with_expected_options(&mut h, expected);
-            h.app.preferences.plugin_remember_importer_options = true;
+            remember_importer(&mut h, true);
             let memory = h.app.preferences.plugin_importer_options.clone();
             // Scripts execute these same engine commands. The guest traps on any other options.
             let run = h.app.run(command, json!({"path":path,"options":options}));
@@ -1807,13 +1819,13 @@ fn programmatic_imports_use_only_explicit_options_and_schema_defaults() {
         // MCP/control opens offload the exact supplied options, without showing a form.
         let mut h = crate::scenario::Harness::new();
         let path = importer_with_expected_options(&mut h, json!({"size":3}));
-        h.app.preferences.plugin_remember_importer_options = true;
+        remember_importer(&mut h, true);
         let (request, _reply) =
             solidcraft_control::ControlRequest::new("engine.execute", json!({"command":command,"params":{"path":path,"options":{"size":3}}}));
         assert!(crate::file_load::control(&mut h.app, request).is_none());
         assert!(h.app.plugin_menu.dialogs.is_empty());
         assert_eq!(h.app.file_load.current_request().unwrap().options["options"], json!({"size":3}));
-        assert_eq!(h.app.preferences.plugin_importer_options["sample"]["convert"]["size"], 7);
+        assert_eq!(h.app.preferences.plugin_importer_options["sample"]["convert"].values["size"], 7);
     }
 }
 
@@ -1822,9 +1834,17 @@ fn programmatic_imports_use_only_explicit_options_and_schema_defaults() {
 fn removing_an_importer_forgets_every_entry_and_preferences_cancel_cannot_restore_it() {
     let mut h = crate::scenario::Harness::new();
     let path = importer_with_expected_options(&mut h, json!({"size":7}));
-    h.app.preferences.plugin_remember_importer_options = true;
-    h.app.preferences.plugin_importer_options.get_mut("sample").unwrap().insert("second".into(), json!({"size":5}));
-    h.app.preferences.plugin_importer_options.insert("other".into(), [("convert".into(), json!({"size":4}))].into());
+    remember_importer(&mut h, true);
+    h.app
+        .preferences
+        .plugin_importer_options
+        .get_mut("sample")
+        .unwrap()
+        .insert("second".into(), crate::plugin_menu::ImporterMemory::new(json!({"size":5}), true));
+    h.app
+        .preferences
+        .plugin_importer_options
+        .insert("other".into(), [("convert".into(), crate::plugin_menu::ImporterMemory::new(json!({"size":4}), true))].into());
     crate::prefs::control(&mut h.app, &json!({"open":"Plugins"})).unwrap();
     h.app.open_chosen_file(&path);
     h.app.run("plugin.remove", json!({"id":"sample"})).unwrap();
@@ -1834,5 +1854,5 @@ fn removing_an_importer_forgets_every_entry_and_preferences_cancel_cannot_restor
     let mut restored = SolveApp::new(Session::default(), Default::default());
     restored.load_prefs(&h.app.prefs());
     assert!(!restored.preferences.plugin_importer_options.contains_key("sample"));
-    assert_eq!(restored.preferences.plugin_importer_options["other"]["convert"]["size"], 4);
+    assert_eq!(restored.preferences.plugin_importer_options["other"]["convert"].values["size"], 4);
 }

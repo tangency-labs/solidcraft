@@ -990,18 +990,63 @@ pub(crate) fn valid_saved_options(entry: &str, value: &Value) -> bool {
         && serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= 64 * 1024)
 }
 
+/// What one importer entry keeps between runs, in `plugin_importer_options`: its own
+/// **Remember these options** choice and the values of its last run. Bookkeeping, never design data.
+///
+/// Stored as `{"remember": bool, "values": {..}}`. A plain option map, as the first version of this
+/// preference stored it, still loads: its values are kept and remembering stays off.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub struct ImporterMemory {
+    /// The entry's dialog starts from `values`, and File > Open and drop show that dialog.
+    pub remember: bool,
+    /// The options of the last import started with remembering on.
+    pub values: Value,
+}
+
+impl ImporterMemory {
+    pub fn new(values: Value, remember: bool) -> Self {
+        Self { remember, values }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ImporterMemory {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = <Value as serde::Deserialize>::deserialize(deserializer)?;
+        if let Some(map) = value.as_object()
+            && map.len() == 2
+            && let Some(remember) = map.get("remember").and_then(Value::as_bool)
+            && let Some(values) = map.get("values").filter(|values| values.is_object())
+        {
+            return Ok(Self { remember, values: values.clone() });
+        }
+        Ok(Self { remember: false, values: value })
+    }
+}
+
+/// The values an entry's dialog starts from: only when that entry's own checkbox was left on.
+fn remembered<'a>(app: &'a SolveApp, plugin: &str, entry: &str) -> Option<&'a Value> {
+    app.preferences.plugin_importer_options.get(plugin)?.get(entry).filter(|memory| memory.remember).map(|memory| &memory.values)
+}
+
 /// Bookkeeping changes only when a user starts an import, never on edits, previews or Cancel.
-fn remember_options(app: &mut SolveApp, plugin: &str, entry: &str, options: &Value) {
-    if !app.preferences.plugin_remember_importer_options || !valid_saved_options(entry, options) {
+/// With the dialog's checkbox on the entry keeps these values; with it off the entry forgets them.
+fn remember_options(app: &mut SolveApp, plugin: &str, entry: &str, options: &Value, remember: bool) {
+    let saved = &mut app.preferences.plugin_importer_options;
+    if !remember {
+        if let Some(entries) = saved.get_mut(plugin) {
+            entries.remove(entry);
+            if entries.is_empty() {
+                saved.remove(plugin);
+            }
+        }
         return;
     }
-    let saved = &mut app.preferences.plugin_importer_options;
-    if !saved.contains_key(plugin) && saved.len() >= crate::plugins::MAX_DISABLED {
+    if !valid_saved_options(entry, options) || (!saved.contains_key(plugin) && saved.len() >= crate::plugins::MAX_DISABLED) {
         return;
     }
     let entries = saved.entry(plugin.to_owned()).or_default();
     if entries.contains_key(entry) || entries.len() < crate::plugins::MAX_DISABLED {
-        entries.insert(entry.to_owned(), options.clone());
+        entries.insert(entry.to_owned(), ImporterMemory::new(options.clone(), true));
     }
 }
 
@@ -1011,16 +1056,17 @@ pub(crate) fn forget_options(app: &mut SolveApp, plugin: &str) {
     app.plugin_menu.dialogs.retain(|dialog| dialog.plugin.id != plugin);
 }
 
-/// Opted-in interactive opens use the options form when it supports the importer's schema.
-/// Other interactive opens retain the direct route; programmatic opens never call this function.
+/// Interactive opens of an importer entry that has **Remember these options** on use its options
+/// form when it supports the importer's schema. Other interactive opens retain the direct route;
+/// programmatic opens never call this function.
 pub(crate) fn open_importer_file(app: &mut SolveApp, path: &str) -> bool {
-    if cfg!(target_arch = "wasm32")
-        || !app.preferences.plugin_remember_importer_options
-        || !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path": path}))
-    {
+    if cfg!(target_arch = "wasm32") || !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path": path})) {
         return false;
     }
     let Ok(Some(importer)) = solidcraft_engine::plugin::importer_for(&app.session, path, None) else { return false };
+    if remembered(app, &importer.plugin_id, &importer.entry).is_none() {
+        return false;
+    }
     // Unsupported forms cannot submit options. Let the ordinary open run the importer directly.
     if form(&importer.input_schema).is_none() {
         return false;
@@ -1057,6 +1103,8 @@ pub(crate) struct EntryDialog {
     pub(crate) opens: Option<Vec<String>>,
     /// File already chosen by File > Open or drop; Run uses it without another picker.
     pub(crate) import_path: Option<String>,
+    /// The importer's **Remember these options** checkbox: Run keeps the values for next time.
+    pub(crate) remember: bool,
     /// An export slot's extensions: its button chooses where to save, then exports the design
     /// with these options.
     pub(crate) writes: Option<Vec<String>>,
@@ -1296,12 +1344,11 @@ fn open_plugin_entry(app: &mut SolveApp, plugin: Listed, e: usize, import_path: 
     }
     let mut fields = form(&entry.input_schema);
     let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
-    if opens.is_some()
-        && app.preferences.plugin_remember_importer_options
+    let saved = if opens.is_some() { remembered(app, &plugin.id, &entry.name).cloned() } else { None };
+    if let Some(saved) = &saved
         && let Some(fields) = &mut fields
-        && let Some(remembered) = app.preferences.plugin_importer_options.get(&plugin.id).and_then(|entries| entries.get(&entry.name))
     {
-        refresh_with_memory(fields, Some(remembered));
+        refresh_with_memory(fields, Some(saved));
     }
     let writes = (entry.kind == solidcraft_engine::plugin::EntryKind::Exporter).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
@@ -1341,6 +1388,7 @@ fn open_plugin_entry(app: &mut SolveApp, plugin: Listed, e: usize, import_path: 
         result: None,
         opens,
         import_path,
+        remember: saved.is_some(),
         writes,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
@@ -1991,15 +2039,15 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
     // An importer: choose the file, then open it as a new design on the file worker, as File ›
     // Open does, with the options from this dialog.
     if let Some(extensions) = dialog.opens.clone() {
-        let (plugin, entry, path) = (dialog.plugin.id.clone(), dialog.entry.clone(), dialog.import_path.clone());
+        let (plugin, entry, path, remember) = (dialog.plugin.id.clone(), dialog.entry.clone(), dialog.import_path.clone(), dialog.remember);
         app.plugin_menu.dialogs.retain(|d| d.id != id);
         if let Some(path) = path {
-            run_importer(app, &plugin, &entry, &path, params);
+            run_importer(app, &plugin, &entry, &path, params, remember);
         } else {
             let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
             app.pick_open_for(&extensions, move |app, path| {
                 if let Some(path) = path {
-                    run_importer(app, &plugin, &entry, &path, params);
+                    run_importer(app, &plugin, &entry, &path, params, remember);
                 }
             });
         }
@@ -2040,8 +2088,8 @@ fn queue(app: &mut SolveApp, id: u64, request: Value) {
     }
 }
 
-fn run_importer(app: &mut SolveApp, plugin: &str, entry: &str, path: &str, options: Value) {
-    remember_options(app, plugin, entry, &options);
+fn run_importer(app: &mut SolveApp, plugin: &str, entry: &str, path: &str, options: Value, remember: bool) {
+    remember_options(app, plugin, entry, &options, remember);
     let mut request = crate::file_load::Request::new(path, crate::file_load::Kind::Open);
     request.plugin_import = true;
     request.options.insert("format".into(), json!(std::format!("{plugin}.{entry}")));
@@ -2281,12 +2329,18 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
             }
             browse = body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim);
             if dialog.opens.is_some() && dialog.fields.is_some() {
-                let reset =
-                    ui.add_enabled_ui(!running, |ui| ui_kit::button(ui, app.tr("ui.plugin_importer_restore_defaults"), ui_kit::Button::Normal)).inner;
-                crate::scenario::publish_target("plugin_dialog:defaults", reset.rect);
-                if reset.clicked() {
-                    restore_defaults(dialog);
-                }
+                ui.horizontal_wrapped(|ui| {
+                    let reset = ui
+                        .add_enabled_ui(!running, |ui| ui_kit::button(ui, app.tr("ui.plugin_importer_restore_defaults"), ui_kit::Button::Normal))
+                        .inner;
+                    crate::scenario::publish_target("plugin_dialog:defaults", reset.rect);
+                    if reset.clicked() {
+                        restore_defaults(dialog);
+                    }
+                    let remember =
+                        ui.add_enabled_ui(!running, |ui| ui_kit::checkbox(ui, app.tr("ui.plugin_importer_remember"), &mut dialog.remember)).inner;
+                    crate::scenario::publish_target("plugin_dialog:remember", remember.rect);
+                });
             }
         });
     if let Some(mut picker) = picker {
@@ -2324,6 +2378,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     (true, action == ui_kit::Action::Ok, claim)
 }
 
+/// Resets the values; the **Remember these options** checkbox keeps its state.
 fn restore_defaults(dialog: &mut EntryDialog) {
     if let Some(entry) = dialog.plugin.entries.iter().find(|entry| entry.name == dialog.entry) {
         dialog.fields = form(&entry.input_schema);
