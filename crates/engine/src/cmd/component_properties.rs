@@ -194,7 +194,7 @@ pub(super) const BODY_COLLISION_CONTRACT: crate::schema::TypedContract<crate::sc
 pub(super) fn body_collision(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.collision";
     let text = crate::params::str_(p, "shape").ok_or_else(|| bad(cmd, "give `shape`"))?;
-    let shape = CollisionShape::parse(text).ok_or_else(|| bad(cmd, "`shape` must be auto, mesh, convex_hull, box, cylinder, sphere or none"))?;
+    let shape = CollisionShape::parse(text).ok_or_else(|| bad(cmd, "`shape` must be auto, mesh, box, cylinder, sphere or none"))?;
     let state = s.model.state();
     let bodies: Vec<String> = match (crate::params::str_(p, "body"), p.get("component").filter(|v| !v.is_null())) {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `body` or `component`, not both")),

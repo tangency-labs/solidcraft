@@ -2262,7 +2262,7 @@ pub struct BodyCollisionParams {
     /// The component whose bodies to set, by id or name. Give this or `body`.
     #[serde(default)]
     pub component: Option<IdOrName>,
-    /// `auto` (the export decides), `mesh`, `convex_hull`, `box`, `cylinder`, `sphere` or `none`.
+    /// `auto` (the export decides), `mesh`, `box`, `cylinder`, `sphere` or `none`.
     pub shape: String,
 }
 

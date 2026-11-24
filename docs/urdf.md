@@ -27,10 +27,8 @@ name in the URDF; with `place_meshes` the files are also written where it points
   the collision mesh.
 - `robot-<component>-collision.stl` holds the bodies that collide as their mesh, written
   separately whenever the component's collision is not the same as its drawing: some bodies
-  are open surfaces, or other bodies have another collision shape (a hull, a fitted shape or
+  are open surfaces, or other bodies have another collision shape (a box, cylinder, sphere or
   none).
-- `robot-<component>-<body>-collision.stl` is the convex hull of one body, one file per body
-  set to `convex_hull` (or left on `auto` with `collision: convex_hull`).
 - With `images: true`, `robot-<component>-<decal>.dae` and `robot-<component>-<decal>.png` (or
   `.jpg`) appear for each shown picture of the component: a COLLADA mesh with texture
   coordinates, and the decal's image beside it. See [Decals](#decals).
@@ -47,7 +45,6 @@ way, the error names the files already written and the one that failed.
 | `effort` | 1000 | Effort limit for joint values with none saved, in N (sliding) or N m (turning). |
 | `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
 | `images` | false | Also write each picture shown on the model as a textured visual; see [Decals](#decals). |
-| `collision` | mesh | What a body left on `auto` becomes: `mesh` or `convex_hull`. See [Collision shapes](#collision-shapes). |
 | `mimic` | false | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. The desktop dialog's **Couple motion links** (`urdf_mimic`). |
 | `place_meshes` | false | Write the meshes where `mesh_prefix` points, making the folder. `false` writes them next to the URDF whatever the prefix says, as older versions did; copy them where the prefix points yourself. The desktop dialog's **Write meshes where the prefix points** (`urdf_place_meshes`). |
 
@@ -195,17 +192,15 @@ the copies move together, which a URDF could only express with `<mimic>`.) The e
 
 | Shape | Written as |
 |---|---|
-| `auto` | What the `collision` parameter says (the default) |
+| `auto` | The body's full mesh, as `mesh` (the default) |
 | `mesh` | The body's full mesh. A component whose bodies are all this shares its visual STL |
-| `convex_hull` | One closed STL per body. Split a part into bodies to get one hull per body |
-| `box` | A `<box>` along the body's principal axes |
-| `cylinder` | A `<cylinder>` along whichever principal axis gives the least volume |
-| `sphere` | A `<sphere>` around the body |
+| `box` | A `<box>`: the body's bounding box |
+| `cylinder` | A `<cylinder>` in the bounding box, along whichever side gives the smallest one, as wide as the larger of the other two sides |
+| `sphere` | A `<sphere>` at the bounding box's centre, as wide as its largest side |
 | `none` | No `<collision>`: a screw, a cosmetic part |
 
-The `collision` parameter of `file.export` is `mesh` (the default) or `convex_hull`, and applies to bodies
-left on `auto`. An open surface collides only with a shape that gives it a volume. It still adds no
-mass. A flat body has no convex hull, so it gets no collision, with a warning.
+The bounding box is the kernel's exact one, in the part's frame. An open surface collides only with a
+shape that gives it a volume. It still adds no mass.
 
 ## Warnings about implausible values
 

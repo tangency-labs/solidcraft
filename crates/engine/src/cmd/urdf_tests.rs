@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use solidcraft_doc::{Mat, joints, mat_mul};
-use solidcraft_io::urdf::{CollisionDefault, CollisionGeom, Step, UrdfModel, UrdfOptions, UrdfPackage};
+use solidcraft_io::urdf::{CollisionGeom, Step, UrdfModel, UrdfOptions, UrdfPackage};
 
 use crate::Session;
 
@@ -1361,19 +1361,8 @@ fn a_pasted_component_gets_its_bodies_shapes() {
     assert!(s.doc.collision_shapes.values().all(|x| *x == solidcraft_doc::CollisionShape::Sphere));
 }
 
-fn package_with(s: &Session, collision: CollisionDefault) -> UrdfPackage {
-    let options = UrdfOptions { collision, ..Default::default() };
-    solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "t", &options).unwrap_or_else(|e| panic!("urdf: {e}"))
-}
-
 fn collisions_of<'a>(p: &'a UrdfPackage, link: &str) -> &'a [CollisionGeom] {
     p.model.links.iter().find(|l| l.name == link).map_or(&[], |l| l.collision.as_slice())
-}
-
-/// Volume of a binary STL by name.
-fn named_stl_volume(p: &UrdfPackage, file: &str) -> f64 {
-    let (_, bytes) = p.meshes.iter().find(|(n, _)| n == file).unwrap_or_else(|| panic!("no {file}"));
-    stl_volume(bytes).unwrap_or_else(|| panic!("{file} is not closed"))
 }
 
 #[test]
@@ -1417,55 +1406,23 @@ fn a_cylinder_shape_points_along_urdf_z() {
     run(&mut s, "body.collision", json!({"component": "Post", "shape": "cylinder"}));
     let p = package(&s);
     let [CollisionGeom::Cylinder { origin, radius, length }] = collisions_of(&p, "Post") else { panic!("{}", p.xml) };
+    // The 10 x 40 x 10 box: along y the cylinder is the smallest, 40 long and as wide as the
+    // larger of the other two sides, 10, so radius 5.
     assert!((length - 40.0).abs() < 1e-9, "{length}");
-    assert!((radius - 50f64.sqrt()).abs() < 1e-9, "{radius}");
+    assert!((radius - 5.0).abs() < 1e-9, "{radius}");
     let at = mat_mul(&frame_of(&p, &s, "Post"), origin);
     assert!(at[2][1].abs() > 1.0 - 1e-9, "{at:?}");
     assert!((at[3][1] - 20.0).abs() < 1e-9, "{at:?}");
 }
 
 #[test]
-fn a_sphere_shape_holds_the_body() {
+fn a_sphere_shape_is_as_wide_as_the_bodys_largest_side() {
     let mut s = two_cubes();
     run(&mut s, "body.collision", json!({"component": "B", "shape": "sphere"}));
     let p = package(&s);
     let [CollisionGeom::Sphere { radius, .. }] = collisions_of(&p, "B") else { panic!("{}", p.xml) };
-    assert!((radius - 75f64.sqrt()).abs() < 1e-9, "{radius}");
-}
-
-#[test]
-fn convex_hull_writes_one_stl_per_body_and_each_is_closed() {
-    let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "C"}));
-    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "One"}));
-    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Two", "operation": "new"}));
-    run(&mut s, "body.collision", json!({"component": "C", "shape": "convex_hull"}));
-    let p = package(&s);
-    let geoms = collisions_of(&p, "C");
-    assert_eq!(geoms.len(), 2, "{}", p.xml);
-    for g in geoms {
-        let CollisionGeom::Mesh { file, .. } = g else { panic!("{g:?}") };
-        assert!(file.ends_with("-collision.stl"), "{file}");
-        // In metres: 1 cm³.
-        assert!((named_stl_volume(&p, file) - 1e-6).abs() < 1e-12);
-    }
-}
-
-#[test]
-fn the_collision_option_applies_only_to_auto_bodies() {
-    let mut s = two_cubes();
-    run(&mut s, "body.collision", json!({"component": "A", "shape": "sphere"}));
-    let p = package_with(&s, CollisionDefault::ConvexHull);
-    assert!(matches!(collisions_of(&p, "A"), [CollisionGeom::Sphere { .. }]), "{}", p.xml);
-    assert!(matches!(collisions_of(&p, "B"), [CollisionGeom::Mesh { file, .. }] if file != "t-B.stl"), "{}", p.xml);
-}
-
-#[test]
-fn a_mesh_body_keeps_the_mesh_under_a_hull_default() {
-    let mut s = two_cubes();
-    run(&mut s, "body.collision", json!({"component": "B", "shape": "mesh"}));
-    let p = package_with(&s, CollisionDefault::ConvexHull);
-    assert!(matches!(collisions_of(&p, "B"), [CollisionGeom::Mesh { file, .. }] if file == "t-B.stl"), "{}", p.xml);
+    // The 10 mm cube: radius 5.
+    assert!((radius - 5.0).abs() < 1e-9, "{radius}");
 }
 
 /// A flat open surface in component "Sheet", body "Wall".
@@ -1480,12 +1437,11 @@ fn sheet() -> Session {
 }
 
 #[test]
-fn a_flat_body_given_a_hull_has_none_and_warns() {
-    let mut s = sheet();
-    run(&mut s, "body.collision", json!({"component": "Sheet", "shape": "convex_hull"}));
-    let p = package(&s);
-    assert!(collisions_of(&p, "Sheet").is_empty(), "{}", p.xml);
-    assert!(p.warnings.iter().any(|w| w.contains("Wall") && w.contains("hull")), "{:?}", p.warnings);
+fn convex_hull_from_a_development_build_reads_as_a_mesh_and_is_refused_now() {
+    let read: solidcraft_doc::CollisionShape = serde_json::from_value(json!("convex_hull")).unwrap_or_default();
+    assert_eq!(read, solidcraft_doc::CollisionShape::Mesh);
+    let mut s = two_cubes();
+    assert!(s.execute("body.collision", &json!({"component": "B", "shape": "convex_hull"})).is_err());
 }
 
 #[test]
@@ -1495,25 +1451,6 @@ fn an_open_surface_given_a_box_collides_and_adds_no_mass() {
     let p = package(&s);
     assert!(matches!(collisions_of(&p, "Sheet"), [CollisionGeom::Box { .. }]), "{}", p.xml);
     assert_eq!(inertial_of(&p, "Sheet").mass, 1e-6);
-}
-
-#[test]
-fn hull_stls_stay_inside_allow_paths() {
-    let mut s = two_cubes();
-    run(&mut s, "body.collision", json!({"component": "B", "shape": "convex_hull"}));
-    let dir = temp("hull-files");
-    let urdf = dir.join("robot.urdf");
-    let r = run(&mut s, "file.export", json!({"path": urdf.to_string_lossy()}));
-    let files = r["files"].as_array().cloned().unwrap_or_default();
-    assert!(files.iter().any(|f| f.as_str().is_some_and(|f| f.ends_with("-collision.stl"))), "{r}");
-    assert!(files.iter().all(|f| f.as_str().is_some_and(|f| f.starts_with(&*dir.to_string_lossy()))), "{r}");
-}
-
-#[test]
-fn file_export_refuses_an_unknown_collision_default() {
-    let mut s = two_cubes();
-    let urdf = temp("collision-word").join("r.urdf");
-    assert!(s.execute("file.export", &json!({"path": urdf.to_string_lossy(), "collision": "blob"})).is_err());
 }
 
 #[test]
@@ -1662,7 +1599,7 @@ fn file_export_refuses_urdf_choices_of_the_wrong_type() {
     let mut s = two_cubes();
     let dir = temp("export-wrong-types");
     let path = dir.join("r.urdf").to_string_lossy().to_string();
-    for (k, v) in [("mimic", json!("false")), ("collision", json!(1)), ("place_meshes", json!(0)), ("collision", json!("hull"))] {
+    for (k, v) in [("mimic", json!("false")), ("place_meshes", json!(0))] {
         let r = s.execute("file.export", &json!({"path": path, k: v}));
         assert!(r.is_err(), "{k}: {v}");
     }
@@ -1682,17 +1619,16 @@ fn a_web_prefix_keeps_the_meshes_beside_the_urdf_and_says_so() {
 }
 
 #[test]
-fn file_export_urdf_takes_the_mimic_and_collision_choices() {
+fn file_export_urdf_takes_the_mimic_choice() {
     let mut s = fan(&["revolute", "revolute"]);
     link(&mut s, "J0", "J1", 2.0, 0.0);
     let dir = temp("export-urdf-cmd");
     let path = dir.join("r.urdf");
     // Strict: a parameter the command's schema doesn't list is refused.
     s.param_check = crate::schema::ParamCheck::Strict;
-    run(&mut s, "file.export_urdf", json!({"path": path.to_string_lossy(), "mimic": false, "collision": "convex_hull"}));
+    run(&mut s, "file.export_urdf", json!({"path": path.to_string_lossy(), "mimic": false}));
     let xml = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(!xml.contains("<mimic"), "{xml}");
-    assert!(xml.contains("-collision.stl"), "{xml}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2286,7 +2222,7 @@ fn drop_height(robot: &XRobot, dir: &std::path::Path, xy: [f64; 2], r: f64) -> O
 #[test]
 fn checker_a_dropped_ball_lands_on_each_collision_shape() {
     let mut cmds = Vec::new();
-    for (k, shape) in ["mesh", "convex_hull", "box", "cylinder", "sphere", "none"].into_iter().enumerate() {
+    for (k, shape) in ["mesh", "box", "cylinder", "sphere", "none"].into_iter().enumerate() {
         let (component, body) = (format!("S{k}"), format!("B{k}"));
         cmds.push(("component.activate", json!({"component": "root"})));
         cmds.push(("component.create", json!({"name": component})));
@@ -2295,11 +2231,10 @@ fn checker_a_dropped_ball_lands_on_each_collision_shape() {
         cmds.push(("occurrence.ground", json!({"occurrence": format!("{component}:1"), "grounded": true})));
     }
     let (robot, dir) = checker_case("collision_shapes", &cmds);
-    // A 5 mm ball over each 10 mm cube's centre comes to rest on its top at 10 + 5 mm; the
-    // sphere is the cube's bounding one, radius 5√3 mm about the cube's centre, so the ball rests
-    // at 5 + 5√3 + 5 mm; through `none` it falls.
-    let sphere = 0.005 + 0.005 * 3f64.sqrt() + 0.005;
-    for (k, want) in [Some(0.015), Some(0.015), Some(0.015), Some(0.015), Some(sphere), None].into_iter().enumerate() {
+    // A 5 mm ball over each 10 mm cube's centre comes to rest on its top at 10 + 5 mm: the mesh,
+    // the box and the cylinder (along z, radius 5) all end at the top face, and the sphere, radius
+    // 5 about the cube's centre at 5, too; through `none` it falls.
+    for (k, want) in [Some(0.015), Some(0.015), Some(0.015), Some(0.015), None].into_iter().enumerate() {
         let got = drop_height(&robot, &dir, [0.005 + 0.03 * k as f64, 0.005], 0.005);
         match (got, want) {
             (Some(g), Some(w)) => assert!((g - w).abs() < 1e-3, "shape {k}: the ball lands at {g:.4} m, expected {w:.4} m"),

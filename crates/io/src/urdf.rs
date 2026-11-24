@@ -12,7 +12,6 @@
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::hull3::{convex_hull, fit_box, fit_cylinder, fit_sphere};
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, Joint, JointDynamics, JointKind};
 use solidcraft_doc::{
@@ -22,7 +21,7 @@ use solidcraft_doc::{
 use solidcraft_geom::Mesh;
 use solidcraft_geom::inertia::principal;
 
-use crate::{IoError, Result, export_mesh, export_mesh_noted, stl_binary, weld, weld_eps};
+use crate::{IoError, Result, export_mesh_noted, stl_binary, weld, weld_eps};
 
 /// Mass (kg) and inertia (kg m²) of a link with no massive body: Gazebo drops massless links.
 const TOKEN_MASS: f64 = 1e-6;
@@ -50,8 +49,6 @@ pub struct UrdfOptions {
     pub velocity: Option<f64>,
     /// Write `<mimic>` for motion links. `file.export` sets it unless told not to.
     pub mimic: bool,
-    /// What a body left on `Auto` becomes.
-    pub collision: CollisionDefault,
     /// The design's decals, each written as a textured mesh in a visual of its component's links.
     pub decals: Vec<UrdfDecal>,
 }
@@ -139,14 +136,6 @@ impl CollisionGeom {
         *origin = mat_mul(to_link, origin);
         out
     }
-}
-
-/// What a body with no collision shape of its own (`Auto`) becomes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CollisionDefault {
-    #[default]
-    Mesh,
-    ConvexHull,
 }
 
 /// Mass (kg), centre of mass (mm, link frame) and inertia about it (kg m², link axes).
@@ -413,7 +402,7 @@ fn parts(
         let (mut masses, mut color) = (Vec::new(), None);
         // Every body collides as drawn: the collision mesh is the visual one.
         let mut shared = true;
-        let (mut hulls, mut fitted) = (Vec::new(), Vec::new());
+        let mut fitted = Vec::new();
         for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == c) {
             let (mut m, notes) = export_mesh_noted(&b.body, crate::MeshQuality::Standard)?;
             out.warnings.extend(notes.into_iter().map(|n| format!("body `{}`: {n}", b.name)));
@@ -434,7 +423,6 @@ fn parts(
                 masses.push((rho * mp.volume, mp.centroid, mp.inertia.map(|r| r.map(|x| x * rho))));
             }
             let shape = match doc.collision_shape(&b.name) {
-                CollisionShape::Auto if options.collision == CollisionDefault::ConvexHull => CollisionShape::ConvexHull,
                 CollisionShape::Auto => CollisionShape::Mesh,
                 shape => shape,
             };
@@ -449,27 +437,15 @@ fn parts(
             match shape {
                 CollisionShape::Mesh if closed.is_some() => append(&mut collision, &welded),
                 CollisionShape::Auto | CollisionShape::Mesh | CollisionShape::None => {}
-                CollisionShape::ConvexHull => match convex_hull(&welded.positions) {
-                    Some(hull) => hulls.push((b.name.clone(), hull)),
-                    None => fit_failed(out, "convex hull, since it spans no volume,"),
-                },
-                CollisionShape::Box => match fit_box(&welded) {
-                    Some(f) => fitted.push(CollisionGeom::Box {
-                        origin: f.frame,
-                        size: Vec3::new(f.size.x.max(MIN_SHAPE), f.size.y.max(MIN_SHAPE), f.size.z.max(MIN_SHAPE)),
-                    }),
-                    None => fit_failed(out, "box"),
-                },
-                CollisionShape::Cylinder => match fit_cylinder(&welded) {
-                    Some(f) => {
-                        fitted.push(CollisionGeom::Cylinder { origin: f.frame, radius: f.size.x.max(MIN_SHAPE), length: f.size.z.max(MIN_SHAPE) })
+                CollisionShape::Box | CollisionShape::Cylinder | CollisionShape::Sphere => {
+                    // The shape is set in the body's exact bounding box (the kernel's), in the
+                    // frame its mesh is in.
+                    let offset = doc.model_body_offset(b).copied().unwrap_or(IDENTITY);
+                    match b.body.exact_bounds().ok().and_then(|bb| bounded_shape(shape, bb.min, bb.max)) {
+                        Some(g) => fitted.push(g.in_frame(&offset)),
+                        None => fit_failed(out, shape_word(shape)),
                     }
-                    None => fit_failed(out, "cylinder"),
-                },
-                CollisionShape::Sphere => match fit_sphere(&welded) {
-                    Some(f) => fitted.push(CollisionGeom::Sphere { origin: f.frame, radius: f.size.x.max(MIN_SHAPE) }),
-                    None => fit_failed(out, "sphere"),
-                },
+                }
             }
         }
         let decals = decal_files(&options.decals, c, &format!("{stem}-{label}"), names, out);
@@ -495,11 +471,6 @@ fn parts(
             out.warnings.extend(large_collision(collision.triangles.len(), &label));
             let file = names.file(&format!("{stem}-{label}-collision"));
             out.meshes.push((file.clone(), stl_binary(&[metres(&collision)], &label)));
-            part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
-        }
-        for (body, hull) in hulls {
-            let file = names.file(&format!("{stem}-{label}-{body}-collision"));
-            out.meshes.push((file.clone(), stl_binary(&[metres(&hull)], &label)));
             part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
         }
         part.collision.extend(fitted);
@@ -1095,16 +1066,48 @@ fn turned(inertia: [[f64; 3]; 3], m: &Mat) -> [[f64; 3]; 3] {
     out
 }
 
+fn shape_word(shape: CollisionShape) -> &'static str {
+    match shape {
+        CollisionShape::Box => "box",
+        CollisionShape::Cylinder => "cylinder",
+        _ => "sphere",
+    }
+}
+
+/// A box, cylinder or sphere set in the box `lo`..`hi` (mm): the box itself; the cylinder along
+/// whichever side of it gives the smallest one, as wide as the larger of the other two sides; the
+/// sphere at its centre, as wide as its largest side. `None` for an empty or non-finite box.
+fn bounded_shape(shape: CollisionShape, lo: Vec3, hi: Vec3) -> Option<CollisionGeom> {
+    let size = hi - lo;
+    let finite = [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z].iter().all(|v| v.is_finite());
+    if !finite || size.x < 0.0 || size.y < 0.0 || size.z < 0.0 {
+        return None;
+    }
+    let c = (lo + hi) * 0.5;
+    let at = |x: Vec3, y: Vec3, z: Vec3| -> Mat { [[x.x, x.y, x.z, 0.0], [y.x, y.y, y.z, 0.0], [z.x, z.y, z.z, 0.0], [c.x, c.y, c.z, 1.0]] };
+    Some(match shape {
+        CollisionShape::Box => CollisionGeom::Box {
+            origin: at(Vec3::X, Vec3::Y, Vec3::Z),
+            size: Vec3::new(size.x.max(MIN_SHAPE), size.y.max(MIN_SHAPE), size.z.max(MIN_SHAPE)),
+        },
+        CollisionShape::Cylinder => {
+            // Along z, x or y, the cylinder's own z turned onto it (each frame right-handed); on a
+            // tie the first, so a cube's stands upright.
+            let along = [
+                (size.x.max(size.y), size.z, at(Vec3::X, Vec3::Y, Vec3::Z)),
+                (size.y.max(size.z), size.x, at(Vec3::Y, Vec3::Z, Vec3::X)),
+                (size.z.max(size.x), size.y, at(Vec3::Z, Vec3::X, Vec3::Y)),
+            ];
+            let (width, length, origin) = along.into_iter().min_by(|a, b| (a.0 * a.0 * a.1).total_cmp(&(b.0 * b.0 * b.1)))?;
+            CollisionGeom::Cylinder { origin, radius: (width / 2.0).max(MIN_SHAPE), length: length.max(MIN_SHAPE) }
+        }
+        _ => CollisionGeom::Sphere { origin: at(Vec3::X, Vec3::Y, Vec3::Z), radius: (size.x.max(size.y).max(size.z) / 2.0).max(MIN_SHAPE) },
+    })
+}
+
 /// Whether a component has a closed body to work a mass out from.
 pub fn has_mass(doc: &Document, st: &ModelState, component: u64) -> Result<bool> {
-    for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == component) {
-        let m = export_mesh(&b.body)?;
-        let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
-        if (Mesh { positions, triangles, ..Mesh::default() }).mass_properties().is_some() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+    Ok(st.bodies.iter().filter(|b| doc.model_body_component(b) == component).any(|b| b.is_closed() && b.volume().is_some_and(|v| v > 0.0)))
 }
 
 fn append(into: &mut Mesh, m: &Mesh) {

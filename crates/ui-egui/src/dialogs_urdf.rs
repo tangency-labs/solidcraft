@@ -13,8 +13,6 @@ pub struct UrdfExport {
     pub mimic: bool,
     /// Write the meshes where `mesh_prefix` points (`place_meshes`).
     pub place_meshes: bool,
-    /// A body with no collision shape of its own becomes a convex hull, not the full mesh.
-    pub hulls: bool,
 }
 
 /// The form as last chosen: the remembered choices, the rest empty.
@@ -41,13 +39,12 @@ pub fn rows(ui: &mut egui::Ui, f: &mut UrdfExport) -> bool {
     let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Couple motion links"), &mut f.mimic);
     crate::scenario::publish_handle("dialog:urdf:mimic", r.rect.center());
     crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("urdf.place_meshes"), &mut f.place_meshes);
-    crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Convex hull collision"), &mut f.hulls);
     enter
 }
 
 /// The parameters of `file.export`, or what is wrong with the form.
 pub fn params(f: &UrdfExport, path: &str) -> Result<Value, String> {
-    let mut p = json!({"path": path, "format": "urdf", "mimic": f.mimic, "place_meshes": f.place_meshes, "collision": if f.hulls { "convex_hull" } else { "mesh" }});
+    let mut p = json!({"path": path, "format": "urdf", "mimic": f.mimic, "place_meshes": f.place_meshes});
     if !f.mesh_prefix.trim().is_empty() {
         p["mesh_prefix"] = json!(f.mesh_prefix.trim());
     }
@@ -104,23 +101,17 @@ mod tests {
     #[test]
     fn empty_numbers_are_left_to_the_exports_fallback() {
         let p = params(&form(), "r.urdf").unwrap();
-        assert_eq!(p, json!({"path": "r.urdf", "format": "urdf", "mimic": true, "place_meshes": true, "collision": "mesh"}));
+        assert_eq!(p, json!({"path": "r.urdf", "format": "urdf", "mimic": true, "place_meshes": true}));
     }
 
     #[test]
     fn the_dialog_passes_every_option_to_file_export() {
-        let f = UrdfExport {
-            mesh_prefix: "package://r/meshes/".into(),
-            effort: "5".into(),
-            velocity: "2.5".into(),
-            mimic: false,
-            place_meshes: true,
-            hulls: true,
-        };
+        let f =
+            UrdfExport { mesh_prefix: "package://r/meshes/".into(), effort: "5".into(), velocity: "2.5".into(), mimic: false, place_meshes: true };
         let p = params(&f, "r.urdf").unwrap();
         assert_eq!(
             p,
-            json!({"path": "r.urdf", "format": "urdf", "mimic": false, "place_meshes": true, "collision": "convex_hull", "mesh_prefix": "package://r/meshes/", "effort": 5.0, "velocity": 2.5})
+            json!({"path": "r.urdf", "format": "urdf", "mimic": false, "place_meshes": true, "mesh_prefix": "package://r/meshes/", "effort": 5.0, "velocity": 2.5})
         );
     }
 

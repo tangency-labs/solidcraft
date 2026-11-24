@@ -3036,8 +3036,9 @@ pub enum CollisionShape {
     /// The export decides.
     #[default]
     Auto,
+    /// `convex_hull`, which development builds wrote, reads as a mesh.
+    #[serde(alias = "convex_hull")]
     Mesh,
-    ConvexHull,
     Box,
     Cylinder,
     Sphere,
@@ -3050,7 +3051,6 @@ impl CollisionShape {
         Some(match text {
             "auto" => CollisionShape::Auto,
             "mesh" => CollisionShape::Mesh,
-            "convex_hull" => CollisionShape::ConvexHull,
             "box" => CollisionShape::Box,
             "cylinder" => CollisionShape::Cylinder,
             "sphere" => CollisionShape::Sphere,

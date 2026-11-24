@@ -163,7 +163,6 @@ fn collision_menu(app: &SolveApp, target: serde_json::Value) -> Item {
     menu.children = [
         ("auto", "Automatic", "collision_auto"),
         ("mesh", "Full mesh", "mesh_body"),
-        ("convex_hull", "Convex hull", "collision_hull"),
         ("box", "Box", "box"),
         ("cylinder", "Cylinder", "cylinder"),
         ("sphere", "Sphere", "sphere"),
@@ -4650,7 +4649,7 @@ mod tests {
         let menu = items(&h.app, &Target::Body { name: "Block".into() });
         let shapes = menu.iter().find(|i| i.id == "body.collision").expect("a body offers Collision Shape");
         let icons: Vec<&str> = shapes.children.iter().map(|c| &*c.icon).collect();
-        assert_eq!(icons, ["collision_auto", "mesh_body", "collision_hull", "box", "cylinder", "sphere", "contact_off"]);
+        assert_eq!(icons, ["collision_auto", "mesh_body", "box", "cylinder", "sphere", "contact_off"]);
         for icon in icons {
             assert!(!crate::icon_svg::resolve(icon).placeholder, "{icon} is drawn");
         }

@@ -161,7 +161,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("body")
         .contract(&properties::BODY_COLLISION_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::component::BodyCollisionResult>)
-        .params("body: its name, or component: id or name for all its bodies; shape: auto|mesh|convex_hull|box|cylinder|sphere|none: what it looks like to a simulator (URDF export)"),
+        .params("body: its name, or component: id or name for all its bodies; shape: auto|mesh|box|cylinder|sphere|none: what it looks like to a simulator (URDF export; box, cylinder and sphere are set in the body's bounding box)"),
     CommandSpec::new("component.physical_override", "Mass Override", crate::checked!("component.physical_override", properties::physical_override))
         .icon("measure")
         .contract(&properties::PHYSICAL_OVERRIDE_CONTRACT)

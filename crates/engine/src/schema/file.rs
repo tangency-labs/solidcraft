@@ -206,10 +206,6 @@ pub struct ExportUrdfParams {
     /// Write motion links as `<mimic>`. Default: false (each joint free).
     #[serde(default)]
     pub mimic: Option<bool>,
-    /// What a body with no collision shape of its own (`body.collision`) becomes: `mesh` or
-    /// `convex_hull`. Default: mesh.
-    #[serde(default)]
-    pub collision: Option<String>,
     /// Also write each picture shown on the model (Canvas or Decal) as a textured COLLADA quad
     /// and its image, in one more `<visual>` of its part's link. Default: false.
     #[serde(default)]
@@ -246,7 +242,7 @@ pub struct ExportSdfParams {
 
 /// Export bodies, or the whole design, to a file. `format` names the format; without it the
 /// path's extension does. STL, OBJ and 3MF take `quality` (and 3MF `objects`); URDF takes
-/// `mesh_prefix`, `effort`, `velocity`, `mimic`, `place_meshes`, `collision` and `images` and exports the whole
+/// `mesh_prefix`, `effort`, `velocity`, `mimic`, `place_meshes` and `images` and exports the whole
 /// assembly; SDF takes `name`, `static`, `model_uris` and `quality` and writes a model folder;
 /// design JSON the complete document.
 #[derive(Debug, JsonSchema)]
@@ -303,10 +299,6 @@ pub struct ExportParams {
     /// next to the `.urdf` whatever the prefix says.
     #[serde(default)]
     pub place_meshes: Option<bool>,
-    /// URDF only: what a body with no collision shape of its own becomes: `mesh` or
-    /// `convex_hull`. Default: mesh.
-    #[serde(default)]
-    pub collision: Option<String>,
     /// GLB only: true writes each component occurrence as a node named after it, holding its
     /// part's bodies in the part's frame, so a viewer can move each part on its own; false writes
     /// every body directly under the root in world coordinates, named as the model names it (as
@@ -435,7 +427,6 @@ impl<'de> Deserialize<'de> for ExportParams {
             model_uris: None,
             mimic: None,
             place_meshes: None,
-            collision: None,
         };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
@@ -521,11 +512,6 @@ impl<'de> Deserialize<'de> for ExportParams {
                 None | Some(Value::Null) => None,
                 Some(Value::Bool(b)) => Some(*b),
                 Some(_) => return Err(refuse::<D::Error>("`place_meshes` must be true or false")),
-            };
-            out.collision = match m.get("collision") {
-                None | Some(Value::Null) => None,
-                Some(Value::String(c)) if c == "mesh" || c == "convex_hull" => Some(c.clone()),
-                Some(_) => return Err(refuse::<D::Error>("`collision` must be mesh or convex_hull")),
             };
             return Ok(out);
         }

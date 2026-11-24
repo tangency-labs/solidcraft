@@ -26,7 +26,6 @@ mod gerber;
 mod gerber_area;
 mod gerber_set;
 mod glb;
-pub mod hull3;
 pub use design::DesignCompression;
 pub use design::DesignContainerReader;
 pub use design::DesignFile;
