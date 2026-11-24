@@ -1966,6 +1966,120 @@ mod tests {
         }
     }
 
+    /// 32 of the 472 spans of the round from #18557: a 0.28 round along the top edge of an
+    /// extruded spline outline, rational of degree 3 along the edge and 2 across, written
+    /// out as its Bezier patches (`tests/data/issue_18557_spline_round_spans.json`).
+    fn spline_round_spans() -> Nurb {
+        let data: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/issue_18557_spline_round_spans.json"
+        )))
+        .unwrap();
+        let floats = |v: &serde_json::Value| -> Vec<f64> {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_f64().unwrap())
+                .collect()
+        };
+        let net = data["net"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                row.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| match floats(c)[..] {
+                        [x, y, z, w] => CPoint::new(x, y, z, w),
+                        _ => panic!("a control point is x, y, z, w"),
+                    })
+                    .collect()
+            })
+            .collect();
+        let degree = |key: &str| usize::try_from(data[key].as_u64().unwrap()).unwrap();
+        Nurb::new(
+            net,
+            degree("p"),
+            degree("q"),
+            floats(&data["u"]),
+            floats(&data["v"]),
+        )
+        .unwrap()
+    }
+
+    /// #18557: a shell 0.24 thick insets the 0.28 round by 86 % of its radius. The offset
+    /// is regular, `det(I - d W)` about 1 - 0.24 / 0.28 = 0.14 across the round, and is
+    /// certified within the patch budget; bounding `q0` and `X q1` apart took about 790
+    /// patches for each of these 32 and ran out of it. Inset by its radius it is not
+    /// certified (the offset collapses onto the round's spine), and past it the offset
+    /// folds, naming the round's radius 0.28, to the net's approximation of the round.
+    #[test]
+    fn a_round_inset_close_to_its_radius_is_certified_within_the_budget() {
+        let s = spline_round_spans();
+        let k = Kernel::default();
+        for d in [-0.24, -0.2, -0.1] {
+            assert_eq!(
+                certify_regular(&k, &s, d, None).unwrap(),
+                Regularity::Regular,
+                "{d}"
+            );
+        }
+        assert_ne!(
+            certify_regular(&k, &s, -0.28, None).unwrap(),
+            Regularity::Regular
+        );
+        let Regularity::Folds { largest } = certify_regular(&k, &s, -0.3, None).unwrap() else {
+            panic!("an inset past the round's radius folds");
+        };
+        assert!((largest - 0.28).abs() < 1e-5, "{largest}");
+    }
+
+    /// The quarter cylinder (radius 10) inset close to its radius, `det(I - d W) =
+    /// 1 - |d| / 10`, is certified regular: the tangent bound closes on the thin margin where
+    /// the coefficients' ranges ran out of the budget. Moved 10^4 from the origin the forms
+    /// are built in the patch's own frame, so the same insets certify and the inset by the
+    /// radius (`Q = 0` everywhere) still does not; past the radius it folds.
+    #[test]
+    fn a_cylinder_inset_close_to_its_radius_is_certified() {
+        let k = Kernel::default();
+        for (s, far) in [
+            (quarter_cylinder(), false),
+            (quarter_cylinder_at(1e4, -1e4), true),
+        ] {
+            for d in [-9.9, -9.99] {
+                assert_eq!(
+                    certify_regular(&k, &s, d, None).unwrap(),
+                    Regularity::Regular,
+                    "{d} {far}"
+                );
+            }
+            assert_eq!(
+                certify_regular(&k, &s, -10.0, None).unwrap(),
+                Regularity::NotCertified,
+                "{far}"
+            );
+            let Regularity::Folds { largest } = certify_regular(&k, &s, -10.5, None).unwrap()
+            else {
+                panic!("an inset past the radius folds ({far})");
+            };
+            assert!((largest - 10.0).abs() < 1e-9, "{largest} {far}");
+        }
+    }
+
+    /// #2487's G2 round patch (the quarter cylinder raised to septic across, cubic along)
+    /// inset close to its radius: the tangent bound's product `q1 (x2 + c^2)` is of degree
+    /// 100 across, within the Bernstein forms' cap, and certifies it.
+    #[test]
+    fn a_septic_rational_patch_inset_close_to_its_radius_is_certified() {
+        let s = elevated_quarter_cylinder(7, 3);
+        let k = Kernel::default();
+        assert_eq!(
+            certify_regular(&k, &s, -9.9, None).unwrap(),
+            Regularity::Regular
+        );
+    }
+
     /// The shell searches a face's least radius on the displaced side once
     /// ([`least_wall`]) and both of its checks use it: given that radius,
     /// [`certify_regular_knowing`] answers what [`certify_regular`] answers by searching, and
