@@ -206,7 +206,7 @@ pub fn fetch(download: &HttpDownload, offer: &Offer, path: PathBuf) -> Result<Pa
 #[cfg(not(target_arch = "wasm32"))]
 pub fn package(source: &Source, get: &HttpGet, download: &HttpDownload) -> Result<(Vec<u8>, Offer), String> {
     let offer = package_release(&get(&source.release_url()).map_err(|e| e.to_string())?, &source.repository).map_err(|e| e.to_string())?;
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
+    let stamp = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
     let staging = std::env::temp_dir().join(format!("solidcraft-plugin-{}-{stamp}", std::process::id()));
     std::fs::create_dir(&staging).map_err(|e| e.to_string())?;
     let result = fetch(download, &offer, staging.join("package.zip")).and_then(|path| {
