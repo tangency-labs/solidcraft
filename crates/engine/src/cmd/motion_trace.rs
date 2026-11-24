@@ -176,8 +176,9 @@ fn inputs(s: &Session, t: &MotionTrace) -> Result<Value> {
         definition.offset = offset;
         definition.angle = angle;
         definition.values = q;
+        definition.limits = joints::expressed_limits(&params, &definition)?;
         definition.exprs = Default::default();
-        let fa = joints::resolve_origin(&s.doc, &st, &j.a)?;
+        let fa = j.offset_frame_a(joints::resolve_origin(&s.doc, &st, &j.a)?);
         let fb = joints::resolve_origin(&s.doc, &st, &j.b)?;
         joints.push(json!([definition, fa, fb]));
     }
@@ -357,6 +358,8 @@ pub(crate) fn refresh(s: &mut Session) {
                     {
                         wire.pts = solidcraft_sketch::fit_polyline(&points);
                         wire.fit = points;
+                        // Its points are new: 3D constraints on the old ones go (#10608).
+                        sk.drop_wire_constraints_on(&t.wire);
                         changed = true;
                     }
                     None

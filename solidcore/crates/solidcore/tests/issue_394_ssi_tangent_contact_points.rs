@@ -6,9 +6,8 @@
 //! The cases are the ssi-corpus' `c3n_parab_apex`, `c3n_four_points` and
 //! `y23_t6_ex4_tangential_point` (jyviko/ssi-corpus `b04c8a6`, surfaces copied here),
 //! intersected as `difftest --ssi-corpus` does (natural domains, edges on, approximation
-//! tolerance `1e-6`). By default the port returns nothing, as the pinned C++ does; with
-//! `Kernel::fixes.ssi_tangent_contact_points` each true contact comes back as one
-//! degenerate `TOUCHING` curve.
+//! tolerance `1e-6`). The pinned C++ returns nothing; the kernel returns each true
+//! contact as one degenerate `TOUCHING` curve.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -22,9 +21,10 @@ use solidcore::geom::vector2d::Vec2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
-use solidcore::nurbs::srf_basic::Surface as NurbSurface;
+use solidcore::nurbs::srf_basic::{Direction, Surface as NurbSurface};
+use solidcore::nurbs::srf_tool::p1::insert_knot;
 use solidcore::surface::plane::Plane;
-use solidcore::surface::surface::p2::{SurfaceIntersection, TsectCurveType};
+use solidcore::surface::surface::p2::{SurfaceIntersection, SurfaceKind, TsectCurveType};
 use solidcore::surface::surface::Surface;
 use solidcore::Kernel;
 
@@ -48,7 +48,10 @@ fn bezier(deg: usize, points: &[[f64; 3]]) -> Surface {
 
 /// The plane z = 0 over [-3, 3]^2.
 fn plane_z0() -> Surface {
-    let dom = Extent2d::from_bounds(-3.0, -3.0, 3.0, 3.0);
+    plane_z0_in(Extent2d::from_bounds(-3.0, -3.0, 3.0, 3.0))
+}
+
+fn plane_z0_in(dom: Extent2d) -> Surface {
     let plane = Plane::new(
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(1.0, 0.0, 0.0),
@@ -61,9 +64,8 @@ fn plane_z0() -> Surface {
     Surface::from(plane)
 }
 
-fn intersect(fix: bool, a: &Surface, b: &Surface) -> SurfaceIntersection {
-    let mut k = Kernel::default();
-    k.fixes.ssi_tangent_contact_points = fix;
+fn intersect(a: &Surface, b: &Surface) -> SurfaceIntersection {
+    let k = Kernel::default();
     let da = a.natural_uv_domain_with_nurb(&k).unwrap();
     let db = b.natural_uv_domain_with_nurb(&k).unwrap();
     let tol = approx_tol3d(&k, 1e-6);
@@ -192,28 +194,16 @@ fn y23_t6_ex4() -> (Surface, Surface) {
 }
 
 #[test]
-fn issue_394_default_misses_the_paraboloid_apex() {
+fn issue_394_finds_the_paraboloid_apex() {
     let (a, b) = parab_apex();
-    assert!(intersect(false, &a, &b).curves_3d.is_empty());
-}
-
-#[test]
-fn issue_394_fix_finds_the_paraboloid_apex() {
-    let (a, b) = parab_apex();
-    let x = intersect(true, &a, &b);
+    let x = intersect(&a, &b);
     assert_points(&touching_points(&x, &a, &b), &[[0.0, 0.0, 0.0]], 1e-9);
 }
 
 #[test]
-fn issue_394_default_misses_the_four_points() {
+fn issue_394_finds_the_four_points() {
     let (a, b) = four_points();
-    assert!(intersect(false, &a, &b).curves_3d.is_empty());
-}
-
-#[test]
-fn issue_394_fix_finds_the_four_points() {
-    let (a, b) = four_points();
-    let x = intersect(true, &a, &b);
+    let x = intersect(&a, &b);
     assert_points(
         &touching_points(&x, &a, &b),
         &[
@@ -226,16 +216,90 @@ fn issue_394_fix_finds_the_four_points() {
     );
 }
 
-#[test]
-fn issue_394_default_misses_the_y23_tangential_point() {
-    let (a, b) = y23_t6_ex4();
-    assert!(intersect(false, &a, &b).curves_3d.is_empty());
+/// The nonnegative graph `(x²-a²)²/(4a²) + y²` has exactly two zeros, at
+/// `(±a, 0)`. These Bernstein coefficients describe it over `[-l, l] × [-b, b]`.
+fn nearby_contacts(a: f64, l: f64, b: f64) -> Surface {
+    let a2 = a * a;
+    let l2 = l * l;
+    let end = (l2 - a2) * (l2 - a2) / (4.0 * a2);
+    let adjacent = end - l2 * (l2 - a2) / (2.0 * a2);
+    let x = [end, adjacent, end + 2.0 * l2 / 3.0, adjacent, end];
+    let y = [1.0, 0.0, -1.0 / 3.0, 0.0, 1.0];
+    let mut points = Vec::new();
+    for (i, cx) in x.into_iter().enumerate() {
+        for (j, cy) in y.into_iter().enumerate() {
+            points.push([
+                l * (i as f64 / 2.0 - 1.0),
+                b * (j as f64 / 2.0 - 1.0),
+                cx + b * b * cy,
+            ]);
+        }
+    }
+    bezier(4, &points)
 }
 
 #[test]
-fn issue_394_fix_finds_the_y23_tangential_point() {
+fn nearby_distinct_tangent_contacts_are_not_one_contact() {
+    let a = 2.5e-5;
+    let graph = nearby_contacts(a, 0.001, 0.01);
+    let plane = plane_z0();
+    for (first, second) in [(&graph, &plane), (&plane, &graph)] {
+        let result = intersect(first, second);
+        assert_points(
+            &touching_points(&result, first, second),
+            &[[-a, 0.0, 0.0], [a, 0.0, 0.0]],
+            1e-9,
+        );
+    }
+}
+
+#[test]
+fn a_distant_c0_knot_preserves_nearby_distinct_contacts() {
+    let a = 2.5e-5;
+    let graph = nearby_contacts(a, 0.001, 0.01);
+    let SurfaceKind::BSpline(spline) = graph.kind() else {
+        panic!("expected the quartic spline");
+    };
+    // A degree-four knot with multiplicity four limits the guaranteed
+    // continuity at u=1/4, away from the two contacts near u=1/2.
+    let net = insert_knot(spline.gw_nurb().unwrap(), 0.25, 4, Direction::U).unwrap();
+    let graph = Surface::from(BSplineSurface::from_nurb(net, false));
+    let plane = plane_z0();
+    let result = intersect(&graph, &plane);
+    assert_points(
+        &touching_points(&result, &graph, &plane),
+        &[[-a, 0.0, 0.0], [a, 0.0, 0.0]],
+        1e-9,
+    );
+}
+
+#[test]
+fn nearby_distinct_contacts_survive_certification_against_a_trim_edge() {
+    let near = 2.5e-5;
+    let one_ulp_inside = 1.0_f64 / 32.0;
+    // The first pair needs a clipped proof to distinguish the contacts.
+    // In the second, the positive contact is only one ulp inside the trim.
+    for (a, l, edge) in [
+        (near, 0.001, near + 4e-15),
+        (one_ulp_inside, 0.125, one_ulp_inside.next_up()),
+    ] {
+        let plane = plane_z0_in(Extent2d::from_bounds(-1.0, -1.0, edge, 1.0));
+        let graph = nearby_contacts(a, l, 0.01);
+        for (first, second) in [(&graph, &plane), (&plane, &graph)] {
+            let result = intersect(first, second);
+            assert_points(
+                &touching_points(&result, first, second),
+                &[[-a, 0.0, 0.0], [a, 0.0, 0.0]],
+                1e-9,
+            );
+        }
+    }
+}
+
+#[test]
+fn issue_394_finds_the_y23_tangential_point() {
     let (a, b) = y23_t6_ex4();
-    let x = intersect(true, &a, &b);
+    let x = intersect(&a, &b);
     // the corpus' truth, to its own data's precision (the control points have six to
     // eight digits)
     assert_points(
@@ -243,4 +307,70 @@ fn issue_394_fix_finds_the_y23_tangential_point() {
         &[[2.2399990803239955, -2.4200008322270063, 1.1469998029474493]],
         1e-5,
     );
+}
+
+/// `z = 1e8 x ((x-a)² + y²)` over `[-l, l] × [-b, b]`: its zero set is the
+/// crossing line `x = 0` and the isolated contact `(a, 0, 0)`.
+fn crossing_line_and_nearby_contact(a: f64, l: f64, b: f64) -> Surface {
+    let linear = [-1.0, -1.0 / 3.0, 1.0 / 3.0, 1.0];
+    let square = [1.0, -1.0 / 3.0, -1.0 / 3.0, 1.0];
+    let cube = [-1.0, 1.0, -1.0, 1.0];
+    let mut points = Vec::new();
+    for ((cx, cx2), cx3) in linear.into_iter().zip(square).zip(cube) {
+        let x = l * cx;
+        for (cy, cy2) in linear.into_iter().zip(square) {
+            let z = 1e8 * (l * l * l * cx3 - 2.0 * a * l * l * cx2 + a * a * x + x * b * b * cy2);
+            points.push([x, b * cy, z]);
+        }
+    }
+    bezier(3, &points)
+}
+
+#[test]
+fn isolated_contact_near_a_crossing_curve_is_retained() {
+    let a = 5e-5;
+    let half_y = 0.001;
+    let graph = crossing_line_and_nearby_contact(a, 0.001, half_y);
+    let plane = plane_z0();
+    let k = Kernel::default();
+    for (first, second) in [(&graph, &plane), (&plane, &graph)] {
+        let result = intersect(first, second);
+        assert_eq!(result.curves_3d.len(), 2);
+        let mut crossing = 0;
+        let mut touching = 0;
+        for (i, curve) in result.curves_3d.iter().enumerate() {
+            let interval = curve.natural_interval();
+            match result.curve_types[i] {
+                TsectCurveType::Crossing => {
+                    crossing += 1;
+                    for t in [interval.min(), interval.mid(), interval.max()] {
+                        let p = curve.evaluate_point(&k, t).unwrap();
+                        assert!(p.x.abs() < 1e-9 && p.z.abs() < 1e-9, "{p:?}");
+                    }
+                    let start = curve.evaluate_point(&k, interval.min()).unwrap();
+                    let end = curve.evaluate_point(&k, interval.max()).unwrap();
+                    assert!((start.y.abs() - half_y).abs() < 1e-9, "{start:?}");
+                    assert!((end.y.abs() - half_y).abs() < 1e-9, "{end:?}");
+                    assert!(start.y * end.y < 0.0);
+                }
+                TsectCurveType::Touching => {
+                    touching += 1;
+                    assert!(curve.is_degenerate(&k, 1e-12, None).unwrap());
+                    let p = curve.evaluate_point(&k, interval.min()).unwrap();
+                    assert!(p.distance(Vec3::new(a, 0.0, 0.0)) < 1e-9, "{p:?}");
+                    assert!(result.deviations[i] < 1e-12);
+                    for (uv_curve, surface) in [
+                        (&result.surface1_uv_curves[i], first),
+                        (&result.surface2_uv_curves[i], second),
+                    ] {
+                        let uv = uv_curve.as_ref().unwrap().evaluate_point(&k, 0.0).unwrap();
+                        let q = surface.evaluate_point(&k, Vec2::new(uv.x, uv.y)).unwrap();
+                        assert!(p.distance(q) < 1e-9, "{p:?} vs {q:?}");
+                    }
+                }
+                kind => panic!("unexpected intersection kind {kind:?}"),
+            }
+        }
+        assert_eq!((crossing, touching), (1, 1));
+    }
 }

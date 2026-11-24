@@ -78,6 +78,10 @@ fn shown_features(app: &SolveApp, compact: bool) -> usize {
 }
 
 pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
+    // A search lists only what it finds, and it doesn't look for features.
+    if app.tree.search.on() {
+        return;
+    }
     // Compact history: every feature of the component, sketches too, in history order with the
     // marker, in place of the timeline.
     let compact = app.preferences.history_in_browser;
@@ -461,8 +465,9 @@ fn feature_row(
     // selected in the tree, as NX marks the feature of a picked face; the session's selection
     // stays the face or edge.
     let [_, picked] = acts.lit.features_from_view(app);
-    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && picked == Some(id);
-    let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
+    let chosen = app.session.selection.iter().any(|s| crate::timeline::feature_of_sel(&app.session.doc, s) == Some(id));
+    let by_geometry = !chosen && picked == Some(id);
+    let selected = chosen || by_geometry;
     let mut order_key = String::new();
     write_order_key(here, id, &mut order_key);
     app.tree.remember(&order_key);
@@ -538,6 +543,11 @@ fn feature_row(
         acts.hovered = true;
     }
     if let Some(at) = r.secondary {
+        // A right-click on a feature or sketch outside the selection selects it first, as in
+        // both History layouts, so the menu's Copy and Delete act on the same features.
+        if !app.session.selection.contains(&Sel::Feature { id }) {
+            click_select(app, None, Some(Sel::Feature { id }));
+        }
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
     }
     // In the History: a drag of the row (not of its fold arrow or eye) moves the feature (#9565).
@@ -846,6 +856,113 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), undo);
     }
 
+    /// A right-click on a feature row outside the selection selects that feature alone, so its
+    /// menu acts on it; inside the selection it keeps the selection, and the menu's Copy and
+    /// Delete both take every selected feature.
+    #[test]
+    fn browser_feature_right_click_selects_outside_and_keeps_inside() {
+        let mut h = Harness::new();
+        let ids: Vec<u64> = (0..4)
+            .map(|i| {
+                h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":format!("B{i}")})).unwrap()["feature"].as_u64().unwrap()
+            })
+            .collect();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let row = |id: u64| json!({"handle": format!("row:browser-feature:c0:{id}")});
+        for id in &ids[..3] {
+            h.step(&json!({"click": row(*id), "ctrl": true})).unwrap();
+            h.frames(2);
+        }
+        h.step(&json!({"click": row(ids[3]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[3] }], "outside: the clicked feature alone");
+        h.step(&json!({"widget": "Suppress"})).unwrap();
+        h.settle();
+        let suppressed: Vec<u64> = h.app.session.doc.features.iter().filter(|f| f.suppressed).map(|f| f.id).collect();
+        assert_eq!(suppressed, [ids[3]]);
+
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[0] }, Sel::Feature { id: ids[1] }], "inside keeps it");
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        let copied: Vec<&str> = h.app.session.clipboard.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(copied.len(), 2, "Copy takes both: {copied:?}");
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        let left: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
+        assert_eq!(left, ids[2..], "Delete takes the same two");
+
+        // A row lit only by a picked face of its body counts as outside: the right-click
+        // selects the feature itself.
+        h.app.run("select.set", json!({"items": [{"type": "face", "body": "B2", "index": 0, "point": [0, 0, 0]}]})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[2] }], "a picked face is not the feature");
+    }
+
+    /// The same for sketch rows, whose menu is the sketch's own: outside the selection a
+    /// right-click selects the sketch alone; inside it Copy and Delete take every selected sketch.
+    #[test]
+    fn browser_sketch_right_click_selects_outside_and_keeps_inside() {
+        let mut h = Harness::new();
+        let ids: Vec<u64> = (0..3)
+            .map(|i| {
+                let id = h.app.run("sketch.create", json!({"plane":"XY","name":format!("S{i}")})).unwrap()["sketch"].as_u64().unwrap();
+                h.app.run("sketch.circle.center", json!({"center":[i * 20, 0],"radius":3})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                id
+            })
+            .collect();
+        // The History in the browser lists each sketch as a row of its own.
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        let row = |id: u64| json!({"handle": format!("row:browser-feature:c0:{id}")});
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[2] }], "outside: the clicked sketch alone");
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[0] }, Sel::Feature { id: ids[1] }], "inside keeps it");
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.clipboard.len(), 2, "Copy takes both");
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        let left: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
+        assert_eq!(left, ids[2..], "Delete takes the same two");
+
+        // A sketch and another feature selected: the sketch's Copy and Delete take both.
+        let block = h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"body_name":"Block"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row(ids[2])})).unwrap();
+        h.step(&json!({"click": row(block), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.clipboard.len(), 2, "Copy takes the sketch and the box");
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        assert!(h.app.session.doc.features.is_empty(), "Delete takes the same two");
+    }
+
     #[test]
     fn browser_feature_shift_click_selects_the_range_up_and_down() {
         let mut h = Harness::new();
@@ -1002,6 +1119,26 @@ mod tests {
         assert!(item.enabled);
         crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
         assert_eq!(app.session.selection, [Sel::Feature { id: feature }]);
+    }
+
+    #[test]
+    fn an_offset_plane_is_one_selection_in_the_features_the_history_and_the_view() {
+        let mut h = Harness::new();
+        let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":31,"name":"Shelf"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        let doc = h.app.session.doc.clone();
+        // A Features row or History icon picks the feature: the view lights the plane by name.
+        assert_eq!(crate::viewport::displayed_selection(&h.app, &Sel::Feature { id: plane }), [Sel::Plane { name: "Shelf".into() }]);
+        // The plane picked in the view (or the Construction row) is that same feature in the lists.
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "Shelf".into() }), Some(plane));
+        h.app.session.selection = vec![Sel::Plane { name: "Shelf".into() }];
+        h.frames(2);
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &h.app.session.selection[0]), Some(plane));
+        // The plane picked in the view is also what a drag, Copy or Delete from its row acts on.
+        assert_eq!(crate::timeline::selected_feature_ids(&h.app), [plane]);
+        assert_eq!(crate::timeline_left::drag_features(&mut h.app, plane, true), [plane]);
+        // An origin plane is no feature, and an unknown name maps to nothing.
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "XY".into() }), None);
     }
 
     #[test]
@@ -1309,7 +1446,7 @@ mod tests {
         let path = [assembly, part];
         let rows = [occurrence_key(&path[..1]), occurrence_key(&path), format!("{}/bodies", occurrence_key(&path))];
         h.app.ui.show_browser = false;
-        crate::timeline::find_in_browser(&mut h.app, feature);
+        crate::timeline::find_in_browser(&mut h.app, &[feature]);
         assert!(h.app.ui.show_browser);
         assert!(rows.iter().all(|key| row_open(&h.app, key)), "{rows:?}");
         assert_eq!(h.app.session.selection, [Sel::Body { name: "Plate".into() }]);

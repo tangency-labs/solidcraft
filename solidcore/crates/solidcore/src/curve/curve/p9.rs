@@ -80,6 +80,13 @@
 //! - **Interval knots.** `CalculateTightBoundingBox` adds only the tangent
 //!   discontinuous knots strictly inside the interval (WR-474, #1054); upstream adds
 //!   them all, and the last knot.
+//! - **Turning points (#17685).** `CalculateTightBoundingBox` also adds the points where
+//!   a coordinate stops changing (`C' . e = 0`), isolated from the roots of the
+//!   derivative's numerator by Bezier subdivision (`curve::curve::turning`; B-spline
+//!   kinds and Hermite curves). A coordinate can peak where the curve stops or nearly
+//!   stops (`|C'|^2 < SM_EFF_ZERO`), and the perpendicular analyses refuse to evaluate
+//!   there. The subdivision is bounded (`turning::MAX_DEPTH`, `turning::MAX_NODES`) and
+//!   refuses with `InvalidInput` past either bound.
 //! - **Coordinate bound.** `GlobalCurveSolve` of a curve whose natural box reaches past
 //!   [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`, below `sqrt(f64::MAX)`)
 //!   fails with `InvalidInput` before any cache is built (the curve cache is built over
@@ -95,6 +102,16 @@
 //!   solves, cylinder guesses, `LocalCurveSolve`), `GlobalCurveSolve`'s boxes and
 //!   `SolveIt`s, the tight boxes' evaluations and `IsOnPlane`; `IsOnPositiveSideOfPlanes`
 //!   is `FALSE` when the classification fails.
+//! - **Projected crossings (WR-647).** The projected intersections of `GlobalCurveSolve`
+//!   take a merged range for the crossing or touch inside it by the rule of
+//!   `GlobalCurveIntersect` (unit `curve.curve_p8`), decided on the curves as projected
+//!   ([`ProjectedCurve`]s built as the solver's leaf solve builds them), for parallel
+//!   projections only: a perspective or rotation projection's derivatives are upstream's
+//!   secant approximations, on which the local solvers stop short of the contact (a
+//!   perspective crossing 7.9e-9 apart found at 8.6e-5), so those keep their ranges. A
+//!   projection without its vectors is `InvalidInput` there, which cannot be reached: the
+//!   solve before it already fails in its box test without the vector
+//!   (`GlobalSolver::opt_vector`), as before WR-647.
 
 use crate::curve::curve::p2::{
     proj_signed_angle, CcGlobalSolver, CciGlobalSolver, Curve, CurveKind, CurvePropertyType,
@@ -108,6 +125,7 @@ use crate::curve::curve::p6::is_measurable_box;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::{operand_handles, CurveIntersectOptions};
 use crate::curve::curve_cache::CurveCache;
+use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -1503,6 +1521,49 @@ impl Curve {
                 },
                 &mut sols,
             )?;
+            // Not upstream (WR-647): a merged range is a crossing or touch seen through
+            // the tolerance when it ends where the projected curves part, inside both, as
+            // in `GlobalCurveIntersect`; decided on the curves as projected, which the
+            // solver compared. Parallel projections only: the projected derivatives of a
+            // perspective or rotation projection are upstream's secant approximations, on
+            // which the solvers stop short of the contact, so a point found there may be
+            // farther than the range it replaces: those keep their ranges. The projected
+            // curves are new curves, so a curve against itself is said so (`same_curve`).
+            if projection_type == ProjectionType::Parallel
+                && sols
+                    .as_slice()
+                    .iter()
+                    .any(|s| s.solution_type == SolutionType::RangeOfValues)
+            {
+                let direction = opts.opt_vectors.unwrap_or(&[]).first().copied().ok_or(
+                    SolidError::invalid_input(
+                        OP_GCS,
+                        "projected intersection without its projection vectors",
+                    ),
+                )?;
+                let origin = Vec3::new(0.0, 0.0, 0.0);
+                let project = |c: &Curve| {
+                    ProjectedCurve::new(
+                        c.clone(),
+                        Some(origin),
+                        Some(direction),
+                        Some(origin),
+                        projection_type,
+                        OwnsCurve::No,
+                    )
+                    .map(Curve::from)
+                };
+                let (p1, p2) = (project(self)?, project(other)?);
+                p1.contacts_seen_through_tolerance(
+                    k,
+                    &mut sols,
+                    &p2,
+                    interval,
+                    other_interval,
+                    dist_tol,
+                    same_curve,
+                )?;
+            }
             // all done
             return Ok(sols);
         }
@@ -1699,6 +1760,12 @@ impl Curve {
                 tight_box.add_point(p);
             })?;
         }
+
+        // Not upstream (#17685): the points where a coordinate stops changing, isolated
+        // from the roots of `C' . e` (`curve::curve::turning`).
+        self.add_turning_points(k, interval, &mut pt, &mut |p| {
+            tight_box.add_point(p);
+        })?;
 
         Ok(tight_box)
     }
@@ -1999,6 +2066,68 @@ mod tests {
             Some(CurveHandle(c1.natural_interval())),
             Some(CurveHandle(c2.natural_interval())),
         ]
+    }
+
+    /// The u = 0 side of `query.brep` gen0128's patch: a quadratic B-spline whose control
+    /// points all lie on the z axis, so it runs up the axis, stops and runs back down.
+    const TURNING_Z: [f64; 5] = [
+        0.336_409_316_230_782_1,
+        0.448_428_932_357_200_6,
+        0.412_240_069_159_368_5,
+        -0.128_554_999_916_893,
+        -0.388_250_346_477_554_63,
+    ];
+    /// Its knots.
+    const TURNING_KNOTS: [f64; 8] = [
+        0.0,
+        0.0,
+        0.0,
+        0.324_471_410_413_183_8,
+        0.897_412_383_425_158_5,
+        1.0,
+        1.0,
+        1.0,
+    ];
+    /// Its peak, from exact rational arithmetic on these control points and knots (Bezier
+    /// subdivision and convex hulls in `Fraction`s, to a width of 6e-22), rounded outward.
+    const TURNING_PEAK: (f64, f64) = (0.436_712_872_774_132_9, 0.436_712_872_774_132_95);
+
+    /// (#17685) A coordinate's extreme where the curve stops is in its tight box. The
+    /// curve's tangent is +z or -z wherever it moves, never perpendicular to z, and the
+    /// perpendicular analyses refuse the parameters where it has stopped: the box ended
+    /// at 0.43534, 1.4e-3 below the peak. With the turning points (the roots of `C' . z`,
+    /// isolated by subdivision) it reaches the peak to within 4 ulp and stays on the curve
+    /// (no higher than the peak but for the evaluation's rounding).
+    #[test]
+    fn tight_box_reaches_the_peak_where_a_curve_turns_back() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let pw = TURNING_Z
+            .iter()
+            .map(|&z| CPoint::new(0.0, 0.0, z, NOW))
+            .collect();
+        let nl = NlCurve::new(pw, 2, TURNING_KNOTS.to_vec()).unwrap();
+        let curve = Curve::from(BSplineCurve::from_nurb(nl, 3, false));
+        let k = Kernel::default();
+        let bx = curve
+            .calculate_tight_bounding_box(&k, &curve.natural_interval())
+            .unwrap();
+        let (lo, hi) = (bx.min(), bx.max());
+        let (peak_lo, peak_hi) = TURNING_PEAK;
+        // The side is the curve at a parameter where z changes by at most its rounding
+        // from the peak: within 4 ulp of the exact interval, on both sides.
+        assert!(
+            hi.z >= peak_lo - 4.0 * f64::EPSILON * peak_lo,
+            "box top {} below the peak {peak_lo}",
+            hi.z
+        );
+        assert!(
+            hi.z <= peak_hi + 4.0 * f64::EPSILON,
+            "box top {} above the peak",
+            hi.z
+        );
+        assert_eq!(lo.z, TURNING_Z[4], "the least is the end");
+        assert_eq!((lo.x, lo.y, hi.x, hi.y), (0.0, 0.0, 0.0, 0.0));
     }
 
     #[test]
@@ -2825,5 +2954,63 @@ mod tests {
         assert!(a.is_on_positive_side_of_planes(&k, &below, &up).unwrap());
         let down = [Vec3::new(0.0, 0.0, -1.0)];
         assert!(!a.is_on_positive_side_of_planes(&k, &below, &down).unwrap());
+    }
+
+    /// WR-647 (review r3, M2): a parallel projected solve of two curves that are not a
+    /// line pair, given no projection vector, fails in the solver's own box test
+    /// (`GlobalSolver::opt_vector`, reached by the root branch's box test before any leaf
+    /// solve) and returns no solutions, as upstream's port did before WR-647. So the
+    /// projected crossings step, which runs only on the solutions of a solve that
+    /// returned, always has its projection vector, and its own refusal of a missing one
+    /// cannot be reached. With the vector, the same solve returns the overlap of the
+    /// curves seen along z.
+    #[test]
+    fn a_parallel_projected_solve_without_its_vector_fails_in_the_solver() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let arch = |z: f64| {
+            let pw = [(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)]
+                .iter()
+                .map(|&(x, y)| CPoint::new(x, y, z, NOW))
+                .collect();
+            let nl = NlCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+        };
+        let (a, b) = (arch(0.0), arch(5.0));
+        let k = Kernel::default();
+        let (ia, ib) = (a.natural_interval(), b.natural_interval());
+        let solve = |vectors: Option<&[Vec3]>| {
+            let opts = CurveSolveOptions {
+                handles: handles(&a, &b),
+                opt_vectors: vectors,
+                ..CurveSolveOptions::default()
+            };
+            a.global_curve_solve(
+                &k,
+                &ia,
+                &b,
+                &ib,
+                SolverOperation::ProjectedIntersect,
+                1e-6,
+                &opts,
+                SolutionRequested::All,
+            )
+        };
+        for vectors in [None, Some(&[][..])] {
+            match solve(vectors) {
+                Err(SolidError::InvalidInput { operation, .. }) => {
+                    assert_eq!(operation, "geom::global_solver::GlobalSolver::opt_vector");
+                }
+                other => panic!("{vectors:?}: {other:?}"),
+            }
+        }
+        let along = [Vec3::new(0.0, 0.0, 1.0)];
+        let sols = solve(Some(&along)).unwrap();
+        assert!(
+            sols.as_slice()
+                .iter()
+                .any(|s| s.solution_type == SolutionType::RangeOfValues),
+            "{sols:?}"
+        );
     }
 }

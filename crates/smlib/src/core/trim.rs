@@ -22,8 +22,6 @@
 //! An untrim of a face out of its body (`in_place` false) copies the face into a body of its own
 //! through `SmBrep::CopyFaces` with the merge (solidcore#1872), which keeps its attributes.
 
-use std::sync::PoisonError;
-
 use solidcore::curve::curve::Curve;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::object::Shape;
@@ -291,12 +289,12 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
     {
         return Err(Error::Argument);
     }
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal("smlib_untrim_face: the body was left unfinished by an earlier panic".to_owned()));
     }
     let at = p3(point);
     super::run_on("smlib_untrim_face", &[("brep", body)], |k| {
-        let mut whole = brep_copy(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let mut whole = brep_copy(k, &body.kernel())?;
         // The face to untrim, in a body of its own (its hole edges lamina there) or in the copy
         // of the whole body.
         let (mut w, f) = if in_place {
@@ -447,7 +445,7 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
         }
         Ok(Ok(w))
     })?
-    .map(Body::new)
+    .map(Body::from_kernel)
 }
 
 /// One side of a face's parameter box (`Side`): which, whether it is a u = const line (the face
@@ -628,11 +626,11 @@ pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f6
     if !point.iter().all(|x| x.is_finite()) || !tol.is_finite() || !(tol > 0.0) || !distance.is_finite() || !(distance > 0.0) {
         return Err(Error::Argument);
     }
-    if sheet.0.is_poisoned() {
+    if sheet.kernel_left_unfinished() {
         return Err(Error::Internal("smlib_extend_sheet: the body was left unfinished by an earlier panic".to_owned()));
     }
     super::run_on("smlib_extend_sheet", &[("sheet", sheet)], |k| {
-        let b = brep_copy(k, &sheet.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let b = brep_copy(k, &sheet.kernel())?;
         let faces = brep_p1::faces(&b, None)?;
         let [f] = faces.as_slice() else { return Ok(Err(Error::Unsupported)) };
         let f = *f;
@@ -725,7 +723,7 @@ pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f6
         }
         Ok(Ok(r))
     })?
-    .map(Body::new)
+    .map(Body::from_kernel)
 }
 
 /// A point inside each face, in the body's face order (`smlib_brep_face_points`:

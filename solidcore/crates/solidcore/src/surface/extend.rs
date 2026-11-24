@@ -54,7 +54,9 @@
 //!
 //! **Knots.** The source's net and knots are kept bit for bit (but for the Ruled product
 //! form past its reach, above): the end knot stays at multiplicity `p` as the joint, and the extension's
-//! spans follow it. No knot is removed.
+//! spans follow it. No knot is removed. A candidate whose ends make the knot fixup merge
+//! or spread a span is unproved. The solve can then name a distance from a net that keeps
+//! its knots.
 //!
 //! **Weights.** Every weight control point of the result is positive, which proves `w > 0` on
 //! it. An extension whose weights are not is refused ([`SolidError::ExtendRefused`]) naming a
@@ -90,7 +92,8 @@
 
 use std::cell::Cell;
 
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::scaled_zero2;
 use crate::geom::vector2d::Point2;
@@ -316,9 +319,12 @@ impl Surface {
                 reason: "the surface has no exact B-spline form",
             },
         )?;
-        let net = form
-            .gw_nurb()
-            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+        // the caller's surface's own NURB (a B-spline whose data was never read or set has none)
+        let net = form.gw_nurb().ok_or_else(|| {
+            Failure::new(OP, SurfaceFailure::NoNurb)
+                .with_status(SM_ERR)
+                .into_error()
+        })?;
         let degree = if side.is_u() { net.p() } else { net.q() };
         let local = Local::of(net, side);
         let fixed = side.at(dom);
@@ -337,6 +343,9 @@ impl Surface {
             }
             let bound = grown.bound();
             let out = grown.surface(side)?;
+            if !knot_fixup_preserves(out.u_knots()) || !knot_fixup_preserves(out.v_knots()) {
+                return Ok(Some((None, f64::INFINITY)));
+            }
             Ok(Some((
                 Some(Surface::from(BSplineSurface::from_gw_nurb(&out))),
                 bound,
@@ -427,9 +436,14 @@ impl Surface {
                 "the extension is not a B-spline",
             ));
         };
-        let out = b
-            .gw_nurb()
-            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+        let out = b.gw_nurb().ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the extension has no NURB, though the continuation built it from a NURB",
+                },
+            )
+        })?;
         let regraded = if side.is_u() {
             out.q() != net.q()
         } else {
@@ -2015,6 +2029,21 @@ fn mirror(pn: H, pn1: H) -> (impl Fn(H) -> H, f64, f64) {
 /// ([`fixup_knot_vector`](crate::nurbs::nurbs_crv::fixup_knot_vector)).
 fn merge_scale(a: f64, end: f64) -> f64 {
     EFF_ZERO_PARAM.max(scaled_zero2(&a, &end))
+}
+
+/// Every distinct span must survive both knot fixup passes at the scale of the final ends.
+/// The two tests use the same floating-point subtraction and scale as the fixup. Check the
+/// actual result knots, including any interior spans made by the extension.
+fn knot_fixup_preserves(knots: &[f64]) -> bool {
+    let Some((&first, &last)) = knots.first().zip(knots.last()) else {
+        return false;
+    };
+    let scale = merge_scale(first, last);
+    knots.iter().all(|knot| knot.is_finite())
+        && knots.windows(2).all(|pair| match pair {
+            [a, b] => a.to_bits() == b.to_bits() || b - a >= scale,
+            _ => false,
+        })
 }
 
 /// The row's `w_(n-1) / w_n`.

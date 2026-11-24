@@ -1,0 +1,516 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 56.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                34.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 34.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 6.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                84.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 35.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "distance": 62.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                60.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 25.0,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  27.164908644017522,
+                  20.446704828949432,
+                  74.38514030650434
+                ],
+                [
+                  27.80751856737123,
+                  19.56379081684591,
+                  44.43535773380271
+                ]
+              ],
+              "index": 12
+            },
+            {
+              "at": [
+                [
+                  27.164908644017522,
+                  20.446704828949432,
+                  74.38514030650434
+                ],
+                [
+                  27.80751856737123,
+                  19.56379081684591,
+                  75.5646422661973
+                ]
+              ],
+              "index": 11
+            },
+            {
+              "at": [
+                [
+                  33.27160951922823,
+                  -7.000000000000055,
+                  83.99999999999999
+                ],
+                [
+                  27.80751856737123,
+                  19.56379081684591,
+                  44.43535773380271
+                ]
+              ],
+              "index": 10
+            },
+            {
+              "at": [
+                [
+                  33.27160951922824,
+                  7.000000000000002,
+                  84.0
+                ],
+                [
+                  27.80751856737123,
+                  19.56379081684591,
+                  75.5646422661973
+                ]
+              ],
+              "index": 8
+            }
+          ],
+          "points": [
+            [
+              23.05760086982623,
+              24.9869360679988,
+              59.195126968447724
+            ],
+            [
+              27.486213605694374,
+              20.005247822897672,
+              74.97489128635081
+            ],
+            [
+              26.897311533369468,
+              -20.79723328763065,
+              46.12743094041867
+            ],
+            [
+              30.958160231627048,
+              14.056587706790662,
+              80.67380894738116
+            ]
+          ],
+          "tolerance": 6.49237246095546
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "report-round-branch-tube-under-flange-ledge",
+  "expected": {
+    "body_count": 1,
+    "method": "housing r <= 34 about Z, z in [34, 90]; flange r <= 35, z in [84, 90]; branch rho <= 25 about the line y = 0, z = 60, x in [0, 62]. V0 = pi 34^2 56 + pi (35^2 - 34^2) 6 + the branch outside the housing and flange (integral over its disc of 62 - sqrt(R(z)^2 - y^2), R = 34 below z = 84 and 35 above) = 264528.713. The round is the closing by a ball of radius 1 of housing and branch: the points outside both that no ball outside both covers, the ball centres being the points with rho_Z >= 35 and rho_X >= 26. Below the flange's underside z = 84 it is added; above it lies inside the flange (it never reaches rho_Z = 35). Its volume, by a midpoint grid in the branch's polar angle and radius (rho = 25 + u^2) with the round's extent along x bisected on the closing test, is 12.9717 (2000 x 200 and 4000 x 400 grids agree to 6e-4).",
+    "outcome": "solid",
+    "source": "analytic",
+    "tolerance": {
+      "rel": 0.000002
+    },
+    "volume_mm3": 264541.685,
+    "what": "an R1 round of the concave edge where a horizontal branch tube joins an upright housing whose top flange overhangs it by 1 mm, so the round's two ends run into the flange's underside (a cast cylinder body, reported from the app 2026-11-14): refused at every radius, as larger than its faces"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 27,
+      "faces": 12,
+      "vertices": 17
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 24687.91401096844,
+      "body_count": 1,
+      "edges": 25,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 264541.685623931
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "an R1 round of the concave edge where a horizontal branch tube joins an upright housing whose top flange overhangs it by 1 mm, so the round's two ends run into the flange's underside (a cast cylinder body, reported from the app 2026-11-14): refused at every radius, as larger than its faces",
+  "why_not": [],
+  "records": "report-round-branch-tube-under-flange-ledge.bodies.json.gz"
+}

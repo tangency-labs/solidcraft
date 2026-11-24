@@ -249,7 +249,10 @@ enum Role {
 
 impl Builder {
     fn add(&mut self, kind: FeatureKind, name: &str) -> Result<u64, String> {
-        self.doc.add_feature(kind, Some(name)).map_err(|e| format!("{name}: {e}"))
+        // Two sketches (or planes) may not share a name; FreeCAD labels can repeat, so number it.
+        let free =
+            if self.doc.name_clash(&kind, name) { solidcraft_doc::copy_name(name, |n| self.doc.name_clash(&kind, n)) } else { name.to_string() };
+        self.doc.add_feature(kind, Some(&free)).map_err(|e| format!("{name}: {e}"))
     }
 
     /// The operation and target of a solid feature in FreeCAD body `body`.
@@ -361,6 +364,7 @@ impl Builder {
                 direction,
                 distance2: second.map(mm),
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: through,
                 taper: None,
                 to: None,
@@ -371,7 +375,9 @@ impl Builder {
                 second_follows_first: false,
                 corner: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation,
             targets,
@@ -411,7 +417,7 @@ impl Builder {
             },
             Some("cylinder") if whole("angle", TAU) => FeatureKind::Cylinder {
                 base: corner,
-                axis: Dir(z),
+                axis: solidcraft_doc::dir_expr(z),
                 radius: mm(len("radius")?),
                 height: mm(len("height")?),
                 operation: op,
@@ -506,8 +512,17 @@ impl Builder {
                         alignment2: Default::default(),
                         reversed: false,
                         reversed2: false,
+                        distance1: Default::default(),
+                        distance2: Default::default(),
+                        extent1: None,
+                        extent2: None,
+                        copy_at_end1: false,
+                        copy_at_end2: false,
                     },
                     bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
                 }
             }
             Some("circular") => {
@@ -532,6 +547,9 @@ impl Builder {
                         axis_feature: None,
                     },
                     bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),
@@ -615,6 +633,7 @@ impl Builder {
                     return Err(format!("{name}: a variable radius fillet is not rebuilt yet"));
                 }
                 FeatureKind::Fillet {
+                    edge_radii: Vec::new(),
                     edges,
                     radius: mm(f(r, "radius").ok_or_else(|| format!("{name}: no radius"))?),
                     body: Some(body.into()),

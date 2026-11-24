@@ -1,9 +1,9 @@
 //! Arrange (`solid.arrange`, #12430): lay bodies out side by side on a rectangle of the XY plane,
 //! as for a build plate or a sheet to cut from. Each body keeps its height and is only turned
 //! about Z, unless it is laid down on a flat side first: the side picked for it, or with
-//! `lay_flat` the one it rests on best ([`solidcraft_geom::rest`]). Its footprint is the outline
+//! `lay_flat` the one it rests on best ([`solidcore_ops::arrange::flat_sides`]). Its footprint is the outline
 //! it covers seen from above, worked out from its exact edges and silhouettes
-//! ([`solidcraft_geom::footprint`]); the footprints are packed by [`solidcraft_geom::arrange`],
+//! ([`solidcore_ops::arrange::footprint`]); the footprints are packed by [`solidcore_ops::arrange`],
 //! and each body that fits is moved there by a Move feature, all in one undo step. Bodies that
 //! don't fit stay where they are and are listed.
 //!
@@ -13,16 +13,14 @@
 //! touch, as Extrude takes areas ([`sheet_areas`]).
 
 use serde_json::{Value, json};
+use solidcore_ops::arrange::{
+    ArrangeItem, ArrangeMethod, ArrangeOptions, COARSEN_BUDGET, FlatSide, Footprint, Hurry, IDENTITY, MAX_COPIES, MAX_IMPROVE, MAX_OBSTACLES,
+    MAX_ROTATIONS, Placement2, Shadow, Shape2, apart, arrange_hurried, axis_angle, coarsen, flat_face_at, flat_sides, footprint, footprint_of,
+    in_frame, margin_line, parallel, plane_frame, pointing_down, side_at, squared_up, turned_about,
+};
 use solidcore_record::brep::Brep;
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_geom::arrange::Hurry;
-use solidcraft_geom::arrange::{
-    ArrangeItem, ArrangeMethod, ArrangeOptions, COARSEN_BUDGET, MAX_COPIES, MAX_IMPROVE, MAX_OBSTACLES, MAX_ROTATIONS, Placement2, Shape2, apart,
-    arrange_hurried, coarsen,
-};
-use solidcraft_geom::footprint::{Footprint, Shadow, footprint, footprint_of};
 use solidcraft_geom::prelude::*;
-use solidcraft_geom::rest::{FlatSide, flat_face_at, flat_sides, side_at};
 
 use solidcraft_doc::expr::Kind;
 
@@ -226,14 +224,12 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
                     let (vals, _) = s.doc.param_values();
                     let pl =
                         s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state())).map_err(|e| bad(cmd, e.to_string()))?;
-                    let (Some(e1), Some(e2)) = (pl.x.normalized(), pl.y.normalized()) else {
-                        return Err(bad(cmd, "the plane is degenerate"));
-                    };
-                    let Some(n) = e1.cross(e2).normalized() else { return Err(bad(cmd, "the plane is degenerate")) };
-                    ([e1, n.cross(e1), n], pl.origin)
+                    let rows = plane_frame(pl.x, pl.y).ok_or_else(|| bad(cmd, "the plane is degenerate"))?;
+                    (rows, pl.origin)
                 }
             };
-            let at = Vec2::new(rows[0].dot(o), rows[1].dot(o));
+            let o = in_frame(rows, o);
+            let at = Vec2::new(o.x, o.y);
             // Sheet after sheet along X.
             let shapes = (0..sheets)
                 .map(|k| {
@@ -245,7 +241,7 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
                     Shape2 { outer, holes: Vec::new() }
                 })
                 .collect();
-            Sheets { shapes, z: rows[2].dot(o), error: 0.0, rows, owners: Vec::new() }
+            Sheets { shapes, z: o.z, error: 0.0, rows, owners: Vec::new() }
         }
         // A list of faces and areas, or one face as it was given before areas were.
         Some(Value::Array(list)) if list.first().is_some_and(Value::is_object) => sheet_areas(s, list, &pieces, cmd)?,
@@ -253,7 +249,7 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // The rectangles are all alike: what does not fit on one fits on none.
     let alike = !on_face;
-    let to_local = |v: Vec3| Vec3::new(rows[0].dot(v), rows[1].dot(v), rows[2].dot(v));
+    let to_local = |v: Vec3| in_frame(rows, v);
     let to_world = |v: Vec3| rows[0] * v.x + rows[1] * v.y + rows[2] * v.z;
     let tilted = rows.iter().zip(IDENTITY).any(|(a, b)| (*a - b).len() > 1e-12);
     // The turn that takes the world into the sheet's frame (its columns: where X, Y and Z go).
@@ -667,7 +663,7 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
                     && let Some(back) = solidcraft_doc::mat_inverse(frame)
                 {
                     let at = solidcraft_doc::apply_point(frame, Vec3::new(0.0, 0.0, 0.0));
-                    let moved = if turned { about(axis, turn, at) } else { at };
+                    let moved = if turned { turned_about(axis, turn, at) } else { at };
                     let (a, tl) = (solidcraft_doc::apply_vector(&back, axis), solidcraft_doc::apply_vector(&back, moved + t - at));
                     q["translate"] = json!([tl.x, tl.y, tl.z]);
                     if turned {
@@ -716,8 +712,16 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let area_used: f64 = sheet_areas.iter().take(used).sum();
     let fill = if used == 0 || area_used <= 0.0 { 0.0 } else { covered / area_used };
     let ring = |r: &[Vec2]| r.iter().map(|v| [v.x, v.y]).collect::<Vec<_>>();
-    let sheet_outlines =
-        sheet_list.iter().map(|sh| SheetOutline { outer: ring(&sh.outer), holes: sh.holes.iter().map(|h| ring(h)).collect() }).collect();
+    let line = |r: &[Vec2], hole: bool| (margin > 0.0).then(|| margin_line(r, margin, hole)).flatten().map(|l| ring(&l));
+    let sheet_outlines = sheet_list
+        .iter()
+        .map(|sh| SheetOutline {
+            outer: ring(&sh.outer),
+            holes: sh.holes.iter().map(|h| ring(h)).collect(),
+            outer_margin: line(&sh.outer, false),
+            hole_margins: if margin > 0.0 { sh.holes.iter().map(|h| line(h, true)).collect() } else { Vec::new() },
+        })
+        .collect();
     let reply = ArrangeReply {
         placed,
         unplaced,
@@ -769,13 +773,6 @@ fn pieces(s: &Session, names: &[String]) -> Vec<Piece> {
         .collect()
 }
 
-/// `v` turned by `angle` (radians) about `axis` through the origin.
-fn about(axis: Vec3, angle: f64, v: Vec3) -> Vec3 {
-    let Some(k) = axis.normalized() else { return v };
-    let (sin, cos) = angle.sin_cos();
-    v * cos + k.cross(v) * sin + k * (k.dot(v) * (1.0 - cos))
-}
-
 /// Copies of `bodies` (in components) in the design's own bodies, each where it stands in the
 /// world: its shape only, kept in the design as a fixed import, with no link to its part and no
 /// joint. Named as the app names copies; the new names, in order.
@@ -800,7 +797,13 @@ fn copy_into_design(s: &mut Session, bodies: &[String], cmd: &str) -> Result<Vec
     // The design itself (its root component, at the world's frame).
     let root = 0;
     let mut scratch = s.scratch();
-    let kind = solidcraft_doc::FeatureKind::Import { file: "Arrange copies".into(), step: step.into(), components: Vec::new(), skip: Vec::new() };
+    let kind = solidcraft_doc::FeatureKind::Import {
+        file: "Arrange copies".into(),
+        step: step.into(),
+        components: Vec::new(),
+        skip: Vec::new(),
+        records: None,
+    };
     let id = scratch.doc_mut().add_feature(kind, None)?;
     if let Some(f) = scratch.doc_mut().feature_mut(id) {
         f.component = root;
@@ -810,7 +813,7 @@ fn copy_into_design(s: &mut Session, bodies: &[String], cmd: &str) -> Result<Vec
     if let Some(error) = scratch.model.result(id).and_then(|r| r.error.as_ref()) {
         return Err(bad(cmd, format!("the copies of the bodies in components didn't come in: {error}")));
     }
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(names)
 }
 
@@ -905,12 +908,15 @@ fn sheet_areas(s: &Session, list: &[Value], pieces: &[Piece], cmd: &str) -> Resu
     drop(st);
     // The first pick's frame, in the order given.
     let rows = first_rows.unwrap_or(IDENTITY);
-    let flat = |p: Vec3| (Vec2::new(rows[0].dot(p), rows[1].dot(p)), rows[2].dot(p));
+    let flat = |p: Vec3| {
+        let q = in_frame(rows, p);
+        (Vec2::new(q.x, q.y), q.z)
+    };
     let mut z: Option<f64> = None;
     let mut size: f64 = 1.0;
     let mut regions: Vec<Region2> = Vec::new();
     for (rings, frame) in &picked {
-        if frame[2].cross(rows[2]).len() > 1e-6 {
+        if !parallel(frame[2], rows[2], 1e-6) {
             return Err(bad(cmd, "the sheet's faces and areas must all lie in one plane"));
         }
         let mut loops = Vec::with_capacity(rings.len());
@@ -953,11 +959,7 @@ fn sheet_areas(s: &Session, list: &[Value], pieces: &[Piece], cmd: &str) -> Resu
 
 /// A sketch's frame: along its X, across it and out of it.
 fn sketch_rows(ss: &solidcraft_doc::SolvedSketch, cmd: &str) -> Result<[Vec3; 3]> {
-    let (Some(e1), Some(y)) = (ss.plane.x.normalized(), ss.plane.y.normalized()) else {
-        return Err(bad(cmd, "a sketch's plane is degenerate"));
-    };
-    let Some(normal) = e1.cross(y).normalized() else { return Err(bad(cmd, "a sketch's plane is degenerate")) };
-    Ok([e1, normal.cross(e1), normal])
+    plane_frame(ss.plane.x, ss.plane.y).ok_or_else(|| bad(cmd, "a sketch's plane is degenerate"))
 }
 
 /// Why no sheet was found at `at`: it is on a body being arranged, or on no flat face.
@@ -990,8 +992,6 @@ fn shape_area(s: &Shape2) -> f64 {
     ring(&s.outer) - s.holes.iter().map(|h| ring(h)).sum::<f64>()
 }
 
-const IDENTITY: [Vec3; 3] = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
-
 /// How a body is laid on one of its flat sides.
 #[derive(Clone, Copy, Debug)]
 struct Down {
@@ -1001,20 +1001,6 @@ struct Down {
     lift: f64,
     /// The side's outward normal before the turn.
     normal: Vec3,
-}
-
-/// The shortest turn that points `n` (unit) along -Z; half a turn about X when `n` points up.
-fn pointing_down(n: Vec3) -> [Vec3; 3] {
-    let down = Vec3::new(0.0, 0.0, -1.0);
-    let cos = n.dot(down).clamp(-1.0, 1.0);
-    if cos > 1.0 - 1e-15 {
-        return IDENTITY;
-    }
-    let axis = n.cross(down).normalized().unwrap_or(Vec3::new(1.0, 0.0, 0.0));
-    let angle = cos.acos();
-    // Rodrigues' formula.
-    let turn = |v: Vec3| v * angle.cos() + axis.cross(v) * angle.sin() + axis * (axis.dot(v) * (1.0 - angle.cos()));
-    IDENTITY.map(turn)
 }
 
 fn matrix(r: [Vec3; 3]) -> [[f64; 4]; 4] {
@@ -1028,12 +1014,7 @@ fn down_on(bodies: &[solidcraft_kernel::Body], lead: usize, side: &FlatSide) -> 
     // Squared up: the side's longest straight edge along X, so quarter turns line it up with the
     // sheet's edges.
     if let Some(d) = side.edge {
-        let e = rotation[0] * d.x + rotation[1] * d.y + rotation[2] * d.z;
-        if e.x.hypot(e.y) > 1e-9 {
-            let a = -e.y.atan2(e.x);
-            let (c, sn) = (a.cos(), a.sin());
-            rotation = rotation.map(|v| Vec3::new(c * v.x - sn * v.y, sn * v.x + c * v.y, v.z));
-        }
+        rotation = squared_up(rotation, d);
     }
     // Measured on the bodies' exact models, turned: no new body per side tried.
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -1068,39 +1049,6 @@ fn best_side(body: &[solidcraft_kernel::Body], sides: &[FlatSide]) -> std::resul
         }
     }
     Ok(best.map(|(d, _, _)| d))
-}
-
-/// The axis and angle (radians, 0 to π) of the turn whose columns are `r`.
-fn axis_angle(r: [Vec3; 3]) -> (Vec3, f64) {
-    let trace = r[0].x + r[1].y + r[2].z;
-    // Entry (i, j) is r[j][i]; the skew part is 2 sin(angle) times the axis.
-    let skew = Vec3::new(r[1].z - r[2].y, r[2].x - r[0].z, r[0].y - r[1].x);
-    let (sin, cos) = (skew.len() / 2.0, (trace - 1.0) / 2.0);
-    let angle = sin.atan2(cos);
-    if angle < 1e-12 {
-        return (Vec3::new(0.0, 0.0, 1.0), 0.0);
-    }
-    if cos > -0.5
-        && let Some(axis) = skew.normalized()
-    {
-        return (axis, angle);
-    }
-    // Far round: the symmetric part less cos times I is (1 - cos) times the axis times itself;
-    // its largest column, signed by the skew part where it says anything.
-    let sym = |j: usize| {
-        let e = |i: usize, j: usize| {
-            let [a, b] = [r[j], r[i]];
-            let (aij, aji) = ([a.x, a.y, a.z][i], [b.x, b.y, b.z][j]);
-            (aij + aji) / 2.0 - if i == j { cos } else { 0.0 }
-        };
-        Vec3::new(e(0, j), e(1, j), e(2, j))
-    };
-    let k = (0..3).max_by(|a, b| sym(*a).len().total_cmp(&sym(*b).len())).unwrap_or(0);
-    let mut axis = sym(k).normalized().unwrap_or(Vec3::new(0.0, 0.0, 1.0));
-    if axis.dot(skew) < 0.0 {
-        axis = axis * -1.0;
-    }
-    (axis, angle)
 }
 
 #[cfg(test)]

@@ -192,7 +192,7 @@ sketch = [
   "extend", "finish", "fit_section", "include",
   "intersect", "intersection_curve", "iso_curve", "line", "line_mid",
   "offset", "offset_two_sides", "offset_symmetric", "point", "polygon", "polygon_circumscribed", "polygon_edge",
-  "project", "project_surface", "rect", "rect3", "rect_center",
+  "project", "project_surface", "rect", "rect3", "rect_center", "rect_edge_center",
   "rect_rounded", "sketch", "sketch_chamfer", "sketch_chamfer_angle", "sketch_chamfer_two_distances",
   "sketch_fillet", "sketch_mirror", "slot", "slot_center", "slot_overall",
   "snap", "spline", "spline_cv", "spun", "svg",

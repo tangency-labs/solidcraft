@@ -1,6 +1,7 @@
 //! WR-631 / WR-638 (#960; the fork's tangency-labs/smlib@8ba4667 and ae2a6de, rev 68fb9162):
 //! a convex blend whose rail leaves its face across a cliff is built on the faces'
-//! continuations, closed into the region it removes and subtracted from the body.
+//! continuations and trimmed at its creases with the body (WR-695; the fork's closing and
+//! subtraction of the removed region went with `fillet_overflow_trim_at_creases`).
 //!
 //! Every expected volume is the body less the blend's corner region clipped to the body, in
 //! closed form: for a round of radius r on an edge between two perpendicular faces w and h
@@ -161,7 +162,7 @@ fn box_40_20_10(k: &mut Kernel) -> Brep {
 }
 
 #[test]
-fn a_round_over_a_step_rim_is_subtracted() {
+fn a_round_over_a_step_rim_is_trimmed() {
     // r6 at (10, 0): the rail on the 5 high side runs past the step's rim
     let expected = 1700.0 - 20.0 * removed_area(6.0, 10.0, 5.0);
     let (a, b) = (p(10.0, 0.0, 0.0), p(10.0, 0.0, 20.0));
@@ -169,7 +170,7 @@ fn a_round_over_a_step_rim_is_subtracted() {
 }
 
 #[test]
-fn a_chamfer_into_a_wall_foot_is_subtracted() {
+fn a_chamfer_into_a_wall_foot_is_trimmed() {
     // chamfer 4 at (10, 5): it reaches x = 6 on the 3 wide step, past the wall's foot; the
     // triangle it removes lies inside the body
     let (a, b) = (p(10.0, 5.0, 0.0), p(10.0, 5.0, 20.0));
@@ -181,7 +182,7 @@ fn a_chamfer_into_a_wall_foot_is_subtracted() {
 }
 
 #[test]
-fn a_round_wider_than_a_bar_is_subtracted() {
+fn a_round_wider_than_a_bar_is_trimmed() {
     // #1466: the long top edge of an 80 x 5 x 5 bar; r9 and r10 run past both faces
     let (a, b) = (p(0.0, 5.0, 5.0), p(80.0, 5.0, 5.0));
     for r in [9.0, 10.0, 12.0] {
@@ -191,7 +192,7 @@ fn a_round_wider_than_a_bar_is_subtracted() {
 }
 
 #[test]
-fn a_round_just_past_a_box_side_is_subtracted() {
+fn a_round_just_past_a_box_side_is_trimmed() {
     // #1467: the top edge of the 40 x 20 x 10 box on its 10 high face, r just over 10 (the
     // radii of the fork's test)
     let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
@@ -210,7 +211,7 @@ fn block_with_hole(k: &mut Kernel) -> Brep {
 }
 
 #[test]
-fn a_round_over_a_hole_is_subtracted() {
+fn a_round_over_a_hole_is_trimmed() {
     // #422: R4 on the top edge at y = 20; its rail on the top face runs into the hole, whose
     // rim is a cliff. The block less the hole and the round's corner, plus the part of that
     // corner inside the hole: O = int_16^17.5 2 sqrt(9 - (y - 14.5)^2) (4 - sqrt(16 - (y -
@@ -227,7 +228,7 @@ fn box_10_20_30(k: &mut Kernel) -> Brep {
 }
 
 #[test]
-fn a_constant_round_past_a_box_top_is_subtracted() {
+fn a_constant_round_past_a_box_top_is_trimmed() {
     // R12: the rail on the 10 wide top runs past its far edge (the fork's 5384.17828518)
     let (a, b) = (p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
     let expected = 6000.0 - 20.0 * removed_area(12.0, 10.0, 30.0);
@@ -257,12 +258,12 @@ fn variable_round(r0: f64, r1: f64) -> Outcome {
 }
 
 #[test]
-fn a_variable_round_past_a_box_top_is_subtracted() {
+fn a_variable_round_past_a_box_top_is_trimmed() {
     // The round is the union of its balls (WR-685), here the balls' cone: the box less the corner
     // between the planes and the cone, cut by the 10 wide top's far face and the box's bottom, by
     // Gauss-Legendre quadrature of each plane across the edge (5 and 10 panels along it agree to
     // 1e-9; 2 -> 11 is `wr685_variable_round_touch_circle`'s `CLIFF_2_11_VOLUME` within its 1e-5),
-    // from either end, to the subtraction's 1e-7. Upstream's approximated arcs (the fork's
+    // from either end, to 1e-7. Upstream's approximated arcs (the fork's
     // d01d7b0) kept up to 0.12 less (2 -> 50: 4693.48804); its great circles took off up to 1147
     // more (3546.18768).
     for (r1, closed) in [
@@ -315,12 +316,11 @@ fn a_cliff_overflow_is_deterministic() {
 }
 
 #[test]
-fn an_overflow_whose_subtraction_leaves_no_solid_is_refused() {
+fn a_round_a_hair_past_its_wall_builds_its_closed_form() {
     // #1467's box at r10.01 and r10.02: the round's face meets the bottom face a hair (2e-5
-    // at r10.02) from its edge, and the Boolean succeeded with an empty or open body. A
-    // built blend must leave a manifold solid; this one is refused as no room instead
-    // (`CliffSubtractionLeavesNoSolid`, not the fork's: the fork checks only the Boolean's
-    // status), and the body is left as it was.
+    // at r10.02) from its edge. The removed subtraction's Boolean could leave an empty or
+    // open body there, and the blend was then refused (`CliffSubtractionLeavesNoSolid`); the
+    // trim at creases builds the round, a manifold solid with the closed-form volume.
     let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
     for r in [10.01, 10.02] {
         let mut k = kernel();
@@ -333,29 +333,16 @@ fn an_overflow_whose_subtraction_leaves_no_solid_is_refused() {
         let result = session.do_fillet(&mut k);
         let info = session.error_info().clone();
         drop(session);
-        if result.is_ok() {
-            assert!(
-                is_manifold_solid(&body).unwrap(),
-                "r {r}: built a body that is not a manifold solid"
-            );
-            let expected = 8000.0 - 40.0 * removed_area(r, 20.0, 10.0);
-            let v = volume(&k, &mut body);
-            assert!(
-                (v - expected).abs() <= 1e-8 * expected,
-                "r {r}: {v} against {expected}"
-            );
-            continue;
-        }
-        assert_eq!(info.code, FilletErrorType::NoRoom as i32, "r {r}: {info:?}");
-        assert_eq!(
-            info.comment,
-            "Fillet Error: subtracting a cliff overflow's removal region leaves no solid",
-            "r {r}"
-        );
+        assert!(result.is_ok(), "r {r}: refused: {info:?}");
         assert!(
             is_manifold_solid(&body).unwrap(),
-            "r {r}: the body must be left whole"
+            "r {r}: built a body that is not a manifold solid"
         );
-        assert!((volume(&k, &mut body) - 8000.0).abs() < 1e-6, "r {r}");
+        let expected = 8000.0 - 40.0 * removed_area(r, 20.0, 10.0);
+        let v = volume(&k, &mut body);
+        assert!(
+            (v - expected).abs() <= 1e-8 * expected,
+            "r {r}: {v} against {expected}"
+        );
     }
 }

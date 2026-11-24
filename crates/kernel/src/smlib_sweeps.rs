@@ -79,8 +79,8 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_rails, loft_to_point, path_curve, project_onto_face,
-    revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
+    body_from_record, curve, curve_tolerance, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_to_point,
+    loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -122,7 +122,7 @@ mod imp {
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use solidcraft_smlib::{Brep, CheckLevel};
 
-    use solidcore_record::Vec2;
+    use solidcore_record::{Loop2, Vec2};
 
     use super::*;
     use crate::history::FaceProv;
@@ -369,7 +369,7 @@ mod imp {
             }
         }
         let body = crate::native::body_from_smlib(&brep)?;
-        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), Checked::AsIs, brep) } else { body })
+        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), Checked::AsIs, brep, &[]) } else { body })
     }
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a
@@ -420,7 +420,7 @@ mod imp {
 
     /// How close a curve SMLib makes on a body's faces keeps to the true one: a millionth of the
     /// body's size.
-    fn curve_tolerance(body: &Body) -> f64 {
+    pub(crate) fn curve_tolerance(body: &Body) -> f64 {
         (body.size() * 1e-6).max(1e-6)
     }
 
@@ -576,7 +576,8 @@ mod imp {
         for (f, face) in r.faces.iter().enumerate() {
             let on_it = on(face, start)
                 && (edges.is_empty() || touched.contains(&f) || {
-                    let (ops, order) = ops()?;
+                    let form = ops()?;
+                    let (ops, order) = &*form;
                     let ds =
                         ops.face_distances(order, f, &points(edges)).map_err(|e| KernelError::Failed(format!("sweep history: face {f}: {e}")))?;
                     ds.iter().any(|d| d.is_some_and(|d| d <= reach))
@@ -598,7 +599,8 @@ mod imp {
         // Inside the walls: the faces nearest each point, as trimmed (a point on the edge between
         // two faces of one wall lies on both).
         if !inside.is_empty() {
-            let (ops, order) = ops()?;
+            let form = ops()?;
+            let (ops, order) = &*form;
             let points = points(inside);
             // Only a face within `reach` of a point can claim it below or be its nearest, so the
             // seam is asked about those alone and answers `None` for the rest: every face against
@@ -930,7 +932,7 @@ mod imp {
         if runs.len() > 1 {
             return cornered(plane, pieces, path, &runs, translate);
         }
-        let (brep, [_, middle, last]) = swept(plane, pieces, path, translate)?;
+        let (brep, [_, middle, last]) = swept_run(plane, pieces, path, translate)?;
         let body = body_of(brep, "sweep")?;
         // The walls known by the profile carried half way (past the start's edges: a wall the
         // start touches by no edge, as round a closed path), and half way along each segment of
@@ -1074,6 +1076,226 @@ mod imp {
         joined.map(|(b, _)| b).ok_or_else(|| KernelError::Invalid("empty path".into()))
     }
 
+    /// How far the profile `pieces` on `plane` reaches from `from` along the unit `d`: exactly for
+    /// lines and arcs, and at most as far as its control points for a free-form piece (a Bézier
+    /// or conic lies within them), so never less than it does.
+    fn reach_along(plane: &Plane, pieces: &[Piece], from: Vec3, d: Vec3) -> f64 {
+        let along = |q: Vec2| (plane.to_world(q) - from).dot(d);
+        // The direction in the plane that `d` points along, for an arc's farthest point.
+        let d2 = Vec2::new(d.dot(plane.x), d.dot(plane.y));
+        pieces
+            .iter()
+            .map(|x| match x.seg {
+                Seg2::Line { a, b } => along(a).max(along(b)),
+                Seg2::Arc { center, radius, start, sweep } => {
+                    let ends = along(x.seg.start()).max(along(x.seg.end()));
+                    let at = d2.y.atan2(d2.x);
+                    let delta =
+                        if sweep >= 0.0 { (at - start).rem_euclid(std::f64::consts::TAU) } else { (start - at).rem_euclid(std::f64::consts::TAU) };
+                    match d2.normalized() {
+                        Some(u) if delta <= sweep.abs() => ends.max(along(center + u * radius)),
+                        _ => ends,
+                    }
+                }
+                Seg2::Cubic { p0, p1, p2, p3 } => [p0, p1, p2, p3].into_iter().map(along).fold(f64::MIN, f64::max),
+                Seg2::Conic { a, apex, b, .. } => [a, apex, b].into_iter().map(along).fold(f64::MIN, f64::max),
+                Seg2::Bezier { n, ref p } => p.iter().take(usize::from(n) + 1).copied().map(along).fold(f64::MIN, f64::max),
+            })
+            .fold(f64::MIN, f64::max)
+    }
+
+    /// Which segments of `route` are bends the profile on `plane`, carried along the route turning
+    /// with it, reaches past the centre of: arcs whose axis the section crosses. SMLib sweeps an
+    /// arc as a turn about its axis, and a section across that axis makes a body that passes
+    /// through itself; a section that only touches the axis (a tube as wide as its bend) it sweeps
+    /// whole. The section's place at each arc is exact past lines and arcs ([`carried_along`]);
+    /// past another curve it is unknown, and an arc there counts as reached when the profile
+    /// reaches further than its radius from the route's start in any direction.
+    fn bends_reached(plane: &Plane, pieces: &[Piece], route: &[crate::PathSeg]) -> Vec<bool> {
+        let start = route.first().map(crate::PathSeg::start).unwrap_or(plane.origin);
+        let reach = pieces
+            .iter()
+            .flat_map(|x| (0..=8).map(move |i| x.seg.point_at(f64::from(i) / 8.0)))
+            .map(|q| plane.to_world(q).dist(start))
+            .fold(0.0f64, f64::max);
+        let mut along = 0.0;
+        route
+            .iter()
+            .map(|s| {
+                let reached = match *s {
+                    crate::PathSeg::Arc { a, center, .. } => {
+                        let radius = a.dist(center);
+                        let tol = 1e-9 * (1.0 + radius);
+                        match ((center - a).normalized(), carried_along(route, along)) {
+                            (Some(u), Some(m)) => reach_along(&placed(plane, &m), pieces, a, u) > radius + tol,
+                            _ => reach > radius + tol,
+                        }
+                    }
+                    _ => false,
+                };
+                along += seg_len(s);
+                reached
+            })
+            .collect()
+    }
+
+    /// The pieces of the profile on `plane` on each side of the line through `center` square to
+    /// the unit `toward` in the plane: first the side away from `toward`, then the side it points
+    /// to; either may be empty. Each piece keeps the profile segments it is a part of; a piece
+    /// along the line is no profile segment's.
+    fn halves_across(plane: &Plane, pieces: &[Piece], center: Vec3, toward: Vec3) -> Result<[Vec<Piece>; 2]> {
+        let bad = || KernelError::Invalid("the profile does not close".into());
+        // The profile's loops, outer first, as it was split into pieces loop after loop.
+        let mut loops: Vec<Loop2> = Vec::new();
+        let mut open: Vec<Seg2> = Vec::new();
+        for x in pieces {
+            open.push(x.seg);
+            if let Some(first) = open.first()
+                && x.seg.end().dist(first.start()) <= 1e-9 * (1.0 + first.start().len())
+            {
+                loops.push(Loop2 { segs: std::mem::take(&mut open) });
+            }
+        }
+        if !open.is_empty() || loops.is_empty() {
+            return Err(bad());
+        }
+        let mut loops = loops.into_iter();
+        let outer = loops.next().ok_or_else(bad)?;
+        let region = Region2 { outer, holes: loops.collect() };
+        // How far the profile reaches from the plane's origin, whole segments not only their
+        // starts: an arc's circle, a curve's control points (it lies in their hull).
+        let size = pieces
+            .iter()
+            .map(|x| match x.seg {
+                Seg2::Line { a, b } => a.len().max(b.len()),
+                Seg2::Arc { center, radius, .. } => center.len() + radius.abs(),
+                Seg2::Cubic { p0, p1, p2, p3 } => [p0, p1, p2, p3].into_iter().map(Vec2::len).fold(0.0, f64::max),
+                Seg2::Conic { a, apex, b, .. } => [a, apex, b].into_iter().map(Vec2::len).fold(0.0, f64::max),
+                Seg2::Bezier { n, ref p } => p.iter().take(usize::from(n) + 1).map(|q| q.len()).fold(0.0, f64::max),
+            })
+            .filter(|s| s.is_finite())
+            .fold(1.0, f64::max);
+        let c = plane.to_local(center);
+        let u = Vec2::new(toward.dot(plane.x), toward.dot(plane.y)).normalized().ok_or_else(|| KernelError::Invalid("bend axis".into()))?;
+        let v = Vec2::new(-u.y, u.x);
+        let far = 4.0 * (size + c.len()) + 1.0;
+        let mut out: [Vec<Piece>; 2] = [Vec::new(), Vec::new()];
+        for (side, sign) in out.iter_mut().zip([-1.0, 1.0]) {
+            let w = u * (sign * far);
+            let mut corners = [c + v * far, c - v * far, c - v * far + w, c + v * far + w];
+            let mut half = Loop2::polygon(&corners);
+            if half.signed_area() < 0.0 {
+                corners.reverse();
+                half = Loop2::polygon(&corners);
+            }
+            let cut = crate::prism::planar_regions_boolean(
+                std::slice::from_ref(&region),
+                &[Region2 { outer: half, holes: Vec::new() }],
+                crate::BoolOp::Intersect,
+                1e-7,
+            )?;
+            for seg in cut.iter().flat_map(|r| r.loops()).flat_map(|l| l.segs.iter().copied()) {
+                let mid = seg.point_at(0.5);
+                let from = pieces
+                    .iter()
+                    .map(|x| (x, x.seg.point_at(x.seg.closest_param(mid)).dist(mid)))
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .filter(|(_, d)| *d <= 1e-6 * size);
+                side.push(match from {
+                    Some((x, _)) => Piece { seg, numbers: x.numbers.clone(), drawn: x.drawn, joins_previous: false },
+                    None => Piece { seg, numbers: Vec::new(), drawn: seg, joins_previous: false },
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// [`swept`] turning with `route`, made whole where the profile reaches past the centre of a
+    /// bend ([`bends_reached`]): there the route is swept in parts and the parts joined. Each
+    /// stretch between such bends is swept as one; at each such bend the profile is cut along the
+    /// bend's axis and each side turned about the axis on its own, which SMLib takes, the
+    /// sides wrapping round the axis from opposite ends. A side touches the axis only along a
+    /// line, so the sides join the stretch before them first (whose end is the whole profile),
+    /// then the stretches join one another. The sweep along a closed path whose sides meet comes
+    /// out filled. Moved only (`translate`), the profile never turns about a bend.
+    fn swept_run(plane: &Plane, pieces: &[Piece], route: &[crate::PathSeg], translate: bool) -> Result<(Brep, [Affine; 3])> {
+        let reached = if translate { Vec::new() } else { bends_reached(plane, pieces, route) };
+        if !reached.iter().any(|r| *r) {
+            return swept(plane, pieces, route, translate);
+        }
+        let mut pose = *plane;
+        let mut total = IDENTITY;
+        // The motion half way along the first stretch, else half way round the first bend.
+        let (mut middle, mut bend_middle) = (None, None);
+        // Each stretch, then the sides of the bends after it; the sides of bends before the first.
+        // Each part ranked: 0 a stretch, 1 a bend's side nearer the path, 2 its other side.
+        let mut groups: Vec<Vec<(u8, Brep)>> = Vec::new();
+        let mut lead: Vec<(u8, Brep)> = Vec::new();
+        let mut i = 0;
+        while let Some(seg) = route.get(i) {
+            if reached.get(i).copied().unwrap_or(false) {
+                let crate::PathSeg::Arc { a, center, axis, angle } = *seg else { return Err(KernelError::Internal("a bend is not an arc".into())) };
+                let k = axis.normalized().ok_or_else(|| KernelError::Invalid("path arc axis".into()))?;
+                let toward = (center - a).normalized().ok_or_else(|| KernelError::Invalid("path arc radius".into()))?;
+                let (k_turn, turn) = if angle < 0.0 { (-k, -angle) } else { (k, angle) };
+                let mut sides = Vec::with_capacity(2);
+                for (rank, side) in (1u8..).zip(halves_across(&pose, pieces, center, toward)?) {
+                    if !side.is_empty() {
+                        let c = curves(&pose, &side)?;
+                        let turned =
+                            Brep::revolve(&c, p(center), p(k_turn), turn.min(std::f64::consts::TAU), true).map_err(|e| failed("sweep", e))?;
+                        sides.push((rank, turned));
+                    }
+                }
+                match groups.last_mut() {
+                    Some(g) => g.extend(sides),
+                    None => lead.extend(sides),
+                }
+                bend_middle.get_or_insert_with(|| affine_after(&affine_turned(center, k, angle * 0.5), &total));
+                pose = turned_plane(&pose, center, k, angle);
+                total = affine_after(&affine_turned(center, k, angle), &total);
+                i += 1;
+            } else {
+                let j = i + reached.iter().skip(i).take_while(|r| !**r).count();
+                let stretch = route.get(i..j).ok_or_else(|| KernelError::Internal("path stretch".into()))?;
+                let (brep, [_, mid, last]) = swept(&pose, pieces, stretch, false)?;
+                middle.get_or_insert_with(|| affine_after(&mid, &total));
+                groups.push(vec![(0, brep)]);
+                pose = placed(&pose, &last);
+                total = affine_after(&last, &total);
+                i = j;
+            }
+        }
+        // Sides of bends the route starts with join the stretch they meet: the last, round a
+        // closed route, else the first.
+        let closed = match (route.first(), route.last()) {
+            (Some(f), Some(l)) => l.end().dist(f.start()) <= 1e-6,
+            _ => false,
+        };
+        match (closed, groups.last_mut()) {
+            (true, Some(g)) => g.append(&mut lead),
+            _ => match groups.first_mut() {
+                Some(g) => g.append(&mut lead),
+                None => groups.push(lead),
+            },
+        }
+        // In each group the stretch first, then the sides nearer the path, then the others: each
+        // part joins what it meets face to face (the sides of one bend meet only along its axis).
+        let mut joined = Vec::with_capacity(groups.len());
+        for mut group in groups {
+            group.sort_by_key(|(rank, _)| *rank);
+            let mut it = group.into_iter().map(|(_, b)| b);
+            let Some(mut acc) = it.next() else { continue };
+            for b in it {
+                acc = combined(&acc, &b, solidcraft_smlib::BooleanOp::Union, "sweep bend")?;
+            }
+            joined.push(acc);
+        }
+        let brep = joined_runs(joined)?;
+        let middle = middle.or(bend_middle).unwrap_or(IDENTITY);
+        Ok((brep, [IDENTITY, middle, total]))
+    }
+
     /// A sweep along a path with corners: each smooth run of it swept on its own, and the runs
     /// joined at each corner. Turning with the path, the profile turns at a corner about the
     /// line square to both directions, and the runs meet in a mitre: each run is swept on
@@ -1149,7 +1371,7 @@ mod imp {
                     route.push(crate::PathSeg::Line { a: b1, b: b1 + t1 * post });
                 }
                 let from = moved_plane(&pose, t0 * -pre);
-                let (mut piece, [_, middle, last]) = swept(&from, pieces, &route, false)?;
+                let (mut piece, [_, middle, last]) = swept_run(&from, pieces, &route, false)?;
                 // Each wall is known by its piece's middle half way along the stretch of the run
                 // that point keeps between the mitres: a point standing `s` ahead of the path
                 // keeps the stretch `s` back from the run's (a profile at a slant to a run shorter
@@ -2037,12 +2259,13 @@ mod imp {
         with_history(body, &roles, &columns)
     }
 
-    /// A loft through `sections` (as [`loft`] takes them) guided by one or two `rails` (polylines
-    /// from the first section to the last, through every section's curve), by the law
-    /// [`crate::loft_rails::railed`] gives a loft's rails: between each two sections stations are
+    /// The curves of a loft through `sections` (as [`loft`] takes them) guided by one or two
+    /// `rails` (polylines from the first section to the last, through every section's curve), each
+    /// section's and each station's in loft order, for [`loft_curves`] to skin. Stations follow the
+    /// law [`crate::loft_rails::railed`] gives a loft's rails: between each two sections they are
     /// the plain loft there moved so that the points the rails guide land on the rails. The
     /// sections' curves are brought to one form there, so a line pairs with an arc (#12512).
-    pub(crate) fn loft_rails(sections: &[(Plane, Vec<Piece>)], first: usize, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    pub(crate) fn rail_curves(sections: &[(Plane, Vec<Piece>)], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Vec<Vec<Curve>>> {
         if rails.is_empty() || rails.len() > 2 {
             return Err(KernelError::Invalid("a loft takes one or two guide rails".into()));
         }
@@ -2053,19 +2276,22 @@ mod imp {
                 crate::loft_rails::Section::of(pl, &segs, ps.iter().map(|x| x.numbers.clone()).collect())
             })
             .collect::<Result<Vec<_>>>()?;
-        let all: Vec<Vec<Curve>> = crate::loft_rails::railed(&matched, true, rails, fit)?
-            .iter()
-            .map(|section| {
-                section
-                    .iter()
-                    .map(|c| {
-                        let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
-                        Curve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }
-                    })
-                    .collect()
-            })
-            .collect();
-        loft_through(sections, first, &all, 3)
+        let all: Vec<Vec<Curve>> =
+            crate::loft_rails::railed(&matched, true, rails, fit)?.iter().map(|section| section.iter().map(rows_curve).collect()).collect();
+        Ok(all)
+    }
+
+    /// A railed loft's row curve (homogeneous control points `[x w, y w, z w, w]`) as SMLib takes
+    /// it: each point's coordinates with its weight, the degree and knots as they are.
+    fn rows_curve(c: &solidcraft_geom::bspline::CurveN<4>) -> Curve {
+        let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
+        Curve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }
+    }
+
+    /// The railed loft through `sections` (as [`loft`] takes them) skinned through `all`
+    /// ([`rail_curves`]), cubic across them: the railed loft.
+    pub(crate) fn loft_curves(sections: &[(Plane, Vec<Piece>)], first: usize, all: &[Vec<Curve>]) -> Result<Body> {
+        loft_through(sections, first, all, 3)
     }
 
     /// A loft from the section `pieces` (lines) on `plane` to `apex`: the base is the start cap,
@@ -2073,6 +2299,23 @@ mod imp {
     pub(crate) fn loft_to_point(plane: &Plane, pieces: &[Piece], apex: Vec3) -> Result<Body> {
         let c = curves(plane, pieces)?;
         let brep = Brep::loft_to_point(&c, p(apex)).map_err(|e| failed("loft to a point", e))?;
+        let body = body_of(brep, "loft to a point")?;
+        let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], false)?;
+        with_history(body, &roles, pieces)
+    }
+
+    /// [`loft_to_point`] following one or two guide `rails` (polylines from the section to the
+    /// apex), `fit` saying how they reshape the section on the way: the base is the start cap, each
+    /// wall comes from the segment it stands on.
+    pub(crate) fn loft_to_point_with_rails(plane: &Plane, pieces: &[Piece], apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+        if rails.is_empty() || rails.len() > 2 {
+            return Err(KernelError::Invalid("a loft takes one or two guide rails".into()));
+        }
+        let segs: Vec<Seg2> = pieces.iter().map(|x| x.seg).collect();
+        let base = crate::loft_rails::Section::of(plane, &segs, pieces.iter().map(|x| x.numbers.clone()).collect())?;
+        let (rows, along) = crate::loft_rails::railed_to_point(&base, apex, rails, fit)?;
+        let sections: Vec<Vec<Curve>> = rows.iter().map(|section| section.iter().map(rows_curve).collect()).collect();
+        let brep = Brep::loft_to_point_through(&sections, p(apex), &along).map_err(|e| failed("loft to a point", e))?;
         let body = body_of(brep, "loft to a point")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], false)?;
         with_history(body, &roles, pieces)

@@ -66,7 +66,6 @@ pub(crate) fn paint(app: &crate::SolveApp, painter: &egui::Painter, proj: &Proj)
     let z = reply.get("sheet_z").and_then(Value::as_f64).unwrap_or(0.0);
     let frame = reply.get("sheet_frame").and_then(frame).unwrap_or(XY);
     let at = |x: f64, y: f64| frame[0] * x + frame[1] * y + frame[2] * z;
-    let margin = reply.get("margin_mm").and_then(Value::as_f64).unwrap_or(0.0);
     let Some(sheets) = reply.get("sheet_outlines").and_then(Value::as_array) else { return };
     let t = Tokens::get();
     let edge = Stroke::new(1.5, t.warning.gamma_multiply(0.85));
@@ -77,15 +76,18 @@ pub(crate) fn paint(app: &crate::SolveApp, painter: &egui::Painter, proj: &Proj)
     let clip = painter.clip_rect();
     for (k, sheet) in sheets.iter().enumerate() {
         let Some(outer) = sheet.get("outer").and_then(ring) else { continue };
-        let holes: Vec<Vec<[f64; 2]>> = sheet.get("holes").and_then(Value::as_array).into_iter().flatten().filter_map(ring).collect();
-        for (r, is_hole) in std::iter::once((&outer, false)).chain(holes.iter().map(|h| (h, true))) {
+        // Each ring with the margin's line beside it, worked out by the command with the sheet.
+        let raw = |key: &str| sheet.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        let hole_margins = raw("hole_margins");
+        let holes: Vec<(Vec<[f64; 2]>, Option<Vec<[f64; 2]>>)> =
+            raw("holes").iter().enumerate().filter_map(|(i, h)| Some((ring(h)?, hole_margins.get(i).and_then(ring)))).collect();
+        let rings = std::iter::once((&outer, false, sheet.get("outer_margin").and_then(ring))).chain(holes.iter().map(|(h, m)| (h, true, m.clone())));
+        for (r, is_hole, margin) in rings {
             let Some(pts) = screen(proj, r, &at) else { continue };
             painter.add(Shape::line(pts.clone(), halo));
             painter.extend(crate::ui_kit::dashed_line(&pts, clip, edge, 8.0, 5.0));
-            if margin > 0.0
-                && let Some(inset) = inset(r, margin, is_hole).and_then(|i| screen(proj, &i, &at))
-            {
-                painter.extend(crate::ui_kit::dashed_line(&inset, clip, inner, 2.0, 5.0));
+            if let Some(line) = margin.and_then(|m| screen(proj, &m, &at)) {
+                painter.extend(crate::ui_kit::dashed_line(&line, clip, inner, 2.0, 5.0));
             }
             if !is_hole && r.len() <= TAPED_CORNERS {
                 taped_corners(painter, &pts, tape);
@@ -129,46 +131,13 @@ fn screen(proj: &Proj, r: &[[f64; 2]], at: &dyn Fn(f64, f64) -> Vec3) -> Option<
     Some(pts)
 }
 
-/// The ring moved `by` into the sheet: an outer ring inward, a hole's outward. Each edge is
-/// moved along its normal and the corners are where the moved edges meet, a sharp one held to
-/// four times `by` from the corner it came from.
-fn inset(r: &[[f64; 2]], by: f64, hole: bool) -> Option<Vec<[f64; 2]>> {
-    let n = r.len();
-    let area: f64 = (0..n).map(|i| r[i][0] * r[(i + 1) % n][1] - r[(i + 1) % n][0] * r[i][1]).sum::<f64>() / 2.0;
-    if area.abs() < 1e-12 {
-        return None;
-    }
-    // Into a counter-clockwise ring is to the left of its edges.
-    let side = if (area > 0.0) != hole { 1.0 } else { -1.0 };
-    let normal = |a: [f64; 2], b: [f64; 2]| {
-        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-        let len = (dx * dx + dy * dy).sqrt();
-        (len > 1e-12).then(|| [-dy / len * side, dx / len * side])
-    };
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let (prev, here, next) = (r[(i + n - 1) % n], r[i], r[(i + 1) % n]);
-        let (Some(a), Some(b)) = (normal(prev, here), normal(here, next)) else { continue };
-        let (sx, sy) = (a[0] + b[0], a[1] + b[1]);
-        let dot = sx * a[0] + sy * a[1];
-        let scale = if dot.abs() < 1e-9 { 0.0 } else { (by / dot).min(4.0 * by / (sx * sx + sy * sy).sqrt().max(1e-12)) };
-        out.push([here[0] + sx * scale, here[1] + sy * scale]);
-    }
-    (out.len() >= 3).then_some(out)
-}
-
 /// A short striped mark along both edges at each corner of a closed ring on screen.
 fn taped_corners(painter: &egui::Painter, pts: &[Pos2], tape: Stroke) {
     for w in pts.windows(2) {
         let (a, b) = (w[0], w[1]);
-        let len = a.distance(b);
-        if len < 8.0 {
-            continue;
-        }
-        let reach = (len * 0.12).min(36.0);
-        let d = (b - a) / len;
-        for (from, dir) in [(a, d), (b, -d)] {
-            painter.extend(Shape::dashed_line(&[from, from + dir * reach], tape, 4.0, 4.0));
+        // A strip of tape along each side from each corner, 12% of the side long.
+        for (from, to) in [(a, a.lerp(b, 0.12)), (b, b.lerp(a, 0.12))] {
+            painter.extend(Shape::dashed_line(&[from, to], tape, 4.0, 4.0));
         }
     }
 }
@@ -189,23 +158,4 @@ fn label(painter: &egui::Painter, proj: &Proj, r: &[[f64; 2]], at: &dyn Fn(f64, 
     // A backing in the sketch halo colour, so the size reads on a light face too.
     painter.rect_filled(rect.expand(2.0), 2.0, t.sketch_halo);
     painter.galley(rect.min, galley, color);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::inset;
-
-    #[test]
-    fn a_square_moves_in_by_the_margin_and_a_hole_out() {
-        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
-        let sq = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
-        let i = inset(&sq, 1.0, false).unwrap();
-        assert!(i.iter().zip([[1.0, 1.0], [9.0, 1.0], [9.0, 9.0], [1.0, 9.0]]).all(|(a, b)| near(*a, b)), "{i:?}");
-        let h = inset(&sq, 1.0, true).unwrap();
-        assert!(near(h[0], [-1.0, -1.0]), "{h:?}");
-        // Clockwise is the same ring.
-        let cw: Vec<[f64; 2]> = sq.iter().rev().copied().collect();
-        assert!(inset(&cw, 1.0, false).unwrap().iter().all(|p| (1.0..=9.0).contains(&p[0]) && (1.0..=9.0).contains(&p[1])));
-        assert!(inset(&[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]], 1.0, false).is_none());
-    }
 }

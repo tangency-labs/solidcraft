@@ -782,7 +782,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | tests/kernel-cases/import/4561-convert-box-mesh-with-a-zero-area-triangle/box-degenerate.stl | SolidCraft contributors | synthetic ASCII STL written by hand: a box with one zero-area triangle, for the kernel regression case of tangency-labs/solidcraft#4561 | MIT OR Apache-2.0 |
 | assets/locales/pending/theme-blur-ui.json | SolidCraft contributors | Original blur controls, notices and translations | MIT OR Apache-2.0 |
 | crates/ui-egui/tests/fixtures/theme-blur.json | SolidCraft contributors | Original theme for blur option scenarios and manager review | MIT OR Apache-2.0 |
-| assets/locales/ka.json | David Machakhelidze (devius) | Original Georgian translation of SolidCraft's English catalog, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/ka.json | Davit Matchakhelidze (devius) | Original Georgian translation of SolidCraft's English catalog, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/branding/logo/solidcraft-mark.svg | SolidCraft contributors | static SolidCraft mark: the five faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg (the final frame of assets/styles/web/loading-logo.svg), cropped to the mark's bounds; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/branding/logo/solidcraft-mark-mono-black.svg | SolidCraft contributors | one-colour (black) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/branding/logo/solidcraft-mark-mono-white.svg | SolidCraft contributors | one-colour (white) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
@@ -890,6 +890,120 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | `assets/locales/pending/pinned-constraints-in-grid.json` | SolidCraft contributors | Original label and note for the pinned-constraints-in-grid preference | MIT OR Apache-2.0 |
 | `assets/locales/pending/plugins-review-commands.json` | SolidCraft contributors | Original plugin removal command labels and translations | MIT OR Apache-2.0 |
 | `assets/locales/pending/plugins-review-ui.json` | SolidCraft contributors | Original plugin installation approval and manager messages and translations | MIT OR Apache-2.0 |
+| tests/step-regressions/thread_crest_band.step | SolidCraft contributors | written entity by entity from formulas (a cylinder face round a helical groove two turns long); import regression fixture | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/briefcase.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/refresh.svg | SolidCraft contributors | original monochrome reload icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/document_browser.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/insert_mesh.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/io/tests/fixtures/pcb/treasure_hunt_pth.drl | Kikomali (SolidCraft contributor) | Plated drill file of the contributor's own "Treasure hunt" printed circuit board, exported unchanged as Excellon; Excellon import test fixture | MIT OR Apache-2.0 |
+| assets/locales/pending/extrude-cut-targets.json | SolidCraft contributors | Original Extrude Cut target tooltip and translations | MIT OR Apache-2.0 |
+| crates/io/tests/fixtures/pcb/treasure_hunt_outline.gko | Kikomali (SolidCraft contributor) | Board outline layer of the contributor's own "Treasure hunt" printed circuit board, exported unchanged as Gerber; Gerber import test fixture | MIT OR Apache-2.0 |
+| solidcore/crates/solidcore-ops/tests/data/issue_17595_imported_corner.smb | HuggingAI4Engineering | a 3 mm cube cut by the kernel from the part of CADGenBench task 248 (https://huggingface.co/datasets/HuggingAI4Engineering/cadgenbench-data, revision f76f9655), written as a native body file; boolean regression fixture | ODC-By-1.0 |
+| solidcore/crates/solidcore-ops/tests/data/issue_17595_imported_edge_off_its_face.record.json | HuggingAI4Engineering | a second 3 mm cube cut by the kernel from the same part (CADGenBench task 248, revision f76f9655), as a body record with one edge at the tolerance the STEP import gave it; boolean regression fixture | ODC-By-1.0 |
+| crates/look/icons/design/svg/flat/find_kinds.svg | Nathan-Dane (SolidCraft contributor) | original icon master (64 grid), the Browser search's kind filter from the contributor's compact search design (#1634) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/drawing_auto_balloon.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_chamfer_note.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_dimension_chain.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_dimension_suggest.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_dimension_tidy.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_gdt.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_hatch.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_issue_revision.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_model_dimensions.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_note.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_parts_renumber.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_replace_model.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_revision_tag.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_sheet_sketch.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_surface_texture.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_view_auxiliary.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_view_break.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_view_copy_to_sheet.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_view_draft.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_view_flat_pattern.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_view_move_to_sheet.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_view_pictorial.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_weld.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/fonts/noto-sans-arabic/NotoSansArabic-Regular.ttf | The Noto Project Authors (Noto Sans Arabic 2.013, hinted) | https://github.com/notofonts/notofonts.github.io (fonts/NotoSansArabic/hinted/ttf), unmodified; licence text in assets/fonts/noto-sans-arabic/OFL.txt; the web app's font for a drawing's Arabic text | SIL OFL 1.1 |
+| assets/fonts/noto-sans-arabic/OFL.txt | The Noto Project Authors | Unmodified accompanying font licence (https://github.com/notofonts/arabic) | SIL OFL 1.1 |
+| assets/fonts/noto-sans-kr/NotoSansKR-Regular.otf | Adobe (Noto Sans KR 2.004, Noto Sans CJK subset) | https://github.com/notofonts/noto-cjk (Sans/SubsetOTF/KR), unmodified; licence text in assets/fonts/noto-sans-kr/OFL.txt; the web app's font for a drawing's Korean text | SIL OFL 1.1 |
+| assets/fonts/noto-sans-kr/OFL.txt | Adobe | Unmodified accompanying font licence (https://github.com/notofonts/noto-cjk, Sans/LICENSE) | SIL OFL 1.1 |
+| assets/fonts/noto-sans-sc/NotoSansSC-Regular.otf | Adobe (Noto Sans SC 2.004, Noto Sans CJK subset) | https://github.com/notofonts/noto-cjk (Sans/SubsetOTF/SC), unmodified; licence text in assets/fonts/noto-sans-sc/OFL.txt; the web app's font for a drawing's simplified Chinese text | SIL OFL 1.1 |
+| assets/fonts/noto-sans-sc/OFL.txt | Adobe | Unmodified accompanying font licence (https://github.com/notofonts/noto-cjk, Sans/LICENSE) | SIL OFL 1.1 |
+| assets/fonts/noto-sans-tc/NotoSansTC-Regular.otf | Adobe (Noto Sans TC 2.004, Noto Sans CJK subset) | https://github.com/notofonts/noto-cjk (Sans/SubsetOTF/TC), unmodified; licence text in assets/fonts/noto-sans-tc/OFL.txt; the web app's font for a drawing's traditional Chinese text | SIL OFL 1.1 |
+| assets/fonts/noto-sans-tc/OFL.txt | Adobe | Unmodified accompanying font licence (https://github.com/notofonts/noto-cjk, Sans/LICENSE) | SIL OFL 1.1 |
+| crates/look/icons/design/svg/model/drawing_base_view.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_projected_view.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_section_view.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_detail_view.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_align_views.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_image.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_dimension.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_hole_callout.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_leader.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_datum.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_centre_mark.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_align_annotations.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_space_annotations.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_parts_list.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_balloon.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_edit_table.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_revision_table.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_update.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_check.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_revision.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_print.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/drawing_resources.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/locales/pending/ka-catch-up-2.json | Davit Matchakhelidze (devius) | Original Georgian translation of SolidCraft's English strings, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/pending/ka-catch-up-ui.json | Davit Matchakhelidze (devius) | Original Georgian translation of SolidCraft's English strings, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| tests/step-regressions/block_edge_off_its_face.step | SolidCraft contributors | written entity by entity from formulas (a block whose edge curve lies 2 um off its face); import regression fixture | MIT OR Apache-2.0 |
+| tests/step-regressions/hole_round_revolved.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (a 30 x 30 x 10 block, a 14 mm hole, a 1 mm round on its top edge), inserted and exported again; import regression fixture | MIT OR Apache-2.0 |
+| tests/step-regressions/torus_patch_and_rest.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (solid.torus R 12, r 2); import regression fixture | MIT OR Apache-2.0 |
+| tests/step-regressions/torus_patch_and_rest_revolved.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (torus_patch_and_rest.step inserted and exported again); import regression fixture | MIT OR Apache-2.0 |
+| solidcore/crates/solidcore/tests/data/issue_17598_pole_corner_patch.smb | HuggingAI4Engineering | a 5 x 4 x 3 mm block cut by the kernel from the part of CADGenBench task 215 (https://huggingface.co/datasets/HuggingAI4Engineering/cadgenbench-data, revision f76f9655), around a three-sided corner patch with a pole, written as a native body file; offset regression fixture | ODC-By-1.0 |
+| assets/sheet-metal/standard-library.json | SolidCraft contributors | Original; gauge thicknesses worked out from the Manufacturers' Standard Gauge weights, 15 U.S.C. 206 and the Brown & Sharpe formula, K-factors and radii from the generic tables its `sources` list cite (facts, not copied text); the standard sheet metal library (#18304) | MIT OR Apache-2.0 |
+| .agents/skills/solidcraft-babysit-pr/SKILL.md | Theo Browne (tstack babysit-pr), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-babysit-pr/scripts/pr-wait | Theo Browne (tstack pr-wait), rewritten for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-file-pr/SKILL.md | Theo Browne (tstack file-pr), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-full-stop/SKILL.md | Theo Browne (tstack full-stop), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-modernize/SKILL.md | Theo Browne (tstack modernize), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-takeover/SKILL.md | Theo Browne (tstack takeover), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| assets/locales/eu.json | Ehuntabi | Original Basque (euskara) translation of SolidCraft's English command labels, written with Claude Code from the meaning of each English string; terms from Euskaltzaindia, Elhuyar, Itzuli and Euskalterm; not yet reviewed by a Basque speaker with CAD vocabulary; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/pending/plane-square-to-line.json | SolidCraft contributors | Original Construct plane command label, help text and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/plane_square_to_line.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rotate_member.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| tests/step-regressions/net_steps_back_within_tolerance.step | SolidCraft contributors | written entity by entity from formulas (a tetrahedron whose spline face's control net steps back 0.5 um); import regression fixture | MIT OR Apache-2.0 |
+| `assets/locales/pending/linked-file-folders.json` | SolidCraft contributors | Original linked-files-from-other-folders question and preference translations | MIT OR Apache-2.0 |
+| assets/locales/pending/plugin-design-events.json | SolidCraft contributors | Original plugin design-change messages and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/rect_edge_center.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| docs/design/drawing-ui/add-sheet.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/annotate.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/base-view-first.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/first-drawing.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/layout.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/make-drawing.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/moving-views.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/paper-presets.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/parts-tables.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/picking.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/placing-views.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/ready-to-issue.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/review-export.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/sheet-colour.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/sheets.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/status-card.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/view-selected.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/views-by-part-type.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| `assets/locales/pending/note-alignment.json` | SolidCraft contributors | Original note alignment labels | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/reload.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/reset.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/window_here.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/window_other.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/window_here.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/window_other.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/pending/basque-second-batch.json | Ehuntabi | Original Basque (euskara) translation of 145 more of SolidCraft's English command labels (sketch, solid, construct, surface, view, file, inspect, parameters and browser commands), written with Claude Code from the meaning of each English string; terms from the same glossary as the first batch (Euskaltzaindia, Elhuyar, Itzuli, Euskalterm); not yet reviewed by a Basque speaker with CAD vocabulary; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/pt-PT.json | acebear17 | Original European Portuguese (Portugal) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| `assets/locales/pending/note-legacy-centre.json` | SolidCraft contributors | Original note alignment label | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -939,11 +1053,13 @@ crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 Linked as a crate; no code from it is copied into SolidCraft. Its licence text and NOTICE go
 into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
 
-## FreeCAD and Rhino import library
+## FreeCAD, Rhino and OpenUSD library
 
-FreeCAD `.FCStd` and Rhino `.3dm` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
-0.6.7 (Apache-2.0), linked as the crates `cadmpeg-core`, `cadmpeg-ir`, `cadmpeg-registry`,
-`cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino` and `cadmpeg-codec-step`
+FreeCAD `.FCStd` and Rhino `.3dm` files are read, OpenUSD files read and written, and STEP and IGES
+files read when "Import with cadmpeg" is chosen, with
+[cadmpeg](https://github.com/cadmpeg/cadmpeg) 0.6.12 (Apache-2.0), linked as the crates `cadmpeg-core`,
+`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-iges`,
+`cadmpeg-codec-rhino`, `cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
 in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
 default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
 codec are not compiled in. Its licence text is in THIRD-PARTY-LICENSES.txt; no code from it is
@@ -963,9 +1079,11 @@ copied into SolidCraft.
 
 ## Vendored renderer compatibility fix
 
-`vendor/egui-wgpu` is egui-wgpu 0.37.0 from https://github.com/emilk/egui
-(MIT OR Apache-2.0; both original licence texts are included). Rust sources and
-its original `egui.wgsl` shader are retained; no images or other artwork are copied.
+`vendor/egui` is egui 0.37.0 from https://github.com/emilk/egui, added whole with
+`git subtree` (MIT OR Apache-2.0; both original licence texts are included). It is a third-party
+project SolidCraft depends on, kept as upstream has it, with its own licences, images (as Git LFS
+pointers, never downloaded) and fonts. The egui-wgpu crate in it carries the
+compatibility fix below (`vendor/README.md` lists every change).
 SolidCraft's narrow patch selects a safe 1x MSAA path on the chosen OpenGL adapter
 and shares that effective count with the surface attachments and CAD callbacks.
 Vulkan, DirectX 12, Metal and WebGPU retain their requested multisampling.

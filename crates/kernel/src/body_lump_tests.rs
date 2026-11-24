@@ -365,3 +365,12 @@ fn point_lies_on_face_answers_through_solidcore() {
     assert_eq!(found, 1);
     assert_eq!(body.point_lies_on_face(99, Vec3::ZERO, 1e-6).unwrap(), None);
 }
+
+/// solidcore-ops' calls on a body run with the kernel's fix set: by the time a body has its
+/// solidcore-ops form, the session has been told the fixes the modelling runs with.
+#[test]
+fn a_bodys_solidcore_ops_form_runs_with_the_kernels_fixes() {
+    let body = crate::build::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    assert!(body.ops_body().is_some());
+    assert_eq!(solidcore_ops::session::fixes(), crate::smlib_trace::fixes());
+}

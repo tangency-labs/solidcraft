@@ -9,7 +9,7 @@ use solidcraft_viewport::surface::srgb8_to_linear;
 use std::fmt;
 
 pub const MAX_AGING_LAYERS: usize = 8;
-const NAME_BYTES: usize = 256;
+const NAME_BYTES: usize = super::MAX_BODY_NAME_BYTES;
 fn invalid(message: impl Into<String>) -> JobError {
     JobError::new(ErrorCode::InvalidRequest, message)
 }
@@ -22,7 +22,7 @@ pub struct BodyName {
 impl BodyName {
     pub fn new(value: &str) -> Result<Self> {
         if value.is_empty() || value.len() > NAME_BYTES || value.chars().any(char::is_control) {
-            return Err(invalid("aging target name must contain 1..256 UTF-8 bytes without controls"));
+            return Err(invalid("aging target name must contain 1..512 UTF-8 bytes without controls"));
         }
         let mut result = Self { bytes: [0; NAME_BYTES], length: value.len() as u16 };
         if let Some(destination) = result.bytes.get_mut(..value.len()) {
@@ -387,7 +387,8 @@ mod tests {
         for name in ["", "bad\nname"] {
             assert!(BodyName::new(name).is_err());
         }
-        assert!(BodyName::new(&"a".repeat(257)).is_err());
+        assert!(BodyName::new(&"a".repeat(513)).is_err());
+        assert!(BodyName::new(&"中".repeat(128)).is_ok(), "any body name a rename takes");
         let name = BodyName::new("Módulo Ω").unwrap();
         assert_eq!(serde_json::from_str::<BodyName>(&serde_json::to_string(&name).unwrap()).unwrap(), name);
     }

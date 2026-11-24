@@ -1,4 +1,4 @@
-//! `solid.move` with `copy: true`: the original body stays where it was, a new body is
+//! `solid.move`: with `copy: true` the original body stays where it was, a new body is
 //! pushed at the transform, and an older design file (no `copy` key at all) still loads.
 use super::*;
 
@@ -638,4 +638,106 @@ fn origins_and_matrices_preserve_component_copies_and_split_body_moves() {
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc, before, "one undo restores both moved bodies");
     }
+}
+
+/// The 40 × 30 × 10 mm box of #17974, `Body1`, with a 10° turn about its top right edge (along Y,
+/// through x = 40, z = 10) as `Move1`, the edge kept as `about` when `about` is set, then a 20 mm
+/// move along X as `Move2`.
+fn box_turned_then_moved(about: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    let mut turn = json!({"bodies": ["Body1"], "origin": [40, 0, 10], "axis": [0, 1, 0], "angle": "10 deg"});
+    if about {
+        turn["about"] = json!({"edge": [40, 15, 10], "body": "Body1"});
+    }
+    run(&mut s, "solid.move", turn);
+    run(&mut s, "solid.move", json!({"bodies": ["Body1"], "translate": [20, 0, 0]}));
+    s
+}
+
+/// `Body1`'s bounding box corners.
+fn body1_box(s: &Session) -> (Vec3, Vec3) {
+    let b = s.model.state().body("Body1").expect("Body1 is in the model").mesh().bounds();
+    (b.min, b.max)
+}
+
+fn same_box(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
+    a.0.dist(b.0) < 1e-6 && a.1.dist(b.1) < 1e-6
+}
+
+/// `Move1`'s error and warning.
+fn move1_notes(s: &Session) -> (Option<String>, Option<String>) {
+    let id = s.doc.find_feature("Move1").expect("Move1 is in the timeline").id;
+    let r = s.model.result(id).expect("Move1 was computed");
+    (r.error.clone(), r.warning.clone())
+}
+
+#[test]
+fn a_turn_about_a_picked_edge_follows_the_edge_when_a_move_is_dragged_before_it() {
+    let turned_then_moved = body1_box(&box_turned_then_moved(true));
+    // #17974's numbers for turn, then move: the box's lowest point stays above the XY plane.
+    assert!((turned_then_moved.0.z - 0.15).abs() < 0.01, "{turned_then_moved:?}");
+    let mut s = box_turned_then_moved(true);
+    run(&mut s, "timeline.reorder", json!({"feature": "Move2", "position": 2}));
+    // The edge moved with the box to x = 60 and the turn turns about it there: the same box as
+    // turning first and moving after, not one that dips 3.3 mm below the XY plane.
+    assert!(same_box(body1_box(&s), turned_then_moved), "{:?} vs {turned_then_moved:?}", body1_box(&s));
+    assert_eq!(move1_notes(&s), (None, None));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(same_box(body1_box(&reopened), turned_then_moved), "{:?}", body1_box(&reopened));
+}
+
+#[test]
+fn a_turn_saved_without_an_edge_still_turns_about_the_saved_line() {
+    // As in designs made before #17974: the turn keeps turning about x = 40, so with the move
+    // dragged before it the box dips below the XY plane, as the issue measured.
+    let mut s = box_turned_then_moved(false);
+    run(&mut s, "timeline.reorder", json!({"feature": "Move2", "position": 2}));
+    assert!((body1_box(&s).0.z + 3.32).abs() < 0.01, "{:?}", body1_box(&s));
+    assert!(!s.doc.to_json().contains("rotate_about"), "a move without `about` saves no `rotate_about`");
+}
+
+#[test]
+fn a_turn_whose_edge_is_not_found_turns_about_the_saved_line_and_says_so() {
+    let mut s = box_turned_then_moved(true);
+    run(&mut s, "timeline.reorder", json!({"feature": "Move2", "position": 2}));
+    // Point the kept reference at the box's flat top face, which has no axis to turn about.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("rotate_about"), "the move keeps the picked edge");
+    let mut doc: Value = serde_json::from_str(&saved).unwrap();
+    fn retarget(v: &mut Value) {
+        match v {
+            Value::Object(o) => {
+                if o.contains_key("rotate_about") {
+                    o.insert("rotate_about".into(), json!({"type": "face", "at": [50, 15, 10]}));
+                }
+                o.values_mut().for_each(retarget);
+            }
+            Value::Array(a) => a.iter_mut().for_each(retarget),
+            _ => {}
+        }
+    }
+    retarget(&mut doc);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&doc.to_string()).unwrap());
+    let (error, warning) = move1_notes(&reopened);
+    assert_eq!(error, None);
+    let warning = warning.expect("the move says its edge was not found");
+    assert!(warning.contains("the edge this turn was picked on was not found"), "{warning}");
+    // It turns about the saved line instead, as a move without the edge does.
+    assert!((body1_box(&reopened).0.z + 3.32).abs() < 0.01, "{:?}", body1_box(&reopened));
+}
+
+#[test]
+fn a_move_about_an_edge_needs_an_axis_along_it_and_an_angle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Body1"}));
+    let about = json!({"edge": [40, 15, 10], "body": "Body1"});
+    let across = json!({"bodies": ["Body1"], "origin": [40, 0, 10], "axis": [1, 0, 0], "angle": "10 deg", "about": about});
+    let e = s.execute("solid.move", &across).unwrap_err().to_string();
+    assert!(e.contains("does not lie along `axis`"), "{e}");
+    let e = s.execute("solid.move", &json!({"bodies": ["Body1"], "about": about})).unwrap_err().to_string();
+    assert!(e.contains("needs `axis` and `angle`"), "{e}");
 }

@@ -696,7 +696,7 @@ fn lattice_loops(
 /// 1e-12..=`max_abs`, an arc's start within ±1e6 radians and its absolute sweep 1e-12 to one turn
 /// (with 1e-12 radians of allowance), a conic weight in 1e-12..=1e12, a Bézier degree of 1 to
 /// [`MAX_BEZIER_DEGREE`], controls not all at one point, and finite ends.
-fn check_seg(seg: &Seg2, max_abs: f64) -> Result<(), &'static str> {
+pub(crate) fn check_seg(seg: &Seg2, max_abs: f64) -> Result<(), &'static str> {
     const MIN_POSITIVE: f64 = 1e-12;
     const MAX_WEIGHT: f64 = 1e12;
     const MAX_START_ANGLE: f64 = 1e6;

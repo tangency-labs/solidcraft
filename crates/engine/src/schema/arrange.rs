@@ -158,6 +158,12 @@ pub struct SheetOutline {
     pub outer: Vec<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holes: Vec<Vec<[f64; 2]>>,
+    /// The margin's line inside `outer`, when there is a margin and the line has a shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outer_margin: Option<Vec<[f64; 2]>>,
+    /// The margin's line around each of `holes`, in their order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hole_margins: Vec<Option<Vec<[f64; 2]>>>,
 }
 
 /// What `solid.arrange` returns.

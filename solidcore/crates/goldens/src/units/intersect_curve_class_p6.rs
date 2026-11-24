@@ -319,7 +319,10 @@ fn geometry(k: &Kernel, kind: i32, scale: f64, pick: [i32; 4]) -> Result<Geometr
     }
     Ok(Geometry {
         curve: c,
-        brep: b.0.clone_standing_for_self().map_err(|e| h(e.to_string()))?,
+        brep: b
+            .0
+            .clone_standing_for_self()
+            .map_err(|e| h(e.to_string()))?,
         first,
         records: solidcore::topology::topology::NotifyRecords::new(),
         attributes: solidcore::geom::attribute::AttributeStore::default(),
@@ -827,5 +830,61 @@ impl UnitDiff for Runner {
             i.input.get_mut(7..10)?.copy_from_slice(&point);
         }
         serde_json::to_value(i).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::geom::tol::scaled_zero_of_curve;
+    use solidcore::intersect::curve_class::p1::xsect_tol_2d_or_3d_for_classify_pair;
+    use solidcore::math::EFF_ZERO_PARAM;
+
+    /// #18342: `scale_k3_5_0_0.000000000001` and `scale_k3_5_0.999999999999_1` insert a
+    /// 1e-12 parameter range at an end of the quadratic B-spline of scale 1e9. That range
+    /// is 2.83e-3 long in 3D: at least the classification's pair tolerance and more than
+    /// the curve's scaled zero (2.27e-3, a margin of only 1.25x, so it is asserted here).
+    /// The parameter snap used to merge it into the whole-curve interval; it now stays an
+    /// interval of its own, next to the rest of the curve.
+    #[test]
+    fn a_short_end_range_distinct_in_3d_stays_an_interval() {
+        for bounds in [[0.0, 1e-12], [1.0 - 1e-12, 1.0]] {
+            let mut i = base();
+            i.kind = 3;
+            i.scale = 1e9;
+            i.input = record(bounds, [0, 0, 0], true);
+            let mut k = Kernel::default();
+            let mut g = geometry(&k, i.kind, i.scale, i.pick).unwrap();
+            let mut a = classification(&k, &i.a, i.tol, &g.first).unwrap();
+            let input = ivl(&i.input, i.tol, &g.first).unwrap();
+            a.insert_curve_interval_mut(&mut k, &mut g, &input).unwrap();
+            assert_eq!(a.size(), 2, "{bounds:?}");
+            let scaled_zero = scaled_zero_of_curve(&k, &g.curve).unwrap();
+            let mut short = 0;
+            for iv in a.intervals() {
+                let (lo, hi) = (iv.min(), iv.max());
+                if hi - lo > EFF_ZERO_PARAM {
+                    continue;
+                }
+                short += 1;
+                assert_eq!((lo, hi), (bounds[0], bounds[1]));
+                let zone_a = iv.start.obj_zone_tol_3d(&k, &g).unwrap();
+                let zone_b = iv.end.obj_zone_tol_3d(&k, &g).unwrap();
+                let tol = xsect_tol_2d_or_3d_for_classify_pair(
+                    &k, &g.curve, None, lo, zone_a, hi, zone_b,
+                )
+                .unwrap();
+                let d = g
+                    .curve
+                    .evaluate_point(&k, lo)
+                    .unwrap()
+                    .distance(g.curve.evaluate_point(&k, hi).unwrap());
+                assert!(
+                    d >= tol && d > scaled_zero,
+                    "{bounds:?}: {d:e} {tol:e} {scaled_zero:e}"
+                );
+            }
+            assert_eq!(short, 1, "{bounds:?}");
+        }
     }
 }

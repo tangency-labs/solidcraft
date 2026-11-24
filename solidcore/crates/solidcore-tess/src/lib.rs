@@ -45,24 +45,41 @@ mod tolerance;
 mod vec;
 
 pub use curve::curve_points;
-pub use iso::{MAX_ISOPARMS, isoparms};
+pub use iso::MAX_ISOPARMS;
+pub use iso::isoparms;
 pub use mesh::Mesh;
-pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
+pub use mesher::MAX_ANGLE_BOUNDARY;
+pub use mesher::plan;
 pub use par::guarded;
-pub use plan::{FacePlan, TessPlan};
-pub use pole::{AveragedPole, PoleNode, PoleRule};
-pub use spec::{MAX_MESH_MIN_ANGLE, MESH_MIN_ANGLE, MeshSpec, WeldedMesh, mesh};
-pub use stats::{
-    Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace, ShapeLimit,
-    Unshaped,
-};
-pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
+pub use plan::FacePlan;
+pub use plan::TessPlan;
+pub use pole::AveragedPole;
+pub use pole::PoleNode;
+pub use pole::PoleRule;
+pub use spec::MAX_MESH_MIN_ANGLE;
+pub use spec::MESH_MIN_ANGLE;
+pub use spec::MeshSpec;
+pub use spec::WeldedMesh;
+pub use spec::mesh;
+pub use stats::Cap;
+pub use stats::CappedEdge;
+pub use stats::EdgeCap;
+pub use stats::OverTolerance;
+pub use stats::PlanStats;
+pub use stats::RefusedEdge;
+pub use stats::RefusedFace;
+pub use stats::ShapeLimit;
+pub use stats::Unshaped;
+pub use tolerance::DISPLAY_ANGLE;
+pub use tolerance::MeshTolerance;
 
 /// The plan evaluator's curve and surface forms a [`TessPlan`] holds (its `surfaces`), so a
 /// client that builds or reads a plan names them through this crate, not the kernel's.
-pub use solidcore::eval::plan::{EvalCurve, EvalSurface};
+pub use solidcore::eval::plan::EvalCurve;
+pub use solidcore::eval::plan::EvalSurface;
 /// The vector conversions between the record and the evaluator that plan surfaces are built with.
-pub use solidcore_convert::{record_vec3, vec3};
+pub use solidcore_convert::record_vec3;
+pub use solidcore_convert::vec3;
 
 /// Why a body could not be planned. The messages are the ones the mesher has always reported.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -76,6 +93,16 @@ pub enum TessError {
     /// A panic inside the mesher, caught there.
     #[error("kernel internal error: {0}")]
     Internal(String),
+    /// A mesh with more vertices than a `u32` index names ([`TessPlan::welded`]): `vertices`
+    /// is the count it had reached when the next one could not be numbered, past `u32::MAX`.
+    #[error(
+        "the mesh has more than {} vertices, more than a 32-bit index can name (reached {vertices})",
+        u32::MAX
+    )]
+    TooManyVertices {
+        /// The vertices numbered or asked for so far (more than `u32::MAX`).
+        vertices: usize,
+    },
 }
 
 /// The mesher's result.

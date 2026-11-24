@@ -53,6 +53,7 @@
 //! | [`Vec3::unitized_derivative3`]               | `UnitizedDerivative3`                            |
 //! | [`Vec3::angle_between`]                      | `AngleBetween`                                   |
 //! | [`Vec3::ccw_angle_between`]                  | `CCWAngleBetween`                                |
+//! | [`Vec3::square_turn`]                        | (none)                                           |
 //! | [`Vec3::is_colinear_with`]                   | `IsColinearWith`                                 |
 //! | [`sqrt`], [`cbrt`], [`acos`], [`asin`]       | `sm_sqrt`, `sm_cbrt`, `sm_acos`, `sm_asin` (`smos_Sqrt`, `smos_CubeRoot`, `smos_ArcCosine`, `smos_ArcSine`) |
 //!
@@ -84,6 +85,7 @@
 
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol;
 use crate::geom::vector2d::{Point2, Vec2};
@@ -315,6 +317,25 @@ impl Vec3 {
         } else {
             self.unitize_nonzero(len_sq)
         }
+    }
+
+    /// The length and the unit direction of a vector of any finite length (not upstream). The
+    /// vector is first divided by its largest absolute coordinate, so its squared length lies
+    /// in `[1, 3]` and neither overflows nor underflows, then made unit as [`Vec3::unitize`]
+    /// makes it. The direction is exact at every finite length; the length is infinite past
+    /// `f64::MAX` and rounds to 0 below the smallest positive `f64`.
+    ///
+    /// `None` for a coordinate that is not finite, or the zero vector.
+    #[must_use]
+    pub fn length_and_unit(self) -> Option<(f64, Self)> {
+        let finite = self.x.is_finite() && self.y.is_finite() && self.z.is_finite();
+        let scale = self.max_dimension();
+        if !(finite && scale > 0.0) {
+            return None;
+        }
+        let scaled = self / scale;
+        let len_sq = scaled.length_squared();
+        Some((scale * sqrt(len_sq), scaled.unitize_nonzero(len_sq)))
     }
 
     fn unitize_nonzero(self, len_sq: f64) -> Self {
@@ -553,9 +574,9 @@ impl Vec3 {
                 return Ok(Point2::new((o.z - o.y * u) / o.x, u));
             }
         }
-        Err(SolidError::geom_failed(
+        Err(SolidError::geom(
             "geom::vector3d::Vec3::solve_two_linear_equations",
-            "the system is singular",
+            GeomFailure::Singular { measure: denom },
         ))
     }
 
@@ -581,9 +602,9 @@ impl Vec3 {
             0 => Ok(&mut self.x),
             1 => Ok(&mut self.y),
             2 => Ok(&mut self.z),
-            _ => Err(SolidError::geom_failed(
+            _ => Err(SolidError::geom(
                 "geom::vector3d::Vec3::component_mut",
-                "the component index is out of range",
+                GeomFailure::IndexOutOfRange { index, len: 3 },
             )),
         }
     }
@@ -663,9 +684,11 @@ impl Vec3 {
         if len_sq < EFF_ZERO_SQ {
             z_axis = x_axis.cross(Self::new(0.0, 0.0, 1.0));
             if z_axis.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::geom_failed(
+                // reached when `self` overflows: unitizing a vector whose squared
+                // length is infinite gives a zero vector
+                return Err(SolidError::geom(
                     "geom::vector3d::Vec3::make_unit_ortho_vectors",
-                    "no perpendicular vector found",
+                    GeomFailure::NoPerpendicular,
                 ));
             }
         }
@@ -860,6 +883,52 @@ impl Vec3 {
         Ok(proj_ang)
     }
 
+    /// The turn about unit axis `self` that brings `normal` square to `line`, folded into
+    /// (-PI/2, PI/2]: the nearer of the two answers PI apart. `normal` and `line` act through
+    /// their projections on the plane square to the axis.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a non-finite vector, or a `normal` or `line` along
+    /// the axis (it has no direction square to it).
+    pub fn square_turn(self, normal: Self, line: Self) -> Result<f64> {
+        let finite = |v: Self| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !(finite(self) && finite(normal) && finite(line)) {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::square_turn",
+                reason: "non-finite vector",
+            });
+        }
+        // Only their directions count: scaled to a largest component of 1, so squaring a huge
+        // (or tiny) finite vector can't overflow (or underflow) on the way.
+        let scaled = |v: Self| {
+            let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
+            if m > 0.0 {
+                v / m
+            } else {
+                v
+            }
+        };
+        let (normal, line) = (scaled(normal), scaled(line));
+        let target = self.cross(line);
+        if self.cross(normal).length_squared() < 100.0 * EFF_ZERO_SQ
+            || target.length_squared() < 100.0 * EFF_ZERO_SQ
+        {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::square_turn",
+                reason: "a vector along the axis",
+            });
+        }
+        let turn = self.ccw_angle_between(normal, target)?;
+        Ok(if turn > PI / 2.0 {
+            turn - PI
+        } else if turn <= -PI / 2.0 {
+            turn + PI
+        } else {
+            turn
+        })
+    }
+
     /// True when `self` and `end_vec` both lie along the segment `start_pnt`..`end_pnt`
     /// (either sense), or the segment is degenerate (`IsColinearWith`).
     #[must_use]
@@ -984,6 +1053,28 @@ mod tests {
     }
 
     use super::*;
+
+    /// A side with normal X, turned about Z to square with a line.
+    #[test]
+    fn square_turn_folds_to_the_nearer() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let turn = |l: [f64; 3]| z.square_turn(x, Vec3::from(l)).unwrap();
+        assert!(turn([0.0, 1.0, 0.0]).abs() < 1e-12);
+        assert!((turn([1.0, 1.0, 5.0]) + PI / 4.0).abs() < 1e-12);
+        assert!((turn([1.0, 0.0, 0.0]) - PI / 2.0).abs() < 1e-12);
+        assert!(z.square_turn(x, z).is_err());
+        assert!(z.square_turn(x, Vec3::new(f64::NAN, 0.0, 0.0)).is_err());
+        // Huge and tiny finite vectors: the same turn, never NaN.
+        assert!((turn([1e200, 1e200, 0.0]) + PI / 4.0).abs() < 1e-12);
+        assert!(
+            (z.square_turn(x * 1e300, Vec3::new(1e-300, 1e-300, 0.0))
+                .unwrap()
+                + PI / 4.0)
+                .abs()
+                < 1e-12
+        );
+    }
 
     /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to
     /// zero and upstream fails after writing the x and z out-params.
@@ -1151,6 +1242,31 @@ mod tests {
             Vec3::new(3.0, 0.0, 4.0).unitize().unwrap(),
             Vec3::new(0.6, 0.0, 0.8)
         );
+    }
+
+    #[test]
+    fn length_and_unit_holds_at_any_finite_length() {
+        // (3, 0, 4) scaled so its squared length underflows or overflows
+        let unit = Vec3::new(0.6, 0.0, 0.8);
+        for s in [1.0, 1e-200, 1e200, 1e-300, 1e300] {
+            let (length, u) = Vec3::new(3.0 * s, 0.0, 4.0 * s).length_and_unit().unwrap();
+            assert!((length / s - 5.0).abs() < 1e-12, "{s:e}: {length:e}");
+            assert!((u - unit).length() < 1e-15, "{s:e}: {u:?}");
+        }
+        let (length, u) = Vec3::new(f64::MAX, f64::MAX, 0.0)
+            .length_and_unit()
+            .unwrap();
+        assert_eq!(length, f64::INFINITY);
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        assert!((u - Vec3::new(half, half, 0.0)).length() < 1e-15, "{u:?}");
+        for v in [
+            Vec3::ZERO,
+            Vec3::new(-0.0, 0.0, -0.0),
+            Vec3::new(f64::NAN, 0.0, 1.0),
+            Vec3::new(0.0, f64::NEG_INFINITY, 1.0),
+        ] {
+            assert_eq!(v.length_and_unit(), None, "{v:?}");
+        }
     }
 
     #[test]

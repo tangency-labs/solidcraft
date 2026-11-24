@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="380" viewBox="0 0 760 380">
+  <title>wr75-probe-meets-2</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="760" height="380" fill="#ffffff"/>
+    <rect x="40" y="170" width="300" height="60" fill="#dce9f5"/>
+    <rect x="420" y="170" width="300" height="60" fill="#dce9f5"/>
+    <line x1="40" y1="200" x2="340" y2="200" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="420" y1="200" x2="720" y2="200" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <polyline points="115,143.23 120,160.94 125,174.65 130,184.88 135,192.09 140,196.74 145,199.25 150,200 155,199.36 160,197.67 165,195.21 170,192.28 175,189.12 180,185.94 185,182.93 190,180.25 195,178.03 200,176.37 205,175.35 210,175 215,175.35 220,176.37 225,178.03 230,180.25 235,182.93 240,185.94 245,189.12 250,192.28 255,195.21 260,197.67 265,199.36 270,200 275,199.25 280,196.74 285,192.09 290,184.88 295,174.65 300,160.94 305,143.23" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <polyline points="495,143.23 500,160.94 505,174.65 510,184.88 515,192.09 520,196.74 525,199.25 530,200 535,199.36 540,197.67 545,195.21 550,192.28 555,189.12 560,185.94 565,182.93 570,180.25 575,178.03 580,176.37 585,175.35 590,175 595,175.35 600,176.37 605,178.03 610,180.25 615,182.93 620,185.94 625,189.12 630,192.28 635,195.21 640,197.67 645,199.36 650,200 655,199.25 660,196.74 665,192.09 670,184.88 675,174.65 680,160.94 685,143.23" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <path d="M54 200 C54 146.981 96.981 104 150 104 C203.019 104 246 146.981 246 200 C246 253.019 203.019 296 150 296 C96.981 296 54 253.019 54 200 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M434 200 C434 146.981 476.981 104 530 104 C583.019 104 626 146.981 626 200 C626 253.019 583.019 296 530 296 C476.981 296 434 253.019 434 200 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <line x1="50" y1="194" x2="330" y2="194" fill="none" stroke="#000000" stroke-width="2.5" stroke-miterlimit="10"/>
+    <circle cx="150" cy="200" r="5" fill="#1f6fb2"/>
+    <circle cx="270" cy="200" r="5" fill="#1f6fb2"/>
+    <circle cx="530" cy="200" r="5" fill="#1f6fb2"/>
+    <circle cx="650" cy="200" r="5" fill="#1f6fb2"/>
+    <circle cx="54" cy="194" r="4" fill="#000000"/>
+    <circle cx="246" cy="194" r="4" fill="#000000"/>
+    <circle cx="434" cy="200" r="4" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="626" cy="200" r="4" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="150" y1="200" x2="150" y2="104" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <line x1="530" y1="200" x2="530" y2="104" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <line x1="46" y1="229" x2="46" y2="304" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <line x1="426" y1="229" x2="426" y2="304" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 40 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Before</tspan></text>
+    <text transform="matrix(1 0 0 1 420 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">After</tspan></text>
+    <text transform="matrix(1 0 0 1 156 140)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">probe radius 4e-5</tspan></text>
+    <text transform="matrix(1 0 0 1 536 140)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">probe radius 4e-5</tspan></text>
+    <text transform="matrix(1 0 0 1 290 126)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">graph</tspan></text>
+    <text transform="matrix(1 0 0 1 670 126)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">graph</tspan></text>
+    <text transform="matrix(1 0 0 1 296 222)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">plane</tspan></text>
+    <text transform="matrix(1 0 0 1 676 222)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">plane</tspan></text>
+    <text transform="matrix(1 0 0 1 40 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">within tolerance</tspan></text>
+    <text transform="matrix(1 0 0 1 420 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">within tolerance</tspan></text>
+    <text transform="matrix(1 0 0 1 118 222)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">touch</tspan></text>
+    <text transform="matrix(1 0 0 1 256 222)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">touch</tspan></text>
+    <text transform="matrix(1 0 0 1 498 222)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">touch</tspan></text>
+    <text transform="matrix(1 0 0 1 636 222)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">touch</tspan></text>
+    <text transform="matrix(1 0 0 1 40 342)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">probe solutions in the band are taken (gap 1e-11 to 5e-9)</tspan></text>
+    <text transform="matrix(1 0 0 1 40 362)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">a crossing branch is traced through both touches</tspan></text>
+    <text transform="matrix(1 0 0 1 420 342)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">probe solutions in the band are refused: no meeting</tspan></text>
+    <text transform="matrix(1 0 0 1 420 362)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">two touching points, as with the tracer off</tspan></text>
+  </g>
+</svg>

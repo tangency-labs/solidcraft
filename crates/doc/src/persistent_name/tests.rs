@@ -150,6 +150,22 @@ fn inner_walls_nest_a_face() {
     assert_eq!(offsets.stem(), made(2, Role::Top));
 }
 
+/// A sheet's corner relief wall holds the edge between the rims its two bends stand on, as a
+/// blend holds the edge it rounds: one face, whatever `|` its edge holds, its role kept as
+/// written; an edge beside it is two faces, and a qualifier after the `)` is the wall's own.
+#[test]
+fn a_relief_wall_holds_the_edge_of_its_corner() {
+    let corner = "F4:relief(F2:side:l1|F2:side:l2)";
+    let f = face(&format!("{corner}#[F2:bottom,F2:top]#1"));
+    assert!(matches!(f.suffixes.as_slice(), [Suffix::Piece(Qualifier { tie: Some(1), .. })]));
+    assert_eq!(f.stem(), made(4, other("relief(F2:side:l1|F2:side:l2)")));
+    let e = edge(&format!("F2:top|{corner}#[F4:bend.inner:F2:side:l1]"));
+    assert_eq!(e.faces.len(), 2);
+    assert_eq!(e.faces[1].stem().to_string(), corner);
+    // Its edge must read.
+    assert!(FaceName::parse("F4:relief(F2:side:l1|)").is_err());
+}
+
 #[test]
 fn what_made_a_face_and_its_kind() {
     assert_eq!(made_by("F2:side:l1@F7.2"), Some(2));
@@ -239,6 +255,10 @@ fn hostile_names_never_panic() {
         "F1:blend()",
         "F1:inner(",
         "F1:blend(a|b",
+        "F1:relief(",
+        "F1:relief()",
+        "F1:relief(a|b",
+        "F1:relief(a|b)x",
         "@F",
         "x@F1.",
         "x@F",

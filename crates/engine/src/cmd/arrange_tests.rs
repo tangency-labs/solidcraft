@@ -87,6 +87,12 @@ fn round_bodies_keep_the_spacing_and_margin_on_their_true_outline() {
     let err = r["footprint_error_mm"].as_f64().unwrap_or(1.0);
     assert!(err > 0.0 && err <= 0.02, "{r}");
     assert_laid_out(&mut s, &all, [101.0, -49.0, 169.0, -4.0], 2.0);
+    // The reply carries the margin's line, 1 mm inside the sheet, for the view to draw.
+    let line: Vec<[f64; 2]> = serde_json::from_value(r["sheet_outlines"][0]["outer_margin"].clone()).unwrap_or_default();
+    assert_eq!(line.len(), 4, "{r}");
+    for p in &line {
+        assert!([101.0, 169.0].iter().any(|x| (p[0] - x).abs() < 1e-9) && [-49.0, -4.0].iter().any(|y| (p[1] - y).abs() < 1e-9), "{p:?}");
+    }
 }
 
 #[test]
@@ -603,36 +609,6 @@ fn a_laser_job_of_sheet_metal_parts_with_windows_tabs_and_slots_nests_clear() {
     }
     assert!(took.as_secs_f64() < 60.0, "arranging 28 parts took {took:?}");
     eprintln!("laser job: 28 parts in {took:?}, fill {}", r["fill"]);
-}
-
-#[test]
-fn turns_compose_into_one_axis_and_angle() {
-    use super::{IDENTITY, axis_angle, pointing_down};
-    use solidcore_record::Vec3;
-    use solidcraft_geom::prelude::*;
-    let turn = |axis: Vec3, a: f64| {
-        let axis = axis.normalized().unwrap_or(Vec3::new(0.0, 0.0, 1.0));
-        IDENTITY.map(|v| v * a.cos() + axis.cross(v) * a.sin() + axis * (axis.dot(v) * (1.0 - a.cos())))
-    };
-    for (axis, a) in [
-        (Vec3::new(1.0, 0.0, 0.0), 0.3),
-        (Vec3::new(1.0, 2.0, -0.5), 2.0),
-        (Vec3::new(0.0, 1.0, 0.0), std::f64::consts::PI),
-        (Vec3::new(1.0, 1.0, 1.0), std::f64::consts::PI - 1e-9),
-        (Vec3::new(-0.2, 0.1, 1.0), 1e-13),
-    ] {
-        let r = turn(axis, a);
-        let (got_axis, got) = axis_angle(r);
-        let back = turn(got_axis, got);
-        for k in 0..3 {
-            assert!((back[k] - r[k]).len() < 1e-7, "{axis:?} {a}: {got_axis:?} {got}");
-        }
-    }
-    for n in [Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.6, 0.0, 0.8), Vec3::new(0.0, -1.0, 0.0)] {
-        let r = pointing_down(n);
-        let image = r[0] * n.x + r[1] * n.y + r[2] * n.z;
-        assert!((image - Vec3::new(0.0, 0.0, -1.0)).len() < 1e-12, "{n:?} -> {image:?}");
-    }
 }
 
 #[test]
