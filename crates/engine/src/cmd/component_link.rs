@@ -1057,16 +1057,28 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 ));
             }
         }
+        let mut moved = None;
         if let Some(f) = s.doc_mut().feature_mut(link.feature) {
             if !same {
-                // Bodies keep their names where the design still has as many.
+                // Bodies keep their names where the design still has as many, also when it lists
+                // them in another order (#21371).
                 if f.body_names.len() != sf.body_names.len() {
                     f.body_names = sf.body_names;
+                } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), &sf.body_names) {
+                    f.body_names = reordered(&f.body_names, &order);
+                    moved = Some(order);
                 }
                 f.kind = sf.kind;
             }
             // A link made before the design's face names were kept gets them here.
             f.link_faces = faces;
+        }
+        // What the link last took from each body moves with it, so a body's own override stays one.
+        if let Some(order) = moved
+            && let Some(kept) = s.doc_mut().links.get_mut(&comp)
+            && kept.inherited.len() == order.len()
+        {
+            kept.inherited = reordered(&kept.inherited, &order);
         }
         s.refresh();
         let changed = inherit_properties(s, comp, &properties)? || changed;
@@ -1177,6 +1189,36 @@ fn numbered_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
     joints.chain(origins).collect()
 }
 
+/// Where each body of a link's design was when the link last read it, for a design that kept
+/// its number of bodies but lists them in another order (#21371): `order[j]` is the place the
+/// design's body `j` had then. `step` is the STEP the link keeps from that read, which names the
+/// bodies as the design did; `now` are the names the design gives its bodies now. A body the
+/// design still has is found by its name; the bodies it has new take the places of the ones it no
+/// longer has, in order. `None` when nothing moved, and when the old STEP can't be read or its
+/// names, or the new ones, can't tell the bodies apart: the bodies then keep their places.
+fn moved_bodies(step: &str, file: &str, now: &[String]) -> Option<Vec<usize>> {
+    if step.is_empty() {
+        return None;
+    }
+    // A second read of the STEP text: the link keeps no other record of the old names.
+    let was = solidcraft_io::step_import_feature(step.as_bytes(), file).ok()?.body_names;
+    let places: std::collections::HashMap<&str, usize> = was.iter().enumerate().map(|(k, n)| (n.as_str(), k)).collect();
+    let distinct = now.iter().collect::<std::collections::HashSet<_>>().len() == now.len();
+    if was.len() != now.len() || places.len() != was.len() || !distinct {
+        return None;
+    }
+    let found: Vec<Option<usize>> = now.iter().map(|n| places.get(n.as_str()).copied()).collect();
+    let taken: std::collections::HashSet<usize> = found.iter().flatten().copied().collect();
+    let mut freed = (0..was.len()).filter(|k| !taken.contains(k));
+    let order: Vec<usize> = found.iter().map(|k| k.or_else(|| freed.next())).collect::<Option<_>>()?;
+    order.iter().enumerate().any(|(j, k)| j != *k).then_some(order)
+}
+
+/// `items` (one per body, in the order a link last read them) in the design's new `order`.
+fn reordered<T: Clone + Default>(items: &[T], order: &[usize]) -> Vec<T> {
+    order.iter().map(|k| items.get(*k).cloned().unwrap_or_default()).collect()
+}
+
 /// `component.relink`: a linked component shows the design at `path` instead, in all its
 /// placements, or with `occurrence` in that placement only.
 fn relink(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1227,9 +1269,19 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     {
         warnings.push("the linked geometry changed; check this component's joints, even when the solver reports no error".to_string());
     }
+    let mut inherited = link.inherited.clone();
     if let Some(f) = s.doc_mut().feature_mut(link.feature) {
         if f.body_names.len() != sf.body_names.len() {
             f.body_names = sf.body_names;
+        } else if let FeatureKind::Import { step, .. } = &f.kind
+            && !same_import_source(&f.kind, &sf.kind)
+            && let Some(order) = moved_bodies(step, &file.display().to_string(), &sf.body_names)
+        {
+            // The names, and what the link last took from each body, stay with their bodies (#21371).
+            f.body_names = reordered(&f.body_names, &order);
+            if inherited.len() == order.len() {
+                inherited = reordered(&inherited, &order);
+            }
         }
         f.kind = sf.kind;
         f.link_faces = faces;
@@ -1243,6 +1295,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
             file_sha256: Some(read),
             configuration: configuration.map(|c| c.row),
             configuration_identity: configuration.and_then(|c| c.identity),
+            inherited,
             ..link.clone()
         },
     );
