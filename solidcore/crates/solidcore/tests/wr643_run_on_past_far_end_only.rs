@@ -1,5 +1,5 @@
 //! Regression test for WR-643 (the SolidCraft fork's tangency-labs/smlib@7224896, branch
-//! `replay/1.0.1`; #960). With WR-610's run-on (`fillet_trace_reaches_rails`),
+//! `replay/1.0.1`; #960). With WR-610's run-on (always on since #18913),
 //! `RailEdgeuseIntersect` widens a straight side edge's interval past both of its ends.
 //! Behind the corner's vertex, the side edge's line lies on the far side of the filleted
 //! edge, where no rail of the blend can be. Once the faces continue as themselves (WR-633,
@@ -112,7 +112,6 @@ fn removed(r: f64) -> f64 {
 fn round(s: f64, r: f64) -> Result<(usize, f64, bool), i32> {
     let mut k = Kernel::default();
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_extension_as_itself = true;
     let mut b = part(&mut k, s);

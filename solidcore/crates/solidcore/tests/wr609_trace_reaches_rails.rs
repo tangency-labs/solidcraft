@@ -1,5 +1,5 @@
 //! WR-609 / WR-610 (#960; the fork's tangency-labs/smlib@a9277fd and @6e77631, rev
-//! 68fb9162): with `fillet_trace_reaches_rails`, `CreateFilletBrep` lets each solver's
+//! 68fb9162; no longer a flag): `CreateFilletBrep` lets each solver's
 //! trace reach as far as its rails can lie from the edge before the corners
 //! (`sm_ExtendTraceToItsRails`, `GetDomainExtension`), and `RailEdgeuseIntersect` runs a
 //! straight side edge on along its line.
@@ -9,7 +9,7 @@
 //!   trace's reach is `(2 / tan(45 deg) + 1) * 30 = 90` across the edge; the fork's
 //!   commit message gives the volume 5822.58649 "either way".
 //! - A round r10 on a 5 x 5 bar's long edge: the pinned C++ fails in `CalcFilletGeom`
-//!   with no rail ends (fillet error 4); with the flag the rails' ends are found and it
+//!   with no rail ends (fillet error 4); reaching its rails, the rails' ends are found and it
 //!   fails where r9 does, at the corner edges (error 3), which the cliff overflow
 //!   (#960's later PRs) builds.
 
@@ -30,10 +30,8 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(fix: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = fix;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
@@ -65,16 +63,16 @@ fn box_and_top_edge(k: &mut Kernel) -> (Brep, EdgeId) {
     (b, e)
 }
 
-fn variable_round_volume(fix: bool) -> f64 {
-    let mut k = kernel(fix);
+fn variable_round_volume() -> f64 {
+    let mut k = kernel();
     let (mut b, e) = box_and_top_edge(&mut k);
     variable_radius_fillet(&mut k, &mut b, &[e], 2.0, 10.0, 1, 1).unwrap();
     volume(&k, &mut b)
 }
 
 /// The trace reach and across flags of each solver after the variable round.
-fn variable_round_reach(fix: bool) -> Vec<(f64, [[bool; 2]; 2])> {
-    let mut k = kernel(fix);
+fn variable_round_reach() -> Vec<(f64, [[bool; 2]; 2])> {
+    let mut k = kernel();
     let (mut b, e) = box_and_top_edge(&mut k);
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();
     session
@@ -98,27 +96,22 @@ fn variable_round_reach(fix: bool) -> Vec<(f64, [[bool; 2]; 2])> {
 /// and 8 across, the union's top over 20001 balls).
 const ENVELOPE_VOLUME: f64 = 5_831.254_415;
 
-/// Traced farther, the round is the same union of balls (WR-685): both within 1.6e-5 of the
-/// 168.75 removed, the skins of the balls' exact circles (WR-708). The trace's stations
-/// differ, yet the two skins agree to 2.1e-8 in volume; upstream's approximated arcs were
-/// 5.5e-5 off, their two skins 1.5e-4 apart, and before the round was the union of its
-/// balls, the great circles' two skins agreed to 5e-6.
+/// Traced farther, the round is the same union of balls (WR-685): within 1.6e-5 of the
+/// 168.75 removed, the skin of the balls' exact circles (WR-708). (Before the flag was
+/// retired the skins traced to the rails and not agreed to 2.1e-8 in volume; upstream's
+/// approximated arcs were 5.5e-5 off.)
 #[test]
 fn variable_round_traced_farther_comes_out_the_same() {
-    for fix in [false, true] {
-        let v = variable_round_volume(fix);
-        eprintln!("flag {fix}: volume {v}");
-        assert!(
-            (v - ENVELOPE_VOLUME).abs() < 1e-4 * (6000.0 - ENVELOPE_VOLUME),
-            "flag {fix}: volume {v}"
-        );
-    }
+    let v = variable_round_volume();
+    assert!(
+        (v - ENVELOPE_VOLUME).abs() < 1e-4 * (6000.0 - ENVELOPE_VOLUME),
+        "volume {v}"
+    );
 }
 
 #[test]
-fn variable_round_trace_reaches_its_rails_only_with_the_flag() {
-    assert_eq!(variable_round_reach(false), vec![(0.0, [[true; 2]; 2])]);
-    let on = variable_round_reach(true);
+fn variable_round_trace_reaches_its_rails() {
+    let on = variable_round_reach();
     let expect = (2.0 / (PI / 4.0).tan() + 1.0) * 30.0;
     assert_eq!(on.len(), 1);
     let (reach, across) = on[0];
@@ -128,9 +121,9 @@ fn variable_round_trace_reaches_its_rails_only_with_the_flag() {
 }
 
 #[test]
-fn variable_round_with_the_flag_is_deterministic() {
+fn variable_round_is_deterministic() {
     assert_eq!(
-        variable_round_volume(true).to_bits(),
-        variable_round_volume(true).to_bits()
+        variable_round_volume().to_bits(),
+        variable_round_volume().to_bits()
     );
 }

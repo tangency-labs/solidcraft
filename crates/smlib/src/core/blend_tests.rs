@@ -770,7 +770,6 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
     }
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     let block = create_box(&mut k, Point3::ZERO, 40.0, 30.0, 10.0).unwrap();
     let notch = create_box(&mut k, p(35.0, -1.0, -1.0), 6.0, 6.0, 4.0).unwrap();
     let mut b = boolean_difference(&mut k, block, notch).unwrap();
@@ -806,7 +805,6 @@ fn pocket_chamfer_on_a_boolean_body() {
     use solidcore::{Kernel, Point3};
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
     let mut b = boolean_difference(&mut k, plate, cut).unwrap();

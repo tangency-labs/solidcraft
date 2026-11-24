@@ -1746,7 +1746,6 @@ mod ball_fit_tests {
     #[test]
     fn a_fillet_body_not_built_keeps_the_executives_failure() {
         let mut k = Kernel::default();
-        k.fixes.fillet_trace_reaches_rails = false;
         let mut body =
             crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 13.0, 2.0)
                 .unwrap();

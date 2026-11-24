@@ -1,4 +1,4 @@
-//! WR-669 (`fixes.fillet_exact_round_classes`), the SolidCraft fork's tangency-labs/smlib@dda3b5d:
+//! WR-669 (no longer a flag), the SolidCraft fork's tangency-labs/smlib@dda3b5d:
 //! a round between two faces touching at one point the same way round is exact on the nodal
 //! quartic their offsets meet in, where upstream (and the flag before that commit) traces it.
 //!
@@ -75,9 +75,8 @@ fn off_b(x: Point3) -> f64 {
 }
 
 /// The two pipes united and their concave edge rounded; the round faces.
-fn pipes(exact: bool) -> (Kernel, Brep, Result<()>, Vec<FaceId>) {
+fn pipes() -> (Kernel, Brep, Result<()>, Vec<FaceId>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
     let a = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 20.0).unwrap();
     let mut small = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), RHO, 10.0 - X0).unwrap();
     // z to x: the small pipe from (X0, R - RHO, 0) along +x
@@ -262,7 +261,7 @@ fn the_quadrature_integrates_a_quarter_torus() {
 
 #[test]
 fn pipes_touching_at_a_point_round_exactly_on_their_nodal_quartic() {
-    let (k, mut b, res, rounds) = pipes(true);
+    let (k, mut b, res, rounds) = pipes();
     res.unwrap();
     assert_eq!(rounds.len(), 1, "one round face");
     let f = rounds[0];
@@ -286,12 +285,6 @@ fn pipes_touching_at_a_point_round_exactly_on_their_nodal_quartic() {
         "round area {got} != {area} (off {:e})",
         got - area
     );
-}
-
-#[test]
-fn upstream_traces_the_round_between_pipes_touching_at_a_point_and_fails() {
-    let (_, _, res, _) = pipes(false);
-    assert!(res.is_err(), "the traced round fails: {res:?}");
 }
 
 // ---- #2485: an exact round is a blend by its definition, its net the exact surface ----
@@ -349,7 +342,7 @@ fn surface_bits(k: &Kernel, s: &Surface) -> Vec<[u64; 3]> {
 fn the_nodal_quartic_round_keeps_its_exact_definition() {
     // Both the offset identities and the canal-surface identity must certify at 0,
     // including after its supports, leader and net pass through a JSON record.
-    let (k, b, res, _) = pipes(true);
+    let (k, b, res, _) = pipes();
     res.unwrap();
     let exact = exact_round_checks(&k, &b);
     assert_eq!(exact.len(), 1, "the nodal quartic keeps its definition");

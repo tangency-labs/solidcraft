@@ -5,10 +5,10 @@
 //! Upstream: not in SMLib at the pinned commit. SolidCraft's fork
 //! (tangency-labs/smlib, rev `68fb9162`) adds `m_dTraceReach`, `m_abTraceAcross`,
 //! `SetTraceReach` and `SmFilletSolver::GetDomainExtension` (`SmFilletSolver.h`,
-//! `SmFilletSolver.cpp`) in commit `a9277fd` (WR-609). They are used only with the
-//! opt-in `Kernel::fixes.fillet_trace_reaches_rails`: with it off the reach stays `0`
-//! and [`FilletSolver::domain_extension`] is the extension factor times the domain's
-//! size, as upstream's `SetupOffsetExtension` computes it.
+//! `SmFilletSolver.cpp`) in commit `a9277fd` (WR-609). With a reach of `0` (a solver
+//! the executive has not reached, as upstream's every solver)
+//! [`FilletSolver::domain_extension`] is the extension factor times the domain's size,
+//! as upstream's `SetupOffsetExtension` computes it.
 //!
 //! | Rust                               | Upstream (fork)                      |
 //! |------------------------------------|--------------------------------------|

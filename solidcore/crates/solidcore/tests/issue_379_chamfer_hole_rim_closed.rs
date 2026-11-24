@@ -1,8 +1,7 @@
 //! tangency-labs/solidcore#379 (WR-421): `SmApiChamferFillet` with a constant distance on a
 //! box minus a through cylinder left the hole's rims open. The issue expects a closed solid
-//! whose chamfer faces join the top and bottom faces to the hole's wall. With
-//! `Kernel::fixes.fillet_chamfer_cone_on_arc` the rims' linear sections are revolved into
-//! cones, as the fork's tangency-labs/smlib@f9299b7 does, and stored as cones (WR-572).
+//! whose chamfer faces join the top and bottom faces to the hole's wall. The rims' linear
+//! sections are revolved into cones (WR-421, no longer a flag), as the fork's tangency-labs/smlib@f9299b7 does, and stored as cones (WR-572).
 //!
 //! The case is the issue's: every edge of a 10 cube with a radius 2 through hole, chamfered
 //! by a chord of 1/sqrt(2) (legs 0.5).
@@ -35,9 +34,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 }
 
 /// The holed cube before the chamfer, the chamfer's status and the body after it.
-fn chamfered(fix: bool) -> (f64, Result<()>, Kernel, Brep) {
+fn chamfered() -> (f64, Result<()>, Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = fix;
     let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(5.0, 5.0, -1.0), 2.0, 12.0).unwrap();
     let mut body = boolean_difference(&mut k, cube, hole).unwrap();
@@ -46,8 +44,8 @@ fn chamfered(fix: bool) -> (f64, Result<()>, Kernel, Brep) {
     (before, r, k, body)
 }
 
-/// The number of the body's faces on a surface of revolution (the rims' chamfers with the
-/// fix; upstream builds them as B-splines).
+/// The number of the body's faces on a surface of revolution (the rims' chamfers before
+/// WR-572; upstream builds them as B-splines).
 fn revolved_faces(b: &Brep) -> usize {
     p1::faces(b, None)
         .unwrap()
@@ -84,13 +82,8 @@ fn cube_chamfers(a: f64) -> f64 {
 }
 
 #[test]
-fn issue_379_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.fillet_chamfer_cone_on_arc);
-}
-
-#[test]
 fn issue_379_the_rims_are_chamfered_into_a_closed_solid_with_the_fix() {
-    let (before, r, k, mut body) = chamfered(true);
+    let (before, r, k, mut body) = chamfered();
     r.unwrap();
     solidcore::topology::integrity::check(&body).unwrap();
     assert!(is_manifold_solid(&body).unwrap(), "not a closed solid");

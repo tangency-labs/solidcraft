@@ -62,9 +62,8 @@
 //! - **Iteration.** `sm_FindRolloverSideEdge`'s `while (TRUE)` advances its interval
 //!   index on every pass that does not return, so it runs at most `pCC.len()` times;
 //!   there is no recursion.
-//! - **Side edge run on (WR-610, #960).** With `fixes.fillet_trace_reaches_rails`,
-//!   `RailEdgeuseIntersect` widens a straight side edge's parameter interval on a planar
-//!   base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
+//! - **Side edge run on (WR-610, #960).** `RailEdgeuseIntersect` widens a straight side
+//!   edge's parameter interval on a planar base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
 //!   tangency-labs/smlib@6e77631), past the end away from the filleted edge's vertex
 //!   only (WR-643, the fork's tangency-labs/smlib@7224896). A widened
 //!   side edge's B-spline UV trim (its local copy) evaluates out of bounds, so it runs on
@@ -72,7 +71,7 @@
 //!   (`continue_bspline_trim_past_its_ends`, WR-654, #1981). With far-end-only (and WR-600,
 //!   the fork's tangency-labs/smlib@856b54e), a side edge whose faces meet tangentially at the
 //!   filleted edge's vertex (a tangent seam) still runs on past both ends.
-//! - **Exact round classes (WR-669, #2085).** For `fixes.fillet_exact_round_classes`, the
+//! - **Exact round classes (WR-669, #2085).** The
 //!   SolidCraft fork's (tangency-labs/smlib@7ac037e) class builders: the line spine's is the
 //!   cylinder body without its generator and `IsLine` gates; the circle spine's the torus
 //!   body without its generator and `IsArc` gates, its frame from the class axis (no `IsArc`
@@ -1002,8 +1001,7 @@ impl FilletSolver {
     }
 
     /// `CalcLineSpineFilletGeom(crBlend, rTsectPnts, pFilletGeom)` (not upstream: the
-    /// SolidCraft fork's tangency-labs/smlib@7ac037e, opt-in
-    /// `Kernel::fixes.fillet_exact_round_classes`, WR-669): the cylinder of a round whose
+    /// SolidCraft fork's tangency-labs/smlib@7ac037e, WR-669): the cylinder of a round whose
     /// spine `blend` classifies as a line, built as [`FilletSolver::calc_cylinder_fillet_geom`]
     /// without its generator and `IsLine` gates.
     ///
@@ -1413,7 +1411,7 @@ impl FilletSolver {
     ///
     /// # Errors
     ///
-    /// With the opt-in `Kernel::fixes.fillet_chamfer_cone_on_arc` (not upstream, WR-421) a
+    /// Not upstream (WR-421): a
     /// linear generator is revolved too, into a cone, and that revolution is stored as the
     /// cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on it (WR-572).
     /// Not upstream: a section centred on the arc's axis has its rail points turned into
@@ -1423,7 +1421,7 @@ impl FilletSolver {
     /// end one, without `IsArc`'s start angle (WR-568), and exactly 360 degrees along a
     /// whole closed edge whose end section is its start one (WR-789).
     ///
-    /// `SM_ERR` when the generator is not circular, the edge curve is not an arc, the
+    /// `SM_ERR` when the generator is neither circular nor linear, the edge curve is not an arc, the
     /// radius is tiny or changes, or the nearest point on the edge is not unique; those
     /// of `SetupOffsetValues`, the evaluations and the constructors;
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (also a rail
@@ -1444,8 +1442,7 @@ impl FilletSolver {
     }
 
     /// `CalcCircleSpineFilletGeom(crBlend, rTsectPnts, pFilletGeom)` (not upstream: the
-    /// SolidCraft fork's tangency-labs/smlib@7ac037e, opt-in
-    /// `Kernel::fixes.fillet_exact_round_classes`, WR-669): the section of a round whose
+    /// SolidCraft fork's tangency-labs/smlib@7ac037e, WR-669): the section of a round whose
     /// spine `blend` classifies as a circle turned about the faces' common axis (the
     /// class's), built as [`FilletSolver::calc_torus_fillet_geom`] without its generator
     /// and `IsArc` gates. The frame is the class axis with its origin where the axis meets
@@ -1490,13 +1487,12 @@ impl FilletSolver {
         // Check for Edge's curve domain being bigger than the Edge domain.
         let curve = checked_edge_curve(k, s, b, e)?;
 
-        // no work - not a circular cross-section on a circular arc (with
-        // `fixes.fillet_chamfer_cone_on_arc`, or a linear one: its revolution is a cone)
+        // no work - not a circular cross-section on a circular arc (or a linear one, not
+        // upstream, WR-421: its revolution is a cone)
         // Side effect: get circular arc RefFrame, Radius, StartAng, and EndAng (only the
         // frame is used: the span is the turn from the start section, WR-568).
         let section = fsg_type(s)?;
-        let linear_section =
-            k.fixes.fillet_chamfer_cone_on_arc && section == FilletSurfaceGeneratorType::Linear;
+        let linear_section = section == FilletSurfaceGeneratorType::Linear;
         let ref_frame = if let Some(class) = class {
             // WR-669: the circular or linear cross-section turned about the faces' common
             // axis (the class's); the frame's origin: the centre of the edge's circle, where
@@ -2411,33 +2407,30 @@ impl FilletSolver {
         // virtual SetupOffsetExtension: dispatched on the solver's kind
         ops.setup_offset_extension(k, &base, &mut domain)?;
 
-        // Opt-in, not upstream (`fixes.fillet_trace_reaches_rails`, WR-610; the fork's
-        // tangency-labs/smlib@6e77631): a straight side edge on a plane continues
-        // exactly along its line, as far as the base surface's domain is extended
-        // across the edge (its extension factor, or the trace's reach). A rail that
-        // leaves its face across a cliff meets the side edge's line past the edge's
-        // end; bounded to the edge's own interval, the solve found that point only
-        // from a first guess already on it.
-        if k.fixes.fillet_trace_reaches_rails {
-            if let Some(side_edge) = side_edge {
-                let widened = run_side_edge_on_along_its_line(
-                    k,
-                    b,
-                    side_eu,
-                    side_edge,
-                    &uv_trim,
-                    &base,
-                    &domain,
-                    ops.solver(),
-                    &mut intervals,
-                )?;
-                // Not upstream (WR-654, #1981): a B-spline trim clamps to its ends, so
-                // the widened interval reached no point of its line past them; a line
-                // trim on the other wall did, and the two rails' ends at the side vertex
-                // fell apart.
-                if widened {
-                    continue_bspline_trim_past_its_ends(&mut uv_trim);
-                }
+        // Not upstream (WR-610; the fork's tangency-labs/smlib@6e77631): a straight side
+        // edge on a plane continues exactly along its line, as far as the base surface's
+        // domain is extended across the edge (its extension factor, or the trace's
+        // reach). A rail that leaves its face across a cliff meets the side edge's line
+        // past the edge's end; bounded to the edge's own interval, the solve found that
+        // point only from a first guess already on it.
+        if let Some(side_edge) = side_edge {
+            let widened = run_side_edge_on_along_its_line(
+                k,
+                b,
+                side_eu,
+                side_edge,
+                &uv_trim,
+                &base,
+                &domain,
+                ops.solver(),
+                &mut intervals,
+            )?;
+            // Not upstream (WR-654, #1981): a B-spline trim clamps to its ends, so
+            // the widened interval reached no point of its line past them; a line
+            // trim on the other wall did, and the two rails' ends at the side vertex
+            // fell apart.
+            if widened {
+                continue_bspline_trim_past_its_ends(&mut uv_trim);
             }
         }
         set_interval(
@@ -3730,7 +3723,7 @@ mod tests {
     }
 
     /// The parameter interval of a side edge use that `RailEdgeuseIntersect` loads,
-    /// with `fillet_trace_reaches_rails`, on a 10 cube: the filleted edge is the top front edge (0,0,10)-(10,0,10). The side
+    /// on a 10 cube: the filleted edge is the top front edge (0,0,10)-(10,0,10). The side
     /// edge is the top left edge, (0,0,10)-(0,10,10), which meets it at the corner (0,0,10),
     /// or, with `at_corner` false, the top back edge, (0,10,10)-(10,10,10), which does not.
     /// Returns the loaded interval, the side edge use's natural interval, and the end of
@@ -3739,7 +3732,6 @@ mod tests {
         use crate::primitive::api_primitives::create_box;
         use crate::topology::vertex;
         let mut k = Kernel::default();
-        k.fixes.fillet_trace_reaches_rails = true;
         let mut ops = jacobian_size_ops(&k, 2);
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let ends = |b: &Brep, e: EdgeId| {

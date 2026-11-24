@@ -70,7 +70,6 @@ fn classify(
     corners: &[(f64, f64); 4],
 ) -> (i32, Vec<EdgeId>, Vec<EdgeId>, Vec<EdgeId>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     let mut b = make(&mut k);
     let rim: Vec<EdgeId> = (0..4)
         .map(|i| {

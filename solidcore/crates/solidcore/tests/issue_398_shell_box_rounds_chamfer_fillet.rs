@@ -9,7 +9,7 @@
 //! The r4 fillet on that traced chamfer then shells into a body that is not a manifold solid
 //! and has zero volume, although the shell reports success. The pinned C++ reference gives the
 //! same body (72 faces, 307 edges, 236 vertices, for both shells), so by default the port
-//! keeps it. With `fixes.fillet_chamfer_cone_on_arc` the chamfer is a cone, and both shells
+//! kept it. With WR-421 (no longer a flag) the chamfer is a cone, and both shells
 //! are manifold solids of the closed-form volume (the SMLib fork, which has the fix, gives
 //! 13701.73 for the open shell).
 //!
@@ -174,10 +174,9 @@ fn part(k: &mut Kernel) -> Brep {
     b
 }
 
-/// The part, with WR-421's fix on or off.
-fn part_with(cone_on_arc: bool) -> (Kernel, Brep) {
+/// The part, with its chamfer a cone (WR-421).
+fn part_with() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = cone_on_arc;
     let b = part(&mut k);
     (k, b)
 }
@@ -197,7 +196,7 @@ fn shell_of(k: &mut Kernel, b: Brep, open: bool) -> solidcore::Result<Brep> {
 
 #[test]
 fn issue_398_part_input() {
-    let (k, mut b) = part_with(true);
+    let (k, mut b) = part_with();
     let got = volume(&k, &mut b).unwrap();
     eprintln!(
         "PROBE issue_398 input: faces={} volume={got}",
@@ -214,7 +213,7 @@ fn issue_398_part_input() {
 
 #[test]
 fn issue_398_open_top_shell() {
-    let (mut k, b) = part_with(true);
+    let (mut k, b) = part_with();
     let result = shell_of(&mut k, b, true);
     assert!(report(
         &k,
@@ -227,7 +226,7 @@ fn issue_398_open_top_shell() {
 
 #[test]
 fn issue_398_closed_shell() {
-    let (mut k, b) = part_with(true);
+    let (mut k, b) = part_with();
     let result = shell_of(&mut k, b, false);
     assert!(report(
         &k,
@@ -245,7 +244,7 @@ fn issue_398_closed_shell() {
 /// fork (tangency-labs/smlib 68fb9162) gives 51 faces, V = 13701.7343.
 #[test]
 fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
-    let (mut k, b) = part_with(true);
+    let (mut k, b) = part_with();
     let mut got = shell_of(&mut k, b, true).unwrap();
     assert!(brep_is_manifold_solid(&got).unwrap());
     let v = volume(&k, &mut got).unwrap();
@@ -338,7 +337,6 @@ fn issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles() {
     use solidcore::topology::topology_traverser::face_edges;
     use std::f64::consts::{PI, SQRT_2};
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     let b = part(&mut k);
     let mut got = shell_of(&mut k, b, true).unwrap();
     assert!(brep_is_manifold_solid(&got).unwrap());

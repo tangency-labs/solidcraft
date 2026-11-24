@@ -6,9 +6,6 @@
   {
    "name": "square_boss",
    "note": "The control: the boss is square to the block, so the round is a torus section, the circle class #13900 certifies on its own torus. solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round builds, 16792.441265; on 4890cebd3, the parent of 59a85a164, it builds, 16792.441265.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",
@@ -73,9 +70,6 @@
   {
    "name": "tilt_quarter_degree",
    "note": "The boss leans 0.25 degrees off square, so the round's spine is an ellipse (the canal class). solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round is refused: 'SMLib fillet: operation: SMLib failed (status 1001)'; on 4890cebd3, the parent of 59a85a164, it builds, 16792.437714.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",
@@ -140,9 +134,6 @@
   {
    "name": "tilt_half_degree",
    "note": "The boss leans 0.5 degrees off square, so the round's spine is an ellipse (the canal class). solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round is refused: 'SMLib fillet: operation: SMLib failed (status 1001)'; on 4890cebd3, the parent of 59a85a164, it builds, 16792.427063.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",
@@ -207,9 +198,6 @@
   {
    "name": "tilt_1_degree",
    "note": "The boss leans 1 degree off square, so the round's spine is an ellipse (the canal class). solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round is refused: 'SMLib fillet: operation: SMLib failed (status 1001)'; on 4890cebd3, the parent of 59a85a164, it builds, 16792.384454.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",
@@ -274,9 +262,6 @@
   {
    "name": "tilt_1_and_a_half_degrees",
    "note": "The boss leans 1.5 degrees off square, so the round's spine is an ellipse (the canal class). solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round is refused: 'SMLib fillet: operation: SMLib failed (status 1001)'; on 4890cebd3, the parent of 59a85a164, it builds, 16792.313421.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",
@@ -341,9 +326,6 @@
   {
    "name": "tilt_2_degrees",
    "note": "The boss leans 2 degrees off square, so the round's spine is an ellipse (the canal class). solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round is refused: 'SMLib fillet: operation: SMLib failed (status 1001)'; on 4890cebd3, the parent of 59a85a164, it builds, 16792.213936.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",
@@ -408,9 +390,6 @@
   {
    "name": "tilt_2_and_a_half_degrees",
    "note": "The boss leans 2.5 degrees off square, so the round's spine is an ellipse (the canal class). solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round is refused: 'SMLib fillet: operation: SMLib failed (status 1001)'; on 4890cebd3, the parent of 59a85a164, it builds, 16792.085962.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",
@@ -475,9 +454,6 @@
   {
    "name": "tilt_3_degrees",
    "note": "The boss leans 3 degrees off square, so the round's spine is an ellipse (the canal class). solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round builds, 16791.929450; on 4890cebd3, the parent of 59a85a164, it builds, 16791.929450.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",
@@ -542,9 +518,6 @@
   {
    "name": "tilt_5_degrees",
    "note": "The boss leans 5 degrees off square, so the round's spine is an ellipse (the canal class). solidcraft-cli, 2026-11-09: on SolidCraft main ef966d46 the round builds, 16791.016644; on 4890cebd3, the parent of 59a85a164, it builds, 16791.016644.",
-   "fixes": [
-    "fillet_exact_round_classes"
-   ],
    "steps": [
     {
      "op": "box",

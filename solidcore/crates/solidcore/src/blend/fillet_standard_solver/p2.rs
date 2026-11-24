@@ -2185,7 +2185,7 @@ impl VariableRadiusFs {
             let solver = &self.curve_based.solver;
             let surface2 = solver.rail(other_rail)?;
             let domain = surface2.base_surface().natural_uv_domain_with_nurb(k)?;
-            // fork WR-609: and the trace's reach (0 without `fillet_trace_reaches_rails`)
+            // fork WR-609: and the trace's reach
             let size = solver.domain_extension(k, Some(surface2.base_surface()), &domain)?;
             let extended = Extent2d::from_points(
                 Point2::new(domain.min().x - size.x, domain.min().y - size.y),

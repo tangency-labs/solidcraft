@@ -64,8 +64,8 @@
 //! - **Analytic fillets.** `CalcConeFilletGeom` / `CalcTorusFilletGeom`
 //!   (`blend.fillet_solver_p2`) read copies of the sorted vertex uses' points
 //!   (`SmTArray<SmTsectPnt*>` upstream; the builders only read them).
-//!   With `fixes.fillet_exact_round_classes` (WR-669, the SolidCraft fork's
-//!   tangency-labs/smlib@b5f2867 and 7ac037e) they are `ClassifyExactBlend` and
+//!   Not upstream (WR-669, the SolidCraft fork's
+//!   tangency-labs/smlib@b5f2867 and 7ac037e): they are `ClassifyExactBlend` and
 //!   `CalcExactFilletGeom(.., TRUE)` instead (`blend::fillet_exact`), with errors passed on,
 //!   and only when there are points.
 //! - **Unported callees.** `SmFilletEdge::CalcCrossSection` (`blend.fillet_geom_p5`)
@@ -1266,15 +1266,15 @@ impl FilletBrep {
         }
 
         let mut fillet_created = false;
-        let exact_classes = k.fixes.fillet_exact_round_classes;
-        if exact_classes
-            && is_analytic_fillet
+        if is_analytic_fillet
             && geom_type != FilletGeomType::TangentRollover
             && !tsect_pnts.is_empty()
         {
             // Not upstream (WR-669, the SolidCraft fork's tangency-labs/smlib@b5f2867 and
-            // 7ac037e): rebuilt exactly by the round's class (`ClassifyExactBlend`,
-            // `CalcExactFilletGeom(.., this, TRUE)`); errors are passed on
+            // 7ac037e, in place of upstream's `CalcConeFilletGeom` then
+            // `CalcTorusFilletGeom`): rebuilt exactly by the round's class
+            // (`ClassifyExactBlend`, `CalcExactFilletGeom(.., this, TRUE)`); errors are
+            // passed on
             let tsects = with_ends(
                 tsect_pnts
                     .iter()
@@ -1295,31 +1295,6 @@ impl FilletBrep {
                 Some(g),
                 true,
             )?;
-        } else if !exact_classes
-            && is_analytic_fillet
-            && geom_type != FilletGeomType::TangentRollover
-        {
-            // Create analytics (the solver reads copies of the vertex uses' points)
-            let tsects = with_ends(
-                tsect_pnts
-                    .iter()
-                    .map(|&vu| Ok(self.fillet_vertexuse(vu)?.tsect_pnt().clone()))
-                    .collect::<Result<Vec<TsectPnt>>>()?,
-            );
-            let cone =
-                FilletSolver::calc_cone_fillet_geom(solver, k, target, self, &tsects, Some(g));
-            fillet_created = match ignored(cone)? {
-                Some(()) => true,
-                None => ignored(FilletSolver::calc_torus_fillet_geom(
-                    solver,
-                    k,
-                    target,
-                    self,
-                    &tsects,
-                    Some(g),
-                ))?
-                .is_some(),
-            };
         }
 
         if !fillet_created {

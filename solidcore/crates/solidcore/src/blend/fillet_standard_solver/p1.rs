@@ -1441,7 +1441,7 @@ impl ConstantDistanceFs {
 
             let other_base = self.solver.rail(other_rail)?.base_surface();
             let domain = other_base.natural_uv_domain_with_nurb(k)?;
-            // fork WR-609: and the trace's reach (0 without `fillet_trace_reaches_rails`)
+            // fork WR-609: and the trace's reach
             let size: Vec2 = self.solver.domain_extension(k, Some(other_base), &domain)?;
 
             let n = guess_t.len();

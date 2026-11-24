@@ -818,7 +818,7 @@ fn on_the_default_kernel_the_variable_round_lies_on_its_cone() {
 }
 
 /// Upstream traces a chord round a circle: 3.07e-5 off the cone it should lie on, where the
-/// fork builds the cone (`fillet_chamfer_cone_on_arc`). The default kernel builds the chord
+/// fork builds the cone (WR-421, always on since #18913). The default kernel builds the chord
 /// as its definition: each station's chord runs between the feet on the plane and on the
 /// boss, at the same offsets all round the circle, so it is a ruling of that cone and the
 /// chamfer passes the case's grade (on the cone to 1e-9, its volume and seams).
@@ -854,7 +854,6 @@ fn the_boss_root_s_chord_is_exact_as_its_definition_and_with_the_cone_on_the_arc
     }
     assert!(chamfers >= 1, "no chamfer by its definition");
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     assert_passes(&case, &mut k);
 }
 

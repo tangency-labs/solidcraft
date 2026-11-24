@@ -42,7 +42,6 @@ const PROFILE: [[f64; 2]; 6] = [
 
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     k
 }
 

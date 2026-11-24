@@ -131,7 +131,6 @@ fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> EdgeId {
 /// The cliff overflow's flags (as `wr631_cliff_overflow_construction`).
 fn cliff_kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     k
 }
 

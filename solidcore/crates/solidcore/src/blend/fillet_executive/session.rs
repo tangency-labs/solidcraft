@@ -5327,8 +5327,7 @@ impl SessionObjects<'_> {
     }
 }
 
-/// The fork's `SmFilletPatchStitchCallback` (tangency-labs/smlib@1072d1b, behind
-/// [`crate::kernel::UpstreamFixes::fillet_patch_keeps_fillet_edges`]; WR-546, #1377):
+/// The fork's `SmFilletPatchStitchCallback` (tangency-labs/smlib@1072d1b; WR-546, #1377):
 /// the stitch of the fillet body keeps a fillet's own edge where a corner's patch meets
 /// it. An N-sided patch's faces are bounded by their surfaces' isoparametric curves,
 /// the approximations the patch was fitted to, as far from the fillet's surface as the

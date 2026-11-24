@@ -107,7 +107,7 @@ impl CornerKind {
 pub enum BlendFaceKind {
     /// A traced round: a circular, blend-curve or Gⁿ section along its trace.
     Round,
-    /// A round built by its exact class (`fillet_exact_round_classes`, WR-669).
+    /// A round built by its exact class (WR-669).
     ExactRound,
     /// A chamfer: a linear section, traced or by its exact class.
     Chamfer,

@@ -59,7 +59,6 @@ const BLOCK: f64 = (40.0 * 10.0 + 20.0 * 2.0) * DEPTH;
 /// The cliff overflow's flags, as SolidCraft runs them (the trim at creases is unconditional).
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     k
 }
 

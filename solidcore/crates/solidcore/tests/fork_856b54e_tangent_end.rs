@@ -102,8 +102,6 @@ fn front_top(b: &Brep) -> EdgeId {
 /// concave chamfer's cone and round's torus about the disc's axis, the cap's cover).
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     k
 }
 

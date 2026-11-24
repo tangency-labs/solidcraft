@@ -15,7 +15,7 @@
 //!
 //! - peg side `2 pi R 15`, plate top `1600 - pi R^2 / cos tau`,
 //!   volume `32000 + 15 pi R^2`;
-//! - rounded r1 (`fillet_exact_round_classes`, whose rails are exact rational curves
+//! - rounded r1 (the exact round classes, whose rails are exact rational curves
 //!   on the cylinder): peg side `2 pi R (15 - 1 / cos tau)`.
 //!
 //! The same holds for a hole: the r3 cylinder through the origin, tilted, cut from the
@@ -62,11 +62,10 @@ const EXACT_GAP: f64 = 1e-12;
 /// already makes exact, is 1.2e-12 off, the tilted ones up to 1.9e-12).
 const AREA_REL: f64 = 5e-12;
 
-/// The plate and the peg tilted `tau_deg`, united, on the default kernel (with, for the
-/// round, `fillet_exact_round_classes`).
+/// The plate and the peg tilted `tau_deg`, united, on the default kernel (the round
+/// by the exact round classes).
 fn plate_and_peg(tau_deg: f64) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = true;
     let plate = create_box(&mut k, Point3::new(-20.0, -20.0, -20.0), 40.0, 40.0, 20.0).unwrap();
     let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 25.0).unwrap();
     let tau = tau_deg.to_radians();

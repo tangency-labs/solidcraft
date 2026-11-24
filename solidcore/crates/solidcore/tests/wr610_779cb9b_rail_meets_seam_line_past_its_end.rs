@@ -1,5 +1,4 @@
-//! The SolidCraft fork's tangency-labs/smlib@779cb9b (`fillet_trace_reaches_rails`,
-//! WR-610): `RailEdgeuseIntersect` runs a straight side edge on along its line on a
+//! The SolidCraft fork's tangency-labs/smlib@779cb9b (WR-610, no longer a flag): `RailEdgeuseIntersect` runs a straight side edge on along its line on a
 //! cylinder or cone too (a ruling of it), not only on a plane. A disc R13 x 2 with its top
 //! rim rounded R2.5 (solidcraft#190): the wall's rail runs round the cylinder 0.5 below the
 //! bottom, and the closed corner's vertex is where it meets the seam's line there. Without
@@ -25,9 +24,8 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(cone_run_on: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = cone_run_on;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_extension_as_itself = true;
     k
@@ -61,8 +59,8 @@ fn rim_at(k: &Kernel, b: &Brep, z: f64) -> EdgeId {
 
 /// Rounds the top rim of the disc R13 x 2 by `r`: the volume of the result, or the error
 /// code and comment.
-fn round_disc_rim(cone_run_on: bool, r: f64) -> Result<f64, (i32, String)> {
-    let mut k = kernel(cone_run_on);
+fn round_disc_rim(r: f64) -> Result<f64, (i32, String)> {
+    let mut k = kernel();
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 13.0, 2.0).unwrap();
     let rim = rim_at(&k, &b, 2.0);
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();
@@ -83,22 +81,16 @@ fn round_disc_rim(cone_run_on: bool, r: f64) -> Result<f64, (i32, String)> {
 
 #[test]
 fn wr610_779cb9b_disc_rim_corner_meets_the_seam_line_past_its_end() {
-    // the trace's reach and the run-on are one flag: without it the round fails at the
-    // closed corner, as the fork reports for main
-    let before = round_disc_rim(false, 2.5);
-    assert!(
-        matches!(&before, Err((3, c)) if c == "Fillet Corner Error: Unable to Compute Geometry"),
-        "{before:?}"
-    );
-    // with it the corner's rail ends are found on the seam's line below the wall
-    let after = round_disc_rim(true, 2.5);
+    // (without the run-on the round failed at the closed corner, error 3, as the fork
+    // reports for main) the corner's rail ends are found on the seam's line below the wall
+    let after = round_disc_rim(2.5);
     assert!(
         !matches!(&after, Err((3, _))),
         "the corner still fails: {after:?}"
     );
 }
 
-/// Within its wall (r 1.5) the round builds either way: 2 pi 169 less the ring the round
+/// Within its wall (r 1.5) the round builds: 2 pi 169 less the ring the round
 /// removes (Pappus: area (1 - pi / 4) r^2 at radius 13 - r (10 - 3 pi) / (12 - 3 pi), its centroid).
 #[test]
 fn wr610_779cb9b_disc_rim_within_its_wall_builds() {
@@ -107,8 +99,6 @@ fn wr610_779cb9b_disc_rim_within_its_wall_builds() {
     let area = (1.0 - pi / 4.0) * r * r;
     let centroid = 13.0 - r * (10.0 - 3.0 * pi) / (12.0 - 3.0 * pi);
     let expected = pi * 169.0 * 2.0 - 2.0 * pi * centroid * area;
-    for run_on in [false, true] {
-        let v = round_disc_rim(run_on, r).unwrap();
-        assert!((v - expected).abs() <= 1e-6 * expected, "{v} vs {expected}");
-    }
+    let v = round_disc_rim(r).unwrap();
+    assert!((v - expected).abs() <= 1e-6 * expected, "{v} vs {expected}");
 }

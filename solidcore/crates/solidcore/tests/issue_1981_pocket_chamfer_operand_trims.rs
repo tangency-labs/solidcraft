@@ -2,14 +2,14 @@
 //! (0,0,0) 60 x 40 x 10 minus box (15,10,5) 30 x 20 x 6, so the pocket is 5 deep) with
 //! leg 5.5, straight on the Boolean's direct body, fails with error code 3 "Fillet Corner
 //! Error: Corner Edge Computation Failure" now that the Boolean keeps the operand's exact
-//! UV trims (WR-361, always on since its flag was retired), with the fillet fixes SolidCraft runs with (`fillet_trace_reaches_rails`,
+//! UV trims (WR-361, always on since its flag was retired), with the fillet fixes SolidCraft ran with (WR-610's run-on,
 //! the WR-642 mitre; the refusal of rails leaving their faces, the rail
 //! end on the continued surface and the cliff overflow, once flags too, are the only path).
 //!
 //! The Boolean copied the cut box's trims: its faces at x = 15 and y = 30 carry the exact
 //! degree-1 B-spline trims `SwapUV` mirrors onto them, the other walls lines (since
 //! solidcraft#17896 a plane keeps `MakeFace`'s exact UV line for a line edge instead, but a
-//! lone box still mixes the two, as below). WR-610's run-on (`fillet_trace_reaches_rails`) widens a side edge's
+//! lone box still mixes the two, as below). WR-610's run-on (always on since #18913) widens a side edge's
 //! parameter interval past its ends, but a B-spline trim clamps the parameter to its own
 //! interval, so one wall's rail met the pocket's vertical edge past the floor and the
 //! other's not at all, and the bevel vertex split. The widened B-spline trim now runs on
@@ -45,7 +45,6 @@ fn expected() -> f64 {
 /// SolidCraft's fillet flag set.
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     k
 }
 
