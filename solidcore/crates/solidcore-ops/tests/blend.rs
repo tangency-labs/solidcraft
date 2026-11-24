@@ -380,24 +380,64 @@ fn post_foot_blends_do_not_report_a_limit_with_an_obstructed_sweep() {
     use solidcore_ops::{boolean::boolean, BooleanOp};
 
     all_fixes();
-    for kind in [Blend::Chamfer, Blend::Round] {
+    for (kind, fit_kind, section) in [
+        (Blend::Chamfer, FitKind::Distance, 1.0 / 2.0),
+        (Blend::Round, FitKind::Radius, 1.0 - PI / 4.0),
+    ] {
         for (point, obstructs) in [([10.5, 4.0, 4.0], true), ([20.0, 20.0, 4.0], false)] {
-            let boss = make_box(point, [1.0, 2.0, 2.0]).unwrap();
-            let body = boolean(post_foot(true), boss, BooleanOp::Union)
-                .unwrap()
-                .unwrap();
-            let edges = post_foot_edges(&body);
-            let before = body.counts().unwrap();
-            let result = blend(&body, kind, &edges, &[6.0], &[], Corners::Filled);
-            assert!(result.is_err(), "{kind:?} at {point:?}: {result:?}");
-            assert_eq!(
-                matches!(result, Err(Error::TooLarge { size: 5.0, .. })),
-                !obstructs,
-                "{kind:?} at {point:?}: {result:?}"
+            for asked in [0.25, 4.75, 5.0, 6.0] {
+                let boss = make_box(point, [1.0, 2.0, 2.0]).unwrap();
+                let body = boolean(post_foot(true), boss, BooleanOp::Union)
+                    .unwrap()
+                    .unwrap();
+                let edges = post_foot_edges(&body);
+                let before = body.to_record().unwrap().0;
+                let result = blend(&body, kind, &edges, &[asked], &[], Corners::Filled);
+                if obstructs && asked >= 4.75 {
+                    assert!(
+                        result.is_err() && !matches!(result, Err(Error::TooLarge { .. })),
+                        "{kind:?} at {point:?}, {asked} mm: {result:?}",
+                    );
+                } else if asked == 6.0 {
+                    assert!(
+                        matches!(result, Err(Error::TooLarge { size: 5.0, kind, .. }) if kind == fit_kind),
+                        "{kind:?} at {point:?}, {asked} mm: {result:?}",
+                    );
+                } else {
+                    let made = result.unwrap();
+                    assert_eq!(made.dropped, [false, false]);
+                    assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+                    // This boss stays separate from the two strips and contributes 4 mm³.
+                    assert!(rel(volume(&body), 12_904.0 + 20.0 * section * asked * asked) < 1e-9);
+                    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+                    continue;
+                }
+                assert_eq!(body.to_record().unwrap().0, before);
+                assert!(rel(volume(&body), 12_904.0) < 1e-9);
+                assert!(body.check(CheckLevel::All).unwrap().is_valid());
+            }
+        }
+    }
+}
+
+#[test]
+fn post_foot_blends_do_not_report_a_fit_below_section_resolution() {
+    all_fixes();
+    for (kind, zone) in [(Blend::Chamfer, 1.0), (Blend::Round, 3.0)] {
+        // The plate still has exact supports. Its coarse B-rep zone puts the
+        // 5 mm cross section below the preparation's resolution for this kind.
+        let body = post_foot(true);
+        body.kernel().set_tolerance(zone);
+        let picks = post_foot_edges(&body);
+        let before = body.to_record().unwrap().0;
+        for asked in [6.0, 9.0] {
+            let result = blend(&body, kind, &picks, &[asked], &[], Corners::Filled);
+            assert!(
+                result.is_err() && !matches!(result, Err(Error::TooLarge { .. })),
+                "{kind:?} with zone {zone}, {asked} mm: {result:?}",
             );
-            assert_eq!(body.counts().unwrap(), before);
-            assert!(rel(volume(&body), 12_904.0) < 1e-9);
-            assert!(body.check(CheckLevel::All).unwrap().is_valid());
+            assert_eq!(body.to_record().unwrap().0, before);
+            assert_eq!(body.kernel().tolerance(), zone);
         }
     }
 }

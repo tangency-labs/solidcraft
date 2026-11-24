@@ -26,6 +26,12 @@ pub(super) struct Corridor {
     pub(super) far_caps: [FaceId; 2],
 }
 
+pub(super) enum Clearance {
+    Clear(Extent3d),
+    Obstructed,
+    Unproven,
+}
+
 type Coords = [f64; 3];
 type Segment = [Coords; 2];
 
@@ -277,7 +283,7 @@ fn clear_rectangle(
     for &edge in path {
         let [from, to] = edge;
         if *from.get(normal)? != value || *to.get(normal)? != value {
-            return Some(false);
+            return None;
         }
         let box_ = segment_bounds(edge);
         let ub = *box_.get(u)?;
@@ -299,7 +305,7 @@ fn clear_rectangle(
     Some(contained == inside)
 }
 
-fn certifies_arm(k: &Kernel, b: &Brep, arm: Arm, far: Point3) -> Result<bool> {
+fn clears_arm(k: &Kernel, b: &Brep, arm: Arm, far: Point3) -> Result<Option<bool>> {
     let [wall, floor] = arm.rail_faces;
     let [first_near, second_near] = arm.near_caps;
     let (Some(&side), Some(&height), Some(&near), Some(&far)) = (
@@ -308,7 +314,7 @@ fn certifies_arm(k: &Kernel, b: &Brep, arm: Arm, far: Point3) -> Result<bool> {
         arm.origin.get(arm.along),
         coords(far).get(arm.along),
     ) else {
-        return Ok(false);
+        return Ok(None);
     };
     for (face, plane, axes, inside) in [
         (wall, (arm.across, side), [arm.along, arm.above], true),
@@ -333,13 +339,14 @@ fn certifies_arm(k: &Kernel, b: &Brep, arm: Arm, far: Point3) -> Result<bool> {
         ),
     ] {
         let Some(path) = planar_polygon(k, b, face)? else {
-            return Ok(false);
+            return Ok(None);
         };
-        if clear_rectangle(&path, arm, plane, axes, inside) != Some(true) {
-            return Ok(false);
+        match clear_rectangle(&path, arm, plane, axes, inside) {
+            Some(true) => {}
+            other => return Ok(other),
         }
     }
-    Ok(true)
+    Ok(Some(true))
 }
 
 fn polygon_bounds(path: &[Segment]) -> Option<[Span; 3]> {
@@ -354,25 +361,22 @@ fn polygon_bounds(path: &[Segment]) -> Option<[Span; 3]> {
     Some(bounds)
 }
 
-/// Certifies room at a common limiting size and returns the span of the picks.
-/// The caller has already qualified its fan and identified a true rim or post
-/// length that supplies the upper bound, and checks interactions across pairs.
+/// Checks the two sweeps at their requested widths or the common limiting width.
 ///
-/// This additional certificate is deliberately limited to planar polygons with
-/// cardinal trims. The ordinary correctly sized construction remains available
-/// for other geometry.
-pub(super) fn certified_limit_span(
+/// This certificate covers planar polygons with cardinal trims. Unsupported
+/// geometry does not establish clearance or prevent the ordinary End construction.
+pub(super) fn check_corridor(
     k: &Kernel,
     b: &Brep,
     c: &Corridor,
-    size: f64,
-) -> Result<Option<Extent3d>> {
+    [size_a, size_b]: [f64; 2],
+) -> Result<Clearance> {
     let [wall_a, wall_b, floor_b, opening_b, opening_a, floor_a] = c.faces;
     let (vertex, at) = c.at;
     for (vertex, stored) in std::iter::once((vertex, at)).chain(c.ends) {
         // The rails used to bound the size must agree with the planes.
         if resolved_vertex(b, vertex)? != Some(stored) {
-            return Ok(None);
+            return Ok(Clearance::Unproven);
         }
     }
     let [(_, rim_a), (_, rim_b), (_, top)] = c.ends;
@@ -380,7 +384,7 @@ pub(super) fn certified_limit_span(
     let [cap_a, cap_b] = c.far_caps;
     let (Some(far_a), Some(far_b)) = (resolved_vertex(b, far_a)?, resolved_vertex(b, far_b)?)
     else {
-        return Ok(None);
+        return Ok(Clearance::Unproven);
     };
     let (Some(a), Some(z)) = (
         Arm::new(
@@ -388,7 +392,7 @@ pub(super) fn certified_limit_span(
             rim_a,
             top,
             far_a,
-            size,
+            size_a,
             [wall_a, floor_a, wall_b, opening_a, cap_a],
         ),
         Arm::new(
@@ -396,14 +400,19 @@ pub(super) fn certified_limit_span(
             rim_b,
             top,
             far_b,
-            size,
+            size_b,
             [wall_b, floor_b, wall_a, opening_b, cap_b],
         ),
     ) else {
-        return Ok(None);
+        return Ok(Clearance::Unproven);
     };
-    if !certifies_arm(k, b, a, far_a)? || !certifies_arm(k, b, z, far_b)? {
-        return Ok(None);
+    let mut clear = true;
+    for (arm, end) in [(a, far_a), (z, far_b)] {
+        match clears_arm(k, b, arm, end)? {
+            Some(true) => {}
+            Some(false) => return Ok(Clearance::Obstructed),
+            None => clear = false,
+        }
     }
 
     for &face in b.face_list() {
@@ -411,19 +420,22 @@ pub(super) fn certified_limit_span(
         if a.permits_contact(face) && z.permits_contact(face) {
             continue;
         }
-        let Some(path) = planar_polygon(k, b, face)? else {
-            return Ok(None);
-        };
-        let Some(bounds) = polygon_bounds(&path) else {
-            return Ok(None);
+        let Some(bounds) = planar_polygon(k, b, face)?
+            .as_deref()
+            .and_then(polygon_bounds)
+        else {
+            clear = false;
+            continue;
         };
         if (!a.permits_contact(face) && a.contacts(bounds) != Some(false))
             || (!z.permits_contact(face) && z.contacts(bounds) != Some(false))
         {
-            return Ok(None);
+            return Ok(Clearance::Obstructed);
         }
     }
-    Ok(Some(
-        Extent3d::from_points(at, far_a).union(&Extent3d::from_point(far_b)),
-    ))
+    Ok(if clear {
+        Clearance::Clear(Extent3d::from_points(at, far_a).union(&Extent3d::from_point(far_b)))
+    } else {
+        Clearance::Unproven
+    })
 }

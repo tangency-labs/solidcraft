@@ -7,10 +7,11 @@
 //! support, using the ordinary single-edge End construction.
 
 use crate::blend::blend_corner::mixed::leaving;
+use crate::blend::blend_refusal::{round_too_small, setback_below_resolution};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::topology::TopologyFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR};
 use crate::geom::certified::{distance, next_down, next_up};
 use crate::geom::expansion;
 use crate::geom::extent3d::Extent3d;
@@ -23,7 +24,19 @@ use crate::topology::face::p2 as face2;
 use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, FaceId, VertexId};
 
 mod corridor;
-use corridor::{certified_limit_span, resolved_vertex, Corridor};
+mod selection;
+
+use corridor::{check_corridor, resolved_vertex, Clearance, Corridor};
+pub use selection::{plan, SeparateEndPlan};
+
+/// The equal-distance chamfer or constant circular round of a separate End.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SectionKind {
+    /// Equal setbacks on the two supporting faces.
+    Chamfer,
+    /// Constant circular cross section.
+    Round,
+}
 
 const OP: &str = "blend::blend_corner::separate_ends::classify_separate_ends";
 
@@ -33,7 +46,7 @@ struct Fan {
 }
 
 /// Two selections that meet at a candidate cutout corner.
-pub struct SeparateEndPair {
+struct SeparateEndPair {
     /// Where the selected edges share an endpoint.
     pub vertex: VertexId,
     /// The two edges to blend.
@@ -43,11 +56,15 @@ pub struct SeparateEndPair {
 }
 
 /// Whether separate Ends fit the selected geometry.
-pub enum SeparateEndFit {
+enum SeparateEndFit {
     /// The selection does not qualify for separate Ends.
     NotApplicable,
     /// Every pair fits and the blend envelopes are disjoint.
     Fits,
+    /// The supports fit, but their trims lie outside the cardinal certificate.
+    WithinSupports,
+    /// A trim or face blocks the sweep at its requested or limiting size.
+    Obstructed { vertex: VertexId },
     /// A common size exceeds the certified room for the whole selection.
     Limited {
         /// The largest representable common size allowed by the supports.
@@ -67,10 +84,11 @@ struct Supports {
 ///
 /// # Errors
 /// Propagates allocation failures and failures reading or evaluating the candidate geometry.
-pub fn independent_separate_ends(
+fn independent_separate_ends(
     k: &Kernel,
     b: &mut Brep,
     pairs: &[SeparateEndPair],
+    kind: SectionKind,
 ) -> Result<SeparateEndFit> {
     let common = pairs
         .first()
@@ -119,24 +137,29 @@ pub fn independent_separate_ends(
                 _ => return Ok(SeparateEndFit::NotApplicable),
             }
         }
-        supports.push((geometry, size));
+        supports.push((geometry, pair.sizes));
     }
 
     let mut envelopes = Vec::new();
     envelopes
         .try_reserve_exact(supports.len())
         .map_err(|_| SolidError::topology(OP, TopologyFailure::AllocationFailed))?;
+    let mut certified = true;
     for (geometry, requested) in supports {
-        let size = limit.map_or(requested, |(fit, _)| fit);
-        let span = if limit.is_some() {
-            let Some(span) = certified_limit_span(k, b, &geometry.corridor, size)? else {
-                return Ok(SeparateEndFit::NotApplicable);
-            };
-            span
-        } else {
-            geometry.span
+        let widths = limit.map_or(requested, |(fit, _)| [fit; 2]);
+        let span = match check_corridor(k, b, &geometry.corridor, widths)? {
+            Clearance::Clear(span) => span,
+            Clearance::Obstructed => {
+                return Ok(SeparateEndFit::Obstructed {
+                    vertex: geometry.corridor.at.0,
+                });
+            }
+            Clearance::Unproven => {
+                certified = false;
+                geometry.span
+            }
         };
-        let Some(envelope) = swept_envelope(span, size) else {
+        let Some(envelope) = swept_envelope(span, widths[0].max(widths[1])) else {
             return Ok(SeparateEndFit::NotApplicable);
         };
         if envelopes
@@ -147,10 +170,46 @@ pub fn independent_separate_ends(
         }
         envelopes.push(envelope);
     }
-    Ok(match limit {
-        Some((size, edge)) => SeparateEndFit::Limited { size, edge },
-        None => SeparateEndFit::Fits,
+    Ok(match (limit, certified) {
+        (Some((size, edge)), true) => {
+            check_resolution(k, b, pairs, size, kind)?;
+            SeparateEndFit::Limited { size, edge }
+        }
+        (Some(_), false) => SeparateEndFit::NotApplicable,
+        (None, true) => SeparateEndFit::Fits,
+        (None, false) => SeparateEndFit::WithinSupports,
     })
+}
+
+/// A maximum is usable only if it clears the very same lower bound as preparation.
+fn check_resolution(
+    k: &Kernel,
+    b: &mut Brep,
+    pairs: &[SeparateEndPair],
+    size: f64,
+    kind: SectionKind,
+) -> Result<()> {
+    let edges = || pairs.iter().flat_map(|pair| pair.edges);
+    match kind {
+        SectionKind::Chamfer => {
+            for e in edges() {
+                setback_below_resolution(OP, e, [size; 2], b.tolerance())?;
+            }
+            Ok(())
+        }
+        SectionKind::Round => b.with_rollback_untouched(
+            |b| {
+                for e in edges() {
+                    k.check_cancelled(OP)?;
+                    if let Some(refusal) = round_too_small(k, b, e, size)? {
+                        return Err(refusal.error(OP, SM_ERR));
+                    }
+                }
+                Ok(())
+            },
+            |_| false,
+        ),
+    }
 }
 
 /// Recognizes separate Ends with square trim supports at `v` and records their lengths.
