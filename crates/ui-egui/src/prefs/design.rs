@@ -9,6 +9,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         "ui.angle_decimals",
         "prefs.parameter_list_rows",
         "prefs.origin_plane_names",
+        "prefs.origin_plane_size",
         "prefs.stand_up_unknown",
         "prefs.export_name",
     ]
@@ -336,6 +337,16 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                         );
                     }
                 }
+            });
+            // (#21191) how large the planes' squares are drawn, as a share of their default size
+            ui_kit::row(ui, app.tr("prefs.origin_plane_size"), |ui| {
+                let response = ui_kit::slider(
+                    ui,
+                    &mut app.preferences.origin_plane_scale,
+                    ORIGIN_PLANE_SCALE,
+                    ui_kit::Slider { step: Some(0.25), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+                );
+                crate::scenario::publish_target("prefs:origin_plane_scale", response.rect);
             });
         });
         let response = setting::hide_origin(app, ui);

@@ -1234,6 +1234,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
 - `origin_axes_across_view` (default false: short axes as before; opt in through Preferences → Design → Origin or the bottom bar's Display menu. The command `view.origin_axes_across_view {enabled: bool}` sets the same preference. When true, the X, Y and Z origin axes run through the origin to the edges of the view, both ways, #11123; away from the origin they are picked only in an open sketch or by a dialog input that takes axes, after anything else under the pointer, and not where a body hides them; false: short axes from the origin, solid then dashed, as before)
 - `origin_plane_names` (`xyz` (default) or `top_front_right`: the browser, dialogs and lists call the origin planes Top, Front and Right; their ids, commands and saved designs keep XY, XZ and YZ)
+- `origin_plane_scale` (default 1, 0.5…4: how large the origin planes' squares are drawn, as a factor of the size they take on screen by default; the origin axes keep their length, #21191)
 - `pan_reverse_x` (default false: horizontal scrolling pans the other way)
 - `pan_reverse_y` (default false: vertical scrolling pans the other way)
 - `parameters_apply_live` (default true: the Parameters dialog applies an expression when its field is left; false: edits wait for Apply or OK, which set them together in one rebuild and one undo step)
