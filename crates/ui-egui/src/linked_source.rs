@@ -327,8 +327,7 @@ fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
 /// and a drive path matches its `\\?\` spelling (`\\?\C:\parts` is `C:\parts`), the form
 /// `canonicalize` and some folder pickers return.
 fn folder_within(folder: &Path, allowed: &Path) -> bool {
-    let plain = |p: &Path| PathBuf::from(solidcraft_engine::agent_setup::plain_path(p));
-    let (folder, allowed) = (&plain(folder), lexical(&plain(allowed)));
+    let (folder, allowed) = (&drive_path(folder), lexical(&drive_path(allowed)));
     if allowed.as_os_str().is_empty() || !allowed.is_absolute() {
         return false;
     }
@@ -343,6 +342,16 @@ fn folder_within(folder: &Path, allowed: &Path) -> bool {
         }
     }
     folder.starts_with(&allowed)
+}
+
+/// `p` without the `\\?\` of a verbatim drive path (`\\?\C:\parts` is `C:\parts`). Other verbatim
+/// paths (`\\?\UNC\…`, `\\?\Volume{…}\…`) have no drive spelling and stay as they are.
+fn drive_path(p: &Path) -> PathBuf {
+    let text = p.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if matches!(rest.as_bytes(), [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic()) => PathBuf::from(rest),
+        _ => p.to_path_buf(),
+    }
 }
 
 /// Update Links (`options` as it was asked) read the shown design's links again: those it read
@@ -1034,6 +1043,22 @@ mod tests {
         settle(&mut app);
         assert!((volume(&app) - 8000.0).abs() < 1e-6, "Update Links reads it: {}", volume(&app));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// On Windows a drive folder matches its `\\?\` spelling either way round, and a verbatim
+    /// folder with no drive (a volume or a server share) still matches itself and what is below it.
+    #[test]
+    fn verbatim_windows_folders_match_their_own_spelling() {
+        if !cfg!(windows) {
+            return;
+        }
+        let within = |folder: &str, allowed: &str| folder_within(Path::new(folder), Path::new(allowed));
+        assert!(within(r"C:\work\parts\gears", r"\\?\C:\work\parts"));
+        assert!(within(r"\\?\C:\work\parts", r"c:\work"));
+        assert!(within(r"\\?\Volume{0123}\parts\gears", r"\\?\Volume{0123}\parts"));
+        assert!(within(r"\\?\UNC\server\share\parts", r"\\?\UNC\server\share"));
+        assert!(!within(r"\\?\Volume{0123}\other", r"\\?\Volume{0123}\parts"));
+        assert!(!within(r"C:\work\parts-old", r"\\?\C:\work\parts"));
     }
 
     /// A folder the user allowed (or one below it) loads as it opens, with no question.
