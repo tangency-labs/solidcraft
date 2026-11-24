@@ -134,7 +134,7 @@ fn check_validated(fixes: &UpstreamFixes, want: Option<f64>, validate: bool) -> 
     }
     let v = volume(&k, &mut b).unwrap();
     // every line edge lies on both its faces' surfaces, by certificate
-    for e in b.edge_list() {
+    for &e in b.edge_list() {
         let Some(curve) = b.edge(e).unwrap().curve.as_ref() else {
             continue;
         };
