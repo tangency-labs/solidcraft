@@ -4194,6 +4194,25 @@ impl Surface {
         context: Option<SurfaceIntersectContext<'_, O>>,
         out: &mut SurfaceIntersection,
     ) -> Result<()> {
+        // A two-row spline loft can have a plane section at a single parameter.
+        // Test the control net before dispatching to the general intersector in either order.
+        use crate::surface::plane::spline_section::intersect;
+        let tolerance = approx_tol_3d.map_or(k.tolerances.zone_tol_3d, |t| {
+            crate::geom::tol::approx_tol3d(k, t)
+        });
+        let section = match (self.kind(), other.kind()) {
+            (SurfaceKind::BSpline(s), SurfaceKind::Plane(p)) => {
+                intersect(k, s, uv_domain, p, other_uv_domain, tolerance)?
+            }
+            (SurfaceKind::Plane(p), SurfaceKind::BSpline(s)) => {
+                intersect(k, s, other_uv_domain, p, uv_domain, tolerance)?
+            }
+            _ => None,
+        };
+        if let Some(section) = section {
+            *out = section;
+            return Ok(());
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => crate::surface::plane::p2::global_surface_intersect_into(
                 k,

@@ -2004,6 +2004,25 @@ fn traced_operands(name: &str) -> impl Fn(&str) -> Body {
     }
 }
 
+/// #21581: a 15 × 1.7 × 20 mm box crosses one side of a loft between two
+/// identical rounded spline profiles. Integrating (x + 20) dz along the
+/// cubic profile spans inside x <= -20 and z <= 0 gives 32.675328686804
+/// mm². The two straight clipping boundaries contribute zero to that
+/// integral, and the same section runs through the box's 1.7 mm width.
+#[test]
+fn a_box_notches_a_periodic_spline_loft_and_leaves_valid_trim_curves() {
+    all_fixes();
+    let body = traced_operands("issue_21581_loft_box_cut");
+    let (loft, tool) = (body("loft"), body("box"));
+    let before = volume(&loft);
+    let cut = boolean(loft, tool, BooleanOp::Subtract).unwrap().unwrap();
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    let removed = before - volume(&cut);
+    assert!(near(removed, 32.675328686804 * 1.7), "{removed}");
+    let full_check = cut.check(CheckLevel::All).unwrap();
+    assert!(full_check.is_valid(), "{}", full_check.text);
+}
+
 /// #16237's cut as SolidCraft passed it: the block less a stadium sketched with its bottom
 /// 3.756e-11 below z = 12, less the rectangle cut from z = 12 up, flush with the block's top and
 /// back. It failed in the merge; it is the closed form of the block, the stadium and the cut.

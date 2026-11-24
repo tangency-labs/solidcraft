@@ -120,6 +120,12 @@ const OP_NURB: &str = "surface::plane::p2::Plane::is_nurb_surface_plane";
 const OP_XFORM: &str = "surface::plane::p2::Plane::transform";
 const OP_TRIM: &str = "surface::plane::p2::Plane::trim_with_domain";
 
+pub(super) struct PlaneClip {
+    pub curves: Vec<Curve>,
+    /// All boundary hits were isolated crossings inside the curve and side intervals.
+    pub proper_crossings: bool,
+}
+
 /// A warning [`Plane::intersect_with_plane`] returns with its result. It is not a
 /// failure of the intersection: the caller decides whether to stop on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -999,7 +1005,6 @@ impl Plane {
     ///
     /// Those of the curve evaluations, copies and degenerate curves (statuses upstream
     /// ignores); [`SolidError::Unported`] from the intersection.
-    #[allow(clippy::too_many_lines)] // one upstream function
     pub fn trim_curve_to_plane_domain(
         &self,
         k: &Kernel,
@@ -1007,6 +1012,18 @@ impl Plane {
         curve: &Curve,
         tol_3d: f64,
     ) -> Result<Vec<Curve>> {
+        Ok(self.clip_curve(k, uv_domain, curve, tol_3d)?.curves)
+    }
+
+    #[allow(clippy::too_many_lines)] // one upstream function
+    pub(super) fn clip_curve(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        tol_3d: f64,
+    ) -> Result<PlaneClip> {
+        let mut proper_crossings = true;
         // init output
         let mut curves_3d = Vec::new();
 
@@ -1048,7 +1065,7 @@ impl Plane {
         for (line_id, line) in (1u8..).zip(&lines) {
             // Intersect Curve with boundary lines (status ignored)
             let line_curve = Curve::from(line.clone());
-            let t_solutions = ignored(curve.global_curve_intersect(
+            let Some(t_solutions) = ignored(curve.global_curve_intersect(
                 k,
                 &ivl,
                 &line_curve,
@@ -1066,13 +1083,20 @@ impl Plane {
                     ],
                 },
             ))?
-            .unwrap_or_default();
+            else {
+                proper_crossings = false;
+                continue;
+            };
 
             // accumulate the solutions - sorted by crCurve parameter
             let mut gs: GlobalSolver<'_, CurveHandle> = GlobalSolver::new();
             gs.set_solutions(core::mem::take(&mut solutions));
             gs.set_num_variables(1);
             for solution in t_solutions.as_slice() {
+                let line_parameter = solution.start.param(1)?;
+                proper_crossings &= solution.solution_type == SolutionType::SingleValue
+                    && !is_zero(line_parameter - line_ivl.min())
+                    && !is_zero(line_parameter - line_ivl.max());
                 // Skip grazing solutions.  [Boolean Restructure]
                 if solution.solution_type == SolutionType::SingleValue
                     && is_grazing_intersection(
@@ -1083,11 +1107,14 @@ impl Plane {
                         solution.start.param(1)?,
                     )?
                 {
+                    proper_crossings = false;
                     continue;
                 }
 
                 // (status ignored)
-                ignore_status(gs.add_sorted_solution(solution, SortKey::ByFirstParameter, true))?;
+                proper_crossings &=
+                    ignored(gs.add_sorted_solution(solution, SortKey::ByFirstParameter, true))?
+                        .is_some();
             }
             solutions = gs.set_solutions(SolutionArray::new());
         }
@@ -1113,6 +1140,7 @@ impl Plane {
             let speed = d0.length();
             if is_zero_to_tol(s_param - e_param, 10.0 * tol_3d / max2(1.0, speed)) && dist < tol_3d
             {
+                proper_crossings = false;
                 continue;
             }
 
@@ -1139,6 +1167,10 @@ impl Plane {
             starts.push(s_param);
             ends.push(e_param);
             keeps.push(2); // unclassified interval
+        }
+
+        if !solutions.is_empty() && is_zero(s_param - e_param) {
+            proper_crossings = false;
         }
 
         // classify every interval unclassified interval
@@ -1203,7 +1235,8 @@ impl Plane {
             let mut trim_ivl = Extent1d::from_min_max(s_param, e_param);
             let mut new_curve = curve.copy(k)?;
             // may snap sIvl by tol to existing knots (status ignored)
-            ignore_status(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            proper_crossings &=
+                ignored(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?.is_some();
             // A full circle has coincident endpoints. Bound the whole analytic
             // interval using its diameter and arc length, with signed sizes by magnitude.
             // Round each computed upper bound outward, including norm underflow.
@@ -1238,7 +1271,10 @@ impl Plane {
             curves_3d.push(new_curve);
         }
 
-        Ok(curves_3d)
+        Ok(PlaneClip {
+            curves: curves_3d,
+            proper_crossings,
+        })
     }
 
     /// The segment `start_pt`-`end_pt` (known to lie in the plane) trimmed to
@@ -1830,6 +1866,123 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
 mod tests {
     use super::*;
     use crate::error::SM_ERR_WARNING;
+
+    #[test]
+    fn two_parallel_spline_rows_give_one_section_in_either_parameter_direction() {
+        use crate::nurbs::math::CPoint;
+        use crate::surface::plane::spline_section;
+
+        let k = Kernel::default();
+        let plane = rect();
+        // Two different quadratic profiles, at z = -1 and z = 3. Their z = 0
+        // section is one quarter of the way between corresponding points.
+        let row = |z, y| {
+            [(-1.0, 0.0), (0.0, y), (1.0, 0.0)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        };
+        let mut rows = vec![row(-1.0, 1.0), row(3.0, 3.0)];
+        let make = |rows: &[Vec<CPoint>]| {
+            BSplineSurface::from_data(
+                1,
+                2,
+                1,
+                2,
+                3,
+                5,
+                rows,
+                &[4.0, 4.0, 12.0, 12.0],
+                &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap()
+        };
+        let mut spline = make(&rows);
+        for swap in [false, true] {
+            if swap {
+                spline.swap_uv().unwrap();
+            }
+            let mut domain = Extent2d::from_bounds(5.0, 0.25, 8.0, 0.75);
+            if swap {
+                domain.transpose();
+            }
+            let section = spline_section::intersect(
+                &k,
+                &spline,
+                &domain,
+                &plane,
+                &plane.natural_uv_domain(),
+                1e-6,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(section.curve_types, [TsectCurveType::Crossing]);
+            let c = &section.curves_3d[0];
+            let iv = c.natural_interval();
+            for f in [0.0, 0.5, 1.0] {
+                let t = 0.25 + 0.5 * f;
+                let expected = Vec3::new(2.0 * t - 1.0, 3.0 * t * (1.0 - t), 0.0);
+                assert!(
+                    c.evaluate_point(&k, iv.evaluate(f))
+                        .unwrap()
+                        .distance(expected)
+                        < 1e-12
+                );
+            }
+        }
+        // One out-of-plane interior pole makes the heights vary within the row.
+        rows[1][1].z += 1e-10;
+        let twisted = make(&rows);
+        assert!(spline_section::intersect(
+            &k,
+            &twisted,
+            &twisted.natural_uv_domain(),
+            &plane,
+            &plane.natural_uv_domain(),
+            1e-6
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn a_section_with_an_isolated_endpoint_and_a_crossing_defers_to_the_full_intersector() {
+        use crate::nurbs::math::CPoint;
+        use crate::surface::plane::spline_section;
+
+        let k = Kernel::default();
+        let plane = rect();
+        // The quadratic (t, t(1/2-t)) lies in y <= 0 at t=0 and over [1/2,1].
+        let rows = [-1.0, 1.0].map(|z| {
+            [(0.0, 0.0), (0.5, 0.25), (1.0, -0.5)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        });
+        let spline = BSplineSurface::from_data(
+            1,
+            2,
+            1,
+            2,
+            3,
+            5,
+            &rows,
+            &[0., 0., 1., 1.],
+            &[0., 0., 0., 1., 1., 1.],
+        )
+        .unwrap();
+        let section = spline_section::intersect(
+            &k,
+            &spline,
+            &spline.natural_uv_domain(),
+            &plane,
+            &Extent2d::from_bounds(-1., -2., 2., 0.),
+            1e-6,
+        )
+        .unwrap();
+        assert!(
+            section.is_none(),
+            "a crossing alone would lose the endpoint contact"
+        );
+    }
 
     fn skewed_bilinear(domain: Extent2d, shear: f64) -> BSplineSurface {
         let dx = 40.0 * shear;
