@@ -50,8 +50,12 @@ fn a_cylinder_chart_keeps_its_pick_and_reports_the_face() {
         lower[0].abs() <= 1e-6 && lower[1].abs() <= 1e-6,
         "{lower:?}"
     );
-    assert!(matches!(
-        chart.region(0.0, 1_000_000.0),
-        Region::OffFace | Region::OffSurface
-    ));
+    // The surface's own domain bounds the chart: its edge is still in it, a millimetre past it
+    // is off the surface, not merely off the face.
+    let edge = chart.chart().lower([uv[0], v1]).expect("chart coordinates");
+    assert!(chart.in_domain(edge[0], edge[1]), "{edge:?}");
+    let past = chart.chart().lower([uv[0], v1 + 1.0]).expect("chart coordinates");
+    assert!(!chart.in_domain(past[0], past[1]), "{past:?}");
+    assert_eq!(chart.region(past[0], past[1]), Region::OffSurface);
+    assert_eq!(chart.region(0.0, 1_000_000.0), Region::OffSurface);
 }

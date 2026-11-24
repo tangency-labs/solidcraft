@@ -1,12 +1,13 @@
-//! A chart on a body face, for a sketch: its origin and metric-orthonormal axes in the face's
+//! A chart on a body face, for a sketch: its origin and metric-orthonormal axes in the surface's
 //! own (u, v), its point, metric and trim region, and the face's (u, v) of a chart point.
 //!
 //! The chart itself is the kernel Chart; this module sequences the record, the face and the
 //! query and converts their answers. No arithmetic of its own.
 //!
-//! The chart lives in the face's (u, v), the one parameterisation in which the face's trim and
-//! the surface metric are both known. A point outside the face's trim but inside the surface
-//! domain is off the face; a point outside the surface domain is off the surface.
+//! The chart lives in the surface's STEP (u, v), the canonical metric space; the face's trim
+//! stays in the face's own (u, v), reached through the face's surface point. The guard runs in
+//! the surface's (u, v) first: a point outside the surface domain is off the surface; a point
+//! inside it but outside the face's trim is off the face.
 
 use solidcore::eval::{Chart as KernelChart, Metric, SurfaceEval};
 use solidcore::Vec3 as EvalVec3;
@@ -92,7 +93,7 @@ impl<'a> SurfaceChart<'a> {
         })
     }
 
-    /// The kernel chart: origin and axes in the face's (u, v).
+    /// The kernel chart: origin and axes in the surface's (u, v).
     #[must_use]
     pub fn chart(&self) -> &KernelChart {
         &self.chart
@@ -129,9 +130,30 @@ impl<'a> SurfaceChart<'a> {
         )
     }
 
-    /// Where a chart point lies relative to the face and its surface.
+    /// Whether a chart point's surface (u, v) is in the surface's own domain, within the
+    /// chart tolerance: a periodic direction never leaves it (the seam wraps), a bounded one
+    /// may be reached from either side up to the tolerance.
+    #[must_use]
+    pub fn in_domain(&self, x: f64, y: f64) -> bool {
+        let uv = self.step_uv(x, y);
+        let domain = self.surface.domain();
+        [0, 1].into_iter().all(|k| {
+            if domain.period[k].is_some() {
+                return true;
+            }
+            domain.range[k].is_none_or(|(a, b)| {
+                uv[k] >= a - self.tolerance && uv[k] <= b + self.tolerance
+            })
+        })
+    }
+
+    /// Where a chart point lies relative to the face and its surface: off-surface first (the
+    /// surface's own domain), then off-face (the face's trim).
     #[must_use]
     pub fn region(&self, x: f64, y: f64) -> Region {
+        if !self.in_domain(x, y) {
+            return Region::OffSurface;
+        }
         let Some(p) = self.point(x, y) else {
             return Region::OffSurface;
         };
