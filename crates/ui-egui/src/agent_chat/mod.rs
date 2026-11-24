@@ -539,6 +539,9 @@ pub struct AgentChat {
     all_selected: bool,
     /// The last message sent, kept to send again after a sign-in (its files too).
     last: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
+    /// The task of a turn the agent could not finish (the provider's usage limit, or any other
+    /// error): it waits to be continued, with its files, when the agent can work again (#16318).
+    unfinished: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
     /// Files for the next message (pictures, text files, imported parts), shown as chips.
     pub(crate) attachments: Vec<attach::Attachment>,
     /// Pictures pasted so far, to name the next one.
@@ -1083,6 +1086,11 @@ impl AgentChat {
                 if std::mem::take(&mut self.discard_end) {
                     return Some(Outcome::TurnEnd);
                 }
+                // A turn the agent could not finish (the provider's usage limit, or any other
+                // error) keeps its task: the user can continue it when the agent can work again.
+                if reason == "error" {
+                    self.unfinished = self.last.clone();
+                }
                 match reason.as_str() {
                     "" | "auth" | "error" => {}
                     // Not a missing tool: the answer ran out of room, or the model declined (#9495).
@@ -1303,6 +1311,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         http,
                         request_timeout_s: entry.request_timeout_s,
                         reasoning_effort: entry.reasoning_effort.clone(),
+                        openai_responses: entry.openai_responses,
                     },
                     start,
                 )
@@ -1485,6 +1494,7 @@ pub(crate) fn leave_document(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.steering = false;
     chat.last = None;
+    chat.unfinished = None;
     // A prompt waiting for startup or sign-in has not reached the backend yet. Keep it
     // with the explicit queue so a late Ready event cannot send it on returning to the tab.
     if let Some((text, image, at, files)) = chat.queued.take() {
@@ -1504,6 +1514,9 @@ const MAX_PENDING: usize = 20;
 /// Said to the agent before a message that interrupted it, so it knows its last step may be
 /// incomplete.
 const INTERRUPT_NOTE: &str = "[The user interrupted your previous step.]";
+/// Said to the agent before a task it could not finish, so it goes on with it instead of
+/// starting again.
+const CONTINUE_NOTE: &str = "[The previous attempt was cut short before it finished. Continue the task from where it stopped.]";
 /// Most names one list of [`changed_note`] carries; the rest are counted.
 const CHANGED_ITEMS: usize = 12;
 
@@ -1868,6 +1881,21 @@ pub fn send_now(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Continue the task the agent could not finish (the provider's usage limit, or any other
+/// error): it goes again, with a note that says it was cut short. The conversation does not
+/// repeat it: the task is the one that is already there.
+pub fn continue_task(app: &mut SolveApp) {
+    if app.agent_chat.state() != State::Ready {
+        return;
+    }
+    let Some((text, image, at, files)) = app.agent_chat.unfinished.take() else {
+        return;
+    };
+    // The task's place in the conversation is where its picture is kept: it is only still there
+    // when the conversation has not changed since.
+    let at = at.filter(|&at| matches!(app.agent_chat.items.get(at), Some(Item::User { .. })));
+    start_turn_with(app, text, image, at, files, Some(CONTINUE_NOTE));
+}
 /// New chat: stop what runs (as Stop does), clear the conversation and the queue, and start a
 /// fresh session with the selected agent; the agent and its mode stay, the design's undo
 /// history is untouched.
@@ -1892,6 +1920,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.pending_edit = None;
     chat.queued = None;
     chat.last = None;
+    chat.unfinished = None;
     chat.steering = false;
     chat.stopped = false;
     chat.ended = None;
@@ -1989,6 +2018,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         heard: now,
     });
     app.agent_chat.last = Some((text, image, at, files));
+    app.agent_chat.unfinished = None;
     app.agent_chat.state = Some(State::Busy);
     app.agent_chat.stopped = false;
     app.agent_chat.steering = false;
@@ -2276,7 +2306,7 @@ fn merge_turn(undo: &mut Vec<solidcraft_engine::Snapshot>, turn: &Turn) -> usize
 /// Merge the undo steps made since `start_doc` (with the history at `start`) into one, labelled
 /// `label`; how many steps it took in (0: none were made, the history no longer reaches that far, or
 /// they changed several parts of the design, whose steps are each undone in their own part).
-fn merge_undo(
+pub(crate) fn merge_undo(
     undo: &mut Vec<solidcraft_engine::Snapshot>,
     start_doc: &Arc<solidcraft_engine::doc::Document>,
     start: &UndoMark,
@@ -2878,7 +2908,13 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
         }
         c.key = false;
         c.allow_insecure_http &= c.kind == agents::Kind::Api;
-        if !c.allow_insecure_http && app.preferences.agents.iter().any(|old| old.id == c.id && old.allow_insecure_http) {
+        c.openai_responses &= c.kind == agents::Kind::Api;
+        if app
+            .preferences
+            .agents
+            .iter()
+            .any(|old| old.id == c.id && ((old.allow_insecure_http && !c.allow_insecure_http) || old.openai_responses != c.openai_responses))
+        {
             disconnect_endpoint(app, &c.id);
         }
         app.preferences.agents.retain(|x| x.id != c.id);

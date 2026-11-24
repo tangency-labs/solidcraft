@@ -94,6 +94,15 @@ impl Protocol {
     }
 }
 
+/// Whether `base_url` is an OpenCode Go endpoint: model requests to all of them
+/// carry `x-opencode-session` (the `zen/go` gateway and the per-model
+/// `inference/go/...` endpoints alike). The model list and connection test are
+/// plain GETs and send none.
+pub(super) fn is_opencode_go(base_url: &str) -> bool {
+    let u = base_url.trim().to_ascii_lowercase();
+    u.starts_with("https://opencode.ai/") && u.contains("/go")
+}
+
 /// An agent the user added.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -118,6 +127,8 @@ pub struct AgentConfig {
     /// API: the reasoning effort to send as `reasoning_effort`; empty sends nothing and the
     /// provider's own default applies (trimmed and length-capped by [`reasoning_effort`]).
     pub reasoning_effort: String,
+    /// OpenAI-compatible API: use Responses instead of Chat Completions.
+    pub openai_responses: bool,
 }
 
 impl Default for AgentConfig {
@@ -134,6 +145,7 @@ impl Default for AgentConfig {
             allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
             reasoning_effort: String::new(),
+            openai_responses: false,
         }
     }
 }
@@ -186,6 +198,8 @@ pub struct Entry {
     pub request_timeout_s: u64,
     /// API: the reasoning effort to send, empty for none (trimmed, in length).
     pub reasoning_effort: String,
+    /// OpenAI-compatible API: use Responses instead of Chat Completions.
+    pub openai_responses: bool,
     /// Found installed, but its program didn't start when asked its version: why (#9034).
     pub problem: Option<String>,
     /// Found installed: the command that installs it again.
@@ -208,6 +222,7 @@ impl Entry {
             allow_insecure_http: c.kind == Kind::Api && c.allow_insecure_http,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
             reasoning_effort: reasoning_effort(&c.reasoning_effort),
+            openai_responses: c.kind == Kind::Api && c.openai_responses && !is_opencode_go(&c.base_url),
             problem: None,
             install: "",
         }
@@ -254,6 +269,7 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
             reasoning_effort: String::new(),
+            openai_responses: false,
             problem: f.problem.clone(),
             install: f.install,
         }));

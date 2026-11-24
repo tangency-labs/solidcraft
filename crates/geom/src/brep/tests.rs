@@ -943,6 +943,7 @@ mod native_ray {
         let knots = vec![0.0, 0.0, 1.0, 1.0];
         let support = |vertical| SupportRecord::Nurbs {
             kind: SupportKindRecord::Plane,
+            revolution: None,
             form: NurbsSurfaceRecord {
                 u_degree: 1,
                 v_degree: 1,

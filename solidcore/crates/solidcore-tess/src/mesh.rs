@@ -101,6 +101,12 @@ impl Mesh {
                 .all(|faces| faces.len() <= 2 && faces.iter().copied().all(valid_face))
     }
 
+    /// The number of triangles stored in the mesh.
+    #[must_use]
+    pub fn triangle_count(&self) -> usize {
+        self.triangles.len()
+    }
+
     /// Visibility in shaded edge presentation, independent of selection/topology.
     #[must_use]
     pub fn shaded_edge_visible(&self, index: usize) -> bool {

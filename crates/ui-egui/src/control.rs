@@ -212,6 +212,9 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.home"
             | "view.tool"
             | "view.tool.zoom"
+            | "view.pan_mode"
+            | "view.orbit_mode"
+            | "view.zoom_mode"
             | "view.spin"
             | "view.visual_style"
             | "view.grid"
@@ -237,6 +240,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     // History changes and session swaps can return to the first-body fitting window.
     let history_may_fit = app.session.undo.len() <= 2
         || SWITCHES_DESIGN.contains(&fit_id)
+        || (OPENS_A_TAB.contains(&fit_id) && params.get("new_tab").and_then(Value::as_bool) == Some(true))
         || matches!(fit_id, "edit.undo" | "edit.restore_checkpoint" | "doc.open" | "doc.recover" | "sketch.finish");
     // Placement failure does not establish an empty model. Keep its camera and
     // let the existing placement diagnostic explain the unavailable world.
@@ -280,9 +284,12 @@ const MAX_BATCH: usize = 10_000;
 /// bypass.
 const LOADS_A_FILE: [&str; 5] = ["doc.open", "file.insert_step", "file.insert_mesh", "pointcloud.insert", "pointcloud.reload"];
 
-/// Edit in Place, Finish Edit and the next or previous tab go to another design's tab: a batch's
-/// rollback, or a script's later steps, would land in the wrong design.
-const SWITCHES_DESIGN: [&str; 4] = ["component.edit_in_place", "component.finish_edit", "view.next_tab", "view.previous_tab"];
+/// Edit in Place, Finish Edit, the next or previous tab and Show Design go to another design's
+/// tab: a batch's rollback, or a script's later steps, would land in the wrong design.
+const SWITCHES_DESIGN: [&str; 5] = ["component.edit_in_place", "component.finish_edit", "view.next_tab", "view.previous_tab", "document.activate"];
+
+/// Commands that open a design in a tab of its own, and show it, when `new_tab` is true.
+const OPENS_A_TAB: [&str; 2] = ["file.new", "doc.open"];
 
 /// `command` names the command `id`, in any of the spellings the engine takes.
 fn is_command(command: Option<&str>, id: &str) -> bool {
@@ -291,7 +298,8 @@ fn is_command(command: Option<&str>, id: &str) -> bool {
 
 /// The command of `step` when it goes to another design's tab.
 fn switches_design(step: &Value) -> Option<&'static str> {
-    SWITCHES_DESIGN.into_iter().find(|id| is_command(command(step), id))
+    let new_tab = step.get("params").and_then(|p| p.get("new_tab")).and_then(Value::as_bool) == Some(true);
+    SWITCHES_DESIGN.into_iter().chain(OPENS_A_TAB.into_iter().filter(|_| new_tab)).find(|id| is_command(command(step), id))
 }
 
 /// Package I/O runs through the dedicated worker, so it cannot share a synchronous batch.
@@ -970,7 +978,7 @@ fn ui_icon_audit(_app: &mut SolveApp, p: &Value) -> Outcome {
     ok(json!({"requested": requested}))
 }
 
-/// `ui.triad`: screen points of the 3D move triad's handles (x, y, z arrows and the plane square).
+/// `ui.triad`: screen points of a clicked drawn point's arrows (sketch_move_classic only).
 fn ui_triad(app: &SolveApp) -> Outcome {
     let Some(rect) = app.viewport.rect else { return err("no viewport") };
     let proj = crate::viewport::projection(app, rect);

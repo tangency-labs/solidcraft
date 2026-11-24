@@ -277,12 +277,17 @@ impl KernelForms {
     }
 }
 
-/// The meshes made of one record (see [`Body::keeping_meshes`]), by tolerance and angle. They
-/// answer only for that record: a copy whose record was replaced makes its own.
+/// The meshes made of one record (see [`Body::keeping_meshes`]), or its plans (see
+/// [`Body::keeping_plans`]), by tolerance and angle. They answer only for that record: a copy
+/// whose record was replaced makes its own.
 #[derive(Debug)]
 pub(crate) struct MeshMemo {
     record: std::sync::Arc<Brep>,
     made: Remembered,
+    /// Meshes are kept ([`Body::keeping_meshes`]).
+    meshes: bool,
+    /// Plans are kept ([`Body::keeping_plans`]).
+    pub(crate) plans: Option<Remembered<solidcraft_geom::tess::TessPlan>>,
 }
 
 /// Meshes a [`MeshMemo`] keeps at most (the oldest goes first).
@@ -531,6 +536,13 @@ pub(crate) fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
 /// fine enough that a small one still meshes.
 fn coarse_tolerance(span: f64) -> f64 {
     (span * 0.01).clamp(1e-3, 1.0)
+}
+
+/// The tolerance a body of size `size` is displayed at: a chord of a thousandth of it, at least
+/// a micron, and [`DISPLAY_ANGLE`]. The display mesh (`ModelBody::mesh`) and the viewport's plan
+/// at Normal quality are made at it.
+pub fn display_tolerance(size: f64) -> MeshTolerance {
+    MeshTolerance { chord: (size * 1e-3).max(1e-3), angle: Some(DISPLAY_ANGLE) }
 }
 
 /// Box diagonal of a record's vertices and points along its edges (0 when it has none or no
@@ -1129,6 +1141,22 @@ impl Body {
         Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0)))
     }
 
+    /// Where the rim of `faces` cuts `outline`, a curve over `interval` lying in the plane through
+    /// `point` square to `normal`: the outline's parameters, in order, each exact on the surface
+    /// across the rim ([`solidcore_ops::Body::outline_cuts`]). `Err` for a mesh body and for each
+    /// refusal, by its cause.
+    pub fn outline_cuts(&self, faces: &[usize], outline: &Curve, interval: [f64; 2], point: Vec3, normal: Vec3) -> Result<Vec<f64>> {
+        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("outline cuts need an exact body".into()))?;
+        let (body, order) = &*form;
+        body.outline_cuts(order, faces, outline, interval, point.into(), normal.into()).map_err(|e| match e {
+            solidcore_ops::Error::Argument => KernelError::Invalid(
+                "outline cuts: an index past the faces, a face with no side that faces out, a coordinate that is not finite, or an outline the kernel can't hold".into(),
+            ),
+            solidcore_ops::Error::Unsupported(why) => KernelError::Invalid(format!("outline cuts: {why}")),
+            e => KernelError::Failed(format!("outline cuts: {e}")),
+        })
+    }
+
     /// Exact polyline samples for each non-seam edge bordering `face` of `self`.
     pub fn face_edge_polylines(&self, face: usize) -> Vec<Vec<Vec3>> {
         if self.is_mesh() {
@@ -1645,20 +1673,44 @@ impl Body {
                 return Ok(placed);
             }
         }
-        match self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.record, self.record.arc())) {
+        match self.memo().filter(|memo| memo.meshes) {
             Some(memo) => {
-                let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t, || self.mesh_of(&self.mesh_plan_untimed(t)?))?;
+                let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t, || self.mesh_of(&*self.mesh_plan_shared_untimed(t)?))?;
                 Ok(Mesh::clone(&kept))
             }
-            None => self.mesh_of(&self.mesh_plan_untimed(t)?),
+            None => self.mesh_of(&*self.mesh_plan_shared_untimed(t)?),
         }
+    }
+
+    /// The memo of this record's meshes or plans, when this body keeps one for its record.
+    pub(crate) fn memo(&self) -> Option<&MeshMemo> {
+        self.meshes.as_deref().filter(|m| std::sync::Arc::ptr_eq(&m.record, self.record.arc()))
     }
 
     /// The plan [`Body::mesh`] evaluates: every face's triangulation in its own parameters, each
     /// edge sampled once so faces meet exactly. For an evaluator of its own (the GPU viewport);
     /// [`Body::mesh_of`] gives its mesh without planning again.
     pub fn mesh_plan(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, "mesh_plan", || self.mesh_plan_untimed(t))
+        self.mesh_plan_shared(t).map(std::sync::Arc::unwrap_or_clone)
+    }
+
+    /// [`Body::mesh_plan`], shared: a body keeping its display plan ([`Body::keeping_plans`])
+    /// gives the plan it made at [`display_tolerance`] before, the same allocation, rather than
+    /// planning again. A plan at any other tolerance is made each time, as before.
+    pub fn mesh_plan_shared(&self, t: &MeshTolerance) -> Result<std::sync::Arc<solidcraft_geom::tess::TessPlan>> {
+        self.mesh_plan_shared_untimed(t)
+    }
+
+    fn mesh_plan_shared_untimed(&self, t: &MeshTolerance) -> Result<std::sync::Arc<solidcraft_geom::tess::TessPlan>> {
+        let plan = || crate::profile::timed(crate::profile::Kind::Tessellate, "mesh_plan", || self.mesh_plan_untimed(t));
+        match self.memo().and_then(|memo| memo.plans.as_ref()) {
+            // Only the display plan: other qualities' plans and the coarse check's are made for
+            // their moment and not kept for the part's whole life.
+            Some(plans) if !self.is_mesh() && self.display_of.is_none() && t.key() == display_tolerance(self.size()).key() => {
+                remembered(plans, t, plan)
+            }
+            _ => plan().map(std::sync::Arc::new),
+        }
     }
 
     /// Display-only paths embedded as actual triangle sides on certified native
@@ -1726,7 +1778,28 @@ impl Body {
     /// such as cutting it down to the region of each of many contacts.
     pub fn keeping_meshes(&self) -> Body {
         Body {
-            meshes: Some(std::sync::Arc::new(MeshMemo { record: self.record.arc().clone(), made: std::sync::Mutex::new(Vec::new()) })),
+            meshes: Some(std::sync::Arc::new(MeshMemo {
+                record: self.record.arc().clone(),
+                made: std::sync::Mutex::new(Vec::new()),
+                meshes: true,
+                plans: None,
+            })),
+            ..self.clone()
+        }
+    }
+
+    /// A copy of this body that keeps its display plan ([`Body::mesh_plan_shared`]) for
+    /// reuse, for as long as the copy (or a clone of it) lives: an imported part's check plans
+    /// it at display tolerance ([`Body::unmeshed_display_faces`]), and its display mesh and the
+    /// viewport's plan take that plan rather than planning the part twice more.
+    pub fn keeping_plans(&self) -> Body {
+        Body {
+            meshes: Some(std::sync::Arc::new(MeshMemo {
+                record: self.record.arc().clone(),
+                made: std::sync::Mutex::new(Vec::new()),
+                meshes: false,
+                plans: Some(std::sync::Mutex::new(Vec::new())),
+            })),
             ..self.clone()
         }
     }
@@ -1824,6 +1897,22 @@ impl Body {
         Ok(crossed)
     }
 
+    /// Faces with no triangles in the display plan ([`display_tolerance`]), counted again on a
+    /// coarse plan as [`Body::unmeshed_faces`] counts them when the display plan leaves any out.
+    /// A body keeping its plans ([`Body::keeping_plans`]) keeps the display plan for the
+    /// viewport: an import's check of its parts, then its display, plan it once.
+    pub fn unmeshed_display_faces(&self) -> usize {
+        if self.is_mesh() {
+            return 0;
+        }
+        if let Ok(plan) = self.mesh_plan_shared(&display_tolerance(self.size()))
+            && plan.faces_with_triangles(self.face_count()).iter().all(|h| *h)
+        {
+            return 0;
+        }
+        self.unmeshed_faces()
+    }
+
     /// Faces with no triangles in a coarse mesh (the mesher failed or gave up), counted on the
     /// mesh's plan: the mesh itself is not made.
     pub fn unmeshed_faces(&self) -> usize {
@@ -1836,12 +1925,17 @@ impl Body {
 
     /// A mesh with its edges flagged for display (seams, tangent joins, protected creases).
     fn flagged(&self, mut m: Mesh) -> Result<Mesh> {
-        if self.is_mesh() {
-            return Ok(m);
-        }
-        m.seams = crate::topo::seam_flags(self, &m);
-        (m.smooth_edges, m.sharp_edges) = crate::smooth_edges::flags(self, &m);
+        self.flag_mesh_edges(&mut m);
         Ok(m)
+    }
+
+    /// Classify display edges from polylines and face adjacency in this body's coordinates and
+    /// record order. This does not require a triangle mesh.
+    pub fn flag_mesh_edges(&self, mesh: &mut Mesh) {
+        if !self.is_mesh() {
+            mesh.seams = crate::topo::seam_flags(self, mesh);
+            (mesh.smooth_edges, mesh.sharp_edges) = crate::smooth_edges::flags(self, mesh);
+        }
     }
 
     /// Edges with polylines (index = the record's edge index).

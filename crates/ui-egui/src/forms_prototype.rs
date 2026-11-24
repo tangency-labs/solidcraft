@@ -575,7 +575,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let gizmo_hot = !selecting_region
         && !geometry_first
         && !tool_active
-        && hit_position.is_some_and(|p| oriented_triad(app).is_some_and(|(t, axes)| crate::gizmo::contains_oriented(&before, &t, p, axes)));
+        && hit_position.is_some_and(|p| oriented_triad(app).is_some_and(|t| crate::gizmo::contains_pointer(&before, &t, p)));
     let painter = ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground, ui.scope_id().with("forms_transform")));
     let dragging_gizmo = if busy || tool_active || selecting_region || escape {
         false
@@ -938,16 +938,16 @@ fn triad(app: &SolveApp) -> Option<crate::gizmo::Triad> {
         return None;
     }
     let center = app.forms_prototype.pivot.unwrap_or_else(|| points.iter().copied().fold(Vec3::ZERO, |a, p| a + p) / points.len() as f64);
-    Some(crate::gizmo::Triad { center, translate: true, rotate: !app.forms_prototype.scale })
+    Some(crate::gizmo::Triad::world(center, true, !app.forms_prototype.scale))
 }
-fn oriented_triad(app: &SolveApp) -> Option<(crate::gizmo::Triad, [Vec3; 3])> {
-    Some((triad(app)?, basis(app).ok()?))
+fn oriented_triad(app: &SolveApp) -> Option<crate::gizmo::Triad> {
+    Some(crate::gizmo::Triad { frame: basis(app).ok()?, ..triad(app)? })
 }
 pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, pos: Pos2) -> bool {
     app.session.forms_prototype.is_some()
         && (face_press::owns_pointer(app)
             || surface::nearest(app, proj, pos).is_some()
-            || oriented_triad(app).is_some_and(|(t, dirs)| crate::gizmo::contains_oriented(proj, &t, pos, dirs)))
+            || oriented_triad(app).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, pos)))
 }
 pub(crate) fn owns_key(app: &SolveApp, key: egui::Key) -> bool {
     let tool_active = tools::active(app) || tool_panel::active(app);
@@ -969,13 +969,14 @@ fn transform_drag_id(app: &SolveApp, ui: &egui::Ui) -> egui::Id {
     ui.scope_id().with("forms_transform_drag").with(app.session.uid)
 }
 fn show_gizmo(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) -> bool {
-    let Some((t, dirs)) = oriented_triad(app) else { return false };
+    let Some(t) = oriented_triad(app) else { return false };
+    let dirs = t.frame;
     let id = transform_drag_id(app, ui);
     let shift_extrude = app.session.forms_prototype.as_ref().is_some_and(|f| f.profile.is_none())
         && ui.input(|i| i.modifiers.shift)
         && app.forms_prototype.elements.iter().any(|e| matches!(e, Element::Face(_) | Element::Edge(_)));
     let scale = app.forms_prototype.scale && !shift_extrude;
-    let Some(event) = crate::gizmo::show_mode(ui, painter, proj, id, &t, 0.0, (dirs, scale)) else {
+    let Some(event) = crate::gizmo::show_mode(ui, painter, proj, id, &t, 0.0, scale) else {
         return app.forms_prototype.gizmo_drag.is_some();
     };
     if shift_extrude && surface::cap_selected(app) {

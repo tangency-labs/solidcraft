@@ -701,21 +701,41 @@ fn feature_and_sketch(app: &SolveApp, f: Option<u64>) -> (Option<u64>, Option<u6
 }
 
 /// A browser feature row's menu: the timeline's feature actions, so the browser alone is enough
-/// to edit, suppress and roll back.
+/// to edit, suppress and roll back. On several selected features an entry acts on them all or
+/// cannot be used ([`crate::timeline::MenuRule`]).
 fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let feature = app.session.doc.feature(id);
     let exists = feature.is_some();
     let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch());
     let suppressed = feature.is_some_and(|f| f.suppressed);
     let targets = crate::timeline::menu_targets(app, id);
-    vec![
-        act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
-        act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
-        act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists),
-        act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
-            .with(json!({"feature":id, "suppressed": !suppressed}))
-            .on(exists),
-        act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists),
+    let rule = crate::timeline::menu_rule(app, id);
+    let is_construction = feature.is_some_and(|f| f.kind.is_construction());
+    let visible = feature.is_some_and(|f| !app.session.visibility.hidden_origin.contains(&f.name));
+    // Suppress for every selected feature, in the single entry's place.
+    let suppress = match crate::timeline::suppress_selected(app, id).filter(|_| rule.many) {
+        Some((label, params)) => act("timeline.suppress", &label, "suppress").with(params),
+        None => act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
+            .with(json!({"feature":id, "suppressed": !suppressed})),
+    };
+    // Every selected feature is found; `feature` names the row the menu was opened on.
+    let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
+    let one = |item: Item| rule.one(item);
+    let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
+    let mut items = vec![
+        one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
+        // Off without a reason for a feature that has no profile sketch: selecting one feature
+        // would not turn it on.
+        if sketch.is_some() { one(profile) } else { profile },
+        one(act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists)),
+    ];
+    if is_construction {
+        let name = feature.map_or("", |f| f.name.as_str());
+        items.push(act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible })));
+    }
+    items.extend([
+        suppress.on(exists),
+        one(act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists)),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(exists && crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(exists && crate::edit_clipboard::something_to_copy(app)),
         // The selected features when the row is among them, as Copy and Cut and both History
@@ -726,8 +746,9 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .on(exists),
         Item::sep(),
         zoom_item(vec![Sel::Feature { id }], exists),
-        act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
-    ]
+        act("ui.findTimeline", "Find in Timeline", "rollback").with(find).on(exists),
+    ]);
+    items
 }
 
 /// Zoom to Selection in a Browser menu: frames what the row stands for, or the whole selection
@@ -834,6 +855,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     // resolved to a sketch curve therefore replaces any face in the selection with that curve.
     // The menu then follows the pick.
     let solid = has(|s| matches!(s, Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } | Sel::Body { .. }));
+    // Faces, edges or bodies selected: the others of their kind can be selected instead (#18107).
+    if has(|s| matches!(s, Sel::Face { .. } | Sel::Edge { .. } | Sel::Body { .. })) {
+        v.push(cmd(app, "select.invert", "Invert Selection"));
+        v.push(Item::sep());
+    }
     if let Some(sketch) = sel_sketch(app).filter(|_| !solid) {
         v.extend(sketch_items(app, sketch));
     } else if has(|s| matches!(s, Sel::Face { .. })) {
@@ -1055,13 +1081,20 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let sketches = if selected.contains(&id.to_string()) { selected } else { vec![id.to_string()] };
     let targets = crate::timeline::menu_targets(app, id);
     let parts = !app.session.doc.components.is_empty();
+    // With several features selected, the entries the feature menus have too follow their rule
+    // ([`crate::timeline::MenuRule`]): Edit Sketch, Redefine Sketch Plane and Rename take one
+    // sketch and are off with the reason; Find in Timeline finds them all. The sketch's own
+    // entries (Extrude, Replace, Export, Look At, the Show/Hide toggles) act on this sketch.
+    let rule = crate::timeline::menu_rule(app, id);
+    let find = if rule.many { json!({ "feature": id, "features": targets }) } else { json!({ "feature": id }) };
     let mut items = vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
-        act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
-        act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
+        rule.one(act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing)),
+        rule.one(act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id }))),
         replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
+        act("ui.exportSvg", "Export SVG…", "export").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
@@ -1071,7 +1104,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
             .key("Del")
             .with(json!({ "items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>() })),
-        act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id })),
+        rule.one(act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id }))),
         crate::browser::sketches_to_parts_item(sketches).on(parts && !editing),
         Item::sep(),
         act("ui.lookAt", "Look At", "lookat").with(json!({ "sketch": id })),
@@ -1080,7 +1113,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
         zoom_item(vec![Sel::Feature { id }], true),
-        act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
+        act("ui.findTimeline", "Find in Timeline", "rollback").with(find),
     ];
     items.retain(|item| parts || item.id != "component.move_sketches.to_parts");
     items
@@ -1342,7 +1375,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if !edits {
         v.push(activate.clone());
     }
-    if id != 0 && doc.links.contains_key(&id) {
+    if id != 0 && doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
         v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
     }
@@ -1376,7 +1409,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id == 0 {
         own.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     }
-    if doc.links.contains_key(&id) {
+    if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
         own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
@@ -1620,8 +1653,19 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     }
     v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
-    if !curves.is_empty() {
-        v.push(cmd(app, "sketch.construction", "Normal / Construction").with(json!({ "curves": curves })));
+    // Points switch too (#18448): a construction point is reference geometry a Hole leaves out.
+    // The origin is the sketch's own and is not offered.
+    let construction_points: Vec<&str> =
+        app.session.selection.iter().filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel)).filter(|id| *id != "origin").collect();
+    if !curves.is_empty() || !construction_points.is_empty() {
+        let mut params = json!({});
+        if !curves.is_empty() {
+            params["curves"] = json!(curves);
+        }
+        if !construction_points.is_empty() {
+            params["points"] = json!(construction_points);
+        }
+        v.push(cmd(app, "sketch.construction", "Normal / Construction").with(params));
     }
     // Infinite lines (#1359): the selected lines switch together.
     let lines: Vec<String> = curves
@@ -1835,6 +1879,13 @@ fn id_of(p: &Value, k: &str) -> Option<u64> {
     p.get(k).and_then(Value::as_u64)
 }
 
+/// The ids in the list `k` of a menu item's parameters; `None` without a list or with an empty
+/// one.
+fn ids_of(p: &Value, k: &str) -> Option<Vec<u64>> {
+    let ids: Vec<u64> = p.get(k)?.as_array()?.iter().filter_map(Value::as_u64).collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
 /// Run a menu item (what a click on it does). `at` places a rename box.
 pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
     if !item.enabled || item.is_sep() || item.is_heading() {
@@ -1860,12 +1911,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.selectOther" => {
             // The list picks instead of the right-click.
-            if let Some((opened, before, made)) = app.menu.picked.take()
-                && opened == at
-                && app.session.selection == made
-            {
-                let _ = app.run("select.set", json!({ "items": before }));
-            }
+            restore_picked(app, at);
             let held = app.menu.opened.filter(|(opened, _)| *opened == at).map(|(_, held)| held).unwrap_or_default();
             crate::select_other::open(app, at, held);
         }
@@ -2023,21 +2069,30 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
-            app.pick_save_command(
-                &format!("{name}.step"),
-                &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
-                "file.export",
-                // `hierarchy` is read for GLB only.
-                json!({"bodies": bodies, "hierarchy": app.preferences.glb_export_hierarchy}),
-            );
+            // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+            let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
+                .into_iter()
+                .filter(|f| *f != "3dm" || !cfg!(target_arch = "wasm32"))
+                .collect();
+            let bodies = bodies.clone();
+            app.pick_save(&format!("{name}.step"), &formats, move |app, path| {
+                let Some(path) = path else { return };
+                let mut params = json!({"bodies": bodies, "path": path, "hierarchy": app.preferences.glb_export_hierarchy});
+                crate::toolbar::with_export_writer(app, &path, &mut params);
+                if let Ok(result) = app.run("file.export", params) {
+                    crate::toolbar::exported(app, &path, &result);
+                }
+            });
         }
         "ui.findBrowser" => {
             if let Some(b) = p.get("body").and_then(Value::as_str) {
                 // Selected first: the rows above the body stay marked until the selection changes.
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
                 crate::browser::reveal_body(app, b);
+            } else if let Some(features) = ids_of(&p, "features") {
+                crate::timeline::find_in_browser(app, &features);
             } else if let Some(f) = id_of(&p, "feature") {
-                crate::timeline::find_in_browser(app, f);
+                crate::timeline::find_in_browser(app, &[f]);
             }
         }
         "ui.copyMessage" => {
@@ -2060,7 +2115,22 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.findTimeline" => {
             let body = p.get("body").and_then(Value::as_str);
             let f = id_of(&p, "feature").or_else(|| body.and_then(|b| body_feature(app, b)));
-            if let Some(f) = f {
+            if let Some(f) = f.filter(|f| app.session.doc.feature(*f).is_some()) {
+                // Every selected feature stays selected and has its folders opened. An id that
+                // names no feature is left out. `f`, the row the menu was opened on, is revealed
+                // last: the Browser has one reveal slot, and the timeline scrolls to `f`.
+                let listed = ids_of(&p, "features").unwrap_or_default();
+                let others: Vec<u64> = listed.into_iter().filter(|id| *id != f && app.session.doc.feature(*id).is_some()).collect();
+                let mut all = others.clone();
+                all.push(f);
+                all.sort_by_key(|id| app.session.doc.feature_index(*id));
+                for other in &others {
+                    if app.preferences.history_in_browser {
+                        crate::browser::reveal_in_history(app, *other);
+                    } else {
+                        crate::timeline_left::reveal_feature(app, *other);
+                    }
+                }
                 if app.preferences.history_in_browser {
                     crate::browser::reveal_in_history(app, f);
                 } else {
@@ -2072,7 +2142,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                         crate::browser::reveal_feature(app, f, body);
                     }
                 }
-                let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
+                let items: Vec<Value> = all.iter().map(|id| json!({"type": "feature", "id": id})).collect();
+                let _ = app.run("select.set", json!({ "items": items }));
                 crate::browser::request_timeline_reveal(app, f);
                 let panel = if app.preferences.history_in_browser { "browser" } else { "history" };
                 crate::browser::reveal_shared_panel(app, panel);
@@ -2230,6 +2301,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
+        "ui.historyClear" => crate::timeline::clear_history(app),
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing" => {
             let result = p.get("workspace").and_then(Value::as_str).map_or(Ok(()), |workspace| crate::workspace::enter(app, workspace));
             if let Err(error) = result {
@@ -2330,6 +2402,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(id) = id_of(&p, "sketch") {
                 let name = app.session.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
                 app.pick_save_command(&format!("{name}.dxf"), &["dxf"], "sketch.export_dxf", json!({"sketch": id}));
+            }
+        }
+        "ui.exportSvg" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                let name = app.session.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+                app.pick_save_command(&format!("{name}.svg"), &["svg"], "sketch.export_svg", json!({"sketch": id}));
             }
         }
         "ui.extrudeSketch" => {
@@ -2529,6 +2607,7 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         .filter_map(|s| match s {
             Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => Some(name.clone()),
             Sel::Vertex { body, .. } if body.is_empty() => Some("O".to_string()),
+            Sel::Feature { id } => app.session.doc.feature(*id).filter(|f| f.kind.is_construction()).map(|f| f.name.clone()),
             _ => None,
         })
         .collect();
@@ -2798,11 +2877,32 @@ pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modi
     app.menu.radial = false;
 }
 
-/// Open a menu for a target (the radial ring only for the viewport).
-pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
-    if browser_took_the_click(app) {
+/// Restore the selection made automatically when opening a right-click menu at `at`.
+fn restore_picked(app: &mut SolveApp, at: Pos2) {
+    if let Some((opened, before, made)) = app.menu.picked.take()
+        && opened == at
+        && app.session.selection == made
+    {
+        let _ = app.run("select.set", json!({ "items": before }));
+    }
+}
+
+/// If post-release confirmation reports that the browser swallowed `contextmenu` (#21229),
+/// dismiss any right-click menu that opened on release and restore its pre-click selection.
+pub fn dismiss_if_browser_took(app: &mut SolveApp) {
+    if app.menu.browser_menu != BrowserMenu::Taken {
         return;
     }
+    let Some(at) = app.viewport.context_menu else { return };
+    if app.menu.opener.is_some() {
+        return;
+    }
+    restore_picked(app, at);
+    close(app);
+    app.set_status(app.tr("ui.context_menu_browser_took").to_owned(), false);
+}
+
+fn open_target(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.key_row = None;
     app.menu.submenu.clear();
     app.menu.submenu_key = None;
@@ -2815,15 +2915,20 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     app.viewport.context_menu = Some(at);
 }
 
-/// A button's menu: a click opens it, and a click on the same button while it is open closes it.
-pub fn toggle_for(app: &mut SolveApp, opener: Rect, at: Pos2, target: Target) {
+/// Open a menu for a target (the radial ring only for the viewport).
+pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     if browser_took_the_click(app) {
         return;
     }
+    open_target(app, at, target);
+}
+
+/// A button's menu: a click opens it, and a click on the same button while it is open closes it.
+pub fn toggle_for(app: &mut SolveApp, opener: Rect, at: Pos2, target: Target) {
     if open_from(app, opener, &target) {
         close(app);
     } else {
-        open_for(app, at, target);
+        open_target(app, at, target);
         app.menu.opener = Some(opener);
     }
 }
@@ -3123,6 +3228,7 @@ fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Show the open menu, the rename box and the Properties window.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    dismiss_if_browser_took(app);
     if let Some((at, target)) = app.menu.pending.clone()
         && app.synthetic.is_empty()
     {
@@ -3623,6 +3729,24 @@ mod tests {
         let menu = items(&h.app, &Target::Viewport);
         assert!(menu.iter().any(|i| i.id == "sketch.toggle_driven"));
         assert!(!menu.iter().any(|i| i.id == "sketch.toggle_diameter"), "a length is no radius");
+    }
+
+    /// #18107: with faces, edges or bodies selected, the view's menu offers Invert Selection, and
+    /// running it selects the other faces of the body; with nothing selected it is not offered.
+    #[test]
+    fn the_view_menu_inverts_a_face_selection() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"})).unwrap();
+        h.app.session.selection.clear();
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "select.invert"), "nothing to invert");
+        h.app.run("select.set", json!({"items":[{"type":"face","body":"A","index":0}]})).unwrap();
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|i| i.id == "select.invert").expect("faces offer Invert Selection");
+        assert!(item.enabled);
+        run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+        let faces: Vec<usize> =
+            h.app.session.selection.iter().filter_map(|s| if let Sel::Face { index, .. } = s { Some(*index) } else { None }).collect();
+        assert_eq!(faces, [1, 2, 3, 4, 5]);
     }
 
     /// #20660: a point's distance from a construction line offers Toggle Radius / Diameter; the
@@ -4199,6 +4323,57 @@ mod tests {
         assert!(h.app.viewport.context_menu.is_none(), "the browser's menu is open: ours must not open under it");
         let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
         assert!(status.contains("browser"), "the user is told why: {status:?}");
+    }
+
+    /// #21229: on Windows, `pointerup` opens SolidCraft's menu before the browser confirms whether
+    /// `contextmenu` was swallowed. When post-release confirmation reports `Taken`, the next frame
+    /// closes the menu, restores any auto-picked selection, and tells the user why.
+    #[test]
+    fn windows_post_release_browser_take_dismisses_menu_and_restores_selection() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,-12],[20,-12]],"connect":false})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.settle();
+        assert!(h.app.session.selection.is_empty());
+
+        h.step(&json!({"click":{"world":[10,-12,0]},"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some(), "menu opens on pointerup before confirmation");
+        assert!(!h.app.session.selection.is_empty(), "right-click picked the curve under the pointer");
+
+        h.app.menu.browser_menu = BrowserMenu::Taken;
+        h.frames(1);
+        h.app.menu.browser_menu = BrowserMenu::Offered;
+
+        assert!(h.app.viewport.context_menu.is_none(), "post-release confirmation dismisses our menu");
+        assert!(h.app.session.selection.is_empty(), "auto-picked selection is restored when dismissed");
+        let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+        assert!(status.contains("browser"), "the user is told why: {status:?}");
+    }
+
+    /// #21229: `Taken` with no open menu (for example after a right-drag orbit) does not post a
+    /// status message, and left-click toolbar/button dropdowns (`toggle_for`) are never dismissed.
+    #[test]
+    fn browser_took_without_open_menu_stays_silent_and_spares_button_dropdown() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.settle();
+        h.app.status = None;
+
+        h.app.menu.browser_menu = BrowserMenu::Taken;
+        dismiss_if_browser_took(&mut h.app);
+        assert!(h.app.status.is_none(), "no menu open: must not post a false browser-took notice");
+
+        let opener = egui::Rect::from_min_size(pos2(40.0, 60.0), egui::vec2(28.0, 28.0));
+        toggle_for(&mut h.app, opener, opener.left_bottom(), Target::Units);
+        assert_eq!(h.app.viewport.context_menu, Some(opener.left_bottom()));
+        assert_eq!(h.app.menu.opener, Some(opener));
+
+        dismiss_if_browser_took(&mut h.app);
+        assert_eq!(h.app.viewport.context_menu, Some(opener.left_bottom()), "left-click dropdown stays open");
+        assert!(h.app.status.is_none());
     }
 
     #[test]

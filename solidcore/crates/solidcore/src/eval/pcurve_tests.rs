@@ -81,6 +81,92 @@ fn radial_order_uses_exact_face_directions_in_every_input_order() {
     }
 }
 
+/// #21183: a Ø0.12 hole 0.44 off a Ø1 bar's axis touches its wall along the bar's seam line, so
+/// their rays tie in pairs (up to rounding once turned off the axes). The hole curves away faster:
+/// about +z, bar back, hole back, hole forward, bar forward, so wall and space alternate.
+#[test]
+fn faces_tangent_along_an_edge_are_ordered_by_how_fast_they_curve_away() {
+    let seam = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0.], [0., 1.]],
+    };
+    for turn in [0.0f64, 0.3, 1.1, 2.5, 4.0] {
+        let (s, c) = turn.sin_cos();
+        let at = |r: f64, z: f64| [r * c, r * s, z];
+        let turned = |origin: [f64; 3]| frame(origin, [c, s, 0.], [-s, c, 0.]);
+        let bar = Surface::Cylinder {
+            frame: turned([0.; 3]),
+            radius: 0.5,
+        };
+        let hole = Surface::Cylinder {
+            frame: turned(at(0.44, 0.)),
+            radius: 0.06,
+        };
+        let curve = Curve::Line {
+            start: at(0.5, 0.),
+            end: at(0.5, 1.),
+        };
+        let uses = [(&bar, false), (&hole, false), (&hole, true), (&bar, true)];
+        for perm in 0..24usize {
+            let mut pool: Vec<usize> = (0..4).collect();
+            let mut k = perm;
+            let mut input = Vec::new();
+            for n in (1..=4).rev() {
+                input.push(pool.remove(k % n));
+                k /= n;
+            }
+            let faces: Vec<_> = input
+                .iter()
+                .map(|&i| RadialFace {
+                    surface: uses[i].0,
+                    pcurve: &seam,
+                    forward: uses[i].1,
+                })
+                .collect();
+            let order = radial_order(&curve, [0., 1.], &faces).unwrap();
+            let got: Vec<_> = order.into_iter().map(|i| input[i]).collect();
+            let expected: Vec<_> = (0..4).map(|n| (input[0] + n) % 4).collect();
+            assert_eq!(got, expected, "turn {turn}, {input:?}");
+        }
+    }
+    let bar = |turn: f64| {
+        let (s, c) = turn.sin_cos();
+        Surface::Cylinder {
+            frame: frame([0.; 3], [c, s, 0.], [-s, c, 0.]),
+            radius: 0.5,
+        }
+    };
+    let (s, c) = 0.3f64.sin_cos();
+    let curve = Curve::Line {
+        start: [0.5 * c, 0.5 * s, 0.],
+        end: [0.5 * c, 0.5 * s, 1.],
+    };
+    // These turns give bends a rounding apart (-2 ± 2 ulps).
+    for turn in [0.0519, 0.2249] {
+        let (low, high) = (bar(0.3), bar(0.3 + turn));
+        let below = Curve2::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: vec![[-turn, 0.], [-turn, 1.]],
+        };
+        let faces = [
+            RadialFace {
+                surface: &low,
+                pcurve: &seam,
+                forward: true,
+            },
+            RadialFace {
+                surface: &high,
+                pcurve: &below,
+                forward: true,
+            },
+        ];
+        assert!(
+            matches!(radial_order(&curve, [0., 1.], &faces), Err(Error::Failed(m)) if m.contains("tangent faces")),
+            "turn {turn}"
+        );
+    }
+}
+
 #[test]
 fn radial_order_refuses_undefined_and_indistinguishable_directions() {
     let curve = Curve::Line {

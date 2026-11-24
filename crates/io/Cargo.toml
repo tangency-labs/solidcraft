@@ -80,6 +80,9 @@ gethostname = { workspace = true }
 # A temporary file in its target folder; also a rename that never replaces a file (src/safe_write.rs, create_atomic).
 tempfile = "3.27"
 same-file = "1.0.6"
+# Whether the process named in a lock is still running (src/design_lock.rs); the workspace's
+# MIT-licensed process lookup, safe API.
+sysinfo = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 trash = "5.2.9"
