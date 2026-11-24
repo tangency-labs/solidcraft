@@ -2118,25 +2118,50 @@ pub(crate) fn command(app: &mut SolveApp, id: &str, p: &Value) -> Result<Value, 
 }
 
 /// The active design as its file holds it (`document.export`): what a host that keeps the files
-/// itself writes (#8517). `text` is the design's JSON, the same a `.json` design file holds, and
-/// `revision` is the one `document.revision` names this state by.
-pub fn export(app: &mut SolveApp) -> Result<Value, String> {
+/// itself writes (#8517). JSON remains the default; a container includes binary parts.
+pub fn export(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     let revision = app.session.design_revision();
     let design = app.session.design();
-    let text = String::from_utf8(solidcraft_engine::io::write_design(&design).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
+    let dirty = app.session.is_dirty();
+    if !document_container(p)? {
+        let text = String::from_utf8(solidcraft_engine::io::write_design(&design).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        Ok(json!({"name": design.name, "revision": revision, "dirty": dirty, "format": "json", "text": text}))
+    } else {
+        let bytes = solidcraft_engine::io::write_design_container(&design).map_err(|e| e.to_string())?;
+        let data = solidcraft_engine::doc::canvas::base64_encode(&bytes);
+        Ok(json!({"name": design.name, "revision": revision, "dirty": dirty, "format": "container", "data": data}))
+    }
 }
 
-/// Replace the active design with one a host kept (`document.import {text, name?}`): the text of
-/// a design file (its JSON, as `document.export` gives it). It opens saved, with nothing to undo,
-/// in the active design's place: as a design opened in a tab of its own, with that tab closed
-/// without asking. A text that does not read changes nothing.
+/// Whether a host explicitly requested the native container format instead of JSON.
+fn document_container(p: &Value) -> Result<bool, String> {
+    match p.get("format") {
+        None => Ok(false),
+        Some(Value::String(format)) if format == "json" => Ok(false),
+        Some(Value::String(format)) if format == "container" => Ok(true),
+        _ => Err("format must be json or container".into()),
+    }
+}
+
+/// Replace the active design with one a host kept: JSON text or a base64-encoded container.
+/// It opens saved, with nothing to undo, in the active design's place. An unreadable file
+/// changes nothing.
 pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     if app.file_picker_busy() || app.file_load.busy() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
         return Err("a file is being opened or saved, or designs are being closed: try again".into());
     }
-    let text = p.get("text").and_then(Value::as_str).ok_or("missing `text` (the design's JSON)")?;
-    let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
+    let mut doc = if document_container(p)? {
+        use solidcraft_engine::doc::canvas::{base64_decode, base64_encode};
+        let data = p.get("data").and_then(Value::as_str).ok_or("missing `data` (the base64 design container)")?;
+        let bytes = base64_decode(data).ok_or("invalid base64 design container")?;
+        if base64_encode(&bytes) != data || !solidcraft_engine::io::is_design_container(&bytes) {
+            return Err("invalid base64 design container".into());
+        }
+        solidcraft_engine::io::read_design(&bytes).map_err(|e| e.to_string())?
+    } else {
+        let text = p.get("text").and_then(Value::as_str).ok_or("missing `text` (the design's JSON)")?;
+        solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?
+    };
     if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
         doc.name = name.to_string();
     }

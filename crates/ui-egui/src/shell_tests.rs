@@ -1720,6 +1720,46 @@ fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
     }
 }
 
+#[test]
+fn a_host_keeps_a_design_with_its_canvas_image_in_a_container() {
+    let mut h = Harness::new();
+    h.app.embed_editor = true;
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]))
+        .write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let path = crate::scenario::image_file(png.get_ref());
+    h.app.run("canvas.insert", json!({"path": path, "plane": "XY", "width": 80})).unwrap();
+    let canvas = h.app.session.doc.canvases[0].clone();
+
+    assert_eq!(h.call("document.export", json!({}))["ok"], false);
+    assert_eq!(h.call("document.export", json!({"format": "other"}))["ok"], false);
+    let kept = h.call("document.export", json!({"format": "container"}));
+    assert_eq!(kept["ok"], true, "{kept}");
+    let kept = &kept["result"];
+    assert_eq!(kept["format"], "container");
+    assert_eq!(kept["dirty"], true);
+    assert_eq!(kept["revision"], h.call("document.revision", json!({}))["result"]["revision"]);
+    let data = kept["data"].as_str().unwrap();
+
+    for bad in [
+        json!({"format": "container"}),
+        json!({"format": "container", "data": "%%%"}),
+        json!({"format": "container", "data": "e30="}),
+        json!({"format": "other", "text": "{}"}),
+    ] {
+        let revision = h.app.session.design_revision();
+        assert_eq!(h.call("document.import", bad)["ok"], false);
+        assert_eq!(h.app.session.design_revision(), revision);
+        assert_eq!(h.app.session.doc.canvases, vec![canvas.clone()]);
+    }
+
+    let back = h.call("document.import", json!({"format": "container", "data": data, "name": "With canvas"}));
+    assert_eq!(back["ok"], true, "{back}");
+    assert_eq!(h.app.session.doc.canvases, vec![canvas]);
+    assert_eq!(h.app.session.doc.name, "With canvas");
+    assert!(!h.app.session.is_dirty());
+}
+
 /// Every text the last frame painted.
 fn painted_texts(h: &Harness) -> Vec<String> {
     fn walk(shape: &egui::Shape, out: &mut Vec<String>) {

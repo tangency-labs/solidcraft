@@ -54,8 +54,19 @@ await app.request("document.saved", {revision: kept.revision});
 await app.request("document.import", {text: kept.text, name: "Bracket"});
 ```
 
-The 16 MiB limit on parameters applies to `document.import`'s `text`. A design that links other
-design files keeps those links as paths; the files themselves are not in `text`.
+For designs with embedded images or other binary parts, request a native `.sc` container instead:
+
+```js
+const kept = await app.request("document.export", {format: "container"});
+// Store kept.data (the base64-encoded container), then acknowledge the save:
+await app.request("document.saved", {revision: kept.revision});
+// Restore the container:
+await app.request("document.import", {format: "container", data: kept.data});
+```
+
+JSON is still the default. The 16 MiB limit on parameters applies to both `text` and base64
+`data` in `document.import`. A design that links other design files keeps those links as
+paths; the linked files themselves are not embedded.
 
 ## Verify a browser build
 
