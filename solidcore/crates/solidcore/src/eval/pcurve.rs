@@ -53,6 +53,23 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Whether a stored trim's control hull leaves a periodic direction's base range.
+/// This is a topology-edit request, not permission to clamp or discard a piece of a trim.
+/// A billionth of a period at the ends allows only parameter rounding.
+pub fn leaves_base_period(domain: Domain, trim: &Curve2) -> bool {
+    points(trim).iter().any(|p| {
+        p.iter()
+            .zip(domain.range)
+            .zip(domain.period)
+            .any(|((x, range), period)| match (range, period) {
+                (Some((lo, hi)), Some(period)) => {
+                    !x.is_finite() || *x < lo - 1e-9 * period || *x > hi + 1e-9 * period
+                }
+                _ => false,
+            })
+    })
+}
+
 impl From<EvalError> for Error {
     fn from(e: EvalError) -> Self {
         match e {
@@ -808,10 +825,14 @@ impl On {
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
-    /// loop order and direction), then all together into the surface's base period where the
-    /// loop's lowest point allows; a loop that lies outside the surface's range there but within
-    /// it a period lower, to within how far its uses miss each other at its vertices away from a
-    /// pole and a billionth of the period, goes there (and may start below the range by that).
+    /// loop order and direction), then all together into the surface's base period. Which
+    /// translate depends on whether the loop's control hull fits in the surface's range, to
+    /// within how far its uses miss each other at its vertices away from a pole and a billionth
+    /// of the period at each end. A loop that fits goes where its lowest point allows; one that
+    /// lies outside the range there but within it a period lower, to that rounding, goes there
+    /// (and may start below the range by that). A loop wider than that, which no translate puts
+    /// in the range, goes where its hull's midpoint allows: a small overrun at either seam must
+    /// not move the rest of a full-period loop one whole period outside the patch.
     /// Where uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets
     /// that turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural
     /// normal) by more than rounding are taken, else the nearest. A seam used twice from pole to
@@ -940,11 +961,6 @@ impl On {
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
                     (a.min(x), b.max(x))
                 });
-            let mut base = if low.is_finite() {
-                ((low - lo) / period + 1e-9).floor() * period
-            } else {
-                0.0
-            };
             // Its uses meet at its vertices only to within their rounding: how far apart they
             // are there, short of whole periods, but at a pole, where the parameter is free.
             let slack = (0..n)
@@ -957,9 +973,6 @@ impl On {
                     Some((gap - (gap / period).round() * period).abs())
                 })
                 .fold(0.0, f64::max);
-            // A loop that lies outside the range where its lowest point puts it, but within it a
-            // period lower to that rounding and the base's own (above), lies there: its lowest
-            // point is a rounding short of a period's start (#19315).
             let hi = self
                 .dom
                 .range
@@ -968,9 +981,60 @@ impl On {
                 .flatten()
                 .map_or(lo + period, |(a, b)| a.max(b));
             let room = slack + 1e-9 * period;
+            // A loop that fits in the range to that rounding is placed by its lowest point; one
+            // wider, which no translate puts in the range, by its midpoint, so an overrun at
+            // either seam leaves the rest of it in the range (#19560).
+            let anchor = if high - low <= hi - lo + 2.0 * room {
+                low
+            } else {
+                0.5 * low + 0.5 * high
+            };
+            let mut base = if anchor.is_finite() {
+                ((anchor - lo) / period + 1e-9).floor() * period
+            } else {
+                0.0
+            };
+            // A loop that lies outside the range where its lowest point puts it, but within it a
+            // period lower to that rounding and the base's own (above), lies there: its lowest
+            // point is a rounding short of a period's start (#19315).
             let inside = |by: f64| low - by >= lo - room && high - by <= hi + room;
             if low.is_finite() && !inside(base) && inside(base + period) {
                 base += period;
+            } else if low.is_finite() && high.is_finite() && !inside(base) {
+                // Within neither: a period lower, where the loop runs past the range by less than
+                // where its lowest point puts it, and by a step that moves the surface within
+                // `tol`: each point past an end moves along `d` by at most that end's overrun,
+                // within the strip from the end to the overrun and across the loop's span, which
+                // a certified bound on the surface's speed there encloses
+                // (`SurfaceEval::strip_shift_bound`); where no bound is decided it stays. A loop
+                // that starts on the range's start, its lowest point a writer's rounding below
+                // it, stays on the range rather than moving a whole period on; one farther below
+                // stays where its lowest point puts it.
+                let spill = |by: f64| (lo - (low - by)).max(0.0) + ((high - by) - hi).max(0.0);
+                let lower = base + period;
+                if spill(lower) < spill(base) {
+                    let (below, above) = (
+                        (lo - (low - lower)).max(0.0),
+                        ((high - lower) - hi).max(0.0),
+                    );
+                    let across = uses
+                        .iter()
+                        .flat_map(|(c, _)| points(c).into_iter().map(|q| at(q, 1 - d)))
+                        .fold([f64::INFINITY, f64::NEG_INFINITY], |[a, b], x| {
+                            [a.min(x), b.max(x)]
+                        });
+                    let shift = |along: [f64; 2], o: f64| -> Option<f64> {
+                        if o > 0.0 {
+                            self.surface.strip_shift_bound(d, along, across, o).ok()
+                        } else {
+                            Some(0.0)
+                        }
+                    };
+                    let moved = shift([lo - below, lo], below).zip(shift([hi, hi + above], above));
+                    if moved.is_some_and(|(x, y)| x.max(y) <= tol) {
+                        base = lower;
+                    }
+                }
             }
             for (((c, _), s), (st, en)) in uses.iter_mut().zip(&shift).zip(ends.iter_mut()) {
                 let by = s - base;

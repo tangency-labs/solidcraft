@@ -11,6 +11,7 @@ use solidcore_record::Vec3;
 use solidcraft_doc::expr::{self, Kind};
 use solidcraft_doc::joints::cam::{self, Cam, CamProfile, Follower};
 use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
+use solidcraft_doc::{Document, ModelState};
 use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
@@ -53,7 +54,7 @@ mod inspect;
 pub(crate) mod constraint;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("joint.origin", "Joint Origin", crate::checked!("joint.origin", joint_origin))
+    CommandSpec::new("joint.origin", "Joint Origin", crate::checked!("joint.origin", joint_origin)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("joint_origin")
         .contract(&ORIGIN_CONTRACT)
@@ -61,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "name?, occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
     ),
-    CommandSpec::new("joint.create", "Joint", crate::checked!("joint.create", joint))
+    CommandSpec::new("joint.create", "Joint", crate::checked!("joint.create", joint)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("joint")
         .key("J")
@@ -80,7 +81,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          kept with the joint and worked out again whenever the design changes, so the joint follows the parameters it names; a joint whose \
          expression no longer works out (a parameter deleted) is left out of the solve with the reason in its errors",
     ),
-    CommandSpec::new("joint.as_built", "As-Built Joint", crate::checked!("joint.as_built", as_built))
+    CommandSpec::new("joint.as_built", "As-Built Joint", crate::checked!("joint.as_built", as_built)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("as_built")
         .contract(&AS_BUILT_CONTRACT)
@@ -89,7 +90,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "type, a: occurrence, b: occurrence (stay where they are); at?: joint origin (default: b's origin) — the joint's frame; one on a or b is kept on its face or hole there, so the joint follows it as the design changes; \
          name?; limits?: [[min, max] | null…]; quiet?: bool",
     ),
-    CommandSpec::new("joint.rigid_group", "Rigid Group", crate::checked!("joint.rigid_group", rigid_group))
+    CommandSpec::new("joint.rigid_group", "Rigid Group", crate::checked!("joint.rigid_group", rigid_group)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("rigid_group")
         .contract(&RIGID_GROUP_CONTRACT)
@@ -114,15 +115,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&REACH_CONTRACT)
         .output(output_schema_for::<ReachResult>)
         .params(
-        "occurrence: id|name; point: [x,y,z] (where its point goes, world); at?: [x,y,z] (its point, in the world where it is now; default: the centre of          its bodies' box); z?: [x,y,z] (the way its axis then points); axis?: [x,y,z] (that axis, in the world now; default: its own z); joints?: [ids          or names] (only these move toward the point; the other joints of a closed loop they are in follow); quiet?: bool; continuous?: bool (a frame          of a drag: the answer says continuous, and the app's command line doesn't echo it). Moves the values of the joints          on its chain from where they are to the nearest pose, within their limits, through motion links, keeping closed loops closed as joint.drive does          (contact sets are not checked) → reached; error_mm (and error_deg with z): how close it got; point: where its point is; values: [{joint, name,          values}] of the joints that moved, as joint.list gives them; moved; stopped_by_limit: [{joint, value, limit: min|max}]: the limits it rests on          short of the point; stopped_by_loop: {joint}: the closed loop that stopped it (its chain alone gets closer); reason: why nothing can move",
+        "occurrence: id|name; point: [x,y,z] (where its point goes, world); at?: [x,y,z] (its point, in the world where it is now; default: the centre of          its bodies' box); z?: [x,y,z] (the way its axis then points); axis?: [x,y,z] (that axis, in the world now; default: its own z); joints?: [ids          or names] (only these move toward the point; the other joints of a closed loop they are in follow); quiet?: bool; continuous?: bool (a frame          of a drag: the answer says continuous, and the app's command line doesn't echo it). Moves the values of the joints          on its chain from where they are to the nearest pose, within their limits, through motion links, keeping closed loops closed as joint.drive does;          with contact sets on, they stop where two parts of a set would pass into each other; from?: [{joint, values}] (the values those joints start from instead of the design's, as joint.list gives them: the pose a drag's last frame showed; with contact sets on, refused unless every value is already the design's) → reached; error_mm (and error_deg with z): how close it got; point: where its point is; values: [{joint, name,          values}] of the joints that moved, as joint.list gives them; moved; stopped_by_limit: [{joint, value, limit: min|max}]: the limits it rests on          short of the point; stopped_by_loop: {joint}: the closed loop that stopped it (its chain alone gets closer); stopped_by_contact: the pair of a contact set that stopped it, as joint.drive says; reason: why nothing can move",
     ),
-    CommandSpec::new("joint.motion_link", "Motion Link", crate::checked!("joint.motion_link", motion_link))
+    CommandSpec::new("joint.motion_link", "Motion Link", crate::checked!("joint.motion_link", motion_link)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("motion_link")
         .contract(&MOTION_LINK_CONTRACT)
         .output(output_schema_for::<MotionLinkResult>)
         .params("a, b: joints; ratio (b = ratio · a + offset): b's units per a's (mm per deg for an angle driving a distance); offset?: in b's units (deg for an angle, mm for a distance, or an expression); ia?, ib?: value indices (default 0); link?: index (put this link in place of that motion link, as the gear and cam commands do) → link: the link's index, as joint.list numbers them"),
-    CommandSpec::new("joint.gear", "Gear", crate::checked!("joint.gear", gear))
+    CommandSpec::new("joint.gear", "Gear", crate::checked!("joint.gear", gear)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("gear")
         .contract(&GEAR_CONTRACT)
@@ -134,7 +135,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          link?: index (replace that motion link; a radius left out then keeps the old gear's, picked round face included) → link, ratio (b's degrees per a's); b keeps where it is, also when the link replaces \
          another (at the current pose)",
     ),
-    CommandSpec::new("joint.rack_pinion", "Rack and Pinion", crate::checked!("joint.rack_pinion", rack_pinion))
+    CommandSpec::new("joint.rack_pinion", "Rack and Pinion", crate::checked!("joint.rack_pinion", rack_pinion)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("rack_pinion")
         .contract(&RACK_PINION_CONTRACT)
@@ -145,7 +146,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          radians; reverse?: bool; link?: index (replace that motion link; the radius left out then keeps the old pinion's, picked round face included) → link, ratio (mm per degree, or degrees per mm); b keeps \
          where it is, also when the link replaces another (at the current pose)",
     ),
-    CommandSpec::new("joint.screw", "Screw", crate::checked!("joint.screw", screw))
+    CommandSpec::new("joint.screw", "Screw", crate::checked!("joint.screw", screw)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("screw")
         .contract(&SCREW_CONTRACT)
@@ -156,7 +157,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          ratio (mm per degree, or degrees per mm); b keeps where it is, also when the link replaces another (at the current \
          pose)",
     ),
-    CommandSpec::new("joint.cam", "Cam", crate::checked!("joint.cam", cam_cmd))
+    CommandSpec::new("joint.cam", "Cam", crate::checked!("joint.cam", cam_cmd)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("cam")
         .contract(&CAM_CONTRACT)
@@ -168,8 +169,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("joint")
         .contract(&LIMITS_CONTRACT)
         .output(output_schema_for::<SolveResult>)
-        .params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
-    CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit))
+        .params("joint; index?: value index (default 0); min?, max? (numbers, or expressions the limit then follows as the parameters change; omit both to clear)"),
+    CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditJointResult>)
@@ -244,17 +245,26 @@ pub fn place(s: &mut Session) -> joints::Solution {
     place_holding(s, &BTreeMap::new())
 }
 
-/// Work out the offsets, angles and values joints were given as expressions again (a parameter
+/// Work out the offsets, angles, values and limits joints were given as expressions again (a parameter
 /// may have changed). One that can't be worked out (its parameter gone) keeps its numbers; the
 /// solve leaves that joint out and says why. A tangent constraint's offset is its gap plus the
 /// radius of its round face as the face is now, so the part keeps resting on the plane when the
 /// radius changes; a face that can't be found keeps the numbers it has.
 fn reexpress(s: &mut Session) {
-    let params = joints::Params::new(&s.doc);
-    let st = s.model.state();
-    let changed: Vec<(usize, (f64, f64, Vec<f64>))> = s
-        .doc
-        .assembly
+    let changed = reexpressed(&s.doc, &s.model.state());
+    if !changed.is_empty() {
+        set_reexpressed(s.doc_mut(), changed);
+    }
+}
+
+/// The joints whose expressions now give other offsets, angles, values or limits: (index, new ones).
+type Reexpressed = Vec<(usize, (f64, f64, Vec<f64>, Vec<Option<(f64, f64)>>))>;
+
+/// The joints of `doc` whose expressions (and, for a tangent constraint, round face in `st`) now
+/// give other offsets, angles, values or limits than the ones stored.
+fn reexpressed(doc: &Document, st: &ModelState) -> Reexpressed {
+    let params = joints::Params::new(doc);
+    doc.assembly
         .joints
         .iter()
         .enumerate()
@@ -262,19 +272,25 @@ fn reexpress(s: &mut Session) {
         .filter_map(|(i, j)| {
             let (mut o, a, mut q) = joints::expressed(&params, j).ok()?;
             if j.constraint == Some(joints::Constraint::Tangent) {
-                o += s.doc.origin_radius(&st, &j.b).ok()?;
+                o += doc.origin_radius(st, &j.b).ok()?;
             }
-            joints::clamp(j, &mut q);
-            ((o, a) != (j.offset, j.angle) || q != j.values).then_some((i, (o, a, q)))
+            // The limits first, so the values are held to the limits as they are now (#20242).
+            let limits = joints::expressed_limits(&params, j).ok()?;
+            for (v, l) in q.iter_mut().zip(&limits) {
+                if let Some((lo, hi)) = l {
+                    *v = v.clamp(lo.min(*hi), hi.max(*lo));
+                }
+            }
+            ((o, a) != (j.offset, j.angle) || q != j.values || limits != j.limits).then_some((i, (o, a, q, limits)))
         })
-        .collect();
-    if changed.is_empty() {
-        return;
-    }
-    let doc = s.doc_mut();
-    for (i, (o, a, q)) in changed {
+        .collect()
+}
+
+/// Store the offsets, angles, values and limits [`reexpressed`] worked out.
+fn set_reexpressed(doc: &mut Document, changed: Reexpressed) {
+    for (i, (o, a, q, limits)) in changed {
         if let Some(j) = doc.assembly.joints.get_mut(i) {
-            (j.offset, j.angle, j.values) = (o, a, q);
+            (j.offset, j.angle, j.values, j.limits) = (o, a, q, limits);
         }
     }
 }
@@ -283,22 +299,31 @@ fn reexpress(s: &mut Session) {
 /// or a cam's profile may have changed). A coupling that can't be worked out (its face gone)
 /// keeps its last ratio and table; `joint.list` says why.
 fn recouple(s: &mut Session) {
-    if s.doc.assembly.links.iter().all(|l| l.coupling.is_none()) {
-        return;
+    let changed = recoupled(&s.doc, &s.model.state());
+    if !changed.is_empty() {
+        set_recoupled(s.doc_mut(), changed);
     }
-    let st = s.model.state();
-    let changed: Vec<(usize, (f64, Vec<f64>))> = s
-        .doc
-        .assembly
+}
+
+/// The coupled motion links whose ratio or cam table came out otherwise: (index, new ones).
+type Recoupled = Vec<(usize, (f64, Vec<f64>))>;
+
+/// The coupled motion links of `doc` whose ratio or cam table, worked out again from `st`, came
+/// out otherwise than the ones stored.
+fn recoupled(doc: &Document, st: &ModelState) -> Recoupled {
+    if doc.assembly.links.iter().all(|l| l.coupling.is_none()) {
+        return Vec::new();
+    }
+    doc.assembly
         .links
         .iter()
         .enumerate()
-        .filter_map(|(i, l)| joints::coupling_values(&s.doc, &st, l)?.ok().filter(|(r, t)| *r != l.ratio || *t != l.lift).map(|v| (i, v)))
-        .collect();
-    if changed.is_empty() {
-        return;
-    }
-    let doc = s.doc_mut();
+        .filter_map(|(i, l)| joints::coupling_values(doc, st, l)?.ok().filter(|(r, t)| *r != l.ratio || *t != l.lift).map(|v| (i, v)))
+        .collect()
+}
+
+/// Store the ratios and cam tables [`recoupled`] worked out.
+fn set_recoupled(doc: &mut Document, changed: Recoupled) {
     for (i, (r, t)) in changed {
         if let Some(l) = doc.assembly.links.get_mut(i) {
             l.ratio = r;
@@ -420,13 +445,12 @@ fn effective_value_list(s: &Session, id: u64) -> Option<Vec<NamedValue>> {
 /// commands changed (a motion link's follower, a joint a closed loop moved). Their values are
 /// as the solver placed them, after motion links and limits, as `joint.inspect` and
 /// `joint.drive` give them.
-pub(crate) fn posed_joints(before: &Session, after: &Session, replies: &[Value]) -> Vec<ReachedJoint> {
-    let was = joints::joint_values(&before.doc.assembly);
-    let now = joints::joint_values(&after.doc.assembly);
-    let mut ids: std::collections::BTreeSet<u64> = replies.iter().filter_map(|r| r.get("joint").and_then(Value::as_u64)).collect();
-    ids.extend(after.doc.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
+pub fn posed_joints(before: &Document, after: &Document, driven: impl IntoIterator<Item = u64>) -> Vec<ReachedJoint> {
+    let was = joints::joint_values(&before.assembly);
+    let now = joints::joint_values(&after.assembly);
+    let mut ids: std::collections::BTreeSet<u64> = driven.into_iter().collect();
+    ids.extend(after.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
     after
-        .doc
         .assembly
         .joints
         .iter()
@@ -1147,6 +1171,25 @@ fn value_exprs(p: &Value) -> Vec<Option<String>> {
     out
 }
 
+/// The expressions among `limits`' minimums and maximums, by value index (#20242).
+fn limit_exprs(p: &Value) -> Vec<[Option<String>; 2]> {
+    let mut out: Vec<[Option<String>; 2]> = match p.get("limits") {
+        // A pair given one end sets no limit (limits_param leaves it out), so it keeps no expression.
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|l| match (l.get(0), l.get(1)) {
+                (Some(_), Some(_)) => [typed(l.get(0)), typed(l.get(1))],
+                _ => [None, None],
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    while out.last().is_some_and(|l| l == &[None, None]) {
+        out.pop();
+    }
+    out
+}
+
 fn values_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Vec<f64>> {
     let n = kind.dofs().len();
     let list: Vec<Value> = match (p.get("values"), p.get("value")) {
@@ -1470,7 +1513,7 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         offset,
         angle: angle.unwrap_or(0.0),
         suppressed: false,
-        exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p), limits: limit_exprs(p) },
         offset_xy,
         captured: None,
         constraint: None,
@@ -1518,7 +1561,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         offset: 0.0,
         angle: 0.0,
         suppressed: false,
-        exprs: Default::default(),
+        exprs: JointExprs { limits: limit_exprs(p), ..Default::default() },
         offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
@@ -1711,7 +1754,7 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
 }
 
 /// Joints `joint.reach` takes at most in `joints`.
-pub(crate) const MAX_REACH_JOINTS: usize = 1000;
+pub const MAX_REACH_JOINTS: usize = 1000;
 
 fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.reach";
@@ -1740,7 +1783,30 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Array(a)) if a.len() <= MAX_REACH_JOINTS => Some(a.iter().map(|v| joint_id(s, Some(v), cmd)).collect::<Result<BTreeSet<u64>>>()?),
         Some(_) => return Err(bad(cmd, format!("`joints` must be a list of joints (ids or names), at most {MAX_REACH_JOINTS}"))),
     };
+    let from = match p.get("from") {
+        None => Vec::new(),
+        Some(Value::Array(a)) if a.len() <= MAX_REACH_JOINTS => a.iter().map(|v| start_values(s, v, cmd)).collect::<Result<Vec<_>>>()?,
+        Some(_) => return Err(bad(cmd, format!("`from` must be a list of {{joint, values}}, at most {MAX_REACH_JOINTS}"))),
+    };
     let before = super::motion::positions(s);
+    // Only the joints that start elsewhere than the design has them: a `from` that names where
+    // they are already changes nothing (and so adds no undo step).
+    let from: Vec<(u64, Vec<f64>)> =
+        from.into_iter().filter(|(id, q)| s.doc.assembly.joints.iter().find(|j| j.id == *id).is_some_and(|j| j.values != *q)).collect();
+    // With contact sets on, the jump to `from` would not be checked for parts passing into each
+    // other (a joint drag sends none then: its frames run on the design).
+    if !from.is_empty() && s.doc.assembly.contact_enabled {
+        return Err(bad(cmd, "`from` can't be used with contact sets on: the move to it isn't checked for contact"));
+    }
+    let seeded: BTreeSet<u64> = from.iter().map(|(id, _)| *id).collect();
+    if !from.is_empty() {
+        let doc = s.doc_mut();
+        for (id, q) in from {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) {
+                j.values = q;
+            }
+        }
+    }
     let st = s.model.state();
     let r = joints::reach(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only });
     let mut stopped_by_contact = None;
@@ -1777,6 +1843,8 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // Loops closed again from there, and where it ended up.
     let sol = if response_analysis(p) == joints::Analysis::Placement { place(s) } else { resolve(s) };
+    // That solve placed every occurrence for this model: the refresh after the command keeps it.
+    s.joints_placed();
     let t = joints::occurrence_world(&s.doc, occ);
     let got = solidcraft_doc::apply_point(&t, at);
     let mut there = got.dist(to) <= joints::REACH_TOL;
@@ -1791,10 +1859,13 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     let name = |id: u64| s.doc.assembly.joints.iter().find(|j| j.id == id);
     // As joint.list gives them: with what motion links set.
     let effective = joints::joint_values(&s.doc.assembly);
+    // The joints the reach moved, and those `from` set elsewhere first.
     let values = reached
         .values
         .keys()
-        .filter_map(|id| name(*id))
+        .copied()
+        .chain(seeded.iter().copied().filter(|id| !reached.values.contains_key(id)))
+        .filter_map(name)
         .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, effective.get(&j.id).unwrap_or(&j.values)) })
         .collect();
     // A contact that stopped it came first: the limits and loop the reach found further on are
@@ -1831,6 +1902,73 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     reply(cmd, result)
+}
+
+/// One of `joint.reach`'s `from`: a joint and the values it starts from (joint.list's units),
+/// within its limits.
+fn start_values(s: &Session, v: &Value, cmd: &str) -> Result<(u64, Vec<f64>)> {
+    let id = joint_id(s, v.get("joint"), cmd)?;
+    let j = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "`from`: no such joint"))?;
+    // A list of numbers only, also for a joint that has no value: a value that is none must not
+    // be passed over, leaving the rest to fit.
+    let n = j.kind.dofs().len();
+    let values = v.get("values").and_then(Value::as_array).ok_or_else(|| bad(cmd, format!("`from`: {} takes {n} finite values", j.name)))?;
+    let given: Vec<f64> = values.iter().map(Value::as_f64).collect::<Option<Vec<f64>>>().unwrap_or_else(|| vec![f64::NAN; values.len().max(1)]);
+    if given.len() != n || given.iter().any(|x| !x.is_finite() || x.abs() >= 1e9) {
+        return Err(bad(cmd, format!("`from`: {} takes {n} finite values", j.name)));
+    }
+    let mut q: Vec<f64> = given.iter().enumerate().map(|(i, x)| if j.kind.is_angle(i) { x.to_radians() } else { *x }).collect();
+    joints::clamp(j, &mut q);
+    Ok((id, q))
+}
+
+/// `joint.reach`'s `from` for starting from the joint values `start` (joint id → values): those
+/// that differ from `design`'s, in joint.list's units. A joint drag passes it on release, so the one
+/// reach that applies the drag is the reach its last frame showed.
+pub fn reach_from(design: &Document, start: &BTreeMap<u64, Vec<f64>>) -> Value {
+    design
+        .assembly
+        .joints
+        .iter()
+        .filter_map(|j| Some((j, start.get(&j.id).filter(|q| **q != j.values)?)))
+        .map(|(j, q)| {
+            let values: Vec<f64> = q.iter().enumerate().map(|(i, v)| if j.kind.is_angle(i) { v.to_degrees() } else { *v }).collect();
+            json!({"joint": j.id, "values": values})
+        })
+        .collect()
+}
+
+/// One frame of a joint drag, shown before it is applied (#6325): the reach `joint.reach` with
+/// `quiet` does (at a frame's effort, [`joints::reach_frame`]), then the solve that places every
+/// occurrence, done to `doc`, the drag's own copy of the design. A drag ran the command on each
+/// pointer move, which evaluated the whole design again, re-placed and redrew it and kept an undo
+/// step up to date; the drag now shows each frame and applies only the last. Nothing is evaluated
+/// here: features that read where parts are, and contact sets, are the command's on release.
+/// `carry` is the drag's own, from its first frame to its last.
+pub fn reach_preview(
+    doc: &mut Document,
+    st: &ModelState,
+    r: &joints::Reach,
+    carry: &mut joints::FrameCarry,
+) -> std::result::Result<joints::Reached, String> {
+    let reached = joints::reach_frame(doc, st, r, carry);
+    if let Ok(x) = &reached {
+        for (id, q) in &x.values {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == *id) {
+                j.values.clone_from(q);
+            }
+        }
+    }
+    // As `place` does after it.
+    let changed = reexpressed(doc, st);
+    set_reexpressed(doc, changed);
+    let changed = recoupled(doc, st);
+    set_recoupled(doc, changed);
+    let sol = joints::solve_holding_with_analysis(doc, st, &joints::Held::new(), joints::Analysis::Placement);
+    if !sol.world.is_empty() {
+        doc.apply_joint_solution(&sol);
+    }
+    reached
 }
 
 /// The centre of the box around an occurrence's bodies, in its own coordinates (its origin when
@@ -2237,6 +2375,8 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(slot) = j.limits.get_mut(i) {
         *slot = lim;
     }
+    // An end typed as an expression keeps it, so the limit follows its parameters (#20242).
+    j.exprs.set_limit(i, [typed(p.get("min")), typed(p.get("max"))]);
     let mut q = j.values.clone();
     q.resize(kind.dofs().len(), 0.0);
     joints::clamp(j, &mut q);
@@ -2326,11 +2466,17 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         j.values.resize(k.dofs().len(), 0.0);
         j.limits.resize(k.dofs().len(), None);
         j.exprs.values.truncate(k.dofs().len());
+        j.exprs.limits.truncate(k.dofs().len());
         // A value that changes unit with the type (a slide becoming a turn) drops its expression,
         // which would no longer work out and leave the joint out of the solve.
         for i in 0..j.exprs.values.len() {
             if was.is_angle(i) != k.is_angle(i) {
                 j.exprs.set_value(i, None);
+            }
+        }
+        for i in 0..j.exprs.limits.len() {
+            if was.is_angle(i) != k.is_angle(i) {
+                j.exprs.set_limit(i, [None, None]);
             }
         }
     }

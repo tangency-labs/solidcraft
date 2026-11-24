@@ -15,7 +15,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
@@ -145,7 +145,12 @@ pub type Sink = Arc<dyn Fn(Vec<String>) + Send + Sync>;
 /// Listen at `endpoint` on a thread of its own, handing the files of each valid request to `sink`.
 /// Does nothing (`false`) when another instance already answers there, so a `--new-instance` run
 /// never takes the channel from the first one, or when the channel cannot be made.
+#[cfg(test)]
 pub fn listen(endpoint: &Endpoint, sink: Sink) -> bool {
+    listen_while(endpoint, sink, Arc::new(AtomicBool::new(true)))
+}
+
+fn listen_while(endpoint: &Endpoint, sink: Sink, open: Arc<AtomicBool>) -> bool {
     if forward(endpoint, &[]) {
         return false;
     }
@@ -163,11 +168,11 @@ pub fn listen(endpoint: &Endpoint, sink: Sink) -> bool {
                     continue;
                 }
                 busy.fetch_add(1, Ordering::SeqCst);
-                let (busy, sink, token) = (busy.clone(), sink.clone(), token.clone());
+                let (busy, sink, token, open) = (busy.clone(), sink.clone(), token.clone(), open.clone());
                 let served = std::thread::Builder::new().name("single-instance-serve".into()).spawn({
                     let busy = busy.clone();
                     move || {
-                        serve(stream, &token, &sink);
+                        serve(stream, &token, &sink, &open);
                         busy.fetch_sub(1, Ordering::SeqCst);
                     }
                 });
@@ -204,11 +209,12 @@ fn create_listener(endpoint: &Endpoint) -> std::io::Result<interprocess::local_s
 }
 
 /// One connection: read the request, answer, and pass the files on.
-fn serve(stream: Stream, token: &str, sink: &Sink) {
+fn serve(stream: Stream, token: &str, sink: &Sink, open: &AtomicBool) {
     let mut stream = BufReader::new(stream);
     let mut line = String::new();
     let read = (&mut stream).take(MAX_LINE).read_line(&mut line);
     let reply = match read {
+        _ if !open.load(Ordering::SeqCst) => "refused: closing".to_string(),
         Ok(n) if n > 0 && line.ends_with('\n') => match parse_request(&line, token) {
             Ok(files) => {
                 let files = valid_files(&files);
@@ -246,7 +252,7 @@ pub fn cleanup(endpoint: &Endpoint) {
 /// Files that arrived and have not been opened yet.
 static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// The endpoint this instance listens at, for [`stop`].
-static LISTENING: OnceLock<Endpoint> = OnceLock::new();
+static LISTENING: OnceLock<(Endpoint, Arc<AtomicBool>)> = OnceLock::new();
 
 /// Start listening for files other launches hand over; the window comes forward and opens them.
 pub fn start(settings: Option<&Path>, ctx: &egui::Context) {
@@ -258,15 +264,19 @@ pub fn start(settings: Option<&Path>, ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         ctx.request_repaint();
     });
-    if listen(&endpoint, sink) {
-        let _ = LISTENING.set(endpoint);
+    let open = Arc::new(AtomicBool::new(true));
+    if listen_while(&endpoint, sink, open.clone()) {
+        let _ = LISTENING.set((endpoint, open));
     }
 }
 
 /// Stop advertising this instance (at exit).
 pub fn stop() {
-    if let Some(endpoint) = LISTENING.get() {
-        cleanup(endpoint);
+    if let Some((endpoint, open)) = LISTENING.get() {
+        // Only once: a second call at exit would delete the token the next launch just wrote.
+        if open.swap(false, Ordering::SeqCst) {
+            cleanup(endpoint);
+        }
     }
 }
 
@@ -421,6 +431,26 @@ mod tests {
         assert!(!ask(&endpoint, &request));
         std::thread::sleep(Duration::from_millis(100));
         assert!(got.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #19340: after `stop`, a successor this window starts must not hand its designs back to it.
+    #[test]
+    fn a_stopped_instance_takes_no_files() {
+        let dir = temp("stopped");
+        let file = dir.join("part.sc");
+        std::fs::write(&file, b"x").unwrap();
+        start(Some(&dir), &egui::Context::default());
+        let endpoint = Endpoint::in_settings(&dir).unwrap();
+        let token = std::fs::read_to_string(&endpoint.token).unwrap();
+        stop();
+        let request = json!({ "token": token.trim(), "files": [file.to_string_lossy()] }).to_string();
+        assert!(!ask(&endpoint, &request), "a stopped instance took a hand-off");
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(take().is_empty());
+        std::fs::write(&endpoint.token, "next launch").unwrap();
+        stop();
+        assert!(endpoint.token.exists(), "a second stop removed the next launch's token");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

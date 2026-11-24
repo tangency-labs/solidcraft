@@ -1221,6 +1221,7 @@
   "cmd.motion_list": "列出運動研究",
   "cmd.motion_play": "播放運動研究",
   "cmd.motion_plot": "運動研究圖表",
+  "cmd.motion_simulate": "運動模擬",
   "cmd.motion_study": "運動研究",
   "cmd.motion_trace": "運動軌跡",
   "cmd.motion_trace_edit": "編輯運動軌跡",

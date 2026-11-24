@@ -2,7 +2,8 @@
 //! export; B-rep features refuse them.
 
 use solidcraft_geom::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
+use std::hash::{Hash, Hasher};
 
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
@@ -72,7 +73,7 @@ impl TriMesh {
         let mut set = std::collections::HashSet::new();
         for t in &self.triangles {
             for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-                set.insert((a.min(b), a.max(b)));
+                set.insert(MeshEdge::new(a, b));
             }
         }
         set.len()
@@ -85,6 +86,22 @@ impl TriMesh {
             .filter_map(|t| Some((self.positions.get(t[0] as usize)?, self.positions.get(t[1] as usize)?, self.positions.get(t[2] as usize)?)))
             .map(|(a, b, c)| a.dot(b.cross(*c)))
             .sum()
+    }
+}
+
+#[derive(PartialEq, Eq)]
+struct MeshEdge(u32, u32);
+
+impl MeshEdge {
+    fn new(a: u32, b: u32) -> Self {
+        Self(a.min(b), a.max(b))
+    }
+}
+
+impl Hash for MeshEdge {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash both indices in one write while keeping the table entries aligned to u32.
+        state.write_u64((u64::from(self.0) << 32) | u64::from(self.1));
     }
 }
 
@@ -180,24 +197,31 @@ fn unify_winding(m: &mut TriMesh) -> bool {
     // A side fits in a u32 because construction caps the mesh at MAX_TRIANGLES.
     const _: () = assert!(MAX_TRIANGLES < (u32::MAX / 3) as usize);
     let mut links = vec![[UNPAIRED; 3]; m.triangles.len()];
+    let side_links = links.as_flattened_mut();
     let mut first_sides = HashMap::new();
     for (triangle, &[a, b, c]) in (0u32..).zip(&m.triangles) {
         for (side, (a, b)) in (0u32..).zip([(a, b), (b, c), (c, a)]) {
             let current = triangle * 3 + side;
-            let first = first_sides.entry((a.min(b), a.max(b))).or_insert(current);
-            if *first == current || *first == UNPAIRED {
+            let first = match first_sides.entry(MeshEdge::new(a, b)) {
+                Entry::Vacant(entry) => {
+                    entry.insert(current);
+                    continue;
+                }
+                Entry::Occupied(entry) => entry.into_mut(),
+            };
+            if *first == UNPAIRED {
                 continue;
             }
-            let Some(previous) = links.get_mut((*first / 3) as usize).and_then(|row| row.get_mut((*first % 3) as usize)) else { continue };
+            let Some(previous) = side_links.get_mut(*first as usize) else { continue };
             if *previous == UNPAIRED {
                 *previous = current;
-                if let Some(link) = links.get_mut(triangle as usize).and_then(|row| row.get_mut(side as usize)) {
+                if let Some(link) = side_links.get_mut(current as usize) {
                     *link = *first;
                 }
             } else {
                 // The third use disconnects the first two; further uses stay disconnected.
                 let second = std::mem::replace(previous, UNPAIRED);
-                if let Some(link) = links.get_mut((second / 3) as usize).and_then(|row| row.get_mut((second % 3) as usize)) {
+                if let Some(link) = side_links.get_mut(second as usize) {
                     *link = UNPAIRED;
                 }
                 *first = UNPAIRED;

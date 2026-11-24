@@ -320,7 +320,8 @@ impl Brep {
     /// outside), open at the faces nearest to `open_faces` (each within `tolerance`); none gives
     /// a closed hollow body. An inward wall that leaves no room inside is [`Error::NoRoom`]; one
     /// whose walls would just meet (a hole exactly twice the wall from a side) is
-    /// [`Error::WallsTouch`].
+    /// [`Error::WallsTouch`]. A shell that fails on a body with a face whose outline touches
+    /// itself (a pad's corner on its face's edge) is [`Error::OutlineTouches`].
     pub fn shell(&self, open_faces: &[[f64; 3]], tolerance: f64, thickness: f64) -> Result<Brep> {
         let r = core::offset::shell(self.core(), open_faces, tolerance, thickness).map(Brep::made_core);
         trace::made(

@@ -396,6 +396,35 @@ impl Session {
         }
     }
 
+    /// Where component `component`'s first placement is shown: the design's own
+    /// ([`solidcraft_doc::Document::component_transform`]) with a joint drag's shown frame over it
+    /// ([`Session::drag_moves`]), so what is drawn in the component's frame (its construction
+    /// geometry) follows the part while it is dragged.
+    pub fn shown_component_transform(&self, component: u64) -> Mat {
+        let moves = self.drag_moves();
+        if moves.is_empty() {
+            return self.doc.component_transform(component);
+        }
+        let mut world = IDENTITY;
+        for id in self.doc.first_path(component) {
+            let Some(o) = self.doc.occurrences.iter().find(|o| o.id == id) else { return self.doc.component_transform(component) };
+            world = mat_mul(&world, moves.get(&id).unwrap_or(&o.transform));
+        }
+        world
+    }
+
+    /// [`Session::occurrence_placement`] as the view shows it: with a joint drag's shown frame
+    /// over the moves not captured yet.
+    pub fn shown_occurrence_placement(&self, path: &[u64]) -> Result<OccurrencePlacement> {
+        let drag = self.drag_moves();
+        if drag.is_empty() {
+            return self.occurrence_placement(path);
+        }
+        let mut moves = self.pending_moves.clone();
+        moves.extend(drag.iter().map(|(o, m)| (*o, *m)));
+        self.occurrence_placement_with(path, &moves)
+    }
+
     /// Document with uncaptured occurrence positions applied, without changing saved geometry.
     pub fn placed_document(&self) -> std::borrow::Cow<'_, solidcraft_doc::Document> {
         if self.pending_moves.is_empty() {

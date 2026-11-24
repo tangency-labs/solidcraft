@@ -44,7 +44,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
-use crate::geom::tol::{contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones};
+use crate::geom::tol::{coincidence_tol_3d, contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, PointClassType, PointClassification,
 };
@@ -483,12 +483,18 @@ impl<O: ClassObject> CurveClassification<O> {
             if let (true, Some(seam_ends)) = (narrowed, edge.seam) {
                 // A stretch along the seam that the intersector reports only within the
                 // band of both tolerances stands where an enclosure proves every point of
-                // it within the curve's reach of the seam, or within both tolerances of a
-                // vertex at which the seam ends on a boundary of material.
+                // it within the curve's reach of the seam, or on a vertex at which the seam
+                // ends on a boundary of material. Not upstream: a point is on the vertex
+                // by the coincidence rule (`coincidence_tol_3d`, the larger of the two
+                // tolerances and the contact tolerance), as a point is on a proto vertex
+                // (docs/booleans.md, "One point or two"), not within their sum: a curve
+                // leaving a cylinder's seam 2.2e-5 from the seam's end vertex otherwise ran
+                // "along" the seam to a point the proto vertices hold apart from the
+                // vertex, and the cut that crosses there came out empty.
                 let balls: Vec<(Point3, f64)> = seam_ends
                     .iter()
                     .flatten()
-                    .map(|&(p, zone)| (p, xsect_tol_3d_from_zones(k, source_zone, zone)))
+                    .map(|&(p, zone)| (p, coincidence_tol_3d(k, source_zone, zone)))
                     .collect();
                 let wide = find(summed)?;
                 for run in wide.as_slice() {

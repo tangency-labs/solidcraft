@@ -290,8 +290,18 @@ Normal command output and plugin result JSON are unchanged. The counter message 
 model data or package paths.
 
 Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)).
-There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
-network integration, persistent guest store, signed index, custom panels or plugin-supplied icons.
+Compiled components are kept between sessions in Wasmtime's own compilation cache, in the
+`plugin-compile` folder of the per-user cache folder (`solidcraft_engine::plugin::configure_compile_cache`).
+Its key covers the component's bytes, the Wasmtime version and every compile setting, fuel metering and
+epoch interruption included; an entry that fails Wasmtime's checks is compiled again. Wasmtime checks an
+entry's format and settings, not its machine code, so whoever can write that folder can change the code
+a plugin call runs: it is the user's own folder, as trusted as the app's files.
+
+There is no unsafe deserialization in SolidCraft's code, no WASI filesystem/clock/socket/process API,
+network integration, persistent guest store, signed index or plugin-supplied icons.
+The optional `ui@0.1` capability provides host-drawn panels, with declarations in `runtime.ui`
+and the matching `ui-provider.describe` export. Panel updates use the command transaction and
+are merged by the window once per frame; see [Docked panels](plugins.md#docked-panels).
 A plugin keeps data in a design through the `storage.*` commands, not a WIT interface of its own.
 `manifest()` is not used.
 

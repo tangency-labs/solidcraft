@@ -631,6 +631,12 @@ impl Document {
         crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
     }
 
+    /// [`Document::placements`] with some occurrences' transforms (in their parents) replaced:
+    /// moves not captured yet, or a joint drag's frame, drawn without copying the design.
+    pub fn placements_moved(&self, moves: &std::collections::BTreeMap<u64, Mat>) -> Vec<(u64, Vec<u64>, Mat)> {
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| moves.get(&o.id).copied().unwrap_or(o.transform))
+    }
+
     /// Every placement inside `component`, `component` itself first: (component, occurrence
     /// path ids from `component`, transform into `component`'s frame). Limited as
     /// [`Document::placements`] is.

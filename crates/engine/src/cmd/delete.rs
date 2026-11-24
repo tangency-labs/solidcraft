@@ -20,12 +20,12 @@ use crate::{EngineError, Result, Sel, Session};
 const DELETE_CONTRACT: TypedContract<SelectionDeleteParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", crate::checked!("selection.delete", delete))
-    .open_part()
+    .open_part().selection_edit()
     .icon("delete")
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
     .params(
-        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went], deleted: the names of the views that went with those asked for",
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, sketches, fills: [the ids that went], deleted: the names of the views that went with those asked for",
     )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -59,7 +59,8 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Deletes the views, dimensions, balloons and notes `items` name in the drawing open, as one change: the
-/// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated.
+/// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated. A
+/// view takes its sketches and their fills with it; the reply lists them too.
 fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value> {
     let cmd = "selection.delete";
     let model = || bad(cmd, "a drawing's objects are deleted apart from the model's: select one or the other");
@@ -67,6 +68,31 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     let asks = |v: &Value| !v.is_null() && v.as_array().is_none_or(|list| !list.is_empty());
     if ["components", "occurrences", "canvases", "point_clouds", "joints"].iter().any(|key| p.get(*key).is_some_and(asks)) {
         return Err(model());
+    }
+    if s.sheet_sketching()
+        && !items.is_empty()
+        && items.iter().all(|item| matches!(item, Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchConstraint { .. }))
+    {
+        let sketch = s.active_sheet_sketch.as_ref().map(|entry| entry.sketch);
+        let entities = items
+            .iter()
+            .map(|item| match item {
+                Sel::SketchCurve { id, sketch: target } if target.is_none() || *target == sketch => Ok(id.clone()),
+                Sel::SketchPoint { id } | Sel::SketchConstraint { id } => Ok(id.clone()),
+                _ => Err(bad(cmd, "sketch geometry must belong to the active sheet sketch")),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let spec = super::find_command("sketch.delete").ok_or_else(|| EngineError::UnknownCommand("sketch.delete".into()))?;
+        spec.run_nested_continuing(s, &json!({"entities":entities}))?;
+        return serde_json::to_value(SelectionDeleteResult {
+            deleted: Vec::new(),
+            deleted_joints: Vec::new(),
+            bodies: Vec::new(),
+            would_fail: Vec::new(),
+            skipped: Vec::new(),
+            param_warnings: Vec::new(),
+        })
+        .map_err(|error| bad(cmd, error.to_string()));
     }
     let with_projected = super::drawing_sheet::contents_delete(cmd, p, "a view goes with the views projected or cut from it")?;
     let open = s.drawing(cmd)?.clone();
@@ -121,15 +147,20 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     gone.notes.extend(notes);
     gone.notes.sort_unstable();
     gone.notes.dedup();
+    if s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.goes_with(open.id, &gone)) {
+        return Err(bad(cmd, "finish or cancel the sketch being edited before deleting its view"));
+    }
     s.edit_drawing(cmd, |d| {
         d.remove_objects(&gone);
         Ok(())
     })?;
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
     let (views, dimensions, balloons) = (listed(&gone.views), listed(&gone.dimensions), listed(&gone.balloons));
-    Ok(
-        json!({ "deleted": also, "deleted_joints": [], "would_fail": [], "skipped": [], "views": views, "dimensions": dimensions, "balloons": balloons, "notes": listed(&gone.notes) }),
-    )
+    let (notes, sketches, fills) = (listed(&gone.notes), listed(&gone.sketches), listed(&gone.fills));
+    Ok(json!({
+        "deleted": also, "deleted_joints": [], "would_fail": [], "skipped": [],
+        "views": views, "dimensions": dimensions, "balloons": balloons, "notes": notes, "sketches": sketches, "fills": fills,
+    }))
 }
 
 /// The delete `p` asks for is of the open drawing's objects (its undo step is the drawing's): it
@@ -222,6 +253,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 None => faces.push((body.clone(), vec![*point])),
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
+            Sel::PointCloudPoint { .. } => skip("points belong to their point cloud".into()),
             // In the sketch being edited, a profile stands for the curves around it (#7107);
             // its holes are shapes of their own and stay. A letter's outline stands for its
             // whole text, so no counters are left behind.
@@ -891,6 +923,17 @@ mod tests {
         assert_eq!(s.open_drawing, open);
         assert_eq!(s.undo.last().unwrap().part, None, "the model's step");
         assert_eq!(s.drawing("test").unwrap(), &drawing);
+    }
+
+    #[test]
+    fn selected_drawing_items_keep_their_drawing_history_owner() {
+        let (mut s, _, dimension, _, drawing) = sheet_objects();
+        s.selection = vec![Sel::Drawing { drawing, object: dimension }];
+        let params = json!({"items":s.selection});
+        run(&mut s, "selection.delete", params);
+        assert_eq!(s.undo.last().unwrap().part, Some(drawing));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.drawing("test").unwrap().has_object(dimension));
     }
 
     /// Seeded selections of the drawing's objects, deleted or dry-run in turn with undos between:

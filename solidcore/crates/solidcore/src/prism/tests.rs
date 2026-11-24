@@ -11,7 +11,7 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
-use super::extrude::extrude_region;
+use super::extrude::{extrude_region, symmetric_offset_intervals, symmetric_offset_probe_points};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -19,7 +19,9 @@ use super::profile::{
     check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
     Loop2, ProfileRefusal, Region2, Seg2,
 };
-use super::read::{arc_before_line, planar_curves, planar_pieces, PlanarPiece, Run};
+use super::read::{
+    arc_before_line, circular_boundary, planar_curves, planar_pieces, PlanarPiece, Run,
+};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
@@ -1086,6 +1088,39 @@ fn a_curve_near_a_circle_is_not_an_arc_ending_off_it() {
             "{tol}: {segs:?}"
         );
     }
+}
+
+/// A circular reading keeps the arc only when each end it returns lies within the tolerance of its
+/// vertex: a vertex just inside is read, one just outside is refused (the edge stays a spline),
+/// and one exactly on the circle is read.
+#[test]
+fn a_circular_reading_ends_within_tolerance_of_its_vertices() {
+    let k = Kernel::default();
+    let w = FRAC_1_SQRT_2;
+    // the quarter of the unit circle from (1, 0) to (0, 1)
+    let (c, iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0]],
+    );
+    let tol = 1e-6;
+    let read_at = |first_x: f64, last_y: f64| {
+        let run = Run {
+            curve: &c,
+            interval: iv,
+            forward: true,
+            ends: [
+                crate::geom::vector3d::Vec3::new(first_x, 0.0, 0.0),
+                crate::geom::vector3d::Vec3::new(0.0, last_y, 0.0),
+            ],
+        };
+        circular_boundary(&k, &run, &xy(), p(0.0, 0.0), 1.0, tol, &mut 2_000_000)
+    };
+    assert!(read_at(1.0, 1.0).is_some());
+    assert!(read_at(1.0 + 0.9 * tol, 1.0).is_some());
+    assert!(read_at(1.0, 1.0 - 0.9 * tol).is_some());
+    assert!(read_at(1.0 + 1.1 * tol, 1.0).is_none());
+    assert!(read_at(1.0, 1.0 + 1.1 * tol).is_none());
 }
 
 /// A spline of several spans reads as the one B-spline it is for a sketch, run back, its ends
@@ -2945,4 +2980,31 @@ mod path_export_regressions {
         assert!(!pts.contains(&Vec2::new(0.0, -1.0)));
         assert_eq!(pts.len(), 5);
     }
+}
+
+#[test]
+fn symmetric_offset_intervals_and_probes_are_symmetric_about_sketch_plane() {
+    assert_eq!(
+        symmetric_offset_intervals(3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+    assert_eq!(
+        symmetric_offset_intervals(-3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+
+    // `base` in auto-operation is already shifted by `start` along `n`.
+    let n = [0.0, 0.0, 1.0];
+    let pos_start_probes = symmetric_offset_probe_points([0.0, 0.0, 3.0], n, 3.0, 10.0, 0.5);
+    assert_eq!(
+        pos_start_probes,
+        [
+            [0.0, 0.0, 3.5],
+            [0.0, 0.0, 5.5],
+            [0.0, 0.0, -3.5],
+            [0.0, 0.0, -5.5],
+        ]
+    );
+    let neg_start_probes = symmetric_offset_probe_points([0.0, 0.0, -3.0], n, -3.0, 10.0, 0.5);
+    assert_eq!(neg_start_probes, pos_start_probes);
 }

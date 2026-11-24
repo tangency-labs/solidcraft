@@ -40,7 +40,7 @@ fn schemas_and_the_key_check_agree() {
         &["axis", "body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "path", "plane", "point", "x", "z"],
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
-    assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "joints", "occurrence", "point", "quiet", "z"]);
+    assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "from", "joints", "occurrence", "point", "quiet", "z"]);
     assert_keys(input_schema_for::<MotionLinkParams>(), &["a", "b", "ia", "ib", "link", "offset", "quiet", "ratio"]);
     assert_keys(input_schema_for::<GearParams>(), &["a", "b", "internal", "link", "quiet", "ra", "rb", "reverse"]);
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);
@@ -201,6 +201,9 @@ fn strict_keeps_todays_errors() {
         ("joint.reach", json!({"occurrence": 0, "point": [0, 0, 0], "joints": null})),
         ("joint.reach", json!({"occurrence": 0, "point": [0, 0, 0], "joints": [true]})),
         ("joint.reach", json!({"occurrence": 0, "point": [0, 0, 0], "joints": vec![1; 1001]})),
+        ("joint.reach", json!({"occurrence": 0, "point": [0, 0, 0], "from": null})),
+        ("joint.reach", json!({"occurrence": 0, "point": [0, 0, 0], "from": {"joint": 1, "values": [0]}})),
+        ("joint.reach", json!({"occurrence": 0, "point": [0, 0, 0], "from": vec![json!({"joint": 1, "values": [0]}); 1001]})),
         // joint.motion_link, joint.gear, joint.rack_pinion, joint.screw and joint.cam
         ("joint.motion_link", json!({})),
         ("joint.motion_link", json!({"a": true, "b": 1, "ratio": 1})),

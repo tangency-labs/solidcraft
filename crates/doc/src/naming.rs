@@ -254,8 +254,8 @@ impl FaceIndex {
         FaceIndex { faces }
     }
 
-    /// The face a point lies on (within `tol`).
-    fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+    /// The face a point lies on (within `tol`) and its distance to the point.
+    fn face_and_dist_at(&self, p: Vec3, tol: f64) -> Option<(f64, usize)> {
         let mut best: Option<(f64, usize)> = None;
         for (i, (bounds, tris)) in self.faces.iter().enumerate() {
             if !bounds.inflated(tol).contains(p) {
@@ -266,7 +266,12 @@ impl FaceIndex {
                 best = Some((d, i));
             }
         }
-        best.map(|(_, i)| i)
+        best
+    }
+
+    /// The face a point lies on (within `tol`).
+    fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+        self.face_and_dist_at(p, tol).map(|(_, i)| i)
     }
 }
 
@@ -529,6 +534,96 @@ fn predecessor(b: &ModelBody) -> Option<&ModelBody> {
     }
     let o = b.names.origin.as_ref().filter(|o| o.depth < MAX_DEPTH)?;
     o.before.body(&b.name)
+}
+
+/// The input of a non-copy rigid transform whose exact history keeps every face and edge
+/// one-to-one. Compatibility names may cross these steps, never a copy or a topology edit.
+pub(crate) fn rigid_predecessor(b: &ModelBody) -> Option<&ModelBody> {
+    use solidcraft_kernel::history::{EdgeOrigin, FaceOrigin};
+
+    let origin = b.names.origin.as_ref()?;
+    let bodies = match &origin.feature.kind {
+        FeatureKind::Move { bodies, copy: false, .. } | FeatureKind::Align { bodies, .. } => bodies,
+        _ => return None,
+    };
+    if !bodies.iter().any(|name| *name == b.name) {
+        return None;
+    }
+    let lineage = b.names.lineage.as_ref()?;
+    let [operand] = lineage.operands.as_slice() else { return None };
+    let crate::lineage::Operand::Body(name) = operand.as_ref() else { return None };
+    let source = origin.before.body(name)?;
+    let history = &lineage.history;
+    if history.operands != 1 || history.faces.len() != b.body.face_count() || history.edges.len() != b.body.edge_count() {
+        return None;
+    }
+    fn permutation(indices: impl Iterator<Item = Option<usize>>, count: usize) -> bool {
+        let mut seen = vec![false; count];
+        for index in indices {
+            let Some(slot) = index.and_then(|i| seen.get_mut(i)) else { return false };
+            if std::mem::replace(slot, true) {
+                return false;
+            }
+        }
+        seen.into_iter().all(|found| found)
+    }
+    let faces = history.faces.iter().map(|face| match face.origins.as_slice() {
+        [FaceOrigin::Face { operand: 0, face }] => Some(*face),
+        _ => None,
+    });
+    let edges = history.edges.iter().map(|edge| match edge.origins.as_slice() {
+        [EdgeOrigin::Edge { operand: 0, edge }] => Some(*edge),
+        _ => None,
+    });
+    (permutation(faces, source.body.face_count()) && permutation(edges, source.body.edge_count())).then_some(source)
+}
+
+/// An edge's direct source through a non-copy rigid transform or join. Like exact naming,
+/// follow only Body and intermediate Stage operands, never Copy, Inner or newly made geometry.
+pub(crate) fn inherited_edge_predecessor(b: &ModelBody, edge: usize) -> Option<(&ModelBody, usize)> {
+    use crate::Operation;
+    use crate::lineage::Operand;
+    use solidcraft_kernel::history::EdgeOrigin;
+
+    let origin = b.names.origin.as_ref()?;
+    match &origin.feature.kind {
+        FeatureKind::Move { copy: false, .. } | FeatureKind::Align { .. } => {
+            rigid_predecessor(b)?;
+        }
+        FeatureKind::Combine { operation: Operation::Join | Operation::NewBody, .. }
+        | FeatureKind::Box { operation: Operation::Join, .. }
+        | FeatureKind::Cylinder { operation: Operation::Join, .. }
+        | FeatureKind::Cone { operation: Operation::Join, .. }
+        | FeatureKind::Sphere { operation: Operation::Join, .. }
+        | FeatureKind::Torus { operation: Operation::Join, .. }
+        | FeatureKind::Extrude { operation: Operation::Join, .. }
+        | FeatureKind::Revolve { operation: Operation::Join, .. }
+        | FeatureKind::Sweep { operation: Operation::Join, .. }
+        | FeatureKind::Loft { operation: Operation::Join, .. }
+        | FeatureKind::Pipe { operation: Operation::Join, .. }
+        | FeatureKind::Coil { operation: Operation::Join, .. }
+        | FeatureKind::BoundaryFill { operation: Operation::Join, .. }
+        | FeatureKind::Thicken { operation: Operation::Join, .. }
+        | FeatureKind::SurfaceNetwork { operation: Operation::Join, .. } => {}
+        _ => return None,
+    }
+    let mut lineage = b.names.lineage.as_deref()?;
+    let mut edge = edge;
+    for _ in 0..MAX_DEPTH {
+        let [EdgeOrigin::Edge { operand, edge: source_edge }] = lineage.history.edges.get(edge)?.origins.as_slice() else { return None };
+        match lineage.operands.get(*operand)?.as_ref() {
+            Operand::Body(name) => {
+                let source = origin.before.body(name)?;
+                return (*source_edge < source.body.edge_count()).then_some((source, *source_edge));
+            }
+            Operand::Stage(stage) => {
+                edge = *source_edge;
+                lineage = &stage.lineage;
+            }
+            _ => return None,
+        }
+    }
+    None
 }
 
 /// Work out the names of the earlier versions of `b` that are not known yet, oldest first and
@@ -1177,18 +1272,32 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
-/// Names of the faces holding each point (any body; empty when none does).
+/// Names of the faces holding each point within modelling tolerance (any body; empty when none
+/// does). Resolve against the exact trimmed faces: a display chord can put a point near a round
+/// rim nearer the adjacent wall and save that wall's name instead.
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
+            let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+                // A point on a body's face, found by exact geometry, names that face (#20260).
+                if let Some(f) = b.body.face_at_point(*p).ok().flatten() {
+                    best = Some((0.0, face_names(b).get(f).cloned().unwrap_or_default()));
+                    break;
+                }
                 let tol = (b.body.size() * 1e-3).max(1e-3);
                 let idx = FaceIndex::new(&b.mesh(), face_count(b));
-                if let Some(f) = idx.face_at(*p, tol) {
-                    return face_names(b).get(f).cloned().unwrap_or_default();
+                if let Some((d, f)) = idx.face_and_dist_at(*p, tol)
+                    && best.as_ref().is_none_or(|(bd, _)| d < *bd)
+                {
+                    let name = face_names(b).get(f).cloned().unwrap_or_default();
+                    best = Some((d, name));
+                    if d == 0.0 {
+                        break;
+                    }
                 }
             }
-            String::new()
+            best.map(|(_, name)| name).unwrap_or_default()
         })
         .collect()
 }
@@ -1312,7 +1421,14 @@ pub fn face_spot(b: &ModelBody, index: usize) -> Option<FaceSpot> {
 pub fn named_face_point(st: &ModelState, body: Option<&str>, name: &str) -> Result<Vec3, String> {
     let hit = locate_one(st, body, name)?;
     let b = st.bodies.get(hit.body).ok_or_else(|| format!("no face is named `{name}`"))?;
-    face_spot(b, hit.face).map(|spot| spot.point).ok_or_else(|| format!("face `{name}` has no surface to pick"))
+    // The spot starts on a display triangle. Project it onto the known face before exact
+    // face-name capture; a non-analytic curved face has no analytic projection in `spot`.
+    // When the exact projection finds nothing, the spot itself is returned, as it always was.
+    let spot = face_spot(b, hit.face).ok_or_else(|| format!("face `{name}` has no surface to pick"))?;
+    match solidcraft_kernel::point_closest(spot.point, &b.body, solidcraft_kernel::Members::Faces(&[hit.face])) {
+        Ok(Some(nearest)) => Ok(nearest.to),
+        _ => Ok(spot.point),
+    }
 }
 
 /// The point on the face this name finds nearest `p`; `None` when the name finds no face (see
@@ -1355,6 +1471,41 @@ mod tests {
     fn same_hit(a: &FaceHit, b: &FaceHit) {
         assert_eq!((a.body, a.face, a.point), (b.body, b.face, b.point));
         assert_eq!((a.verified, a.on_point), (b.verified, b.on_point));
+    }
+
+    #[test]
+    fn rigid_predecessor_requires_a_non_copy_transform_and_bijective_history() {
+        use crate::lineage::Operand;
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+        let source = ModelBody::new("Box".into(), body.clone(), 1);
+        let before = Arc::new(ModelState::default().with_bodies(vec![source.clone()]));
+        let feature: Feature = serde_json::from_value(serde_json::json!({
+            "id": 2, "name": "Move", "type": "move", "bodies": ["Box"], "translate": ["0 mm", "0 mm", "0 mm"]
+        }))
+        .unwrap();
+        let mut lineage = Lineage::of(&body, Operand::Body("Box".into()));
+        // A rigid transform is allowed to reorder entities: the map must be bijective,
+        // rather than requiring that every index remain at its old position.
+        lineage.history.faces.swap(0, 1);
+        lineage.history.edges.swap(0, 1);
+        let made = |feature: Feature, lineage: Option<Lineage>| {
+            let mut moved = source.clone();
+            let origin = Arc::new(NamingOrigin { feature, before: before.clone(), depth: 1, mats: Vec::new() });
+            moved.names = NameCell::traced(Some(origin), lineage.map(Arc::new));
+            moved
+        };
+        assert!(rigid_predecessor(&made(feature.clone(), Some(lineage.clone()))).is_some());
+        assert!(rigid_predecessor(&made(feature.clone(), None)).is_none(), "no history is no proof");
+        let mut copied = feature.clone();
+        let FeatureKind::Move { copy, .. } = &mut copied.kind else { panic!("Move") };
+        *copy = true;
+        assert!(rigid_predecessor(&made(copied, Some(lineage.clone()))).is_none(), "a copy has its own names");
+        let mut duplicate = lineage.clone();
+        duplicate.history.faces[1].origins = duplicate.history.faces[0].origins.clone();
+        assert!(rigid_predecessor(&made(feature.clone(), Some(duplicate))).is_none(), "two faces from one source are not a rigid move");
+        let mut missing = lineage.clone();
+        missing.history.edges[0].origins.clear();
+        assert!(rigid_predecessor(&made(feature, Some(missing))).is_none(), "an edge with no source is not a rigid move");
     }
 
     #[test]
@@ -1665,5 +1816,23 @@ mod tests {
         let body = ModelBody::new("Cube".into(), body, 1);
         let pairs = mesh_adjacency(&body);
         assert_eq!(pairs.len(), 12);
+    }
+
+    #[test]
+    fn face_names_at_chooses_nearest_face_across_all_bodies() -> Result<(), Box<dyn std::error::Error>> {
+        let body1 = solidcraft_kernel::box_solid(Vec3::new(-22.3, 0.0, 0.0), Vec3::new(-22.3 + 200.0, 100.0, 20.0))?;
+        let mb1 = ModelBody::new("Body1".into(), body1, 1);
+
+        let body2 = solidcraft_kernel::box_solid(Vec3::new(-37.5, 0.0, 0.0), Vec3::new(-37.5 + 15.0, 100.0, 20.0))?;
+        let mb2 = ModelBody::new("Body2".into(), body2, 2);
+
+        let st = ModelState::default().with_bodies(vec![mb1.clone(), mb2.clone()]);
+
+        let pt = Vec3::new(-22.5, 50.0, 10.0);
+        let names = face_names_at(&st, &[pt]);
+        assert_eq!(names.len(), 1);
+        let body2_faces = face_names(&mb2);
+        assert!(body2_faces.contains(&names[0]), "expected a face belonging to Body2, got '{}'", names[0]);
+        Ok(())
     }
 }

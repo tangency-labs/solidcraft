@@ -33,6 +33,7 @@ fn fixture(name: &str) -> String {
     let (package, version) = API.split_once('@').unwrap();
     let source = match name {
         "command" => include_str!("../../../crates/engine/src/plugin/fixture.wat"),
+        "exporter" => include_str!("../../../crates/engine/src/plugin/exporter_fixture.wat"),
         _ => include_str!("../../../crates/engine/src/plugin/importer_fixture.wat"),
     };
     source.replace("\r\n", "\n").replace("__PACKAGE__", package).replace("__VERSION__", version)
@@ -223,6 +224,28 @@ fn test_runs_the_packages_cases_on_the_real_host() {
     let path = package(&refused.0, &net, &command_component("call $box"), &[("one-box", one_box)]);
     let output = cli(&["plugin", "test", &path]);
     assert!(!output.status.success() && text(&output.stderr).contains("does not pass plugin check"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn an_exporter_without_folder_grants_runs_default_and_explicit_cases() {
+    let scratch = Scratch::new();
+    let manifest = json!({"id":"writer","name":"Writer","version":"1.0.0","capabilities":["formats@0.1"],"runtime":{
+        "module":"exporter.wasm","commands":["document.inspect"],
+        "entries":[{"name":"copy","kind":"exporter","extensions":["smp"]}],
+        "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000}}});
+    let path = package(&scratch.0, &manifest, &wat::parse_str(fixture("exporter")).unwrap(), &[]);
+    for name in ["copy (defaults)", "write"] {
+        if name == "write" {
+            let case = json!({"entry":"copy","expect":{"reply":{"format":"writer.copy","plugin":"Writer"}}});
+            std::fs::write(Path::new(&path).join("tests/write.json"), case.to_string()).unwrap();
+        }
+        let output = cli(&["plugin", "test", &path, "--json"]);
+        assert!(output.status.success(), "{}{}", text(&output.stdout), text(&output.stderr));
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!((report["passed"].as_u64(), report["failed"].as_u64(), report["skipped"].as_u64()), (Some(1), Some(0), Some(0)), "{report}");
+        assert_eq!(report["cases"][0]["name"], name);
+        assert_eq!(report["cases"][0]["status"], "passed");
+    }
 }
 
 #[test]

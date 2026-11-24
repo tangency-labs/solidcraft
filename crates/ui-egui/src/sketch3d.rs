@@ -36,8 +36,10 @@ const ARROW: f32 = 60.0;
 
 /// Is the sketch being edited a 3D sketch?
 pub fn active(app: &SolveApp) -> bool {
-    let st = crate::open_meshing::session_world(&app.session);
-    app.session.active_sketch.and_then(|s| st.sketch(s)).is_some_and(|ss| ss.sketch.view.three_d)
+    // Asked at every frame: with no sketch open (a joint drag runs only then), the world is not
+    // asked for, which would place a drag's frame, every moved body again (#6325).
+    let Some(sketch) = app.session.active_sketch else { return false };
+    crate::open_meshing::session_world(&app.session).sketch(sketch).is_some_and(|ss| ss.sketch.view.three_d)
 }
 
 fn takes(cmd: &str) -> bool {
@@ -97,6 +99,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
                 }
             }
             Hit::Vertex { point, .. } => return Some((point, "Vertex")),
+            Hit::PointCloudPoint { point, .. } => return Some((point, "Cloud")),
             Hit::Edge { body, index, .. } => {
                 let ws = crate::open_meshing::session_world(&app.session);
                 let m = ws.body(&body)?.mesh();
@@ -334,15 +337,12 @@ pub fn click(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> bool {
     }
     TRIAD.with(|t| *t.borrow_mut() = hit.as_ref().map(|(w, i, _)| (w.clone(), *i)));
     if let Some((w, _, p)) = hit {
-        app.set_status(
-            format!(
-                "{w} at {}, {}, {}: drag an arrow (X, Y, Z) or the square (in the sketch plane); Delete removes it",
-                crate::prefs::show_mm(app, p.x, 1),
-                crate::prefs::show_mm(app, p.y, 1),
-                crate::prefs::show_mm(app, p.z, 1)
-            ),
-            false,
-        );
+        app.set_tool_hint(format!(
+            "{w} at {}, {}, {}: drag an arrow (X, Y, Z) or the square (in the sketch plane); Delete removes it",
+            crate::prefs::show_mm(app, p.x, 1),
+            crate::prefs::show_mm(app, p.y, 1),
+            crate::prefs::show_mm(app, p.z, 1)
+        ));
         return true;
     }
     false

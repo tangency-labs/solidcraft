@@ -9,6 +9,7 @@
 //! | `Recovery::support_edge` | calls [`super::super::p1::compute_support_edge`] |
 //! | `Recovery::retraced_end`, `Recovery::end_sections`, `RecoveryOps::end_vertex`, `RecoveryOps::recalc_through` | none (#2406: a rollover's piece traced again up to an End at a smooth vertex) |
 //! | `Recovery::keeps_round` (private) | none (#2406: the piece before a tangent rollover keeps its round by its definition) |
+//! | `Recovery::seed_from_solved_end`, `Recovery::side_edge_across_rolled_edge` (private) | none (#15767: both rail ends of an Nx1 corner past a partway tangent rollover re-solved, seeded from the first, on the face beyond's side edge) |
 //!
 //! Deviations: missing callees have typed call boundaries in `RecoveryOps`;
 //! their callers, mutations, cleanup and continuation are fully represented.
@@ -37,6 +38,7 @@ use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_solver::p1::{FilletSolverOffsetsData, OffsetSurfaceSlot};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
+use crate::error::blend::CrossingInput;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
@@ -134,6 +136,10 @@ pub(super) trait RecoveryOps {
             Some(EntityRef::Edge(e)) => Some(e),
             _ => None,
         };
+        let tolerance = c
+            .solver
+            .rollover_tolerance(c.k, c.target)?
+            .min(tangency_tolerance);
         let r = crate::blend::fillet_solver::p2::find_rollover_side_edge(
             c.k,
             c.fillets,
@@ -143,7 +149,7 @@ pub(super) trait RecoveryOps {
             original_uv_curve,
             original_surface,
             convex,
-            tangency_tolerance,
+            tolerance,
             &edge_of,
             &mut io,
         );
@@ -196,12 +202,23 @@ pub(super) trait RecoveryOps {
             c.solver, c.k, c.target, c.fillets, vertex, geom, which, rail, side, guess,
         )
     }
-    fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId) -> Result<bool> {
-        super::super::p1::test_manifold_tangent_rollover(
+    fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId, point: Point3) -> Result<bool> {
+        let tolerance = c.solver.rollover_tolerance(c.k, c.target)?;
+        let curve = edge::curve(c.target, side)?.ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::SideEdgeCurve)
+        })?;
+        let (parameter, _) = super::super::p3::drop_param(
             c.k,
-            c.target,
-            side,
-            c.solver.solver().tangency_tolerance,
+            curve,
+            &edge::interval(c.target, side)?,
+            point,
+            false,
+        )?
+        .ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::CrossingOnSideEdge)
+        })?;
+        super::super::p1::test_manifold_tangent_rollover_at(
+            c.k, c.target, side, parameter, tolerance,
         )
         .map(|r| r.0)
     }
@@ -413,6 +430,85 @@ fn required<T>(value: Option<T>) -> Result<T> {
 }
 
 impl Recovery<'_> {
+    /// Not upstream (#15767): gives rail end `to` of geometry `geom` the intersection point of
+    /// `from`, the other rail's end at the same corner just solved after a roll-over: the
+    /// round's ball there, with its UVs on the geometry's current offsets, from which `to`'s
+    /// solve starts. Nothing is done where either end has no vertex use on `geom`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the vertex use lookups.
+    fn seed_from_solved_end(
+        &mut self,
+        from: VertexId,
+        to: VertexId,
+        geom: FilletGeomId,
+    ) -> Result<()> {
+        let (Some(src), Some(dst)) = (
+            self.fillets.vu_at_rail_end(from, Some(geom), None, None)?,
+            self.fillets.vu_at_rail_end(to, Some(geom), None, None)?,
+        ) else {
+            return Ok(());
+        };
+        let tsect = self.fillets.fillet_vertexuse(src)?.tsect_pnt().clone();
+        self.fillets
+            .fillet_vertexuse_mut(dst)?
+            .set_tsect_pnt(&tsect);
+        Ok(())
+    }
+
+    /// Not upstream (#15767): re-points corner vertex `vertex`, found on side edge use E of
+    /// the face its rail rolled off, at the side edge use N on face `x` the rail rolled onto,
+    /// where E's far end has three edges: E, the tangent edge T rolled over (between the rail's
+    /// old face and `x`) and N (between `x` and E's other face, the end face)
+    /// ([`side_edgeuse_across_rolled_edge`]). A vertex on a side edge of `x` already, or with
+    /// no such continuation, is left as it is.
+    ///
+    /// [`side_edgeuse_across_rolled_edge`]: crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walks and the tangency test.
+    fn side_edge_across_rolled_edge(&mut self, vertex: VertexId, x: FaceId) -> Result<()> {
+        let record = self.fillets.fillet_vertex(vertex)?;
+        if record.point_class() != PointClassType::Edgeuse {
+            return Ok(());
+        }
+        let Some(EntityRef::Edgeuse(side_eu)) = record.point_class_object() else {
+            return Ok(());
+        };
+        let Some(side_edge) = eu::edge(self.target, side_eu)? else {
+            return Ok(());
+        };
+        if edge::faces(self.target, side_edge, None)?.contains(&x) {
+            return Ok(());
+        }
+        let tol = self.solver.solver().tangency_tolerance;
+        let (start, end) = crate::topology::vertex::edge_vertex_pair(self.target, side_edge)?;
+        for at in [start, end].into_iter().flatten() {
+            let Some(beyond) = crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge(
+                self.k,
+                self.target,
+                side_eu,
+                at,
+                Some(x),
+                tol,
+            )?
+            else {
+                continue;
+            };
+            // N's edge use on the rail's face X
+            let Some(on_x) = eu::radial(self.target, beyond)? else {
+                continue;
+            };
+            self.fillets
+                .fillet_vertex_mut(vertex)?
+                .set_point_class(PointClassType::Edgeuse, Some(EntityRef::Edgeuse(on_x)));
+            return Ok(());
+        }
+        Ok(())
+    }
+
     fn split_rail(
         &mut self,
         geom: FilletGeomId,
@@ -987,7 +1083,7 @@ impl Recovery<'_> {
                         return Err(SolidError::blend_missing(OP, "the rail vertex's side edge"));
                     };
                     let guess = self.fillets.vertex_point(vertex)?;
-                    if ops.tangent(self, side)? {
+                    if ops.tangent(self, side, guess)? {
                         ops.rail_x_edge(
                             self,
                             vertex,
@@ -1062,6 +1158,7 @@ impl Recovery<'_> {
                 }
             }
             if first || last {
+                let mut solved_corner: Option<(FilletCornerId, VertexId)> = None;
                 for which in 0..2 {
                     let rail = required(self.fillets.geom(current_geom)?.rail(which))?;
                     let vertex = if last {
@@ -1076,10 +1173,26 @@ impl Recovery<'_> {
                     let Some(corner) = record.fillet_corner() else {
                         continue;
                     };
+                    // only the other rail's end at the corner just solved (below)
+                    if solved_corner.is_some_and(|(c, _)| c != corner) {
+                        break;
+                    }
                     if !adjusted.contains(&corner) {
                         adjusted.push(corner);
                     }
                     if geom_type == FilletGeomType::TangentRollover {
+                        // Not upstream (#15767): this rail rolled onto face X; its end on a
+                        // side edge of the face it rolled off lies past that edge's end, on
+                        // the edge between X and the end face beyond the rolled-over edge
+                        if let Some(x) = *get(&adjacent, which)? {
+                            self.side_edge_across_rolled_edge(vertex, x)?;
+                        }
+                        // Not upstream (#15767): the other rail's end at that corner is solved
+                        // from the rolled end's ball, whose points lie on the geometry's new
+                        // offsets; its own point's UVs are on the offset the roll-over replaced
+                        if let Some((_, solved)) = solved_corner {
+                            self.seed_from_solved_end(solved, vertex, current_geom)?;
+                        }
                         self.fillets
                             .fillet_vertex_mut(vertex)?
                             .set_status(FilStatus::Unprocessed);
@@ -1099,6 +1212,19 @@ impl Recovery<'_> {
                                 OP,
                                 "the corner vertex's solver did not converge",
                             ));
+                        }
+                        // Not upstream (#15767): a corner whose two rail ends are each on
+                        // their own side edge (no mates; an open end's Nx2 corner) has both
+                        // solved from the round's ball, which the roll-over changed: the
+                        // other rail's end is solved again too, not left at the ball before it.
+                        // Only an end solved here seeds it: one that found no side edge
+                        // (`NoIntRailEu`) keeps its point from before the roll-over
+                        if solved_corner.is_none()
+                            && self.fillets.fillet_vertex(vertex)?.is_processed()
+                            && self.fillets.fillet_vertex(vertex)?.mate(0).is_none()
+                        {
+                            solved_corner = Some((corner, vertex));
+                            continue;
                         }
                     }
                     break;

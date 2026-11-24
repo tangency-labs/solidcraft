@@ -3,8 +3,8 @@
 //! `check` runs the app's `plugin.check`: what Install and a call would refuse, each with its fix.
 //! `test` installs the package into a scratch plugins folder with the app's own installer, stores
 //! each case's approvals in that folder's grant store as an install does, then
-//! runs the plugin's test cases (`tests/*.json` in the package) through `plugin.run` and
-//! `file.import` on the real host, with its real limits, and compares what comes back.
+//! runs the plugin's test cases (`tests/*.json` in the package) through `plugin.run`,
+//! `file.import` and `file.export` on the real host, with its real limits, and compares what comes back.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -107,10 +107,11 @@ struct Case {
     #[serde(default)]
     #[allow(dead_code)]
     description: String,
-    /// A command's parameters, or an importer's options. Default `{}`.
+    /// A command's parameters, or an importer's or exporter's options. Default `{}`.
     #[serde(default)]
     params: Option<Value>,
-    /// A command: the design it runs on, in the tests folder. Default: an empty design.
+    /// A command or an exporter: the design it runs on, in the tests folder. Default: an empty
+    /// design.
     #[serde(default)]
     design: Option<String>,
     /// An importer: the file it opens, in the tests folder.
@@ -161,7 +162,8 @@ struct Expect {
     /// Text the error message contains.
     #[serde(default)]
     message: Option<String>,
-    /// Values the reply contains: `plugin.run`'s (`{"result": ...}`) or `file.import`'s.
+    /// Values the reply contains: `plugin.run`'s (`{"result": ...}`), `file.import`'s or
+    /// `file.export`'s.
     #[serde(default)]
     reply: Option<Value>,
     /// Values `inspect.measure` gives for the resulting design (`{"body_count": 1}`).
@@ -238,7 +240,9 @@ fn test(args: &[String]) -> Result<(), String> {
                     status: if require_cases { "failed" } else { "skipped" },
                     message: match entry.kind {
                         EntryKind::Importer => format!("no test case: add tests/{}.json with a \"file\" to open", entry.name),
-                        EntryKind::Command => format!("no test case, and its inputs need values: add tests/{}.json with \"params\"", entry.name),
+                        EntryKind::Command | EntryKind::Exporter => {
+                            format!("no test case, and its inputs need values: add tests/{}.json with \"params\"", entry.name)
+                        }
                     },
                     ms: 0,
                     design: None,
@@ -347,11 +351,11 @@ fn read_cases(tests: &Path) -> Result<Vec<(String, Result<Case, String>)>, Strin
         .collect())
 }
 
-/// The parameters a command entry's dialog would start with: each field's default. `None` for an
-/// importer, which needs a file, and for a command a required field without a default would leave
-/// empty.
+/// The parameters a command's or exporter's dialog would start with: each field's default. `None`
+/// for an importer, which needs a file, and for an entry a required field without a default would
+/// leave empty.
 fn smoke_params(entry: &solidcraft_engine::plugin::Entry) -> Option<Value> {
-    if entry.kind != EntryKind::Command {
+    if entry.kind == EntryKind::Importer {
         return None;
     }
     let properties = entry.input_schema.get("properties").and_then(Value::as_object);
@@ -487,7 +491,7 @@ fn run_case(
         })?;
         let mut s = match (&case.design, entry.kind) {
             (Some(_), EntryKind::Importer) => return Err("an importer makes a new design: give it a \"file\", not a \"design\"".into()),
-            (Some(d), EntryKind::Command) => crate::load(&in_tests(tests, d, "design")?.to_string_lossy())?,
+            (Some(d), EntryKind::Command | EntryKind::Exporter) => crate::load(&in_tests(tests, d, "design")?.to_string_lossy())?,
             (None, _) => Session::default(),
         };
         s.plugin_state.plugins_dir = Some(plugins.to_path_buf());
@@ -521,6 +525,19 @@ fn run_case(
                 s.execute(
                     "file.import",
                     &json!({"path": file.to_string_lossy(), "format": format!("{}.{}", manifest.id, entry.name), "options": params}),
+                )
+            }
+            EntryKind::Exporter => {
+                if case.file.is_some() {
+                    return Err("an exporter writes the design: give it a \"design\", not a \"file\"".into());
+                }
+                // Into the scratch folder, under the case's name and the slot's first extension.
+                let extension = entry.extensions.first().map(String::as_str).unwrap_or("out");
+                std::fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
+                let path = work.join(format!("{name}.{extension}"));
+                s.execute(
+                    "file.export",
+                    &json!({"path": path.to_string_lossy(), "format": format!("{}.{}", manifest.id, entry.name), "options": params}),
                 )
             }
         };

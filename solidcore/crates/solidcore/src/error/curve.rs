@@ -24,6 +24,8 @@
 //! | [`CurveFailure::StageFailed`]        | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
 //! | [`CurveFailure::PointSolveOptionMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`CurveFailure::Defect`]             | the site's (`SM_ERR`, or another through `with_status`) |
+//! | [`CurveFailure::AuxiliaryAlongProjection`] | `SM_ERR_INVALID_INPUT`  |
+//! | the other named causes ([`CurveFailure::TooManyDerivatives`], [`CurveFailure::BaseCurveNotOwned`], ...) | `SM_ERR` |
 //!
 //! **The record** (#15034). A check that refuses builds a typed cause with its numbers
 //! ([`CurveFailure::SingleLinearCurve`], [`CurveFailure::InfiniteTangent`], ...); a stage that
@@ -36,8 +38,9 @@
 //! `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No failure names an entity: the sites they
-//! replace named none. The failures that are checks of a caller's arguments stay
-//! [`crate::SolidError::InvalidInput`].
+//! replace named none. A check of a caller's argument that reported a status is a named
+//! cause of kind [`ErrorKind::InvalidInput`] keeping that status; the checks that reported
+//! none stay [`crate::SolidError::InvalidInput`].
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
 
@@ -72,8 +75,9 @@ pub enum CurveFailure {
     /// Something a curve routine needs is missing, as the phrase says (for example "the
     /// curve's cache").
     Missing(&'static str),
-    /// A direction a curve routine needs is the zero vector, as the phrase says (for example
-    /// "the projected curve's auxiliary direction").
+    /// A direction a curve routine needs is the zero vector, as the phrase says. No site
+    /// builds it any more (the projected curve's was the last); it goes with the other phrase
+    /// forms once every count is zero.
     ZeroDirection(&'static str),
     /// The only curve whose area normal is asked is a line: one line spans no plane.
     SingleLinearCurve,
@@ -129,6 +133,119 @@ pub enum CurveFailure {
         /// The knot span's end.
         span_end: f64,
     },
+    /// The routine evaluates at most `most` derivatives, and the caller asked for
+    /// `asked`. The caller's argument: [`ErrorKind::InvalidInput`].
+    TooManyDerivatives {
+        /// The derivatives asked for.
+        asked: usize,
+        /// The most the routine evaluates.
+        most: usize,
+    },
+    /// An analytic curve (a conic) is asked to scale by `scale`, which is not the same
+    /// along every axis: its kind keeps its shape only under a uniform scale.
+    /// [`ErrorKind::Unsupported`].
+    NonUniformScale {
+        /// The scale asked for, per axis.
+        scale: crate::geom::vector3d::Vec3,
+    },
+    /// The curve refers to a base curve it does not own, so the routine may not `edit`
+    /// it. The caller's curve as supplied: [`ErrorKind::InvalidInput`].
+    BaseCurveNotOwned {
+        /// The edit refused.
+        edit: CurveEdit,
+    },
+    /// A composite curve is evaluated through its segments; it has no evaluation of its own
+    /// at a parameter of the whole. [`ErrorKind::Unsupported`].
+    NoEvaluationOfItsOwn,
+    /// An offset corner by curve extension is asked of the corner builder, which builds
+    /// line, fillet and chamfer corners only (the taper extrude continues each wall
+    /// itself). [`ErrorKind::Unsupported`].
+    CornerByCurveExtension,
+    /// The same-point tolerance given, `tolerance`, is not positive.
+    /// [`ErrorKind::InvalidInput`].
+    SamePointToleranceNotPositive {
+        /// The tolerance given.
+        tolerance: f64,
+    },
+    /// The distance under which a gap gets a line, `distance`, is neither zero nor above the
+    /// same-point tolerance `tolerance`. [`ErrorKind::InvalidInput`].
+    LineDistanceNotAboveTolerance {
+        /// The distance given.
+        distance: f64,
+        /// The same-point tolerance given.
+        tolerance: f64,
+    },
+    /// A hyperbola's arc is numerically degenerate for its rational quadratic form: the
+    /// line from its middle point toward the end tangents' meeting point cuts the chord at
+    /// `at` of the chord's length, within the kernel's zero of an end (exactly, it cuts it
+    /// at the middle; only rounding moves it there). [`ErrorKind::Degenerate`].
+    MidTangentOffChord {
+        /// Where the line cuts the chord, as a fraction of the chord from its start.
+        at: f64,
+    },
+    /// The curve's cached breaks and continuities are not current: the caller asked before
+    /// the breaks were computed (a new, trimmed or reparametrised curve), or loaded a cache
+    /// whose counts differ. [`ErrorKind::InvalidInput`].
+    BreaksNotCurrent,
+    /// The knot `knot` the caller gave lies past the curve's last cached break.
+    /// [`ErrorKind::InvalidInput`].
+    KnotPastBreaks {
+        /// The knot given.
+        knot: f64,
+    },
+    /// The cached continuity at the break `at` is undefined: the kernel never caches one,
+    /// so it came with the curve the caller loaded. [`ErrorKind::InvalidInput`].
+    ContinuityUndefined {
+        /// The break.
+        at: f64,
+    },
+    /// A projected curve's projection vector is unset or zero. [`ErrorKind::InvalidInput`].
+    ProjectionVectorZero,
+    /// A rotation's auxiliary vector is unset or zero. [`ErrorKind::InvalidInput`].
+    AuxiliaryVectorZero,
+    /// A rotation's auxiliary vector is parallel to the projection vector, so it has no
+    /// direction normal to it. Status `SM_ERR_INVALID_INPUT`. [`ErrorKind::InvalidInput`].
+    AuxiliaryAlongProjection,
+    /// The point of the tangent field's start curve at its mated parameter lies `gap` from
+    /// the start of the base curve, farther than the tolerance `tolerance`.
+    /// [`ErrorKind::NotWithinTolerance`].
+    StartsApart {
+        /// The distance between the two starts.
+        gap: f64,
+        /// The tolerance given.
+        tolerance: f64,
+    },
+    /// The point of the tangent field's end curve at its mated parameter lies `gap` from the
+    /// end of the base curve, farther than the tolerance `tolerance`.
+    /// [`ErrorKind::NotWithinTolerance`].
+    EndsApart {
+        /// The distance between the two ends.
+        gap: f64,
+        /// The tolerance given.
+        tolerance: f64,
+    },
+}
+
+/// An edit of a curve that [`CurveFailure::BaseCurveNotOwned`] refuses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CurveEdit {
+    /// A change or reversal of its parameterisation.
+    Reparametrise,
+    /// A trim.
+    Trim,
+    /// A transform.
+    Transform,
+}
+
+impl core::fmt::Display for CurveEdit {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Reparametrise => "reparametrised",
+            Self::Trim => "trimmed",
+            Self::Transform => "transformed",
+        })
+    }
 }
 
 /// A required option of [`crate::curve::curve::p3::PointSolveOptions`] that a ray solve
@@ -153,8 +270,9 @@ impl core::fmt::Display for PointSolveOption {
 
 impl CurveFailure {
     /// The status the C++ reports for it (a comparison detail): `SM_ERR`, except
-    /// `SM_ERR_NULL_POINTER` for [`CurveFailure::Missing`] and `SM_ERR_INVALID_INPUT` for
-    /// [`CurveFailure::ZeroDirection`].
+    /// `SM_ERR_NULL_POINTER` for [`CurveFailure::Missing`] and
+    /// [`CurveFailure::PointSolveOptionMissing`], and `SM_ERR_INVALID_INPUT` for
+    /// [`CurveFailure::ZeroDirection`] and [`CurveFailure::AuxiliaryAlongProjection`].
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
             Self::LengthBelowFloor { .. }
@@ -166,9 +284,24 @@ impl CurveFailure {
             | Self::PointOnCurveWhenMaximising { .. }
             | Self::StageFailed
             | Self::Defect { .. }
-            | Self::PieceOutsideSpan { .. } => SM_ERR,
+            | Self::PieceOutsideSpan { .. }
+            | Self::TooManyDerivatives { .. }
+            | Self::NonUniformScale { .. }
+            | Self::BaseCurveNotOwned { .. }
+            | Self::NoEvaluationOfItsOwn
+            | Self::CornerByCurveExtension
+            | Self::SamePointToleranceNotPositive { .. }
+            | Self::LineDistanceNotAboveTolerance { .. }
+            | Self::MidTangentOffChord { .. }
+            | Self::BreaksNotCurrent
+            | Self::KnotPastBreaks { .. }
+            | Self::ContinuityUndefined { .. }
+            | Self::ProjectionVectorZero
+            | Self::AuxiliaryVectorZero
+            | Self::StartsApart { .. }
+            | Self::EndsApart { .. } => SM_ERR,
             Self::Missing(_) | Self::PointSolveOptionMissing { .. } => SM_ERR_NULL_POINTER,
-            Self::ZeroDirection(_) => SM_ERR_INVALID_INPUT,
+            Self::ZeroDirection(_) | Self::AuxiliaryAlongProjection => SM_ERR_INVALID_INPUT,
         }
     }
 
@@ -178,16 +311,35 @@ impl CurveFailure {
     /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]) and that of the status of a typed
     /// cause that replaced one; [`ErrorKind::StageFailed`] for a stage that failed, reviewed
     /// or not, a defect;
-    /// [`ErrorKind::PortInvariant`] for a piece outside its span, a port invariant broken.
+    /// [`ErrorKind::PortInvariant`] for a piece outside its span, a port invariant broken;
+    /// [`ErrorKind::InvalidInput`] for a check of the caller's argument or curve,
+    /// [`ErrorKind::Unsupported`] for what the routine does not do,
+    /// [`ErrorKind::Degenerate`] for an arc too flat for its form and
+    /// [`ErrorKind::NotWithinTolerance`] for curves whose ends lie apart.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::LengthBelowFloor { .. } | Self::LengthPastPieceCap { .. } => {
-                ErrorKind::NotWithinTolerance
-            }
+            Self::LengthBelowFloor { .. }
+            | Self::LengthPastPieceCap { .. }
+            | Self::StartsApart { .. }
+            | Self::EndsApart { .. } => ErrorKind::NotWithinTolerance,
             Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::PointSolveOptionMissing { .. } => ErrorKind::InvalidInput,
+            Self::PointSolveOptionMissing { .. }
+            | Self::TooManyDerivatives { .. }
+            | Self::BaseCurveNotOwned { .. }
+            | Self::SamePointToleranceNotPositive { .. }
+            | Self::LineDistanceNotAboveTolerance { .. }
+            | Self::BreaksNotCurrent
+            | Self::KnotPastBreaks { .. }
+            | Self::ContinuityUndefined { .. }
+            | Self::ProjectionVectorZero
+            | Self::AuxiliaryVectorZero
+            | Self::AuxiliaryAlongProjection => ErrorKind::InvalidInput,
+            Self::NonUniformScale { .. }
+            | Self::NoEvaluationOfItsOwn
+            | Self::CornerByCurveExtension => ErrorKind::Unsupported,
+            Self::MidTangentOffChord { .. } => ErrorKind::Degenerate,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::ZeroDirection(_)
@@ -220,7 +372,23 @@ impl CurveFailure {
             | Self::PointOnCurveWhenMaximising { .. }
             | Self::StageFailed
             | Self::Defect { .. }
-            | Self::PointSolveOptionMissing { .. } => true,
+            | Self::PointSolveOptionMissing { .. }
+            | Self::TooManyDerivatives { .. }
+            | Self::NonUniformScale { .. }
+            | Self::BaseCurveNotOwned { .. }
+            | Self::NoEvaluationOfItsOwn
+            | Self::CornerByCurveExtension
+            | Self::SamePointToleranceNotPositive { .. }
+            | Self::LineDistanceNotAboveTolerance { .. }
+            | Self::MidTangentOffChord { .. }
+            | Self::BreaksNotCurrent
+            | Self::KnotPastBreaks { .. }
+            | Self::ContinuityUndefined { .. }
+            | Self::ProjectionVectorZero
+            | Self::AuxiliaryVectorZero
+            | Self::AuxiliaryAlongProjection
+            | Self::StartsApart { .. }
+            | Self::EndsApart { .. } => true,
         }
     }
 }
@@ -271,6 +439,65 @@ impl core::fmt::Display for CurveFailure {
             Self::PointSolveOptionMissing { option } => {
                 write!(f, "the ray solve was called without its {option}")
             }
+            Self::TooManyDerivatives { asked, most } => write!(
+                f,
+                "{asked} derivatives were asked, more than the {most} the routine evaluates"
+            ),
+            Self::NonUniformScale { scale } => write!(
+                f,
+                "the scale ({}, {}, {}) is not uniform, and an analytic curve scales only uniformly",
+                scale.x, scale.y, scale.z
+            ),
+            Self::BaseCurveNotOwned { edit } => write!(
+                f,
+                "the curve does not own its base curve, so it cannot be {edit}"
+            ),
+            Self::NoEvaluationOfItsOwn => f.write_str(
+                "a composite curve is evaluated through its segments and has no evaluation of its own",
+            ),
+            Self::CornerByCurveExtension => f.write_str(
+                "an offset corner by curve extension is not built here, only line, fillet and chamfer corners",
+            ),
+            Self::SamePointToleranceNotPositive { tolerance } => {
+                write!(f, "the same-point tolerance {tolerance:e} is not positive")
+            }
+            Self::LineDistanceNotAboveTolerance {
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "the distance to create a line {distance:e} is neither zero nor above the same-point tolerance {tolerance:e}"
+            ),
+            Self::MidTangentOffChord { at } => write!(
+                f,
+                "the hyperbola's arc is numerically degenerate for its rational form: its middle tangent line cuts the chord at {at} of its length, at an end"
+            ),
+            Self::BreaksNotCurrent => {
+                f.write_str("the curve's cached breaks and continuities are not current")
+            }
+            Self::KnotPastBreaks { knot } => {
+                write!(f, "the knot {knot} lies past the curve's last cached break")
+            }
+            Self::ContinuityUndefined { at } => {
+                write!(f, "the cached continuity at the break {at} is undefined")
+            }
+            Self::ProjectionVectorZero => {
+                f.write_str("the projected curve's projection vector is unset or zero")
+            }
+            Self::AuxiliaryVectorZero => {
+                f.write_str("the rotation's auxiliary vector is unset or zero")
+            }
+            Self::AuxiliaryAlongProjection => f.write_str(
+                "the rotation's auxiliary vector is parallel to the projection vector",
+            ),
+            Self::StartsApart { gap, tolerance } => write!(
+                f,
+                "the start curve's mated point lies {gap:e} from the base curve's start, more than the tolerance {tolerance:e}"
+            ),
+            Self::EndsApart { gap, tolerance } => write!(
+                f,
+                "the end curve's mated point lies {gap:e} from the base curve's end, more than the tolerance {tolerance:e}"
+            ),
         }
     }
 }
@@ -470,6 +697,136 @@ mod tests {
         }
     }
 
+    /// The named causes keep the status of the phrase they replace, and `upstream_status`
+    /// reads it, with the kind of what they check.
+    #[test]
+    fn the_named_causes_keep_their_sites_statuses() {
+        use crate::geom::vector3d::Vec3;
+        let cases = [
+            (
+                CurveFailure::TooManyDerivatives { asked: 4, most: 3 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::NonUniformScale {
+                    scale: Vec3::new(1.0, 2.0, 1.0),
+                },
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CurveFailure::BaseCurveNotOwned {
+                    edit: CurveEdit::Trim,
+                },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::NoEvaluationOfItsOwn,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CurveFailure::CornerByCurveExtension,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                CurveFailure::SamePointToleranceNotPositive { tolerance: 0.0 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::LineDistanceNotAboveTolerance {
+                    distance: 0.5,
+                    tolerance: 1.0,
+                },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::MidTangentOffChord { at: 0.0 },
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CurveFailure::BreaksNotCurrent,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::KnotPastBreaks { knot: 2.0 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::ContinuityUndefined { at: 0.5 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::ProjectionVectorZero,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::AuxiliaryVectorZero,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::AuxiliaryAlongProjection,
+                SM_ERR_INVALID_INPUT,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                CurveFailure::StartsApart {
+                    gap: 1.0,
+                    tolerance: 0.1,
+                },
+                SM_ERR,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                CurveFailure::EndsApart {
+                    gap: 1.0,
+                    tolerance: 0.1,
+                },
+                SM_ERR,
+                ErrorKind::NotWithinTolerance,
+            ),
+        ];
+        for (cause, status, kind) in cases {
+            let e = SolidError::curve("curve::op", cause);
+            assert_eq!(e.sm_status(), Some(status), "{cause:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status), "{cause:?}");
+            assert_eq!(e.kind(), kind, "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert!(!e.is_defect(), "{cause:?}");
+            assert!(e.is_status_answer(), "{cause:?}");
+            assert_eq!(e.curve_failure(), Some(&cause));
+        }
+        assert_eq!(
+            SolidError::curve(
+                "curve::op",
+                CurveFailure::BaseCurveNotOwned {
+                    edit: CurveEdit::Reparametrise
+                }
+            )
+            .to_string(),
+            "curve::op: the curve does not own its base curve, so it cannot be reparametrised"
+        );
+        assert_eq!(
+            SolidError::curve(
+                "curve::op",
+                CurveFailure::TooManyDerivatives { asked: 4, most: 3 }
+            )
+            .to_string(),
+            "curve::op: 4 derivatives were asked, more than the 3 the routine evaluates"
+        );
+    }
+
     /// The curve routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the files listed (with the bare sites each may still hold)
     /// whose conversion waits on other open work.
@@ -498,10 +855,7 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/curve/composite_curve/p1.rs", 6),
             ("solidcore/src/curve/composite_curve/p2.rs", 2),
-            ("solidcore/src/curve/conic.rs", 1),
-            ("solidcore/src/curve/crv_in_volume.rs", 5),
             ("solidcore/src/curve/crv_on_surf.rs", 2),
             ("solidcore/src/curve/curve/p1.rs", 13),
             ("solidcore/src/curve/curve/p2.rs", 9),
@@ -513,12 +867,8 @@ mod tests {
             ("solidcore/src/curve/curve/p9.rs", 5),
             ("solidcore/src/curve/curve_cache.rs", 7),
             ("solidcore/src/curve/ellipse/p2.rs", 15),
-            ("solidcore/src/curve/hyperbola.rs", 3),
             ("solidcore/src/curve/line.rs", 4),
             ("solidcore/src/curve/offset_curve.rs", 8),
-            ("solidcore/src/curve/parabola.rs", 2),
-            ("solidcore/src/curve/projected_curve.rs", 7),
-            ("solidcore/src/curve/tangent_field.rs", 3),
         ];
         assert_pinned("curve phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }

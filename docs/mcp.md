@@ -198,13 +198,31 @@ solidcraft-cli mcp --connect 127.0.0.1:7878 --compact
 SOLIDCRAFT_MCP_COMPACT=1 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
+### Desktop app management
+
+External MCP clients connected to the desktop app can also use:
+
+- `documents {}` lists tabs. `action: "switch"` selects `index`; `"close"` closes it
+  (the active tab if omitted); `"new"` opens an empty design.
+- `quit_app {}` exits cleanly, avoiding crash recovery on the next launch.
+- `preferences {}` reads the display and unit preferences: `default_units`, `theme`, `language`, `up_axis`, `ui_scale`, `zoom_to_cursor`, `smooth_wheel_zoom` and `show_frame_rate`. Named keys set them and return the updated values.
+- `agent_cursor {}` reads cursor settings; `show`, `speed` (1–5 or `"instant"`), and `follow_camera` change them.
+
+Closing or quitting with unsaved changes is refused and names the designs unless `force: true`
+explicitly discards them, including their recovery copies. These calls never open dialogs.
+`preferences` refuses every other key before changing any settings, so an AI client cannot change plugin access, graphics, file limits, signing or file paths, or use the interactive `open`, `button` and `stand_up` actions.
+Headless servers return an error
+saying they need the desktop app. Confined clients cannot start persistent `theme_follow` reads; use inline `theme_import` instead. These tools cannot be used as `batch` steps or wrapped in
+`execute`. The in-app Assistant does not offer them: its permission gate excludes app management.
+
 ### Tool annotations
 
 Each tool says what it may do, for clients that ask before running tools (or auto-approve on
 these hints). `list_commands`, `describe_command`, `inspect_design`, `measure`, `body_topology`,
 `skill_reference`, `crash_reports`, `pending` and `running` are read-only. `set_parameter`, `undo` and `redo`
 change the design undoably, and so does `check_parameters` (it changes the design and puts it back:
-not read-only, not destructive). `new_design` replaces it (destructive). `execute`, `batch`, `open`, `save`, `export`,
+not read-only, not destructive). `new_design` replaces it (destructive). `documents` and `quit_app` are also destructive because forced closes can discard unsaved work.
+`preferences` and `agent_cursor` change app settings (not read-only, not destructive). `execute`, `batch`, `open`, `save`, `export`,
 `screenshot` (whose `path` writes a file) and `compare_picture` (which reads the reference picture) can read,
 write, overwrite or delete files: they are
 not read-only, `destructiveHint` and `openWorldHint` are true.
@@ -353,7 +371,9 @@ and `options`. Each has a `plugin` field (`{id, name, version, entry, kind, effe
 plugin's own description reaches the agent between `<plugin-text>` markers, as plugin text. A
 call runs without the plugin's dialogs, under its existing grants, as one undo step; arguments are
 checked as strictly as a command's; a missing grant or a `read` entry's refused import is an error
-naming it, also as `structuredContent.plugin_error`. See [Plugins as tools for
+naming it, also as `structuredContent.plugin_error`. For revision-aware edits, use
+`execute` with the namespaced command's `expected_design` precondition
+([design revisions](plugins.md#design-revisions-and-notifications)). See [Plugins as tools for
 agents](plugins.md#plugins-as-tools-for-agents).
 
 Ordinary tool calls do not query plugin tools. A bridge queries `plugin.tools` only when the
@@ -386,7 +406,7 @@ builds it.
 | `check_parameters` | `set: {name: value}` (a number or an expression each, as `set_parameter`'s `value`), `report?` (`measure`, `cylinders`, `errors`; default all three), `bodies?` (a list of body names: only those are measured and their cylinders listed; default all), `summary?` (`measure` as the `measure` tool's `summary: true`; default false) | Try parameter values without keeping them: one `edit.checkpoint`, every value set in one `parameters.change {changes}` (one rebuild; an app without `changes` gets one change per name), the reports read, then `edit.restore_checkpoint`, so the design, its parameters and its undo history are exactly as before. The reply has `values` (each parameter's value with the tried expressions in), `recomputed`, `measure` (volume, bbox, bodies and faces per body, as the `measure` tool reports them), `errors` and `warnings` (the features that fail or warn: `{feature, name, error}`) with `parameter_errors` (the parameters that don't evaluate), `cylinders` (every cylindrical face of every body as `{body, radius, origin, axis, faces, name, area}`; the halves a kernel splits one cylinder into are one entry, `origin` is the axis point closest to the world origin and `axis` points so that its first non-zero component is positive) and `restored: true`. On a large design, `bodies` with the bodies a change touches and `summary: true` keep the reply small. A name the design has no parameter of, a value that is not a number or a string, an expression that does not evaluate, an unknown report item or a `bodies` that is not a list of names is an error, and nothing changes; a body name the design does not have after the change is an error after the design is put back. If the checkpoint cannot be restored the call is an error with `restored: false`, `restore_error` and a note that the tried values are still in the design: set them back before saving. Replaces the loop `set_parameter`, `measure`, `body_topology`, `set_parameter` back, which cost every agent session three to five calls and up to 16 s of rebuilds. Not a `batch` step. |
 | `screenshot` | `view?` (iso, top, front, back, bottom, left, right, home, fit, or a named view saved with `view.save`), `camera?` (`{target, yaw, pitch, distance, fov?}`, as `view.apply`), `path?`, `width?`, `height?`, `source?` (window, model), `grid?`, `axes?` | A PNG image content block. Headless: a render with the viewport's pipelines on a headless GPU device (see `solidcraft-cli gpu`; with no adapter, the CPU rasterizer, without analysis colours), fitted to the model, or from the named view or camera; the reply's `renderer` says which (`gpu`, `gpu-software`, `cpu`, with a `warning` for `cpu`). Bridged: the app window (default) or a model render with the app's camera; a named view or camera moves the app's viewport there first (`execute` `view.apply` does the same without a screenshot). `grid: false` and `axes: false` leave the ground grid (it lies on Z 0 and cuts through a part that straddles it) and the origin's axes out of a model render; axes hidden with `browser.visibility` stay out whatever `axes` says. Bridged, a screenshot that gives `grid` or `axes` is a model render, which follows the app's Grid and Origin switches for what it does not give; `source: "window"` with either is an error. A window that is minimised or on another macOS Space presents no frame: with no `source` the reply is a model render and says so (`fallback`); `source: "window"` is an error saying why, at once. Agents that don't need the app's chrome can ask for `source: "model"`. |
 | `compare_picture` | `reference`, `view?`, `camera?`, `bodies?`, `crop_px?`, `crop_fraction?`, `part_fills_crop?`, `fit?` (width, height, both; default width), `rows?` | Compare the model's outline with the part in a reference picture (a PNG or JPEG inside the server's folders, read through the same path rules as `screenshot`). A JPEG's EXIF orientation is applied, so a phone photo is measured as every viewer shows it (#19138). The compare is outline only: holes are not compared — both the picture's and the model's holes are filled. The model's outline is `inspect.silhouette` seen from `view` (default front) or `camera`; the picture's part is found by growing the background in from the border through small colour steps, filling holes and keeping the largest piece, so a backdrop's shading stays background and labels on a board drop out; a part touching the border, a white part on a light grey backdrop, and a part on a transparent background all separate. `crop_px` (`[x, y, w, h]` in pixels) or `crop_fraction` (the same as fractions 0..1) takes one view off a board; with `part_fills_crop: true` the crop box is the part itself and no background search runs, for a crop that tightly frames the part; `fit` names the dimension the one uniform scale comes from, never stretched per axis (`both` scales by width and reports `aspect_mismatch`). Returns an image content block (the overlay PNG: model red, picture blue) and text: `overlap` (0..1) and the model's top, bottom, left and right edges against the picture's in mm at nine stations, positive where the model reaches past the picture, null where a station misses one of the two. As a `batch` step it runs `inspect.compare_picture` without the overlay. |
-| `export` | `path`, `format?` (step, stp, iges, igs, 3mf, 3mf-tagged, stl, stla, obj, glb, urdf), `bodies?`, `mesh_prefix?`, `effort?`, `velocity?` | STEP, IGES, 3MF or mesh export; GLB writes binary glTF in metres with Y up, with each body's colours, metallic and roughness, and each occurrence a named node holding its part's bodies; URDF writes the whole assembly with its meshes next to it (`docs/urdf.md`). |
+| `export` | `path`, `format?` (step, stp, iges, igs, 3mf, 3mf-tagged, stl, stla, obj, glb, urdf), `bodies?`, `mesh_prefix?`, `effort?`, `velocity?`, `hierarchy?` | STEP, IGES, 3MF or mesh export; GLB writes binary glTF in metres with Y up, with each body's colours, metallic, roughness and opacity (alpha blended when not opaque) and the Glass a render setup gives it (glTF transmission, IOR and volume), and each occurrence a named node holding its part's bodies (`hierarchy: false`: every body flat in world coordinates, as 0.40 did); URDF writes the whole assembly with its meshes next to it (`docs/urdf.md`). |
 | `undo`, `redo` | — | Undo / redo one change. |
 | `pending` | — | Bridged: the result of a request that was still running when its call returned (an error starting `still running:`), waiting up to 60 s for it; `done: false` while it runs (call again), `pending: null` when nothing runs. See [Long-running requests](#long-running-requests). |
 | `crash_reports` | `id?`, `limit?` | The crash reports on this computer, newest first; with `id`, the whole report (backtrace, command, recent commands, `design_path`/`replay_path`). See [crash-reports.md](crash-reports.md). |
@@ -395,7 +415,7 @@ builds it.
 | `new_design` | `name?` | Start an empty design. |
 | `cancel` | — | Bridged: cancel this server's request that was still running in the app when its call returned (`control.cancel`, see [Cancelling a request](#cancelling-a-request)). Headless: an error, as nothing is ever left running. Not a `batch` step. |
 | `open` | `path` | Open a `.sc` design (or a `.solidcraft` one from an earlier release), a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
-| `save` | `path?` | Save the design (to its current file without `path`). |
+| `save` | `path?`, `format?` (container, json), `overwrite?` (default false) | Save the design (to its current file without `path`). A save over a design file that another program or computer changed since it was opened or saved is refused; `overwrite: true` replaces it. |
 
 `measure` with `items` reports each item under `items` (`length_mm`, `area_mm2` or `position`).
 A circle, arc, hole or other cylindrical face also gives `diameter`, `radius`, `center` and
@@ -429,9 +449,15 @@ To change a feature after it is made, read its definition with `execute` `timeli
 `{"extent": {"distance": "30"}}`). The fields per feature type are listed in the book's
 *Solid features* chapter.
 
-To tell whether the design changed since a call, without reading all of it again, `execute`
-`document.revision` answers `{document_id, revision}`: `revision` moves only when the design
-changes, and `document_id` names the open design (another one after `new_design` or `open`).
+To observe changes without reading the whole design again, `execute`
+`document.revision` answers `{document_id, revision}`. Its numeric observation revision
+also follows visibility and uncaptured positions. The document identity belongs to the
+open document's session; opening or importing a design creates a fresh identity,
+including when reopening the same file. Revision-aware plugin edits use the session's
+design-state token, whose revision is an opaque string. Saving preserves that token;
+each committed edit, undo and redo creates a fresh one. Neither token field is saved
+in authored document content or undo snapshots; see
+[design revisions](plugins.md#design-revisions-and-notifications).
 See [control-protocol.md](control-protocol.md#following-the-design).
 
 To compare design proposals with several parameter edits each, call `execute` with

@@ -23,11 +23,16 @@ const MAX_BODY: usize = 24_000;
 const MAX_REPORT: usize = 3 * 4 * MAX_ANSWER + MAX_BODY + 1000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
 const ISSUE_URL: &str = "https://github.com/tangency-labs/solidcraft/issues/new";
-/// GitHub answers a longer link with `414 URI Too Long` (from about 8,200 characters).
-const MAX_URL: usize = 6000;
-/// Someone who isn't signed in is sent to sign in with the link to return to, encoded once more;
-/// past about 7,600 characters GitHub drops it and the form comes back empty after signing in.
-const MAX_SIGN_IN_URL: usize = 7000;
+/// GitHub turns away a request whose link and headers together pass about 7,000 bytes: someone
+/// who isn't signed in gets "Whoops, something went wrong!" instead of the form (#20510).
+const GITHUB_REQUEST: usize = 7000;
+/// What a browser sends besides the link: its own headers and GitHub's cookies. An estimate, with
+/// room to spare: a signed-out visit sends about 1,000 bytes, and signed-in cookies are larger.
+const HEADER_ROOM: usize = 3000;
+const SIGN_IN_URL: &str = "https://github.com/login?return_to=";
+const MAX_URL: usize = GITHUB_REQUEST - HEADER_ROOM;
+/// Someone who isn't signed in is sent to sign in with the link to return to, encoded once more.
+const MAX_SIGN_IN_URL: usize = GITHUB_REQUEST - HEADER_ROOM - SIGN_IN_URL.len();
 
 /// Draw CAD behind a report or native picker without delivering input or focus to editors.
 /// Fresh focus history also prevents inline editors from committing on report focus loss.
@@ -1514,9 +1519,9 @@ mod tests {
         assert_eq!(query(&url), [("title".to_string(), draft.report_title()), ("body".to_string(), body)]);
     }
 
-    /// GitHub refuses a link longer than about 8,200 characters, and drops one its sign-in page
-    /// encodes to more than about 7,600 (the form then comes back empty after signing in). A
-    /// report too long for that goes through the clipboard, never cut.
+    /// GitHub refuses a request whose link and headers pass about 7,000 bytes, and someone who
+    /// isn't signed in first goes to sign in with the link encoded once more (#20510). A report too
+    /// long for that goes through the clipboard, never cut.
     #[test]
     fn issue_report_link_stays_within_what_github_keeps() {
         for chunk in ["word ", "x", "ünïcødé ", "a&b=c#d+e%f\"g'\n"] {
@@ -1529,6 +1534,8 @@ mod tests {
                     refused = true;
                 } else {
                     assert!(url.len() <= MAX_URL && sign_in_length(&url) <= MAX_SIGN_IN_URL, "{chunk:?} × {n}");
+                    // A sign-in link of 6,940 characters got "Whoops" with a browser's headers.
+                    assert!(SIGN_IN_URL.len() + sign_in_length(&url) <= 4000, "{chunk:?} × {n}");
                     assert_eq!(query(&url), [("title".to_string(), "Fillet fails".to_string()), ("body".to_string(), body)]);
                     fitted = true;
                 }

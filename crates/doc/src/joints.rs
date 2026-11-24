@@ -657,11 +657,33 @@ pub struct JointExprs {
     /// By value index, as in `Joint::values`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Option<String>>,
+    /// The minimum and maximum of each value's limits, by value index as in `Joint::limits`
+    /// (in the units of the value: angles or lengths).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits: Vec<[Option<String>; 2]>,
 }
 
 impl JointExprs {
     pub fn is_empty(&self) -> bool {
-        self.offset.is_none() && self.angle.is_none() && self.values.iter().all(Option::is_none)
+        self.offset.is_none() && self.angle.is_none() && self.values.iter().all(Option::is_none) && self.limits.iter().all(|l| l == &[None, None])
+    }
+
+    /// The expressions the minimum and maximum of value `i`'s limits follow.
+    pub fn limit(&self, i: usize) -> [Option<&str>; 2] {
+        self.limits.get(i).map_or([None, None], |[lo, hi]| [lo.as_deref(), hi.as_deref()])
+    }
+
+    /// Value `i`'s limits follow `e` (or nothing).
+    pub fn set_limit(&mut self, i: usize, e: [Option<String>; 2]) {
+        if e != [None, None] && self.limits.len() <= i {
+            self.limits.resize(i + 1, [None, None]);
+        }
+        if let Some(slot) = self.limits.get_mut(i) {
+            *slot = e;
+        }
+        while self.limits.last().is_some_and(|l| l == &[None, None]) {
+            self.limits.pop();
+        }
     }
 
     /// The expression value `i` follows.
@@ -738,6 +760,41 @@ pub fn expressed(params: &Params, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
         }
     }
     Ok((offset, angle, values))
+}
+
+/// A joint's limits worked out from their expressions (an end without one keeps its number), or
+/// why they can't be: an unknown name, a wrong unit, a number too large, or a minimum that comes
+/// out above the maximum.
+pub fn expressed_limits(params: &Params, j: &Joint) -> Result<Vec<Option<(f64, f64)>>> {
+    let mut limits = j.limits.clone();
+    for (i, ends) in j.exprs.limits.iter().enumerate().take(j.kind.dofs().len()) {
+        if ends == &[None, None] {
+            continue;
+        }
+        let kind = if j.kind.is_angle(i) { crate::expr::Kind::Angle } else { crate::expr::Kind::Length };
+        let name = j.kind.dofs().get(i).copied().unwrap_or("value");
+        let (lo, hi) = limits.get(i).copied().flatten().unwrap_or((0.0, 0.0));
+        let mut ends_now = [lo, hi];
+        for ((e, slot), which) in ends.iter().zip(ends_now.iter_mut()).zip(["minimum", "maximum"]) {
+            let Some(e) = e else { continue };
+            let v = params.eval(e, kind).map_err(|err| DocError::Invalid(format!("joint {}: {name} {which} `{e}`: {err}", j.name)))?;
+            if !(v.is_finite() && v.abs() < MAX_EXPR_VALUE) {
+                return Err(DocError::Invalid(format!("joint {}: {name} {which} `{e}` gives {v}", j.name)));
+            }
+            *slot = v;
+        }
+        let [lo, hi] = ends_now;
+        if lo > hi {
+            return Err(DocError::Invalid(format!("joint {}: {name} limits: the minimum comes out above the maximum", j.name)));
+        }
+        if limits.len() <= i {
+            limits.resize(i + 1, None);
+        }
+        if let Some(slot) = limits.get_mut(i) {
+            *slot = Some((lo, hi));
+        }
+    }
+    Ok(limits)
 }
 
 /// Values the loop solver leaves alone: those a motion link sets and those an expression does.
@@ -955,6 +1012,14 @@ impl Assembly {
                     out.push((j.id, j.kind.dofs().get(i).copied().unwrap_or("value").to_string(), e.as_str()));
                 }
             }
+            for (i, ends) in x.limits.iter().enumerate() {
+                let name = j.kind.dofs().get(i).copied().unwrap_or("value");
+                for (e, which) in ends.iter().zip(["minimum", "maximum"]) {
+                    if let Some(e) = e {
+                        out.push((j.id, format!("{name} {which}"), e.as_str()));
+                    }
+                }
+            }
         }
         for l in &self.links {
             for s in l.coupling.as_ref().map(Coupling::sizes).unwrap_or_default() {
@@ -983,6 +1048,7 @@ impl Assembly {
             out.extend(x.offset.as_mut());
             out.extend(x.angle.as_mut());
             out.extend(x.values.iter_mut().flatten());
+            out.extend(x.limits.iter_mut().flatten().flatten());
         }
         for l in &mut self.links {
             for s in l.coupling.as_mut().map(Coupling::sizes_mut).unwrap_or_default() {
@@ -1532,7 +1598,7 @@ pub fn joint_values(asm: &Assembly) -> BTreeMap<u64, Vec<f64>> {
 /// unless flipped. Two datum references (a plane or an axis on each side) both point along the
 /// geometry's own normal rather than out of a body, so they mate aligned - each part keeps its
 /// side of the datum - and `flip` asks for the mated relation.
-fn flip_of(j: &Joint) -> Mat {
+pub fn flip_of(j: &Joint) -> Mat {
     // An angle relation's `angle` is its tilt (`tail`); a perpendicular one has none.
     let turn = if matches!(j.kind, JointKind::Angle | JointKind::Perpendicular) { 0.0 } else { j.angle };
     let mut m = rot_z(turn);
@@ -2773,7 +2839,7 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, held_contents: &'a [Joint], 
         // A joint whose expressions can't be worked out (a parameter gone) is left out rather
         // than placed by numbers that no longer say what it was defined by.
         if !j.exprs.is_empty()
-            && let Err(e) = expressed(&params, j)
+            && let Err(e) = expressed(&params, j).and_then(|_| expressed_limits(&params, j))
         {
             sol.errors.push((j.id, j.name.clone(), e.to_string()));
             continue;
@@ -3034,13 +3100,14 @@ pub use edge::{edge_axis, edge_snap};
 
 #[path = "joints_reach.rs"]
 mod reach;
+pub use reach::ball_values_from_rotation_vector;
 
 #[path = "joints_face.rs"]
 mod face;
 pub use face::{end_faces, face_name_at, named_face_spot, pin_end, round_end_at};
 #[path = "joints_relations.rs"]
 mod relations;
-pub use reach::{REACH_TOL, Reach, Reached, reach};
+pub use reach::{FrameCarry, REACH_TOL, Reach, Reached, reach, reach_frame};
 pub use relations::relation_values;
 
 #[path = "joints_rigid_groups.rs"]

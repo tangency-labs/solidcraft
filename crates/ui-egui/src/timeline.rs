@@ -160,9 +160,18 @@ pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
 /// as Edit Feature on a face finds it (the hole, not the plate it was cut into), else the feature
 /// that made the body.
 fn geometry_feature(app: &SolveApp, body: &str, face: Option<usize>) -> Option<u64> {
-    face.and_then(|index| crate::context_menu::face_feature(app, body, index))
-        .or_else(|| crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature))
-        .filter(|id| app.session.doc.feature(*id).is_some())
+    // Asked at every frame for a face picked in the view (the timeline follows the pick).
+    let world = crate::open_meshing::still_world(app);
+    let model_body = world.body(body)?;
+    let owner = app.session.doc.feature(model_body.feature);
+    // An imported mesh can only highlight its import feature. Looking up a geometric face
+    // name here would scan the mesh on the UI thread the first time its face is hovered.
+    if model_body.body.triangle_mesh().is_some()
+        && owner.is_some_and(|feature| matches!(feature.kind, FeatureKind::Import { .. } | FeatureKind::MeshImport { .. }))
+    {
+        return Some(model_body.feature);
+    }
+    face.and_then(|index| crate::context_menu::face_feature(app, model_body, index)).or_else(|| owner.map(|feature| feature.id))
 }
 
 /// The feature of the face, edge or vertex under the pointer in the view.
@@ -232,6 +241,15 @@ impl TimelineKind {
     }
 }
 
+/// The History menus' edit item, label and icon: a sketch says Edit Sketch, as its Browser row
+/// does (#14366); both open the same editor.
+pub(crate) fn edit_label(kind: TimelineKind) -> (&'static str, &'static str) {
+    match kind {
+        TimelineKind::Sketch => ("Edit Sketch", "sketch"),
+        _ => ("Edit Feature", "edit"),
+    }
+}
+
 pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
     match k {
         FeatureKind::Sketch { .. } => "sketch",
@@ -298,6 +316,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
+        FeatureKind::FramePlate { .. } => "frame_plate",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
@@ -362,11 +381,13 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
 /// only once the rect is presented in the viewport (an offscreen or hidden bar asks again on the
 /// next frame); then it returns true and the caller clears `timeline_reveal`.
 fn reveal_once(ui: &egui::Ui, reveal: &mut Option<usize>, holds: bool, rect: Rect, align: egui::Align) -> bool {
-    if holds && crate::semantic_content::scroll_acknowledged_at(ui, rect, align) {
-        *reveal = None;
-        return true;
+    if !holds {
+        return false;
     }
-    false
+    // Choose one target this frame: a group's last feature must not replace its request.
+    // The caller keeps the persistent reveal until this target is actually visible.
+    *reveal = None;
+    crate::semantic_content::scroll_acknowledged_at(ui, rect, align)
 }
 
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
@@ -525,7 +546,8 @@ pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, 
 pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let doc = &app.session.doc;
     let (Some(feature), Some(index)) = (doc.feature(id), doc.feature_index(id)) else { return Vec::new() };
-    let mut v = vec![Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id }))];
+    let (edit, icon) = edit_label(TimelineKind::of(&feature.kind));
+    let mut v = vec![Item::action("ui.editFeature", edit, icon).with(json!({ "feature": id }))];
     if matches!(feature.kind, FeatureKind::Sketch { .. }) {
         v.extend(
             crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().filter(|item| item.id == "ui.redefineSketch"),
@@ -1252,6 +1274,9 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     let reveal_at = app.tree.timeline_reveal.and_then(|id| app.session.doc.features.iter().position(|f| f.id == id));
     let reveal = reveal_at.and_then(|i| history.view.find(i));
     let x = crate::timeline_scope::header(app, ui, &p, x, r).min(r.right() - t.space_24);
+    // A path click asks the next view to reveal the same feature. The old view must not
+    // acknowledge that new request while finishing this frame.
+    let reveal = reveal.filter(|_| history.within == crate::timeline_scope::shown(app));
     // Below, slots and features count those the bar shows; the marker's slot among them.
     let shown = history.view.len();
     let marker_view = history.view.slot(marker);
@@ -1832,6 +1857,8 @@ mod tests {
             features: Vec::new(),
             bodies: Vec::new(),
             placements: Vec::new(),
+            components: Vec::new(),
+            occurrences: Vec::new(),
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),
                 path: Vec::new(),
@@ -1840,6 +1867,9 @@ mod tests {
                 extent: false,
                 flip: false,
                 orient: false,
+                start: None,
+                start_fraction: None,
+                follow_frame: true,
             },
         };
         assert_eq!(super::icon_of(&feature), solidcraft_engine::find_command("solid.pattern.path").unwrap().icon);
@@ -2803,6 +2833,29 @@ mod tests {
     }
 
     #[test]
+    fn an_imported_mesh_lights_its_import_feature_in_history() {
+        use solidcraft_engine::doc::{Document, MeshData};
+
+        let mut doc = Document::default();
+        let mesh = MeshData {
+            name: "Scan".into(),
+            positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0].into(),
+            triangles: [0, 1, 2].into(),
+            color: None,
+            corner_normals: Default::default(),
+        };
+        let imported = doc.add_feature(FeatureKind::MeshImport { file: "scan.stl".into(), meshes: vec![mesh] }, Some("Import Scan")).unwrap();
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        let world = crate::open_meshing::session_world(&app.session);
+        let body = world.bodies.first().unwrap().name.clone();
+        let point = solidcore_record::Vec3::new(0.25, 0.25, 0.0);
+        app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.clone(), index: 0, point });
+        assert_eq!(super::hovered_feature(&app), Some(imported));
+        app.session.selection = vec![solidcraft_engine::Sel::Face { body, index: 0, point }];
+        assert_eq!(super::picked_feature(&app), Some(imported));
+    }
+
+    #[test]
     fn the_feature_menu_edits_its_profile_sketch_in_both_timelines() {
         for left in [false, true] {
             let mut h = Harness::new();
@@ -3510,7 +3563,10 @@ mod tests {
         h.frames(2);
         let chip = rect_of("timeline-folder-chip:Mid").unwrap();
         let marker = rect_of("history:marker").unwrap();
-        assert!(marker.left() > chip.right(), "the marker waits after the folded chip: {marker:?} {chip:?}");
+        assert!(
+            (marker.center().x - chip.right() - 2.0).abs() < 0.01,
+            "the marker line sits in the existing gap after the folded chip: {marker:?} {chip:?}"
+        );
         let y = chip.center().y;
         h.step(&json!({"drag": [[marker.center().x, marker.center().y], [chip.left() + 2.0, y]]})).unwrap();
         h.settle();

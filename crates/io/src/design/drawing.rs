@@ -172,22 +172,82 @@ pub(super) fn write(writer: &mut PackageWriter, doc: &Document) -> Result<()> {
     Ok(())
 }
 
-/// Read the container's drawings, in their order.
-pub(super) fn read<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Vec<Arc<Drawing>>> {
+/// A drawing a newer build saved that this build can't read at all: its entry and the parts it
+/// names, kept as they came, and what to say about it.
+pub(super) struct KeptDrawing {
+    pub parts: Vec<(String, Arc<[u8]>)>,
+    pub note: String,
+}
+
+/// Read the container's drawings, in their order. A drawing a newer build saved that this build
+/// can't read is kept as it came, with the parts it names (`KeptDrawing`), so the rest of the
+/// design opens and saving writes it back; one this build's own format says is damaged refuses
+/// the design, as damage does.
+pub(super) fn read<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<(Vec<Arc<Drawing>>, Vec<KeptDrawing>)> {
     let names: Vec<String> = reader.part_names().into_iter().filter(|n| n.starts_with(FOLDER)).collect();
     drawing::check_count(names.len()).map_err(invalid)?;
     let mut drawings = Vec::with_capacity(names.len());
+    let mut kept = Vec::new();
     for name in names {
         let id = name.strip_prefix(FOLDER).and_then(|n| n.strip_suffix(".json")).and_then(ids::decode);
         let id = id.ok_or_else(|| invalid(format!("`{name}` is not a drawing's entry")))?;
         let bytes = reader.limited_part(&name, MAX_DRAWING_BYTES)?;
-        let d = open_record(reader, &bytes).map_err(|e| invalid(format!("`{name}`: {e}")))?;
+        let d = match open_record(reader, &bytes) {
+            Ok(d) => d,
+            Err(why) => match newer_record(&bytes) {
+                Some((label, format)) => {
+                    kept.push(keep(reader, &name, &bytes, &label, format, &why)?);
+                    continue;
+                }
+                None => return Err(invalid(format!("`{name}`: {why}"))),
+            },
+        };
         if d.id != id {
             return Err(invalid(format!("`{name}` holds the drawing {}", ids::encode(d.id))));
         }
         drawings.push(d);
     }
-    drawing::in_design(drawings).map_err(invalid)
+    Ok((drawing::in_design(drawings).map_err(invalid)?, kept))
+}
+
+/// The name and format number of a drawing record a newer build saved: a format this build doesn't
+/// read, or changes it doesn't know. `None` for a record this build's own format covers.
+fn newer_record(bytes: &[u8]) -> Option<(String, u32)> {
+    let value: Value = serde_json::from_slice(bytes).ok()?;
+    let version = value.get("format").and_then(Value::as_str).and_then(|f| DRAWING.version_of(f))?;
+    let applied: Option<Vec<String>> =
+        value.get("format_pending").and_then(Value::as_array).map(|list| list.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+    let newer = DRAWING.newer(version, applied.as_deref())?;
+    let label = value.get("name").and_then(Value::as_str).unwrap_or("unnamed").chars().take(80).collect();
+    Some((label, newer.format))
+}
+
+/// The entry `name` kept as it came, with every container part its record names.
+fn keep<R: Read + Seek>(reader: &mut PackageReader<R>, name: &str, bytes: &[u8], label: &str, format: u32, why: &IoError) -> Result<KeptDrawing> {
+    fn named(value: &Value, found: &mut Vec<String>) {
+        match value {
+            Value::String(s) if s.starts_with("blobs/") => found.push(s.clone()),
+            Value::Array(items) => items.iter().for_each(|v| named(v, found)),
+            Value::Object(map) => map.values().for_each(|v| named(v, found)),
+            _ => {}
+        }
+    }
+    let mut names = Vec::new();
+    if let Ok(value) = serde_json::from_slice::<Value>(bytes) {
+        named(&value, &mut names);
+    }
+    names.sort();
+    names.dedup();
+    let mut parts = vec![(name.to_string(), Arc::from(bytes))];
+    for part in names {
+        if !reader.has_part(&part) {
+            continue;
+        }
+        let bytes = reader.limited_part(&part, super::part_limit(&part))?;
+        parts.push((part, bytes.into()));
+    }
+    let note = format!("drawing `{label}` (saved by a newer SolidCraft, drawing format {format}, which this version can't read: {why})");
+    Ok(KeptDrawing { parts, note })
 }
 
 #[cfg(test)]

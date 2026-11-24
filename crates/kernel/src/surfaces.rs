@@ -38,7 +38,8 @@ impl Body {
     /// is used twice and is not open. Mesh bodies and topology the kernel cannot read are errors.
     pub fn open_edge_count(&self) -> Result<usize> {
         self.require_brep("open boundary edges")?;
-        let (body, _) = self.ops_body().ok_or_else(|| failed("open boundary edges: the body's topology could not be read"))?;
+        let form = self.ops_body().ok_or_else(|| failed("open boundary edges: the body's topology could not be read"))?;
+        let (body, _) = &*form;
         solidcore_ops::stitch::open_edges(body).map(|edges| edges.len()).map_err(|e| failed(format!("open boundary edges: {e}")))
     }
 }
@@ -487,7 +488,7 @@ pub(crate) fn picked_chain(body: &Body, at: &[Vec3]) -> Result<(Chain, bool)> {
     let r = body.record();
     let mut edges: Vec<usize> = Vec::new();
     for p in at {
-        let e = edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p:?}")))?;
+        let e = edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p}")))?;
         if !edges.contains(&e) {
             edges.push(e);
         }
@@ -837,7 +838,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     // The outer loop runs counter-clockwise about the surface's natural normal.
     let n = du.cross(dv).normalized().ok_or_else(|| invalid("a planar face with no normal"))?;
     let [b::Loop::Edges { edges: rim }] = face.loops.as_slice() else { return Err(invalid("not supported yet: extending a surface with holes")) };
-    let chosen: Vec<usize> = at.iter().map(|p| edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p:?}")))).collect::<Result<_>>()?;
+    let chosen: Vec<usize> = at.iter().map(|p| edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p}")))).collect::<Result<_>>()?;
     let m = rim.len();
     // Each edge as a line (point, direction along the loop), moved outward when chosen.
     let mut lines = Vec::with_capacity(m);

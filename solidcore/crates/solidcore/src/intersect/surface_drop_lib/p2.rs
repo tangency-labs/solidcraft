@@ -66,7 +66,8 @@
 //!   messages (`MSG` at 2000 control points).
 
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError, SM_ERR};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{
     directional_derivs, is_dog_leg, line_point_distance, vec_lin_comb_two_vectors,
@@ -230,9 +231,14 @@ impl DropOffset {
             drop_vectors_at(k, off, uv, side(from_left_u), side(from_left_v), &[vector])?
         };
         dropped.first().copied().ok_or_else(|| {
-            SolidError::intersect_failed(
+            SolidError::intersect(
                 OP_SET,
-                "dropping the vector onto the offset surface gave no uv vector",
+                IntersectFailure::Defect {
+                    why: "the offset surface's first-order evaluation on the knot line's sides \
+                          returned fewer than three rows, though it returns the point and both \
+                          first derivatives (the vector drop returns one vector per vector \
+                          given)",
+                },
             )
         })
     }
@@ -261,9 +267,13 @@ impl DropOffset {
         };
         match d.as_slice() {
             [p, d1, ..] => Ok([*p, *d1]),
-            _ => Err(SolidError::intersect_failed(
+            _ => Err(SolidError::intersect(
                 OP_SET,
-                "the offset surface's directional derivative was not evaluated",
+                IntersectFailure::Defect {
+                    why: "the offset surface's directional evaluation to first order returned \
+                          fewer than two vectors, though it returns the point and the \
+                          derivative asked for",
+                },
             )),
         }
     }
@@ -283,10 +293,15 @@ fn on_sides(
     non_zero_tangents: bool,
 ) -> Result<Vec<Vec3>> {
     let SurfaceKind::OffsetSurface(offset) = off.kind() else {
-        return Err(SolidError::intersect_missing(
+        return Err(Failure::new(
             OP_SET,
-            "the drop's offset surface",
-        ));
+            IntersectFailure::Defect {
+                why: "the drop's stand-in surface is not an offset surface, though the drop \
+                      builds it as one",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error());
     };
     let flags = EvaluateFlags {
         u_side: side(from_left_u),
@@ -674,23 +689,30 @@ impl DropPt {
         if crv_speed < EFF_ZERO && self.degen_curve == Some(false) {
             // inform the public (when the drop was good) either way it is SM_ERR
             self.good_drop = Some(false);
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_SET,
-                "the curve's first derivative is zero and the curve is not degenerate",
+                IntersectFailure::DegenerateTangent,
             ));
         }
 
         // when m_bDegenCurve != TRUE
         if self.degen_curve != Some(true) {
             // can't drop Crv1stDeriv vectors parallel to m_SrfNormal (degenerate case)
-            let srf_norm_crv_tan_ang_rad =
-                self.srf_normal.angle_between(self.crv_pd[1]).unwrap_or(0.0);
-            if rad_to_deg(srf_norm_crv_tan_ang_rad) < 3.0 {
+            // (no angle: a zero tangent or normal, which upstream reads as 0 degrees; the
+            // angle's error stays the cause, rule 6)
+            let stop = match self.srf_normal.angle_between(self.crv_pd[1]) {
+                Ok(rad) => Some(rad_to_deg(rad))
+                    .filter(|degrees| *degrees < 3.0)
+                    .map(|degrees| {
+                        Failure::new(OP_SET, IntersectFailure::TangentAlongNormal { degrees })
+                    }),
+                Err(e) => {
+                    Some(Failure::new(OP_SET, IntersectFailure::DegenerateTangent).caused_by(e))
+                }
+            };
+            if let Some(stop) = stop {
                 self.good_drop = Some(false);
-                return Err(SolidError::intersect_failed(
-                    OP_SET,
-                    "the curve's tangent is within 3 degrees of the surface normal",
-                ));
+                return Err(stop.into_error());
             }
         }
 
@@ -819,6 +841,9 @@ impl DropPt {
         end_t: f64,
         end: &mut Self,
     ) -> Result<i32> {
+        // Not upstream: a drop that subdivides without end is stopped by the caller's token
+        // (a work limit, or a cancelled job); upstream has no such check.
+        k.check_cancelled(OP_NEXT)?;
         let start = self;
 
         // init return values
@@ -887,12 +912,9 @@ impl DropPt {
         let (found_answer, local_uv) =
             local_point_solve(k, surface, uv_domain, end.crv_pd[0], end.uv_pd[0])?;
 
-        // MINIMIZE should always find some solution.
+        // MINIMIZE should always find some solution (none found: rule 7).
         if !found_answer {
-            return Err(SolidError::intersect_failed(
-                OP_NEXT,
-                "the span end could not be dropped onto the surface",
-            ));
+            return Err(SolidError::intersect(OP_NEXT, IntersectFailure::NoFoot));
         }
 
         // load SpanEnd[UV] from DropPoint(SpandEnd[CrvPt]) solution
@@ -1073,6 +1095,62 @@ pub fn flush_curve_bounded(
     fix_bc_change: &mut bool,
     bound: Option<(&Kernel, &MoveBound)>,
 ) -> Result<()> {
+    flush_curve_with_policy(
+        uv_domain,
+        ctrl_poly,
+        knots,
+        uv_tol_x,
+        uv_tol_y,
+        curves,
+        fix_bc_change,
+        bound.map_or(BoundaryPolicy::Unbounded, |(k, b)| {
+            BoundaryPolicy::Bounded(k, b)
+        }),
+    )
+}
+
+/// How a traced UV polynomial may be changed before it is stored.
+#[derive(Clone, Copy)]
+pub(crate) enum BoundaryPolicy<'a> {
+    /// The original boundary fix-up, for surfaces without a procedural definition.
+    Unbounded,
+    /// Boundary moves enclosed on the surface's net.
+    Bounded(&'a Kernel, &'a MoveBound),
+    /// Keep the Hermite jets and prove the whole polynomial stays in the domain.
+    Preserve,
+}
+
+/// A cubic lies in the convex hull of its four control points. Testing every point
+/// of the piecewise cubic polygon therefore proves containment of every span,
+/// without snapping its endpoints or changing its tangents (#17016).
+fn prove_uv_domain(polygon: &[Point3], domain: &Extent2d) -> Result<()> {
+    let lo = domain.min();
+    let hi = domain.max();
+    if ![lo.x, lo.y, hi.x, hi.y].iter().all(|x| x.is_finite())
+        || polygon.iter().any(|p| {
+            !p.x.is_finite()
+                || !p.y.is_finite()
+                || !p.z.is_finite()
+                || !domain.contains_point(Point2::new(p.x, p.y), 0.0)
+        })
+    {
+        return Err(SolidError::intersect_uv_polygon_not_in_domain(OP_ADD));
+    }
+    Ok(())
+}
+
+/// Flush with an explicit construction policy, including an unchanged, domain-proved
+/// Hermite polynomial for a surface evaluated from its procedural definition.
+pub(crate) fn flush_curve_with_policy(
+    uv_domain: &Extent2d,
+    ctrl_poly: &mut Vec<Point3>,
+    knots: &mut Vec<f64>,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+    curves: &mut Vec<BSplineCurve>,
+    fix_bc_change: &mut bool,
+    policy: BoundaryPolicy<'_>,
+) -> Result<()> {
     // no work: no knots
     let num_knots = knots.len();
     if num_knots == 0 {
@@ -1080,18 +1158,22 @@ pub fn flush_curve_bounded(
     }
 
     // postprocess the curve (not upstream: bounded moves where the surface allows it)
-    let fixed = match bound {
-        Some((k, b)) => {
+    let fixed = match policy {
+        BoundaryPolicy::Bounded(k, b) => {
             fix_boundary_curves_bounded(k, ctrl_poly, knots, uv_domain, uv_tol_x, uv_tol_y, b)?
         }
-        None => fix_boundary_curves(ctrl_poly, uv_domain, uv_tol_x, uv_tol_y)?,
+        BoundaryPolicy::Unbounded => fix_boundary_curves(ctrl_poly, uv_domain, uv_tol_x, uv_tol_y)?,
+        BoundaryPolicy::Preserve => {
+            prove_uv_domain(ctrl_poly, uv_domain)?;
+            false
+        }
     };
     if fixed {
         *fix_bc_change = true;
     }
 
     // for every knot - set knot multiplicy = [ 4 3 3 ... 4]
-    let mut knot_mult = vec![3usize; num_knots];
+    let mut knot_mult: Vec<usize> = knots.iter().map(|_| 3).collect();
     if let Some(m) = knot_mult.first_mut() {
         *m = 4;
     }
@@ -1191,6 +1273,41 @@ pub fn add_to_curve_bounded(
     fix_bc_change: &mut bool,
     bound: Option<&MoveBound>,
 ) -> Result<()> {
+    add_to_curve_with_policy(
+        k,
+        surface,
+        uv_domain,
+        start,
+        end,
+        ctrl_poly,
+        knots,
+        approx_tol_3d,
+        uv_tol_x,
+        uv_tol_y,
+        curves,
+        fix_bc_change,
+        bound.map_or(BoundaryPolicy::Unbounded, |b| BoundaryPolicy::Bounded(k, b)),
+    )
+}
+
+/// Add the tested Hermite span with the same policy used by every intermediate
+/// and final flush. The preserve policy also forbids the pole dog-leg edit and
+/// endpoint clamping: every emitted point belongs to the tested polynomial.
+pub(crate) fn add_to_curve_with_policy(
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    start: &DropPt,
+    end: &DropPt,
+    ctrl_poly: &mut Vec<Point3>,
+    knots: &mut Vec<f64>,
+    approx_tol_3d: f64,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+    curves: &mut Vec<BSplineCurve>,
+    fix_bc_change: &mut bool,
+    policy: BoundaryPolicy<'_>,
+) -> Result<()> {
     // locals for hermite curve segment
     let scale = end.t - start.t;
     let mut p1 = start.uv_pd[0];
@@ -1205,7 +1322,8 @@ pub fn add_to_curve_bounded(
 
     // when beg/end pt is on a pole - straighten out dog-leg shapes
     let start_on_pole = start.on_pole != Some(false);
-    let dog_leg = if start_on_pole || end.on_pole != Some(false) {
+    let preserve = matches!(policy, BoundaryPolicy::Preserve);
+    let dog_leg = if !preserve && (start_on_pole || end.on_pole != Some(false)) {
         is_dog_leg(p1, p2, p3, p4, 35.0, 45.0)
     } else {
         false
@@ -1250,7 +1368,7 @@ pub fn add_to_curve_bounded(
         {
             // span is notC0 or zeroLength - create current curve, restart lists, and
             // carry on.
-            flush_curve_bounded(
+            flush_curve_with_policy(
                 uv_domain,
                 ctrl_poly,
                 knots,
@@ -1258,7 +1376,7 @@ pub fn add_to_curve_bounded(
                 uv_tol_y,
                 curves,
                 fix_bc_change,
-                bound.map(|b| (k, b)),
+                policy,
             )?;
         }
     } else if !knots.is_empty() {
@@ -1274,9 +1392,13 @@ pub fn add_to_curve_bounded(
         return Ok(());
     }
 
-    // Clamp points into parameter space
-    p1 = uv_domain.clamp_point(p1);
-    p4 = uv_domain.clamp_point(p4);
+    if preserve {
+        prove_uv_domain(&[p1.into(), p2.into(), p3.into(), p4.into()], uv_domain)?;
+    } else {
+        // Clamp points into parameter space.
+        p1 = uv_domain.clamp_point(p1);
+        p4 = uv_domain.clamp_point(p4);
+    }
 
     // when adding 1st segment - add start CtrlPoint and start knot value
     if knots.is_empty() {
@@ -1292,9 +1414,11 @@ pub fn add_to_curve_bounded(
 
     // return error for huge drop point counts
     if ctrl_poly.len() >= MAX_CTRL_POINTS {
-        return Err(SolidError::intersect_failed(
+        return Err(SolidError::intersect(
             OP_ADD,
-            "the dropped curve has too many control points",
+            IntersectFailure::TooManyControlPoints {
+                limit: MAX_CTRL_POINTS,
+            },
         ));
     }
 
@@ -1365,6 +1489,100 @@ mod tests {
         assert!(poly.is_empty() && knots.is_empty());
         assert_eq!(curves.len(), 2);
         assert!(!ch);
+    }
+
+    #[test]
+    fn preserving_a_near_boundary_uv_drop_keeps_the_transverse_tangent() {
+        let k = Kernel::default();
+        let surface = plane();
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        // The exact line v = 1 - 2^-20 u approaches the boundary obliquely.
+        // Its whole polygon is inside, including the endpoint on v = 1.
+        let slope = 2.0_f64.powi(-20);
+        let tangent = Vec2::new(1.0, -slope);
+        let a = pt(0.0, Point2::new(0.0, 1.0), tangent);
+        let b = pt(0.5, Point2::new(0.5, 1.0 - slope / 2.0), tangent);
+        let c = pt(1.0, Point2::new(1.0, 1.0 - slope), tangent);
+        let mut polygon = Vec::new();
+        let mut knots = Vec::new();
+        let mut curves = Vec::new();
+        let mut changed = false;
+        // The last span starts a second curve, exercising the intermediate flush.
+        for (start, end) in [(&a, &b), (&b, &c), (&a, &b)] {
+            add_to_curve_with_policy(
+                &k,
+                &surface,
+                &domain,
+                start,
+                end,
+                &mut polygon,
+                &mut knots,
+                slope,
+                slope,
+                slope,
+                &mut curves,
+                &mut changed,
+                BoundaryPolicy::Preserve,
+            )
+            .unwrap();
+        }
+        assert_eq!(curves.len(), 1);
+        flush_curve_with_policy(
+            &domain,
+            &mut polygon,
+            &mut knots,
+            slope,
+            slope,
+            &mut curves,
+            &mut changed,
+            BoundaryPolicy::Preserve,
+        )
+        .unwrap();
+        assert_eq!(curves.len(), 2);
+        assert!(!changed);
+        for curve in curves {
+            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let t = curve.natural_interval().evaluate(fraction);
+                let jet = curve.evaluate(t, 1, false, false).unwrap();
+                // Cubic evaluation has rounding; it must retain the line and its
+                // nonzero cross-boundary derivative, including at the shared knot.
+                assert!((jet[0].y - (1.0 - slope * t)).abs() <= 32.0 * f64::EPSILON);
+                assert!((jet[1].y + slope).abs() <= 32.0 * f64::EPSILON);
+            }
+        }
+    }
+
+    #[test]
+    fn preserving_a_uv_drop_refuses_an_unproved_span_instead_of_snapping_it() {
+        let k = Kernel::default();
+        let surface = plane();
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        for derivative in [1.0, f64::NAN] {
+            let a = pt(0.0, Point2::new(0.0, 1.0), Vec2::new(1.0, derivative));
+            let b = pt(1.0, Point2::new(1.0, 0.5), Vec2::new(1.0, 0.0));
+            let mut polygon = Vec::new();
+            let mut knots = Vec::new();
+            let mut curves = Vec::new();
+            let mut changed = false;
+            assert!(add_to_curve_with_policy(
+                &k,
+                &surface,
+                &domain,
+                &a,
+                &b,
+                &mut polygon,
+                &mut knots,
+                1.0,
+                1.0,
+                1.0,
+                &mut curves,
+                &mut changed,
+                BoundaryPolicy::Preserve,
+            )
+            .is_err());
+            assert!(polygon.is_empty() && knots.is_empty() && curves.is_empty());
+            assert!(!changed);
+        }
     }
 
     #[test]
@@ -1476,6 +1694,43 @@ mod tests {
         assert!(p
             .set_properties(&k, &s, &mut off, SS_NONE, 1e-6, &d, true)
             .is_err());
+        assert_eq!(p.good_drop, Some(false));
+    }
+
+    /// A zero tangent with the curve's degeneracy unknown has no angle to the normal: the
+    /// stop is a degenerate tangent (`SM_ERR`) that keeps the angle's error as its cause.
+    #[test]
+    fn set_properties_zero_tangent_keeps_the_angle_error() {
+        let k = Kernel::default();
+        let s = plane();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut p = DropPt::new(0.0, None);
+        p.uv_pd = [Point2::new(0.5, 0.5), Vec2::new(0.0, 0.0)];
+        p.crv_pd = [
+            Vec3::new(0.5, 0.5, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+        ];
+        let mut off = DropOffset::new(1.0, SS_NONE);
+        let e = p
+            .set_properties(&k, &s, &mut off, SS_NONE, 1e-6, &d, true)
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::DegenerateTangent)
+        );
+        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert!(
+            matches!(
+                e.cause(),
+                Some(SolidError::InvalidInput {
+                    operation: "geom::vector3d::Vec3::angle_between",
+                    ..
+                })
+            ),
+            "{:?}",
+            e.cause()
+        );
         assert_eq!(p.good_drop, Some(false));
     }
 }

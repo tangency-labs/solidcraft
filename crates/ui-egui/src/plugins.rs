@@ -43,14 +43,17 @@ pub(crate) fn normalize_request(session: &solidcraft_engine::Session, method: &s
 }
 
 /// Whether an agent's request runs a plugin's code: `plugin.run` (a `<plugin>.<entry>` call is
-/// one once normalized), `file.import`, or `doc.open` of a file an installed importer opens, alone
-/// or as a batch step. The chat asks before such a request in every mode, whatever was allowed
-/// before: running a plugin's code needs the user's go each time.
+/// one once normalized), `file.import`, `doc.open` of a file an installed importer opens, or
+/// `file.export` through an installed exporter, alone or as a batch step. The chat asks before
+/// such a request in every mode, whatever was allowed before: running a plugin's code needs the
+/// user's go each time.
 pub(crate) fn runs_plugin_code(session: &solidcraft_engine::Session, method: &str, params: &serde_json::Value) -> bool {
     let step = |step: &serde_json::Value| {
         let Some(command) = step.get("command").or_else(|| step.get("id")).and_then(serde_json::Value::as_str) else { return false };
         let params = step.get("params").unwrap_or(&serde_json::Value::Null);
-        command.eq_ignore_ascii_case("plugin.run") || solidcraft_engine::cmd::runs_plugin_importer(session, command, params)
+        command.eq_ignore_ascii_case("plugin.run")
+            || solidcraft_engine::cmd::runs_plugin_importer(session, command, params)
+            || solidcraft_engine::cmd::runs_plugin_exporter(session, command, params)
     };
     match method {
         "engine.execute" | "command" => step(params),
@@ -83,6 +86,7 @@ pub struct Plugin {
     /// The images its entries name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
+    pub(crate) swatches: crate::plugin_images::Swatches,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -149,6 +153,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         groups: Default::default(),
         entries: Vec::new(),
         images: Default::default(),
+        swatches: Default::default(),
     })
 }
 
@@ -169,6 +174,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
         plugin.groups = runtime.permissions.command_groups;
     }
     plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
+    plugin.swatches = crate::plugin_images::load_swatches(dir, &plugin.entries);
     Ok((plugin, executable))
 }
 
@@ -277,14 +283,14 @@ pub(crate) fn share_grants(app: &mut SolveApp) {
         log::warn!("plugins: approvals could not be shared with the command line: {e}");
     }
     app.preferences.plugin_grants.retain(|id, grants| valid_id(id) && valid_grants(grants));
-    app.plugin_grant_store = Some(synced);
+    app.plugins.grant_store = Some(synced);
     sync_policy(app);
 }
 
 /// Write the grants changed here to the shared store, then take in what the command line or
 /// headless MCP changed there. Nothing to do unless the app shares its grants.
 fn sync_store(app: &mut SolveApp) -> Result<(), String> {
-    let Some(synced) = app.plugin_grant_store.as_mut() else { return Ok(()) };
+    let Some(synced) = app.plugins.grant_store.as_mut() else { return Ok(()) };
     let Some(dir) = app.session.plugin_state.plugins_dir() else { return Ok(()) };
     let saved = synced.persist(&dir, &app.preferences.plugin_grants);
     // A record that could not be written or deleted reads back as last seen: no change here.
@@ -587,14 +593,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             crate::plugin_install::start(app);
         }
         ui.add_space(8.0);
-        resource_controls(app, ui);
-        crate::ui_kit::checkbox(
-            ui,
-            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
-            &mut app.preferences.plugin_remember_dialog_position,
-        )
-        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
-        ui.add_space(8.0);
         let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();
         let searching = crate::ui_kit::settings_search::querying(ui);
@@ -656,6 +654,15 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
                 ui.label(RichText::new(format!("{who}: {}", skip.reason)).size(t.font_small).color(t.text_dim));
             }
         }
+        ui.add_space(8.0);
+        resource_controls(app, ui);
+        crate::ui_kit::checkbox(
+            ui,
+            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
+            &mut app.preferences.plugin_remember_dialog_position,
+        )
+        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
+        ui.add_space(8.0);
         if !searching {
             ui.horizontal(|ui| {
                 let button = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("prefs.plugins_show_folder"), "folder", true, false)
@@ -741,6 +748,13 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         ui.add_space(t.space_12);
         ui.label(RichText::new(approved).size(t.font_small).color(t.text_dim));
     });
+    if let Some(error) = app.session.plugin_state.listener_failures.get(&plugin.id) {
+        let text = solidcraft_ui_text::format("prefs.plugin_listener_failed", &[("error", error)]);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(t.space_12);
+            ui.label(RichText::new(text).size(t.font_small).color(t.text_dim));
+        });
+    }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:folder", plugin.id), folder.rect);
     crate::scenario::publish_target(&format!("prefs:plugin:{}", plugin.id), check.rect);
     if folder.clicked()
@@ -805,11 +819,15 @@ mod tests {
     }
 
     fn capture_page(app: &mut SolveApp, dir: &Path, name: &str) {
+        capture_page_sized(app, dir, name, egui::vec2(1280.0, 720.0));
+    }
+
+    fn capture_page_sized(app: &mut SolveApp, dir: &Path, name: &str, size: egui::Vec2) {
         let Ok(output_dir) = std::env::var("SOLIDCRAFT_PLUGINS_EVIDENCE") else { return };
         let ctx = crate::fonts::test_context();
         let mut textures = std::collections::HashMap::new();
         for frame in 0..6 {
-            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
             let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
                 crate::ui_kit::scope(ui, |ui| page_in_dir(app, ui, Some(dir)))
             });
@@ -829,6 +847,49 @@ mod tests {
         for name in ["plugin.json", "plugin.wasm"] {
             std::fs::copy(path.join(name), target.join(name)).unwrap();
         }
+    }
+
+    #[test]
+    fn design_notifications_report_handler_failure_in_plugin_preferences() {
+        fn has_text(shape: &egui::Shape, expected: &str) -> bool {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_text(shape, expected)),
+                egui::Shape::Text(text) => text.galley.job.text.contains(expected),
+                _ => false,
+            }
+        }
+        fn text_bounds(shape: &egui::Shape, expected: &str) -> Option<egui::Rect> {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_bounds(shape, expected)),
+                egui::Shape::Text(text) if text.galley.job.text.contains(expected) => Some(text.visual_bounding_rect()),
+                _ => None,
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        let path = package(&h, "workshop-helper");
+        hand_install(&path, &root, "workshop-helper");
+        h.app.session.plugin_state.listener_failures.insert("workshop-helper".into(), "read entries cannot edit the design".into());
+        for size in [egui::vec2(1280.0, 720.0), egui::vec2(640.0, 480.0)] {
+            let ctx = crate::fonts::test_context();
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+                crate::ui_kit::scope(ui, |ui| page_in_dir(&mut h.app, ui, Some(&root)))
+            });
+            output.textures_delta.clear();
+            assert!(
+                output.shapes.iter().any(|shape| has_text(&shape.shape, "read entries cannot edit the design")),
+                "diagnostic remains visible at {size:?}"
+            );
+            let (painted, clip) = output
+                .shapes
+                .iter()
+                .find_map(|shape| text_bounds(&shape.shape, "read entries cannot edit the design").map(|rect| (rect, shape.clip_rect)))
+                .unwrap();
+            assert!(bounds.contains_rect(painted) && clip.contains_rect(painted), "diagnostic is fully painted at {size:?}: {painted:?}");
+        }
+        capture_page(&mut h.app, &root, "plugin-design-listener-failure.png");
+        capture_page_sized(&mut h.app, &root, "plugin-design-listener-failure-small.png", egui::vec2(640.0, 480.0));
     }
 
     #[test]
@@ -1563,6 +1624,7 @@ mod tests {
             groups: Default::default(),
             entries: Vec::new(),
             images: Default::default(),
+            swatches: Default::default(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),

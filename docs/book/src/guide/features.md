@@ -163,15 +163,20 @@ angular placement when opened, edited or copied; creating another revolve uses t
 To Object follows that same direction for each selected profile, including curved target faces.
 Pick a target away from the axis so its angular position is defined.
 
-For cylindrical **Emboss**, select a supported cylinder face (outside, or a bore) and a tangent sketch
-profile. **Deboss** cuts radially into the wall (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). Every profile wraps
-round the wall by arc length: straight edges along the axis and round the circumference keep exact
-radial walls, and curves, diagonals and text wrap too, their edges and walls fitted within the
-part's tolerance. Profiles may have holes and concave outlines, and must stay clear of seams and ends.
-Complete cylinders and coaxial sleeves are supported. Capture pending component positions
-before applying. The feature stores the selected target and author occurrence paths, so edits
-and reopening retain the chosen instances. Other curved surfaces remain
-unsupported. A new Emboss without an explicit face infers a unique eligible supported cylinder;
+For **Emboss** on a picked face, select the face (planar, a cylinder wall outside or a bore, or
+another curved face) and a sketch profile. **Deboss** cuts into the face (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). On a
+complete cylinder or coaxial sleeve every profile wraps round the wall by arc length: straight edges
+along the axis and round the circumference keep exact radial walls, and curves, diagonals and text
+wrap too, their edges and walls fitted within the part's tolerance. Profiles may have holes and
+concave outlines, and must stay clear of seams and ends. A partial cylinder wall bounded by two arcs
+round its axis and two lines along it (a half tube, a rounded box corner, a revolved wall) wraps the
+same way; the profiles must stay inside the picked face, and raised material that runs into another
+part of the body, or sunk material that breaks through another face, is refused. On any other
+cylinder face and any other face, each closed region follows the face at the given depth: on a
+cylinder it is laid on the wall at its arc length from the sketch, elsewhere it is projected along
+the sketch normal; a region that does not lie wholly on the face is refused. Capture pending component positions before applying. The
+feature stores the selected target and author occurrence paths, so edits and reopening retain the
+chosen instances. A new Emboss without an explicit face infers a unique eligible cylinder, outside or a bore;
 select the face when the target is ambiguous. Older saved features without a face retain their
 planar placement.
 
@@ -228,6 +233,12 @@ screw: a socket head (ISO 4762) or a button head (ISO 7380-1) of the bolt's size
 **Counterbore Ø** and **Counterbore depth** with the head's diameter and height plus 0.5 mm each
 side and below; change either to use your own. Scripts use `head: "ISO 4762"` with `clearance`
 on `solid.hole`.
+
+With **Hole Type** Countersink and Clearance, **Screw head** offers a countersunk socket head
+(ISO 10642). It fills **Countersink Ø** with the head's diameter plus 0.5 mm each side and
+**Countersink angle** with 90°, so the head sits 0.5 mm below the face; change either to use your
+own. Scripts use `head: "ISO 10642"` with `clearance` on `solid.hole`: the hole type then
+defaults to countersink.
 
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,

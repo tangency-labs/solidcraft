@@ -476,10 +476,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         )?;
         let within = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
         let found = self.find_proto_vertex_holding(k, geometry, position, pc1, pc2, within)?;
+        // Not upstream: a point classified on a vertex is that vertex's point, whatever the
+        // position found for the pair (the average of the two objects' points), so the proto
+        // vertex also holds the ball of each vertex's own point: a later point on the vertex
+        // (within the coincidence rule of it) is at the proto vertex, as the vertex says, though
+        // it may lie farther from the average (docs/booleans.md, "One point or two").
+        let mut held = Vec::new();
+        for pc in [&*pc1, &*pc2] {
+            if pc.point_class() == PointClassType::Vertex {
+                let mut v = *pc;
+                v.set_class_object(PointClassType::Vertex, pc.object());
+                if let Some(at) = ignore_soft(v.find_obj_point_3d(k, geometry))? {
+                    held.push(DeclaredContact::of_point(at, point_tol));
+                }
+            }
+        }
 
         // when nearby PV exists
         if let Some(pv) = found {
             self.note_region(pv, region);
+            for r in held {
+                self.note_region(pv, r);
+            }
             // AddVertexDefinition(rPC1, rPC2, pNewVD): status ignored (passed on with the
             // flag)
             ignore_soft(passed_on(
@@ -493,6 +511,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let created = self.create_proto_vertex(k, geometry, pc1, pc2)?;
         if let Some(pv) = created {
             self.note_region(pv, region);
+            for r in held {
+                self.note_region(pv, r);
+            }
         }
         Ok((created, created.is_some()))
     }
@@ -1560,7 +1581,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     if dist > xs {
                         continue;
                     }
-                    // `seam_vertex_stays_on_seam` (not upstream): the vertex that stays is
+                    // Not upstream (#18274): the vertex that stays is
                     // the first definition's, unless only the other is the operand's own
                     // vertex at the end of a seam edge (its definition found it on that
                     // vertex): a seam's vertex keeps its place on the seam
@@ -1575,9 +1596,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 && ends_seam(&*brep, v)?,
                         )
                     };
-                    let keep_second = k.fixes.seam_vertex_stays_on_seam
-                        && on_seam(self, vd2, v2)?
-                        && !on_seam(self, vd1, v1)?;
+                    let keep_second = on_seam(self, vd2, v2)? && !on_seam(self, vd1, v1)?;
                     let (keep, gone) = if keep_second { (v2, v1) } else { (v1, v2) };
                     let merge_away = |s: &mut Self, deleted_v: &mut [Option<O>]| -> Result<()> {
                         set_slot(deleted_v, jj, gone);

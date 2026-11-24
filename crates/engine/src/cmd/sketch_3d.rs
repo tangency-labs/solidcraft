@@ -1003,15 +1003,16 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
         which.dedup();
         // Points moved on their own: lone ones, and ones on curves that stay where they are
         // (those curves are lifted in place, then just the point moves).
-        let mut alone: Vec<(usize, Vec3)> = Vec::new();
+        let mut alone: Vec<(String, Vec3)> = Vec::new();
         let mut on_curves: Vec<usize> = Vec::new();
         let mut in_place: Vec<usize> = Vec::new();
         for r in points {
             let pi = sk.resolve_point(r).filter(|i| *i != 0).ok_or_else(|| bad(cmd, format!("no point `{r}`")))?;
             let through: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| c.kind.uses(pi)).map(|(i, _)| i).collect();
             if through.is_empty() {
-                if !alone.iter().any(|(q, _)| *q == pi) {
-                    alone.push((pi, sk.points.get(pi).map(|q| comp(q.pos)).ok_or_else(|| bad(cmd, "the point is missing"))?));
+                let q = sk.points.get(pi).ok_or_else(|| bad(cmd, "the point is missing"))?;
+                if !alone.iter().any(|(id, _)| *id == q.id) {
+                    alone.push((q.id.clone(), comp(q.pos)));
                 }
             } else if !through.iter().all(|c| which.contains(c)) {
                 on_curves.push(pi);
@@ -1034,7 +1035,7 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
             lifted.push((ids, fit));
         }
         sk.remove_curves(&all);
-        let gone: Vec<usize> = alone.iter().map(|(q, _)| *q).collect();
+        let gone: Vec<usize> = alone.iter().filter_map(|(id, _)| sk.point_index(id)).collect();
         sk.remove_points(&gone);
         let mut made = Vec::new();
         // Where each point moved on its own sits on the drawn curves (curve id, fit index).
@@ -1066,6 +1067,59 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
         }
         join_in(sk, doc, id, &made)?;
         Ok(made)
+    })
+}
+
+/// Moves drawn 3D picks along the plane as `f` moves plane geometry, and by `z` along its normal.
+pub(super) fn move_drawn(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    picks: &[(String, Option<usize>)],
+    z: f64,
+    f: &dyn Fn(Vec2) -> Vec2,
+) -> Result<(usize, Value)> {
+    let id = sketch_store::target(s, p, cmd)?;
+    let world = s.world_state()?.sketch(id).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "the sketch has no plane"))?;
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let component = solidcore_record::Plane {
+        origin: solidcraft_doc::apply_point(&inverse, world.origin),
+        x: solidcraft_doc::apply_vector(&inverse, world.x),
+        y: solidcraft_doc::apply_vector(&inverse, world.y),
+    };
+    edit(s, p, cmd, false, |sk, _| {
+        let mut moves = Vec::new();
+        for (wire, index) in picks {
+            let drawn = sk
+                .wire_index(wire)
+                .and_then(|w| sk.wires.get(w))
+                .filter(|w| !w.fit.is_empty() && w.link.is_none())
+                .ok_or_else(|| bad(cmd, format!("`{wire}` is not an editable drawn 3D curve")))?;
+            let plane = if drawn.space == WireSpace::Component { component } else { world };
+            let which: Vec<usize> = match index {
+                Some(i) if *i < drawn.fit.len() => vec![*i],
+                Some(i) => return Err(bad(cmd, format!("`{wire}` has no drawn point {i}"))),
+                None => (0..drawn.fit.len()).collect(),
+            };
+            let moved: Vec<(usize, Vec3)> = which
+                .into_iter()
+                .filter_map(|i| drawn.fit.get(i).map(|q| (i, *q)))
+                .map(|(i, q)| (i, plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)))
+                .collect();
+            moves.extend(moved.into_iter().map(|(i, to)| (wire.clone(), i, to)));
+        }
+        if let Some((wire, index, _)) = moves.iter().find(|(w, i, _)| sk.wire_point_fixed(&WirePoint { wire: w.clone(), index: *i })) {
+            return Err(bad(cmd, format!("`{wire}` point {index} is fixed, or joined to a fixed point (unfix it to move it)")));
+        }
+        let held_before = sk.wire_constraints_holding();
+        sk.move_drawn_points(&moves)?;
+        if !held_before.is_empty() {
+            let held_after = sk.wire_constraints_holding();
+            if held_before.iter().any(|id| !held_after.contains(id)) {
+                return Err(bad(cmd, "the sketch's 3D constraints cannot hold the moved points there"));
+            }
+        }
+        Ok(moves.len())
     })
 }
 

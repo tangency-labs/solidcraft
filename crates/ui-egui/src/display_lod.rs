@@ -121,8 +121,11 @@ pub(crate) struct Candidate<'a> {
     pub body: &'a ModelBody,
     /// The chosen level's screen-space error ([`error_px`]).
     pub err_px: f64,
-    /// Triangles at the chosen level (an estimate of the step-0 count).
-    pub triangles: usize,
+    /// Its id ([`body_id`]).
+    pub id: usize,
+    /// Triangles at the chosen level (an estimate of the step-0 count); `None`: its mesh's,
+    /// counted only if it may be refined.
+    pub triangles: Option<usize>,
 }
 
 struct Entry {
@@ -238,6 +241,10 @@ impl Lod {
             self.shown.clear();
             changed = true;
         }
+        // A body drawn as chosen that its error leaves there changes nothing (most of a large
+        // assembly, and every body off screen): only the others are ranked.
+        let candidates: Vec<Candidate<'_>> =
+            candidates.into_iter().filter(|c| self.shown.contains_key(&c.id) || refinement_for(c.err_px, 0, MAX_REFINE) > 0).collect();
         // The bodies that need it most first, within the triangle budget.
         let mut order: Vec<usize> = (0..candidates.len()).collect();
         order.sort_by(|&a, &b| candidates[b].err_px.total_cmp(&candidates[a].err_px));
@@ -247,13 +254,16 @@ impl Lod {
         let mut seen = std::collections::HashSet::new();
         for i in order {
             let c = &candidates[i];
-            let (id, _) = body_id(c.body);
+            let id = c.id;
             if !seen.insert(id) {
                 continue;
             }
             let current = self.shown.get(&id).copied().unwrap_or(0);
             let mut k = refinement_for(c.err_px, current, MAX_REFINE);
-            let estimate = |k: u8| self.cache.get(&(id, q, k)).and_then(|e| e.refined.as_ref()).map_or(c.triangles << k, |(_, m)| m.triangles.len());
+            let triangles = std::cell::OnceCell::new();
+            let base = || *triangles.get_or_init(|| c.triangles.unwrap_or_else(|| c.body.mesh_in_place().0.triangles.len()));
+            let estimate =
+                |k: u8| self.cache.get(&(id, q, k)).and_then(|e| e.refined.as_ref()).map_or_else(|| base() << k, |(_, m)| m.triangles.len());
             while k > 0 && estimate(k) > remaining {
                 k -= 1;
             }
@@ -263,7 +273,7 @@ impl Lod {
             wanted.push((i, k));
         }
         for (i, k) in wanted {
-            let (id, holder) = body_id(candidates[i].body);
+            let id = candidates[i].id;
             let current = self.shown.get(&id).copied().unwrap_or(0);
             if k == current {
                 continue;
@@ -280,10 +290,7 @@ impl Lod {
                 }
                 // The planner refused this step: keep what is drawn.
                 Some(_) => {}
-                None => {
-                    let _ = holder;
-                    requests.push((i, k));
-                }
+                None => requests.push((i, k)),
             }
         }
         self.start(q, &candidates, requests);
@@ -490,7 +497,7 @@ mod tests {
         let live: std::collections::HashSet<usize> = [body_id(&b).0].into();
         let base = b.plan_mesh_at(q).unwrap().triangles.len();
         let mut lod = Lod::default();
-        let cand = |err: f64| vec![Candidate { body: &b, err_px: err, triangles: base }];
+        let cand = |err: f64| vec![Candidate { body: &b, id: body_id(&b).0, err_px: err, triangles: Some(base) }];
         assert!(!lod.update(q, cand(0.5), &live));
         assert_eq!(lod.step(&b), 0);
         // 6 px of error: three steps.
@@ -538,7 +545,7 @@ mod tests {
         let fine = DisplayQuality::Fine;
         let fine_err = 6.0 * fine.chord_fraction() / q.chord_fraction();
         for _ in 0..2000 {
-            lod.update(fine, vec![Candidate { body: &b, err_px: fine_err, triangles: base }], &live);
+            lod.update(fine, vec![Candidate { body: &b, id: body_id(&b).0, err_px: fine_err, triangles: Some(base) }], &live);
             if lod.refined(&b, fine).is_some() {
                 break;
             }
@@ -561,8 +568,8 @@ mod tests {
         let mut lod = Lod::default();
         // Each would want four steps at 3M triangles a step-0 count: only the first fits.
         let cands = vec![
-            Candidate { body: &a, err_px: 2.0, triangles: TRIANGLE_BUDGET / 3 },
-            Candidate { body: &b, err_px: 12.0, triangles: TRIANGLE_BUDGET / 3 },
+            Candidate { body: &a, id: body_id(&a).0, err_px: 2.0, triangles: Some(TRIANGLE_BUDGET / 3) },
+            Candidate { body: &b, id: body_id(&b).0, err_px: 12.0, triangles: Some(TRIANGLE_BUDGET / 3) },
         ];
         // Distinct bodies (two ModelBody::new calls), so distinct ids.
         assert_ne!(body_id(&a).0, body_id(&b).0);
