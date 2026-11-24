@@ -367,25 +367,30 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             .map(|r| r.2);
         // (a row the WR-493 retirement moves too: main had the fitted NURB; one the WR-450
         // retirement moves too: main's choices at its seams)
-        let line = crate::wr450_rows::with_mains_choices_for(unit_id, name, || {
-            if let Some(raised) = joined {
-                assert!(
-                    !TRIM_COVER_REFIT.contains(&(unit_id, name)),
-                    "{unit_id} {name}: joined and refit"
-                );
-                let mut out = run_raw(u.as_ref(), case);
-                for (key, count) in put_back_joined(&mut out, raised) {
-                    failures.push(format!(
+        let (line, turned) =
+            crate::wr450_rows::with_mains_choices_counting_gate(unit_id, name, || {
+                if let Some(raised) = joined {
+                    assert!(
+                        !TRIM_COVER_REFIT.contains(&(unit_id, name)),
+                        "{unit_id} {name}: joined and refit"
+                    );
+                    let mut out = run_raw(u.as_ref(), case);
+                    for (key, count) in put_back_joined(&mut out, raised) {
+                        failures.push(format!(
                         "{name}: {count} values {key:e} raised by the joined cover, not as listed"
                     ));
+                    }
+                    encode(&case.name, &out)
+                } else if TRIM_COVER_REFIT.contains(&(unit_id, name)) {
+                    refit_run(case, &mut failures)
+                } else {
+                    run_without_classified_trims(u.as_ref(), case)
                 }
-                encode(&case.name, &out)
-            } else if TRIM_COVER_REFIT.contains(&(unit_id, name)) {
-                refit_run(case, &mut failures)
-            } else {
-                run_without_classified_trims(u.as_ref(), case)
-            }
-        });
+            });
+        // (a row the carry gate reaches only in this put-back run: it turned a trim away there)
+        if crate::wr450_rows::GATE_REPLAY_ONLY.contains(&(unit_id, name)) && turned == 0 {
+            failures.push(format!("{name}: the carry gate turned no trim away"));
+        }
         let Some(Mode::Substitute {
             reads,
             undone,
