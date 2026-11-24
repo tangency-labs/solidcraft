@@ -108,6 +108,24 @@ mod imp {
         out.sort();
         Ok(out)
     }
+    /// The paths of the folders directly in a folder, sorted; at most `max` of them. A link to a
+    /// folder is not one (its file type is the link's), so a listing never leaves `dir`.
+    pub fn dirs_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        check(dir)?;
+        touched();
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                out.push(entry.path().to_string_lossy().into_owned());
+                if out.len() > max {
+                    return Err(Error::new(ErrorKind::InvalidData, "too many folders in the folder"));
+                }
+            }
+        }
+        out.sort();
+        Ok(out)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -184,6 +202,20 @@ mod imp {
             return Err(Error::new(ErrorKind::InvalidData, "too many files in the folder"));
         }
         Ok(out)
+    }
+    /// The folders directly in a folder, sorted; at most `max` of them. A folder here is a path
+    /// part that some stored file sits under, so a folder no file sits under is not there.
+    pub fn dirs_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        if !FILES.with(|f| f.borrow().keys().any(|p| p.starts_with(&prefix))) {
+            return Err(missing(dir));
+        }
+        let out: std::collections::BTreeSet<String> =
+            FILES.with(|f| f.borrow().keys().filter_map(|p| Some(format!("{prefix}{}", p.strip_prefix(&prefix)?.split_once('/')?.0))).collect());
+        if out.len() > max {
+            return Err(Error::new(ErrorKind::InvalidData, "too many folders in the folder"));
+        }
+        Ok(out.into_iter().collect())
     }
     pub fn list(prefix: &str) -> Vec<(String, u64)> {
         FILES.with(|f| f.borrow().iter().filter(|(p, _)| p.starts_with(prefix)).map(|(p, b)| (p.clone(), b.len() as u64)).collect())

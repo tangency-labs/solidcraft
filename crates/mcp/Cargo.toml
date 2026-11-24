@@ -23,3 +23,6 @@ solidcraft-gpu = { workspace = true }
 image = { workspace = true }
 # A temporary folder per test, removed when the test ends, a failure included.
 tempfile = "3.27"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wat = "1"

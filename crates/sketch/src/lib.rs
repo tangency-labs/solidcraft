@@ -16,6 +16,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod cancel;
 mod construct;
 mod curves;
 mod decompose;
@@ -177,6 +178,7 @@ pub use profiles::MAX_PROFILE_EDGES;
 pub use profiles::Profile;
 pub use profiles::ProfileSearch;
 pub use profiles::distinct_curves;
+pub use profiles::enclosed_gaps;
 pub use profiles::find_drawn_profiles;
 pub use profiles::find_profiles;
 pub use profiles::find_profiles_checked;

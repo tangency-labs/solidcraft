@@ -315,6 +315,9 @@ fn build(
             && b.vertex_list() == order.vertices.as_slice()
     };
     put_enclosing_shells_first(k, &mut b)?;
+    // the body is assembled field by field, so its cached topology (each face's shell, each
+    // loop's edges) was never derived; rebuilt last, as `Body::from_smb` does before handing out
+    b.refresh_cached_topology();
     Ok((b, kept.then_some(order)))
 }
 
