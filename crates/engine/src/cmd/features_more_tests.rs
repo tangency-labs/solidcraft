@@ -5011,3 +5011,11 @@ fn align_refuses_a_target_on_a_body_that_moves() {
     run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [50, 0, 5], "to": {"snap": "vertex", "at": [60, 10, 15]}}));
     assert_bounds(&mut s, "B", [60., 10., 15.], [70., 20., 25.]);
 }
+
+/// A body listed twice is refused, not moved twice.
+#[test]
+fn align_refuses_a_body_listed_twice() {
+    let mut s = blocks_and_pin();
+    let e = align_error(&mut s, json!({"bodies": ["B", "B"], "from": [50, 0, 0], "to": [0, 0, 100]}));
+    assert!(e.contains("`B`") && e.contains("twice"), "{e}");
+}
