@@ -2925,7 +2925,11 @@ fn remove_history_freezes_a_body_built_by_several_features_and_undoes() {
 fn remove_history_keeps_a_feature_another_body_shares() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name": "A", "length": 10, "width": 10, "height": 10, "name": "Box A"}));
-    run(&mut s, "solid.box", json!({"body_name": "B", "corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "Box B"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"body_name": "B", "corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "Box B"}),
+    );
     run(&mut s, "solid.move", json!({"bodies": ["A", "B"], "translate": [0, 0, 5], "name": "Lift"}));
     run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 15]], "radius": 2, "body": "A", "name": "Round A"}));
     let (a, b) = (body_shape(&s, "A"), body_shape(&s, "B"));

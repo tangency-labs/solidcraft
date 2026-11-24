@@ -89,7 +89,13 @@ struct Shape {
 
 fn shape(body: &ModelBody) -> Result<Shape> {
     let m = solidcraft_kernel::measure(&body.body)?;
-    Ok(Shape { faces: body.body.face_count(), edges: body.body.edge_count(), vertices: body.body.vertex_count(), shells: body.body.shell_count(), volume: m.volume })
+    Ok(Shape {
+        faces: body.body.face_count(),
+        edges: body.body.edge_count(),
+        vertices: body.body.vertex_count(),
+        shells: body.body.shell_count(),
+        volume: m.volume,
+    })
 }
 
 /// The same topology and, within the kernel's measuring accuracy, the same volume.
@@ -142,7 +148,10 @@ fn remove_history(s: &mut Session, p: &Value) -> Result<Value> {
     // A linked design's or an inserted file's import keeps its component and its link.
     let fixed = |id: u64| {
         s.doc.feature(id).is_none_or(|f| {
-            f.inserted || s.doc.links.values().any(|l| l.feature == id) || s.doc.feature_owns_component(f) || matches!(f.kind, FeatureKind::MeshImport { .. })
+            f.inserted
+                || s.doc.links.values().any(|l| l.feature == id)
+                || s.doc.feature_owns_component(f)
+                || matches!(f.kind, FeatureKind::MeshImport { .. })
         })
     };
     let place = |id: &u64| order.get(id).copied().unwrap_or(usize::MAX);

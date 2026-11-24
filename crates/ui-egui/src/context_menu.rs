@@ -2568,7 +2568,13 @@ fn remove_history(app: &mut SolveApp, p: Value) {
         Err(error) => return app.set_status(crate::friendly_error("body.remove_history", &error), true),
     };
     let names = |key: &str| -> Vec<String> {
-        out.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.get("feature").and_then(Value::as_str).or(v.as_str())).map(str::to_string).collect()
+        out.get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.get("feature").and_then(Value::as_str).or(v.as_str()))
+            .map(str::to_string)
+            .collect()
     };
     let (removed, kept, broken) = (names("removed"), names("kept"), names("broken"));
     let count = removed.len().to_string();
