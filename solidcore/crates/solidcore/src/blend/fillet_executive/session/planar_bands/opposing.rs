@@ -516,9 +516,13 @@ fn subtract_corner_strip(
     Ok(())
 }
 
-/// Find the leftmost on-face bisector parameter `u` across `kept` by splitting
-/// each retained interval at exact crossings with `face_id`'s boundary edges
-/// (outer loop and inner holes) and classifying each resulting piece.
+/// Find `(u_min, u_witness)` for the leftmost on-face bisector piece across
+/// `kept` by splitting each retained interval at exact crossings with `face_id`'s
+/// boundary edges (outer loop and inner holes) and classifying each resulting
+/// piece. `u_min` is the exact one-sided affine minimum on that on-face piece
+/// (used for overlap and fit calculations), while `u_witness` is an interior or
+/// certified-boundary point verified on `face_id` (used only as the caller's
+/// face-classification witness).
 fn first_on_face_parameter(
     k: &Kernel,
     target: &mut Brep,
@@ -526,7 +530,7 @@ fn first_on_face_parameter(
     bisector: &OpposingBisector,
     kept: &[Interval],
     tolerance: f64,
-) -> Result<Option<f64>> {
+) -> Result<Option<(f64, f64)>> {
     let face_edges = face::p4::edges(target, face_id, None, false, None)?;
     let mut edge_curves = Vec::new();
     for edge_id in face_edges {
@@ -542,7 +546,7 @@ fn first_on_face_parameter(
                 && iv.hi_closed
                 && !super::super::sample_off_face(k, target, face_id, bisector.point(iv.lo))?
             {
-                return Ok(Some(iv.lo));
+                return Ok(Some((iv.lo, iv.lo)));
             }
             continue;
         }
@@ -577,24 +581,17 @@ fn first_on_face_parameter(
                 !super::super::sample_off_face(k, target, face_id, bisector.point(mid))?;
             if mid_on_face {
                 if bisector.s_slope == 0.0 {
-                    return Ok(Some(mid));
+                    return Ok(Some((mid, mid)));
                 }
                 let can_use_sub_lo = !sub_lo_is_iv_lo || iv.lo_closed;
-                if can_use_sub_lo
+                let u_witness = if can_use_sub_lo
                     && !super::super::sample_off_face(k, target, face_id, bisector.point(sub_lo))?
                 {
-                    return Ok(Some(sub_lo));
-                }
-                let span = sub_hi - sub_lo;
-                let step = (span * 0.5).min(tolerance * 1e-2).max(span * 1e-9);
-                let probe = sub_lo + step;
-                if probe > sub_lo
-                    && probe < sub_hi
-                    && !super::super::sample_off_face(k, target, face_id, bisector.point(probe))?
-                {
-                    return Ok(Some(probe));
-                }
-                return Ok(Some(mid));
+                    sub_lo
+                } else {
+                    mid
+                };
+                return Ok(Some((sub_lo, u_witness)));
             }
             sub_lo = sub_hi;
             sub_lo_is_iv_lo = false;
@@ -602,7 +599,7 @@ fn first_on_face_parameter(
         if iv.hi_closed
             && !super::super::sample_off_face(k, target, face_id, bisector.point(iv.hi))?
         {
-            return Ok(Some(iv.hi));
+            return Ok(Some((iv.hi, iv.hi)));
         }
     }
     Ok(None)
@@ -654,13 +651,15 @@ pub(super) fn retained_contact(
         }
     }
     let tolerance = edge::tolerance(target, a.edge)?.max(edge::tolerance(target, b.edge)?);
-    let Some(u_on_face) = first_on_face_parameter(k, target, a.face, &bisector, &kept, tolerance)?
+    let Some((u_min, u_witness)) =
+        first_on_face_parameter(k, target, a.face, &bisector, &kept, tolerance)?
     else {
         return Ok(None);
     };
-    let contact_at = bisector.point(u_on_face);
-    let da = (contact_at - bisector.a0).dot(bisector.na);
-    let db = (contact_at - bisector.b0).dot(bisector.nb);
+    let at_min = bisector.point(u_min);
+    let contact_at = bisector.point(u_witness);
+    let da = (at_min - bisector.a0).dot(bisector.na);
+    let db = (at_min - bisector.b0).dot(bisector.nb);
     if !(da.is_finite() && db.is_finite() && da > 0.0 && db > 0.0) {
         return Ok(None);
     }
@@ -676,7 +675,7 @@ pub(super) fn retained_contact(
             "invalid planar contact scale",
         ));
     }
-    let coord_scale = contact_at
+    let coord_scale = at_min
         .max_dimension()
         .max(bisector.a0.max_dimension())
         .max(bisector.a1.max_dimension())

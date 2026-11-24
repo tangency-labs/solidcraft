@@ -817,4 +817,49 @@ fn opposing_chamfers_on_a_skewed_or_tapered_face_name_their_fit() {
     };
     let volume = brep_volume(&k, &mut b, 1e-9, &attrs).unwrap();
     assert!((volume - 570.0).abs() <= 1e-9 * 570.0, "volume {volume}");
+
+    // Open lower bound (selected end chamfer at x = 0) on a 10-long tapered face
+    // (`skew = 0.05`, slope `0.005`): an overlap of `1e-10` per side right past the
+    // open corner-strip boundary must still be refused using the exact one-sided
+    // affine minimum rather than an interior probe stepped into the interval.
+    let tapered = [(0.0, 0.0), (10.0, 0.0), (10.0, 2.05), (0.0, 2.0)];
+    let run_open = |d: f64| {
+        let mut k = kernel();
+        let (mut b, mids) = prism(&mut k, &tapered, 20.0);
+        let edges = [
+            pick(&k, &b, mids[0]),
+            pick(&k, &b, mids[2]),
+            pick(&k, &b, mids[3]),
+        ];
+        let top = edge::faces(&b, edges[0], None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+            .unwrap();
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(&k, &edges, &[ChamferSize::Distances([d, d]); 3], &[top; 3])
+            .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        let result = s.do_filleting(&mut k, None);
+        (result, s.fit_size())
+    };
+    let (refused_big, fit_big) = run_open(1.5);
+    assert!(refused_big.is_err());
+    let open_limit = fit_big
+        .expect("open-bound tapered refusal names a fit")
+        .size;
+    let (refused_tiny, fit_tiny) = run_open(open_limit + 1e-10);
+    assert!(
+        refused_tiny.is_err(),
+        "overlap 1e-10 past open lower bound at {open_limit} was missed"
+    );
+    let fit_tiny = fit_tiny.expect("tiny open-bound refusal names a fit");
+    assert!(
+        (fit_tiny.size - open_limit).abs() <= 1e-11,
+        "{} vs {open_limit}",
+        fit_tiny.size
+    );
 }
