@@ -509,6 +509,10 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     if crate::mesh_units::ask(app, path, insert) {
         return;
     }
+    // A STEP, IGES, FreeCAD, Rhino or glTF file: its import options first (`crate::import_options`).
+    if crate::import_options::ask(app, path, insert) {
+        return;
+    }
     let mut request = Request::new(path, if insert { Kind::Insert } else { Kind::Open });
     if !insert && app.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(path) {
         request.options.insert("verify".into(), json!(true));
@@ -864,19 +868,7 @@ fn start(app: &mut SolveApp) {
     if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
-    // A request for a tab that was closed has nowhere to land: answer it so it does not wait for
-    // a tab number that will never match again and hold the queue.
-    let mut at = 0;
-    while at < app.file_load.queued.len() {
-        let orphan = app.file_load.queued[at].tab.is_some_and(|tab| !app.docs.tab_open(tab));
-        if orphan {
-            if let Some(request) = app.file_load.queued.remove(at) {
-                orphaned_request(app, request);
-            }
-        } else {
-            at += 1;
-        }
-    }
+    answer_orphaned(app);
     // The first that can start: one for a design in a tab not shown waits for it.
     let shown = app.docs.active_tab();
     let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };
@@ -1050,12 +1042,29 @@ fn start(app: &mut SolveApp) {
     }
 }
 
+/// Answer the queued requests whose design's tab was closed: each has nowhere to land, and it
+/// would wait for a tab number that never matches again and hold the queue.
+fn answer_orphaned(app: &mut SolveApp) {
+    let mut at = 0;
+    while at < app.file_load.queued.len() {
+        let orphan = app.file_load.queued[at].tab.is_some_and(|tab| !app.docs.tab_open(tab));
+        if orphan {
+            if let Some(request) = app.file_load.queued.remove(at) {
+                orphaned_request(app, request);
+            }
+        } else {
+            at += 1;
+        }
+    }
+}
+
 /// Start the next queued STEP file as a [`Staged`] import (see [`step_staged`]).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn start_staged(app: &mut SolveApp) {
     if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
+    answer_orphaned(app);
     // The first that can start: one for a design in a tab not shown waits for it.
     let shown = app.docs.active_tab();
     let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };
