@@ -13673,6 +13673,63 @@ fn plugin_panels_register_declared_zones_and_draw_virtual_table_actions() {
 }
 
 #[test]
+fn plugin_panel_toolbar_button_receives_selected_table_row() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout = Layout {
+        root: 0,
+        nodes: vec![
+            Node { widget: Widget::Group(vec![1, 2]) },
+            Node { widget: Widget::Toolbar(vec![ButtonSpec { label: "Edit".into(), icon: None, entry: "edit".into() }]) },
+            Node {
+                widget: Widget::Table(TableSpec {
+                    bind: "/tools".into(),
+                    row_id: "id".into(),
+                    columns: vec![Column { key: "name".into(), label: "Tool".into(), unit: None }],
+                    select: SelectionMode::Single,
+                    on_select: Some("choose".into()),
+                    on_edit: Some("edit".into()),
+                }),
+            },
+        ],
+    };
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    {
+        let mut frame = |events: Vec<egui::Event>| {
+            crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    super::plugin::draw(ui, &panel, 0, &mut actions, "in", 0);
+                },
+            )
+        };
+        frame(Vec::new());
+        let row_at = crate::scenario::rect_of("plugin-panel:machining:tools:row:tool-0").unwrap().center();
+        frame(crate::test_support::pointer(row_at, true));
+        frame(crate::test_support::pointer(row_at, false));
+        let btn_at = crate::scenario::rect_of("plugin-panel:machining:tools:button:edit").unwrap().center();
+        frame(crate::test_support::pointer(btn_at, true));
+        frame(crate::test_support::pointer(btn_at, false));
+    }
+    assert_eq!(
+        actions,
+        vec![
+            (
+                "choose".into(),
+                UiEvent { panel: "tools".into(), event: EventKind::Select, path: "/tools".into(), row: Some("tool-0".into()), value: None }
+            ),
+            ("edit".into(), UiEvent { panel: "tools".into(), event: EventKind::Press, path: "edit".into(), row: Some("tool-0".into()), value: None }),
+        ]
+    );
+}
+
+#[test]
 fn plugin_panels_sync_errors_remain_observable_until_a_successful_frame() {
     let mut h = plugin_panel_harness();
     let mut panel = plugin_table_snapshot();
