@@ -24,6 +24,7 @@ assembly.bom.item.set             the bill of materials: its tests in crates/eng
 assembly.bom.renumber             the bill of materials: its tests in crates/engine/src/cmd/bom_tests.rs
 assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
 assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
+body.collision                    URDF collision shape: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 body.print_faces                  reports which bodies have a print face; crates/engine/src/cmd/print_face.rs tests
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
@@ -56,6 +57,7 @@ component.list                    a listing
 component.metadata                component metadata
 component.metadata.set            component metadata
 component.paste_from_design       pastes the app's clipboard from another window, which no command fills (engine tests place it)
+component.physical_override       URDF mass and inertia: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 component.properties              component properties
 component.relink                  component links
 component.rename                  a component name
@@ -77,6 +79,7 @@ diagnostics.profile               timing: where a command's time goes
 diagnostics.report_issue          problem reports: tested in issue_report.rs
 diagnostics.report_issue_status   problem reports: tested in issue_report.rs
 diagnostics.validation            a setting: when the body check runs
+doc.info                          the open design's file: crates/engine/src/schema/inspect_tests.rs, plugin/tests.rs
 doc.open                          opening and recovering documents
 doc.recover                       opening and recovering documents
 doc.recovery_discard              opening and recovering documents
@@ -178,6 +181,7 @@ explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
 file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.export_sdf                  writes a robot model folder from the meshes: tested in crates/io/src/sdf.rs and crates/engine/src/tests.rs
+file.export_urdf_options          the URDF export with its options dialog first: tested in crates/engine/src/cmd/urdf_tests.rs
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
@@ -185,6 +189,7 @@ file.import_cache_clear           clears a cache of imported files
 file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
 file.move                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.open_in_easyprint            hands the file to another program
+file.revert_saved                 reads the open design again from its file: tested in crates/engine/src/cmd/file.rs tests
 file.save                         saving the design
 file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
@@ -200,6 +205,7 @@ frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
 frame.remove_member               removes a tube from a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
 frame.rotate_member               turns a member about its own axis; tested in crates/engine/src/cmd/frame_tests.rs
+frame.trim                        frame member ends; tested in crates/engine/src/cmd/frame_tests.rs
 inspect.accessibility             display analysis: shading
 inspect.analysis                  display analysis: which one is on
 inspect.classify_points           exact read query: crates/engine/src/schema/inspect_tests.rs classification, normals, trim, tolerance and hostile inputs
@@ -207,9 +213,12 @@ inspect.colored_components        display: component colours
 inspect.compare_picture           display analysis: a picture compared with the outline
 inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
+inspect.hole_stacks               read-only query: tested in crates/engine/src/cmd/hole_stacks_tests.rs
 inspect.parameter_variants        inspect: independent rebuilds and regressions in crates/engine/src/cmd/parameter_sweep_tests.rs
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
+joint.dynamics                    URDF joint dynamics: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
+joint.origin_frame                URDF frame flag on a joint origin: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
 layout.delete                     application panel layout; no geometry (engine/UI/MCP tests)
 layout.get                        application panel layout; no geometry (engine/UI/MCP tests)

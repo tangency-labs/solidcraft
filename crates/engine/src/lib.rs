@@ -40,6 +40,7 @@ pub mod occurrences;
 pub mod origins;
 pub mod panels;
 pub mod params;
+pub mod pick_pieces;
 pub mod plugin;
 pub mod point_cloud_pick;
 pub mod product_scene;
@@ -50,6 +51,7 @@ pub mod render_preparation;
 pub mod report_issue;
 pub mod sample;
 pub mod schema;
+pub mod selection_context;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod slicer_files;
 mod slicer_icon;
@@ -828,6 +830,10 @@ pub struct Session {
     pub feature_edit_sketch: Option<u64>,
     pub selection: Vec<Sel>,
     pub path: Option<String>,
+    /// The file of the design this session is a scratch copy of ([`Session::scratch`]): the copy's
+    /// own `path` stays `None` so nothing run on it saves over that file. Read only by `doc.info`;
+    /// never saved, never adopted. `None` in a session that is not a copy.
+    pub(crate) source_path: Option<String>,
     /// Where the drawing commands' object ids come from: one source for the session, kept across
     /// a file change, so a session seeded alike and run alike gives the same ids
     /// ([`Session::seed_ids`]). A failed command draws none.
@@ -1397,6 +1403,7 @@ impl Session {
             feature_edit_sketch: None,
             selection: Vec::new(),
             path: None,
+            source_path: None,
             ids: solidcraft_doc::ids::IdSource::from_entropy(),
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
@@ -3366,6 +3373,7 @@ impl Session {
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
             path: None,
+            source_path: self.path.clone().or_else(|| self.source_path.clone()),
             ids: self.ids.clone(),
             uid: self.uid,
             disk: self.disk,
@@ -4300,6 +4308,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         param_comments,
         materials,
         print_faces,
+        collision_shapes,
         user_materials,
         appearances,
         body_components,
@@ -4342,6 +4351,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *param_comments == b.param_comments
         && *materials == b.materials
         && *print_faces == b.print_faces
+        && *collision_shapes == b.collision_shapes
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components
