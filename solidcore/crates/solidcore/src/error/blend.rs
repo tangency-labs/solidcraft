@@ -3845,6 +3845,29 @@ mod tests {
                 CornerStep::CommonFaceNotPlanar,
                 ErrorKind::NotWithinTolerance,
             ),
+            (CornerStep::OpenSetbackRailsParallel, ErrorKind::Degenerate),
+            (CornerStep::RailSquareToEdge, ErrorKind::Degenerate),
+            (CornerStep::RoundEndSpanNotBezier, ErrorKind::Unsupported),
+            (CornerStep::RoundSurfaceNotBSpline, ErrorKind::Unsupported),
+            (CornerStep::SetbackFillMayFold, ErrorKind::Unsupported),
+            (CornerStep::SetbackG2NetTurnsBack, ErrorKind::Unsupported),
+            (
+                CornerStep::SetbackGrowthUnplaced,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (CornerStep::SetbackNoInteriorMap, ErrorKind::NotFound),
+            (
+                CornerStep::SetbackPatchMissesInterior,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                CornerStep::SetbackPatchWeightNotPositive,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CornerStep::SetbackSpringSideOffRailEnd,
+                ErrorKind::NotWithinTolerance,
+            ),
         ] {
             let e = SolidError::blend("blend::op", BlendFailure::CornerUnbuildable(step));
             assert_eq!(e.kind(), class, "{e}");
@@ -3868,6 +3891,12 @@ mod tests {
             (CornerInput::TopologyMismatch, SM_ERR),
             (CornerInput::VertexNotProcessed, SM_ERR),
             (CornerInput::EventMalformed, SM_ERR),
+            (CornerInput::FaceNotAsClassified, SM_ERR),
+            (CornerInput::FacesNotBuilt, SM_ERR_NULL_POINTER),
+            (CornerInput::EdgeWithoutVertex, SM_ERR_NULL_POINTER),
+            (CornerInput::RingEdgeUseWithoutSolver, SM_ERR_NULL_POINTER),
+            (CornerInput::FillNotFromSetbackSplit, SM_ERR),
+            (CornerInput::RoundOfDegreeZeroAcross, SM_ERR),
         ] {
             let e = SolidError::blend(
                 "blend::op",
@@ -4320,6 +4349,15 @@ mod tests {
             (EaseStop::RailNotOneUvCurve, ErrorKind::Unsupported),
             (EaseStop::UvCurveOffRailInterval, ErrorKind::Unsupported),
             (EaseStop::NoDirectionAlongRails, ErrorKind::Unsupported),
+            (EaseStop::EasedWeightNotPositive, ErrorKind::Degenerate),
+            (EaseStop::NetsNotOneStructure, ErrorKind::NotWithinTolerance),
+            (EaseStop::RailIntervalsDiffer, ErrorKind::Unsupported),
+            (EaseStop::RampPastSurface, ErrorKind::OutsideDomain),
+            (EaseStop::RampsOverlap, ErrorKind::Unsupported),
+            (
+                EaseStop::TurnedSurfaceNotTurned,
+                ErrorKind::NotWithinTolerance,
+            ),
         ] {
             rows.push((BlendFailure::EaseNotBuilt(stop), class, SM_ERR));
         }
