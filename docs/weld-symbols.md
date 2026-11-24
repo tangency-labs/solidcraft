@@ -30,10 +30,11 @@ external notes or WPS references.
 Dimensions are finite mm in `1e-6..=100000`. Intermittent fillets require element length and
 a centre pitch exceeding it by at least `1e-6 mm`. An optional count is 2 to 65535 and never
 allocates repeated geometry. Two-sided chain arrangements require matching length, pitch
-and optional count. Staggered patterns, all-round intermittent notes and intermittent butt
-welds are unsupported. These bounds are implementation limits, not universal manufacturing
-rules. Tails contain nonblank text of at most 512 UTF-8 bytes; controls, line separators and
-bidi overrides/isolates are rejected.
+and optional count. Staggered patterns, all-round intermittent notes, intermittent butt
+welds and a continuous weld paired with an intermittent weld are unsupported. These bounds
+are implementation limits, not universal manufacturing rules. Tails contain nonblank text of
+at most 512 UTF-8 bytes. Ordinary spaces are allowed, and controls, line separators,
+nonbreaking spaces and bidi overrides/isolates are rejected.
 
 Call `validate()` after serde deserialization or editing. Encoded-input boundaries must also
 cap bytes and nesting before parsing; validation cannot undo parsing allocations. Unknown
@@ -78,8 +79,9 @@ Later sheet composition must declare the system and engineering units (mm).
 `format_number(value_mm)` supplies the drawing profile's decimal marker and precision for every
 size, length, pitch and derived ISO gap. It returns the formatted text and rounded value in mm;
 the caller must ensure those agree. Positive values that round to zero and non-finite rounded
-values are rejected. Text is bounded to 128 bytes and limited to digits and decimal/grouping
-separators. The callback must round derived gaps to the drawing precision to avoid binary
+values are rejected. The rounded AWS pitch must exceed the rounded element length, and the
+rounded ISO total throat must exceed the rounded nominal throat. Text is bounded to 128 bytes
+and limited to digits and decimal/grouping separators. The callback must round derived gaps to the drawing precision to avoid binary
 floating-point artifacts. The diagnostic `text()` remains independent and retains precision.
 
 Use the same font and cap height for `measure(text, height_mm)` and for the returned text.

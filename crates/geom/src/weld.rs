@@ -10,6 +10,8 @@
 //! ISO intermittent clear spacing is derived from stored centre pitch, never confused
 //! with it; unsupported combinations return errors.
 
+use std::f64::consts::{FRAC_PI_3, FRAC_PI_4};
+
 use serde::{Deserialize, Serialize};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
@@ -185,6 +187,7 @@ impl Weld {
         if let (Some(a), Some(b)) = (&self.arrow_side, &self.other_side)
             && (a.intermittent.is_some() || b.intermittent.is_some())
         {
+            require(a.intermittent.is_some() && b.intermittent.is_some(), "continuous and intermittent welds on opposite sides are not supported")?;
             require(
                 a.intermittent == b.intermittent && a.length_mm == b.length_mm,
                 "two-sided intermittent fillets must have matching chain spacing",
@@ -249,10 +252,13 @@ pub enum IdentificationLine {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub enum Convention {
+    #[serde(rename = "iso2553_2019_a")]
     Iso2553_2019A { identification: IdentificationLine },
+    #[serde(rename = "iso2553_2019_b")]
     Iso2553_2019B,
+    #[serde(rename = "aws_a2_4_2020")]
     AwsA2_4_2020,
 }
 
@@ -407,8 +413,11 @@ impl Weld {
                         Contour::Convex | Contour::Concave => {
                             let bulge = if contour == Contour::Convex { 1.0 } else { -1.0 };
                             let center = middle - outward * (bulge * offset);
-                            let start = (p0.y - center.y).atan2(p0.x - center.x);
-                            Seg2::Arc { center, radius, start, sweep: -sign * bulge * std::f64::consts::FRAC_PI_3 }
+                            // The contour starts 120° from the face tangent. The fillet face
+                            // rotates that tangent another 45° toward its symbol baseline.
+                            let tilt = if s.kind == Kind::Fillet { FRAC_PI_4 } else { 0.0 };
+                            let start = sign * (bulge * 2.0 * FRAC_PI_3 - tilt);
+                            Seg2::Arc { center, radius, start, sweep: -sign * bulge * FRAC_PI_3 }
                         }
                     };
                     stroke(&mut drawing.items, vec![path], false, d);
@@ -459,30 +468,40 @@ fn callout(side: &WeldSide, convention: Convention, format_number: &impl Fn(f64)
                 && text.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | ' ' | '\u{202f}' | '\'')),
             "formatted dimension must be bounded numeric text",
         )?;
-        Ok::<_, Invalid>(text)
+        Ok::<_, Invalid>((text, rounded))
     };
     let aws = convention == Convention::AwsA2_4_2020;
     let size = match side.size {
         None => String::new(),
         Some(Size::Leg(v)) => {
             if aws {
-                number(v)?
+                number(v)?.0
             } else {
-                format!("z{}", number(v)?)
+                format!("z{}", number(v)?.0)
             }
         }
-        Some(Size::Throat(v)) if !aws => format!("a{}", number(v)?),
-        Some(Size::DeepPenetrationThroat { total_mm, nominal_mm }) if !aws => format!("s{} a{}", number(total_mm)?, number(nominal_mm)?),
-        Some(Size::ButtPenetration(v)) if !aws => number(v)?,
+        Some(Size::Throat(v)) if !aws => format!("a{}", number(v)?.0),
+        Some(Size::DeepPenetrationThroat { total_mm, nominal_mm }) if !aws => {
+            let (total, rounded_total) = number(total_mm)?;
+            let (nominal, rounded_nominal) = number(nominal_mm)?;
+            require(rounded_total > rounded_nominal, "formatted total throat must exceed the formatted nominal throat")?;
+            format!("s{total} a{nominal}")
+        }
+        Some(Size::ButtPenetration(v)) if !aws => number(v)?.0,
         Some(_) => return Err(Invalid("this size meaning has no supported AWS callout; no automatic conversion")),
     };
     let length = match (side.length_mm, side.intermittent) {
         (None, _) => String::new(),
-        (Some(l), None) => number(l)?,
-        (Some(l), Some(i)) if aws && i.count.is_none() => format!("{}-{}", number(l)?, number(i.pitch_mm)?),
+        (Some(l), None) => number(l)?.0,
+        (Some(l), Some(i)) if aws && i.count.is_none() => {
+            let (length, rounded_length) = number(l)?;
+            let (pitch, rounded_pitch) = number(i.pitch_mm)?;
+            require(rounded_pitch > rounded_length, "formatted pitch must exceed the formatted element length")?;
+            format!("{length}-{pitch}")
+        }
         (Some(_), Some(_)) if aws => return Err(Invalid("counted AWS intermittent fillet callouts are not supported; use the semantic text")),
-        (Some(l), Some(Intermittent { count: Some(n), pitch_mm })) => format!("{n}×{} ({})", number(l)?, number(pitch_mm - l)?),
-        (Some(l), Some(Intermittent { count: None, pitch_mm })) => format!("{} ({})", number(l)?, number(pitch_mm - l)?),
+        (Some(l), Some(Intermittent { count: Some(n), pitch_mm })) => format!("{n}×{} ({})", number(l)?.0, number(pitch_mm - l)?.0),
+        (Some(l), Some(Intermittent { count: None, pitch_mm })) => format!("{} ({})", number(l)?.0, number(pitch_mm - l)?.0),
     };
     Ok((size, length))
 }

@@ -234,7 +234,10 @@ fn round_trip_and_unknown_fields() {
     }
     assert!(serde_json::from_str::<Kind>("\"single_u\"").is_err());
     assert!(serde_json::from_str::<Size>(r#"{"kind":"leg","mm":5,"surprise":2}"#).is_err());
+    assert_eq!(serde_json::to_value(a(IdentificationLine::Above)).unwrap(), serde_json::json!({"iso2553_2019_a": {"identification": "above"}}));
+    assert_eq!(serde_json::to_value(Convention::AwsA2_4_2020).unwrap(), serde_json::json!("aws_a2_4_2020"));
     let unit = serde_json::to_value(Convention::Iso2553_2019B).unwrap();
+    assert_eq!(unit, serde_json::json!("iso2553_2019_b"));
     let mut mixed = serde_json::Map::new();
     mixed.insert(unit.as_str().unwrap().into(), serde_json::json!({"identification": "above"}));
     assert!(serde_json::from_value::<Convention>(serde_json::Value::Object(mixed)).is_err());
@@ -640,6 +643,23 @@ fn invalid_formatted_dimensions_fail_before_measurement() {
     }
     assert!(n.draw(Convention::Iso2553_2019B, Style::default(), |_| Ok(("1".repeat(129), 1.0)), metric).is_err());
     assert!(n.draw(Convention::Iso2553_2019B, Style::default(), |_| Err(Invalid("formatter failed")), metric).is_err());
+
+    let mut n = note();
+    let side = n.arrow_side.as_mut().unwrap();
+    side.length_mm = Some(50.2);
+    side.intermittent = Some(Intermittent { count: None, pitch_mm: 50.4 });
+    let whole = |value: f64| Ok((format!("{value:.0}"), value.round()));
+    let no_measure = |_: &str, _: f64| panic!("rejected formatting must not measure text");
+    n.validate().unwrap();
+    let err = n.draw(Convention::AwsA2_4_2020, Style::default(), whole, no_measure).unwrap_err();
+    assert_eq!(err, Invalid("formatted pitch must exceed the formatted element length"));
+
+    let side = n.arrow_side.as_mut().unwrap();
+    side.intermittent = None;
+    side.size = Some(Size::DeepPenetrationThroat { total_mm: 6.4, nominal_mm: 5.6 });
+    n.validate().unwrap();
+    let err = n.draw(Convention::Iso2553_2019B, Style::default(), whole, no_measure).unwrap_err();
+    assert_eq!(err, Invalid("formatted total throat must exceed the formatted nominal throat"));
 }
 
 #[test]
