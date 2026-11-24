@@ -429,19 +429,19 @@ mod tests {
         ));
     }
 
-    #[test]
+    /// A box of edge `size` with all twelve edges rounded at `r`, drawn along (-1, -2, -3) with
+    /// tangent edges off, against its outline in closed form.
     #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
-    fn a_box_with_rounded_corners_is_drawn_with_its_ball_corners_as_spheres() {
+    fn rounded_box_outline(size: f64, r: f64) {
         use crate::blend::{blend, Blend, Corners};
         use solidcore_record::Vec2;
         use std::f64::consts::PI;
 
-        // A 10 mm box with all twelve edges rounded at 2 mm: 6 planes, 12 rounds and 8 ball
-        // corners, each corner a patch on the sphere of radius 2 about the corner of the inner
-        // 6 mm box.
-        let b = crate::body::make_box([0.; 3], [10.; 3]).unwrap();
+        // 6 planes, 12 rounds and 8 ball corners, each corner a patch on the sphere of radius r
+        // about a corner of the inner box, of edge size - 2r.
+        let b = crate::body::make_box([0.; 3], [size; 3]).unwrap();
         let all: Vec<usize> = (0..12).collect();
-        blend(&b, Blend::Round, &all, &[2.; 12], &[], Corners::Filled).unwrap();
+        blend(&b, Blend::Round, &all, &[r; 12], &[], Corners::Filled).unwrap();
         let (rec, _) = b.to_record().unwrap();
         let balls = rec
             .faces
@@ -464,16 +464,17 @@ mod tests {
         assert_eq!(surfaces, [("cylinder", 12), ("plane", 6), ("sphere", 8)]);
         assert!(def.report.freeform_faces.is_empty());
         assert_eq!(def.report.tangent_edges, 48);
-        // Boundaries are trimmed in chords: 256 to each quarter circle of radius 2 here, which
-        // sag about 1e-5 mm.
+        // Boundaries are trimmed in chords: 256 to each quarter circle of radius r, which sag
+        // about 5e-6 r.
         let chord = def.report.max_trim_chord;
-        assert!(chord > 0. && chord <= 1e-4, "trim chord {chord}");
+        assert!(chord > 0. && chord <= 5e-5 * r, "trim chord {chord}");
 
         // Seen along d = (-1, -2, -3) the convex body's outline is the inner box's outline, a
-        // hexagon whose sides are its edges seen along d, each edge e of length 6 drawn
-        // 6 * sqrt(1 - (e . d)^2) long, twice each, grown by the 2 mm circle: the hexagon's six
-        // sides as lines from the rounds, and the circle's whole turn as arcs of radius 2 from
-        // the corners. With tangent edges off nothing else is drawn, and nothing is hidden.
+        // hexagon whose sides are its edges seen along d, each edge e of length s = size - 2r
+        // drawn s sqrt(1 - (e . d)^2) long, twice each, grown by the circle of radius r: the
+        // hexagon's six sides as lines from the rounds, at r from them, and the circle's whole
+        // turn as arcs of radius r about its six corners from the ball corners. With tangent
+        // edges off nothing else is drawn, and nothing is hidden.
         let view = View::new(Vec3::new(-1., -2., -3.), Vec3::new(0., 0., 1.)).unwrap();
         let scene = [Placement {
             body: 0,
@@ -486,10 +487,45 @@ mod tests {
         }];
         let d = hidden_lines(&[def], &scene, &view, &opts, &|| false).unwrap();
         assert!(d.unsupported.is_empty());
-        // The corners are drawn on the sphere their spline form is recognised as, to 1e-9 of the
-        // 10 mm body, so a radius or a length is off by some 1e-8 mm: far within a micrometre.
+        let s = size - 2. * r;
+        let corners: Vec<Vec2> = (0..8)
+            .map(|i| {
+                let at = |bit: usize| if i & bit == 0 { r } else { r + s };
+                let [x, y] = view.screen(Vec3::new(at(1), at(2), at(4)));
+                Vec2 { x, y }
+            })
+            .collect();
+        // The corners lie on their labels' spheres and the rounds on theirs: a radius, a
+        // position or a length is off by rounding only, far within a micrometre.
         let near = |x: f64, y: f64| (x - y).abs() <= 1e-6;
         let dist = |p: Vec2, q: Vec2| (q.x - p.x).hypot(q.y - p.y);
+        // Distance from p to the segment from a to b.
+        let to_segment = |p: Vec2, a: Vec2, b: Vec2| {
+            let (ux, uy) = (b.x - a.x, b.y - a.y);
+            let t = (((p.x - a.x) * ux + (p.y - a.y) * uy) / (ux * ux + uy * uy)).clamp(0., 1.);
+            dist(
+                p,
+                Vec2 {
+                    x: a.x + t * ux,
+                    y: a.y + t * uy,
+                },
+            )
+        };
+        let on_a_side = |p: Vec2, q: Vec2| {
+            corners.iter().any(|a| {
+                corners.iter().any(|b| {
+                    dist(*a, *b) > 0.
+                        && near(to_segment(p, *a, *b), r)
+                        && near(to_segment(q, *a, *b), r)
+                })
+            })
+        };
+        let mut centres: Vec<usize> = Vec::new();
+        let mut centre = |o: Vec2| {
+            let at = corners.iter().position(|c| near(dist(*c, o), 0.));
+            assert!(at.is_some(), "arc about {o:?}, no corner of the inner box");
+            centres.extend(at);
+        };
         let (mut lines, mut arcs) = (0., 0.);
         for l in &d.lines {
             assert!(
@@ -500,47 +536,83 @@ mod tests {
             for p in l.pieces.iter().filter(|p| !p.covered) {
                 assert_eq!(p.visibility, Visibility::Visible);
                 assert_eq!(p.accuracy, CurveAccuracy::Analytic);
-                for s in &p.geometry {
-                    match *s {
-                        Seg2::Line { a, b } => lines += dist(a, b),
-                        Seg2::Arc { radius, sweep, .. } => {
-                            assert!(near(radius, 2.), "arc radius {radius}");
+                for seg in &p.geometry {
+                    match *seg {
+                        Seg2::Line { a, b } => {
+                            assert!(on_a_side(a, b), "{seg:?} on no side of the hexagon");
+                            lines += dist(a, b);
+                        }
+                        Seg2::Arc {
+                            center,
+                            radius,
+                            sweep,
+                            ..
+                        } => {
+                            assert!(near(radius, r), "arc radius {radius}");
+                            centre(center);
                             arcs += radius * sweep.abs();
                         }
                         // A circular arc as a rational quadratic: its legs to the apex are equal,
-                        // its weight is the cosine of half its sweep, and a leg is r tan(sweep/2).
+                        // its weight is the cosine of half its sweep, a leg is r tan(sweep/2),
+                        // and its centre lies past the chord's middle from the apex, as far from
+                        // the apex as sqrt(r^2 + leg^2).
                         Seg2::Conic { a, apex, b, w } => {
-                            assert!(near(dist(a, apex), dist(b, apex)), "{s:?}");
+                            let leg = dist(a, apex);
+                            assert!(near(leg, dist(b, apex)), "{seg:?}");
                             // A piece that is a point (where the outline crosses a tangent
                             // edge) has no sweep and draws nothing.
-                            if near(dist(a, apex), 0.) {
+                            if near(leg, 0.) {
                                 continue;
                             }
                             let half = w.acos();
-                            let r = dist(a, apex) / half.tan();
-                            assert!(near(dist(a, b), 2. * r * half.sin()), "{s:?}");
-                            assert!(near(r, 2.), "conic radius {r}");
-                            arcs += 2. * half * r;
+                            let radius = leg / half.tan();
+                            assert!(near(dist(a, b), 2. * radius * half.sin()), "{seg:?}");
+                            assert!(near(radius, r), "conic radius {radius}");
+                            let m = Vec2 {
+                                x: 0.5 * (a.x + b.x),
+                                y: 0.5 * (a.y + b.y),
+                            };
+                            let k = radius.hypot(leg) / dist(m, apex);
+                            centre(Vec2 {
+                                x: apex.x + k * (m.x - apex.x),
+                                y: apex.y + k * (m.y - apex.y),
+                            });
+                            arcs += 2. * half * radius;
                         }
                         ref other => panic!("outline piece {other:?}"),
                     }
                 }
             }
         }
+        // The arcs turn about the hexagon's six corners, the projections of the inner box's
+        // corners off the axis of sight.
+        centres.sort_unstable();
+        centres.dedup();
+        assert_eq!(centres.len(), 6, "arcs about corners {centres:?}");
         let sines = [13f64 / 14., 10. / 14., 5. / 14.].map(f64::sqrt);
-        let hexagon = 12. * sines.iter().sum::<f64>();
+        let hexagon = 2. * s * sines.iter().sum::<f64>();
         assert!(near(lines, hexagon), "lines {lines}, hexagon {hexagon}");
         // A face is closed to its trim's chords: a silhouette runs on to within twice their sag
-        // (plus 1e-9 of the face's size) of them, and they lie within one sag of the boundary.
-        // The rounds' outlines end exactly, at the ends of their charts; a corner's runs on along
-        // its sphere, past the boundary to the round along axis i, a great circle square to i,
-        // which it crosses at the angle between the planes square to d and to i, whose sine is
-        // sqrt(1 - d_i^2). Each axis's two outline lines end at four such crossings.
-        let past = 4. * (3. * chord + 1e-8) * sines.iter().map(|s| 1. / s).sum::<f64>();
+        // (plus 1e-9 of the face's size, at most 4r) of them, and they lie within one sag of the
+        // boundary. The rounds' outlines end exactly, at the ends of their charts; a corner's
+        // runs on along its sphere, past the boundary to the round along axis i, a great circle
+        // square to i, which it crosses at the angle between the planes square to d and to i,
+        // whose sine is sqrt(1 - d_i^2). Each axis's two outline lines end at four such
+        // crossings.
+        let slack = 3. * chord + 1e-9 * (1. + 4. * r);
+        let past = 4. * slack * sines.iter().map(|s| 1. / s).sum::<f64>();
+        let circle = 2. * PI * r;
         assert!(
-            arcs >= 4. * PI - 1e-6 && arcs <= 4. * PI + past + 1e-6,
-            "arcs {arcs}, circle {}, past it at most {past}",
-            4. * PI
+            arcs >= circle - 1e-6 && arcs <= circle + past + 1e-6,
+            "arcs {arcs}, circle {circle}, past it at most {past}"
         );
+    }
+
+    #[test]
+    fn a_box_with_rounded_corners_is_drawn_with_its_ball_corners_as_spheres() {
+        rounded_box_outline(10., 2.);
+        // A small round on a large body: the corners lie on their labels' spheres, which a fit
+        // to samples of patches this far from the body's centre would not find.
+        rounded_box_outline(1000., 1.);
     }
 }
