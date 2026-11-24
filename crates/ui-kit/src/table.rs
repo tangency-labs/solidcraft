@@ -314,6 +314,19 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
 }
 
 impl<'a> Table<'a> {
+    /// An embedded grid keeps its former header and divider targets as aliases of this
+    /// table's one shared header. Aliases do not create additional widgets.
+    pub(crate) fn header_aliases(&self, id: &str) {
+        for (index, column) in self.columns.iter().enumerate() {
+            if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:column:{}:{}", self.id, column.label)) {
+                solidcraft_ui_registry::publish_rect(&format!("dialog:column:{id}:{}", column.label), rect);
+            }
+            if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:column_divider:{}:{index}", self.id)) {
+                solidcraft_ui_registry::publish_target(&format!("dialog:column_divider:{id}:{index}"), rect);
+            }
+        }
+    }
+
     /// Enable before adding rows. Background cell targets are registered before their content,
     /// so buttons, editors and dropdowns win clicks. Opt in to editable tables only where this
     /// interaction is appropriate; selecting a cell does not start its editor. Plain cell text
@@ -614,7 +627,7 @@ impl<'a> Table<'a> {
         let icon = egui::Rect::from_center_size(rect.left_center() + vec2(t.space_12, 0.0), vec2(t.space_12, t.space_12));
         super::disclosure(ui.painter(), icon.center(), *open, t.form_dim);
         let mut format = egui::TextFormat::simple(crate::type_face::bold(t.font_small), t.form_dim);
-        format.extra_letter_spacing = t.font_small * t.font_section_tracking * 1.5;
+        format.extra_letter_spacing = t.font_small * t.font_section_tracking;
         let text = label.to_uppercase();
         let mut job = egui::text::LayoutJob::single_section(text, format);
         let count = count.to_string();

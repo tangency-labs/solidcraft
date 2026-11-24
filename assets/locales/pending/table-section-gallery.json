@@ -1,4 +1,8 @@
 {
+  "ar": {
+    "ui.table.gallery.configurations": "التكوينات",
+    "ui.table.gallery.parameters": "المعلمات"
+  },
   "de": {
     "ui.table.gallery.configurations": "Konfigurationen",
     "ui.table.gallery.parameters": "Parameter"
@@ -7,6 +11,10 @@
     "ui.table.gallery.configurations": "Configurations",
     "ui.table.gallery.parameters": "Parameters"
   },
+  "he": {
+    "ui.table.gallery.configurations": "תצורות",
+    "ui.table.gallery.parameters": "פרמטרים"
+  },
   "ja": {
     "ui.table.gallery.configurations": "構成",
     "ui.table.gallery.parameters": "パラメーター"
@@ -14,6 +22,10 @@
   "ko": {
     "ui.table.gallery.configurations": "구성",
     "ui.table.gallery.parameters": "매개변수"
+  },
+  "vi": {
+    "ui.table.gallery.configurations": "Cấu hình",
+    "ui.table.gallery.parameters": "Tham số"
   },
   "zh": {
     "ui.table.gallery.configurations": "配置",

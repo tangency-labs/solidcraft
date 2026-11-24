@@ -540,6 +540,9 @@ impl<'a> Grid<'a> {
             let rows = shown.len();
             let first = (((clip.top() - top) / height).floor().max(0.0) as usize).min(rows);
             let last = (((clip.bottom() - top) / height).ceil().max(0.0) as usize).min(rows);
+            if embedded && (first < last || source.add_row().is_some()) {
+                table.header_aliases(id);
+            }
             // Rows built off screen: the one being edited (its box keeps the keyboard and commits on
             // leaving) and the cursor's when it must scroll into view.
             let mut built: Vec<usize> = (first..last).collect();
@@ -559,10 +562,13 @@ impl<'a> Grid<'a> {
                 let key = source.row_key(source_row).into_owned();
                 let mut reveal = None;
                 let table_key = if embedded { format!("{id}:{key}") } else { key.clone() };
-                table.row_visible(ui, &table_key, false, true, |table_row| {
+                let response = table.row_visible(ui, &table_key, false, true, |table_row| {
                     for (col, column) in columns.iter().enumerate() {
                         table_row.cell(|ui| {
                             let rect = ui.max_rect();
+                            if embedded {
+                                solidcraft_ui_registry::publish_rect(&format!("dialog:table:{id}:{key}:cell:{}", column.label), rect);
+                            }
                             cells.push((row, col, rect));
                             let cell = Cell { id, sid, row, source_row, col, key: &key, column, rect };
                             draw_cell(ui, &cell, &mut state, source, &shown, range, shows_focus, &mut clicks, &mut out);
@@ -575,6 +581,11 @@ impl<'a> Grid<'a> {
                         table_row.cell(|_| {});
                     }
                 });
+                if embedded {
+                    // Embedding changes the table's widget namespace, not the grid's public
+                    // handles. Keep callers' row targets stable alongside the shared table's.
+                    solidcraft_ui_registry::publish_rect(&format!("dialog:table:{id}:{key}"), response.rect);
+                }
                 if let Some(rect) = reveal {
                     table.reveal_row(rect);
                     state.reveal = false;
@@ -586,7 +597,11 @@ impl<'a> Grid<'a> {
             footer(ui, table, source);
             if let Some(label) = source.add_row() {
                 let label = label.into_owned();
-                if table.add_prompt(ui, &label, &label).clicked() {
+                let response = table.add_prompt(ui, &label, &label);
+                if embedded {
+                    solidcraft_ui_registry::publish_target(&format!("dialog:table:{id}:add"), response.rect);
+                }
+                if response.clicked() {
                     out.add_row = true;
                 }
             }

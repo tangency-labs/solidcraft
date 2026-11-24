@@ -1,8 +1,8 @@
 //! The Change Parameters dialog and parameter-name autocomplete for expression boxes.
 //!
-//! A window over the engine's `parameters.*` commands: one table with favourites first, model
-//! parameters grouped by the sketch or feature they drive, then user parameters (name, unit,
-//! expression, value, comment; add, rename, delete). The Name heading sorts each band by name
+//! A window over the engine's `parameters.*` commands: one table with favourites first, user
+//! parameters (name, unit, expression, value, comment; add, rename, delete), then model
+//! parameters grouped by the sketch or feature they drive. The Name heading sorts each band by name
 //! in natural order (#8563). Expressions validate as you type
 //! (`expr.evaluate`) with a live model preview; Enter or leaving the field applies them.
 //! With "Apply each change as you leave its field" off (a remembered preference, #9279), they
@@ -755,11 +755,25 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sections: 
         if !sections.favorites.is_empty() {
             band(app, ui, table, d, ("fav", solidcraft_ui_text::tr_label("Favorites"), &sections.favorites), widths);
         }
+        // Keep the editable user rows above model groups, as in the original dialog: a
+        // design with many feature parameters must not push its user parameters off screen.
+        band(app, ui, table, d, ("user", solidcraft_ui_text::tr_label("User Parameters"), &sections.users), widths);
         for (group, members) in &sections.groups {
             band(app, ui, table, d, (&format!("model:{group}"), group, members), widths);
         }
-        band(app, ui, table, d, ("user", solidcraft_ui_text::tr_label("User Parameters"), &sections.users), widths);
     });
+    // The sections now share one horizontal viewport; existing agents may still ask for
+    // their original grid's viewport and content width.
+    let viewport = crate::scenario::rect_of("dialog:table:parameters:viewport");
+    let content_width = crate::scenario::count_of("dialog:table:parameters:content_width");
+    for salt in ["fav", "user"].into_iter().chain(sections.groups.iter().map(|(group, _)| *group)) {
+        if let Some(rect) = viewport {
+            crate::scenario::publish_rect(&format!("dialog:table:{salt}:viewport"), rect);
+        }
+        if let Some(width) = content_width {
+            crate::scenario::publish_count(&format!("dialog:table:{salt}:content_width"), width);
+        }
+    }
 }
 
 fn band(
@@ -771,11 +785,19 @@ fn band(
     (name_floor, unit_width): (f32, f32),
 ) {
     let open = d.bands.entry(salt.to_owned()).or_insert(true);
-    table.group(ui, salt, label, rows.len(), open);
+    let response = table.group(ui, salt, label, rows.len(), open);
+    let section = match salt {
+        "fav" => "Favorites",
+        "user" => "User Parameters",
+        _ => label,
+    };
+    crate::scenario::publish_target(&format!("dialog:section:{section}"), response.rect);
     crate::scenario::publish_count(&format!("dialog:table:parameters:group:{salt}:count"), rows.len() as f64);
     if !*open {
         return;
     }
+    // The band has a namespaced key, while the grid keeps its original agent-facing id.
+    let salt = salt.strip_prefix("model:").unwrap_or(salt);
     let right = ui.max_rect().right().min(ui.clip_rect().right());
     let state = grid_state(d, salt);
     if !d.grids.iter().any(|g| g == salt) {
@@ -1221,6 +1243,12 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             discard = response.clicked();
         });
     });
+    crate::scenario::publish_rect("dialog:table:user:new", response.rect);
+    for label in ["", "Name", "Unit", "Expression", "Value", "Comment", "Actions"] {
+        if let Some(rect) = crate::scenario::rect_of(&format!("dialog:table:parameters:new:cell:{label}")) {
+            crate::scenario::publish_rect(&format!("dialog:table:user:new:cell:{label}"), rect);
+        }
+    }
     if reveal {
         table.reveal_row(response.rect);
     }
@@ -1676,7 +1704,7 @@ mod tests {
     fn escape_discards_valid_new_parameter_from_name() {
         let mut h = escape_dialog();
         let before = escape_state(&h);
-        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
         escape_type(&mut h, "param:new:expression", "25 mm");
         escape_type(&mut h, "param:new:name", "height");
         assert_eq!(h.app.params.as_ref().unwrap().new_name, "height");
@@ -1688,7 +1716,7 @@ mod tests {
     fn escape_discards_valid_new_parameter_from_expression() {
         let mut h = escape_dialog();
         let before = escape_state(&h);
-        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
         escape_type(&mut h, "param:new:expression", "missing + 1 mm");
         escape_type(&mut h, "param:new:name", "height");
         escape_type(&mut h, "param:new:expression", "25 mm");
@@ -1701,7 +1729,7 @@ mod tests {
     fn escape_discards_new_parameter_from_comment() {
         let mut h = escape_dialog();
         let before = escape_state(&h);
-        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
         escape_type(&mut h, "param:new:expression", "missing + 1 mm");
         escape_type(&mut h, "param:new:name", "height");
         escape_type(&mut h, "param:new:comment", "Pending new comment");
@@ -2070,9 +2098,9 @@ mod tests {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.step(&json!({"start": "parameters.change"})).unwrap();
-            h.step(&json!({"click": {"handle": "dialog:table:parameters:add"}})).unwrap();
+            h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
             h.step(&json!({"text": "width"})).unwrap();
-            let before = crate::scenario::rect_of("dialog:table:parameters:new").unwrap();
+            let before = crate::scenario::rect_of("dialog:table:user:new").unwrap();
             if keyboard {
                 h.step(&json!({"key": "Tab"})).unwrap(); // Unit
                 h.step(&json!({"key": "Tab"})).unwrap(); // Expression
@@ -2080,7 +2108,7 @@ mod tests {
                 h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
             }
             assert!(h.app.session.doc.param("width").is_none(), "moving between cells must not save the draft");
-            assert_eq!(crate::scenario::rect_of("dialog:table:parameters:new"), Some(before), "the draft row must not move");
+            assert_eq!(crate::scenario::rect_of("dialog:table:user:new"), Some(before), "the draft row must not move");
             h.step(&json!({"key": "A", "cmd": true})).unwrap();
             h.step(&json!({"text": "25 mm"})).unwrap();
             if keyboard {
@@ -2090,7 +2118,7 @@ mod tests {
             }
             h.step(&json!({"text": "Overall width"})).unwrap();
             assert!(h.app.session.doc.param("width").is_none());
-            assert_eq!(crate::scenario::rect_of("dialog:table:parameters:new"), Some(before));
+            assert_eq!(crate::scenario::rect_of("dialog:table:user:new"), Some(before));
             h.step(&json!({"key": "Enter"})).unwrap();
             let parameter = h.app.session.doc.param("width").unwrap();
             assert_eq!(parameter.expr, "25 mm");
@@ -2103,7 +2131,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.step(&json!({"start": "parameters.change"})).unwrap();
-        h.step(&json!({"click": {"handle": "dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
         h.step(&json!({"text": "width"})).unwrap();
         h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
         h.step(&json!({"text": "25 mm"})).unwrap();
@@ -2125,7 +2153,7 @@ mod tests {
         h.app.home.open = false;
         h.app.run("parameters.add", json!({"name": "width", "expression": "10 mm"})).unwrap();
         h.step(&json!({"start": "parameters.change"})).unwrap();
-        h.step(&json!({"click": {"handle": "dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
         h.step(&json!({"text": "width"})).unwrap();
         h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
         h.step(&json!({"text": "25 mm"})).unwrap();
@@ -2167,7 +2195,7 @@ mod tests {
         h.app.run("parameters.add", json!({"name": "width", "expression": "10 mm"})).unwrap();
         h.app.run("parameters.add", json!({"name": "depth", "expression": "5 mm"})).unwrap();
         h.step(&json!({"start": "parameters.change"})).unwrap();
-        h.step(&json!({"click": {"handle": "dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
         h.step(&json!({"text": "width"})).unwrap();
         h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
         h.step(&json!({"text": "25 mm"})).unwrap();
@@ -2321,7 +2349,7 @@ mod tests {
         h.app.preferences.parameters_apply_live = false;
         h.app.run("parameters.add", json!({"name": "depth", "expression": "5 mm"})).unwrap();
         h.step(&json!({"start": "parameters.change"})).unwrap();
-        h.step(&json!({"click": {"handle": "dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
         h.step(&json!({"text": "height"})).unwrap();
         h.step(&json!({"click": {"handle": "param:new:expression"}})).unwrap();
         h.step(&json!({"text": "10 +"})).unwrap();
@@ -2424,8 +2452,7 @@ mod tests {
         ] {
             h.app.params.as_mut().unwrap().filter = filter.into();
             h.frames(4);
-            let shown: Vec<&str> =
-                all.into_iter().filter(|n| crate::scenario::rect_of(&format!("dialog:table:parameters:user:{n}")).is_some()).collect();
+            let shown: Vec<&str> = all.into_iter().filter(|n| crate::scenario::rect_of(&format!("dialog:table:user:{n}")).is_some()).collect();
             assert_eq!(shown, expected, "filter {filter:?}");
         }
     }
@@ -2444,10 +2471,8 @@ mod tests {
         h.app.start("parameters.change");
         h.frames(6);
         let order = |table: &str, names: &[String]| {
-            let mut rows: Vec<_> = names
-                .iter()
-                .map(|n| (crate::scenario::rect_of(&format!("dialog:table:parameters:{table}:{n}")).expect(n).top(), n.clone()))
-                .collect();
+            let mut rows: Vec<_> =
+                names.iter().map(|n| (crate::scenario::rect_of(&format!("dialog:table:{table}:{n}")).expect(n).top(), n.clone())).collect();
             rows.sort_by(|a, b| a.0.total_cmp(&b.0));
             rows.into_iter().map(|(_, n)| n).collect::<Vec<_>>()
         };
@@ -2455,8 +2480,7 @@ mod tests {
         let group = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.iter().find(|r| r.source != "user").unwrap().group.clone();
         let model: Vec<String> =
             h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.iter().filter(|r| r.group == group).map(|r| r.name.clone()).collect();
-        // The model band now comes first. Close it to keep all user rows visible while
-        // checking their order; its rows must still take the same sort when reopened.
+        // Sort with the model band closed; its rows must take the same sort when reopened.
         let model_band = format!("dialog:table:parameters:group:model:{group}");
         h.step(&json!({"click":{"handle":model_band}})).unwrap();
         h.frames(3);
@@ -2473,7 +2497,7 @@ mod tests {
         h.frames(4);
         h.step(&json!({"click":{"handle":model_band}})).unwrap();
         h.frames(3);
-        assert_eq!(order(&format!("model:{group}"), &model), sorted_model, "a model group sorts too");
+        assert_eq!(order(&group, &model), sorted_model, "a model group sorts too");
         h.app.params.as_mut().unwrap().filter.clear();
         h.frames(4);
         h.step(&json!({"click":{"handle":model_band}})).unwrap();
@@ -2564,7 +2588,8 @@ mod tests {
         let open = frame_ms(&mut h, 20);
         let listed = &h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1;
         assert_eq!(listed.iter().filter(|r| r.source == "feature").count(), 740);
-        assert!(crate::scenario::rects("dialog:table:parameters:model:").len() < 80, "offscreen rows must not build their cells");
+        let model_rows = crate::scenario::rects("dialog:table:parameters:Plane");
+        assert!(model_rows.is_empty(), "user parameters precede the offscreen model groups");
         eprintln!("740 feature groups: closed {closed:.2} ms, open {open:.2} ms");
     }
 
@@ -2583,12 +2608,13 @@ mod tests {
         assert!((crate::scenario::count_of("dialog:body:content_height").unwrap() - height).abs() < 1.0);
         let band = crate::scenario::rect_of("dialog:table:parameters:group:model:Plane739").unwrap();
         let row_y = band.bottom() + ui_kit::table_row_height() * 0.5;
-        // User parameters follow the models: scroll back to the last model row.
+        // Centre the last model row in the viewport before editing it.
         h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":viewport.center().y - row_y}));
         h.frames(40);
         let at = crate::scenario::handle_at(&format!("param:{last}")).unwrap();
         assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().contains(at), "the last model parameter remains reachable");
-        assert!(crate::scenario::rects("dialog:table:parameters:model:").len() < 80);
+        let model_rows = crate::scenario::rects("dialog:table:parameters:Plane");
+        assert!(!model_rows.is_empty() && model_rows.len() < 80, "only visible model rows build their cells");
         h.step(&json!({"click":{"handle":format!("param:{last}")}})).unwrap();
         h.step(&json!({"key":"A","cmd":true})).unwrap();
         h.step(&json!({"text":"900 mm"})).unwrap();
@@ -2619,7 +2645,7 @@ mod tests {
         h.app.home.open = false;
         h.call("ui.start", json!({"command": "parameters.change"}));
         h.frames(3);
-        h.step(&json!({"click": {"handle": "dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:table:user:add"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.params.as_ref().unwrap().new_expr, "", "a new parameter's expression starts blank");
         h.step(&json!({"click": {"handle": "param:new:name"}})).unwrap();
@@ -2771,9 +2797,11 @@ mod tests {
         let user = crate::scenario::handle_at("param:w").expect("User Parameters expression");
         assert!((fav.x - user.x).abs() < 1.0, "Expression columns lined up: favorites {fav:?} user {user:?}");
         let favorite = crate::scenario::rect_of("dialog:table:parameters:fav:w").unwrap();
-        let own = crate::scenario::rect_of("dialog:table:parameters:user:w").unwrap();
+        let own = crate::scenario::rect_of("dialog:table:user:w").unwrap();
         assert!(favorite.bottom() <= own.top(), "the favourite also has its own distinct row");
-        assert_eq!(crate::scenario::rects("dialog:column:").iter().filter(|(key, _)| key.ends_with(":Name")).count(), 1);
+        assert_eq!(crate::scenario::rects("dialog:column:parameters:").iter().filter(|(key, _)| key.ends_with(":Name")).count(), 1);
+        let header = crate::scenario::rect_of("dialog:column:parameters:Name").unwrap();
+        assert!(crate::scenario::rects("dialog:column:").iter().filter(|(key, _)| key.ends_with(":Name")).all(|(_, rect)| *rect == header));
     }
 
     #[test]
@@ -2799,10 +2827,12 @@ mod tests {
         h.app.run("parameters.favorite", json!({"name":"w","favorite":true})).unwrap();
         h.app.start("parameters.change");
         h.frames(6);
-        let headers = crate::scenario::rects("dialog:column:");
+        let headers = crate::scenario::rects("dialog:column:parameters:");
         assert_eq!(headers.iter().filter(|(key, _)| key.ends_with(":Name")).count(), 1, "one header for the entire table");
+        let header = crate::scenario::rect_of("dialog:column:parameters:Name").unwrap();
+        assert!(crate::scenario::rects("dialog:column:").iter().filter(|(key, _)| key.ends_with(":Name")).all(|(_, rect)| *rect == header));
         let bands = crate::scenario::rects("dialog:table:parameters:group:");
-        let expected = [("fav", "FAVORITES", 1), ("model:Box1", "BOX1", 3), ("model:Box2", "BOX2", 3), ("user", "USER PARAMETERS", 1)];
+        let expected = [("fav", "FAVORITES", 1), ("user", "USER PARAMETERS", 1), ("model:Box1", "BOX1", 3), ("model:Box2", "BOX2", 3)];
         assert_eq!(bands.len(), expected.len());
         for ((key, rect), (band, label, count)) in bands.iter().zip(expected) {
             assert_eq!(key, &format!("dialog:table:parameters:group:{band}"));
@@ -2836,7 +2866,7 @@ mod tests {
 
         h.step(&json!({"click":{"handle":"dialog:table:parameters:group:model:Box1"}})).unwrap();
         h.frames(3);
-        assert!(crate::scenario::rect_of(&format!("dialog:table:parameters:model:Box1:{model}")).is_none());
+        assert!(crate::scenario::rect_of(&format!("dialog:table:Box1:{model}")).is_none());
         h.app.params.as_mut().unwrap().filter = "w".into();
         h.frames(3);
         h.app.params.as_mut().unwrap().filter.clear();
@@ -2844,19 +2874,19 @@ mod tests {
         assert!(!h.app.params.as_ref().unwrap().bands["model:Box1"], "filtering keeps the band's state");
         h.step(&json!({"click":{"handle":"dialog:table:parameters:group:model:Box1"}})).unwrap();
         h.frames(3);
-        assert!(crate::scenario::rect_of(&format!("dialog:table:parameters:model:Box1:{model}")).is_some());
+        assert!(crate::scenario::rect_of(&format!("dialog:table:Box1:{model}")).is_some());
 
-        // Closing preceding bands brings User into view, where its prompt belongs.
+        // Each band toggles independently, including User and its add prompt.
         h.step(&json!({"click":{"handle":"dialog:table:parameters:group:model:Box2"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:table:parameters:group:model:Box1"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:table:parameters:group:user"}})).unwrap();
         h.frames(3);
         assert!(crate::scenario::handle_at("param:w").is_none());
-        assert!(crate::scenario::handle_at("dialog:table:parameters:add").is_none());
+        assert!(crate::scenario::handle_at("dialog:table:user:add").is_none());
         h.step(&json!({"click":{"handle":"dialog:table:parameters:group:user"}})).unwrap();
         h.frames(3);
         assert!(crate::scenario::handle_at("param:w").is_some());
-        assert!(crate::scenario::handle_at("dialog:table:parameters:add").is_some());
+        assert!(crate::scenario::handle_at("dialog:table:user:add").is_some());
     }
 
     #[test]
@@ -3071,14 +3101,14 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.step(&json!({"start":"parameters.change"})).unwrap();
-        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
         h.step(&json!({"text":"width"})).unwrap();
         h.step(&json!({"click":{"handle":"param:new:expression"}})).unwrap();
         h.step(&json!({"text":"25 mm"})).unwrap();
         h.step(&json!({"click":{"handle":"param:new:comment:expand"}})).unwrap();
         h.frames(3);
         let popup = crate::scenario::rect_of("param:new:comment:popup").unwrap();
-        let row = crate::scenario::rect_of("dialog:table:parameters:new").unwrap();
+        let row = crate::scenario::rect_of("dialog:table:user:new").unwrap();
         let inside = egui::pos2(popup.center().x, popup.bottom() - 8.0);
         assert!(!row.contains(inside), "the click is below the compact draft row");
         assert!(h.app.session.doc.param("width").is_none(), "opening the expanded draft field stays in its row");

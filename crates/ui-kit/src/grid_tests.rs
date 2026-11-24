@@ -450,6 +450,7 @@ fn sections_share_one_table_but_keep_independent_editors_for_repeated_row_keys()
     let ctx = crate::test_support::context();
     let mut first = Sheet::new(1);
     let mut second = Sheet::new(1);
+    second.grows = true;
     let mut draw = |events: Vec<Event>| {
         registry::clear_handles();
         let input = egui::RawInput {
@@ -481,7 +482,12 @@ fn sections_share_one_table_but_keep_independent_editors_for_repeated_row_keys()
     for section in ["first", "second"] {
         let cell = registry::rect_of(&format!("dialog:table:sections:{section}:r0:cell:Value")).unwrap();
         assert_eq!(cell.x_range(), registry::rect_of("dialog:column:sections:Value").unwrap().x_range());
+        assert_eq!(registry::rect_of(&format!("dialog:column:{section}:Value")), registry::rect_of("dialog:column:sections:Value"));
+        assert_eq!(registry::rect_of(&format!("dialog:table:{section}:r0:cell:Value")), Some(cell));
+        assert_eq!(registry::rect_of(&format!("dialog:table:{section}:r0")), registry::rect_of(&format!("dialog:table:sections:{section}:r0")));
     }
+    assert_eq!(registry::rect_of("dialog:table:second:add"), registry::rect_of("dialog:table:sections:add"));
+    assert!(registry::handle_at("dialog:table:second:add").is_some());
     Grid::select(&ctx, Grid::state_of("second"), "r0", 0, 1);
     draw(vec![]);
     draw(vec![Event::Text("changed".into())]);
