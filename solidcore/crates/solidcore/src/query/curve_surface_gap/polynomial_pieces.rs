@@ -800,7 +800,7 @@ pub(crate) fn trim_distance_bound(
     };
     // (#20643 review: the pieces bound the net's image; a cone's distance off its net is
     // taken off `accept` and added to the result, rounded up)
-    let Some(off) = super::cone_net_offset(k, &surface, &net)? else {
+    let Some(off) = super::cone_net_offset(k, &surface, &net, uv)? else {
         return Ok(None);
     };
     let accept = if off > 0.0 {

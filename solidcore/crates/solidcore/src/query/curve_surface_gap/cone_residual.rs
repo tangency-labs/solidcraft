@@ -856,8 +856,23 @@ impl Setup<'_> {
 ///
 /// The kernel's cancelled status (polled once per piece of the sweep).
 pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Result<Option<f64>> {
+    cone_net_residual_within(k, cone, net, None)
+}
+
+/// [`cone_net_residual`] over the net's parameters whose sweep coordinate is in `window`'s
+/// (`[[u0, u1], [v0, v1]]`, the net's `(u, v)`; the sweep direction's range taken, the
+/// linear direction's whole range kept): the distance from the net to the cone at every
+/// parameter of the net in that box. The whole net where `window` is `None`, or where its
+/// sweep range does not meet the net's in an interval of positive length (a bound over the
+/// whole net holds over any part of it).
+pub(super) fn cone_net_residual_within(
+    k: &Kernel,
+    cone: &Cone,
+    net: &Nurbs,
+    window: Option<[[f64; 2]; 2]>,
+) -> Result<Option<f64>> {
     let mut cancelled = false;
-    let bound = enclose(k, cone, net, &mut cancelled);
+    let bound = enclose(k, cone, net, window, &mut cancelled);
     if cancelled {
         k.check_cancelled(OP)?;
     }
@@ -866,7 +881,13 @@ pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Result<
 
 /// [`cone_net_residual`]'s enclosure; `cancelled` set (and `None`) where the kernel was
 /// cancelled during the sweep.
-fn enclose(k: &Kernel, cone: &Cone, net: &Nurbs, cancelled: &mut bool) -> Option<f64> {
+fn enclose(
+    k: &Kernel,
+    cone: &Cone,
+    net: &Nurbs,
+    window: Option<[[f64; 2]; 2]>,
+    cancelled: &mut bool,
+) -> Option<f64> {
     let rev = &cone.rev;
     let circle = rev.polar_curve()?;
     let table = &rev.polar;
@@ -1039,6 +1060,11 @@ fn enclose(k: &Kernel, cone: &Cone, net: &Nurbs, cancelled: &mut bool) -> Option
     if !(d0 < d1 && d0.is_finite() && d1.is_finite()) {
         return None;
     }
+    // (#20643: the sweep range of the caller's box, where it meets the net's in an interval)
+    let (d0, d1) = match window.map(|[u, v]| if swap { v } else { u }) {
+        Some([w0, w1]) if w0.max(d0) < w1.min(d1) => (w0.max(d0), w1.min(d1)),
+        _ => (d0, d1),
+    };
     let mut cuts: Vec<f64> = vec![d0, d1];
     cuts.extend(sk.iter().copied());
     cuts.extend(setup.polar.u.iter().copied());
@@ -1056,6 +1082,11 @@ fn enclose(k: &Kernel, cone: &Cone, net: &Nurbs, cancelled: &mut bool) -> Option
             _ => None,
         })
         .collect();
+    // (#20643 review: a partition past the budget is not evaluated piece by piece; the loose
+    // bound holds over the whole net)
+    if stack.len() >= MAX_PIECES {
+        return setup.loose.is_finite().then_some(setup.loose);
+    }
     let mut worst = 0.0_f64;
     let mut pieces = stack.len();
     while let Some(([s0, s1], depth)) = stack.pop() {
@@ -1394,6 +1425,59 @@ mod tests {
     /// A net with a NaN control point gives no bound (`f64::max` would drop it from the
     /// loose bound's reach).
     #[test]
+    fn a_net_cut_past_the_piece_budget_takes_the_loose_bound() {
+        // (#20643 review) a cylinder's net as a polyline of 5000 sides along its circle: its
+        // knots cut the sweep into more pieces than `MAX_PIECES`, which are not evaluated one
+        // by one; the loose bound (past the radius) is taken instead of the chord's sag
+        // (about 2.5e-6 here) the pieces would prove
+        let k = Kernel::default();
+        let mut c = Cone::new_bounded(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            12.5,
+            12.5,
+            0.0,
+            360.0,
+            3.0,
+            false,
+            false,
+            true,
+        );
+        c.make_nurb(&k).unwrap();
+        let s = Surface::from(c.clone());
+        let d = c.rev.base.natural_uv_domain();
+        let (u0, u1) = (d.u_interval().min(), d.u_interval().max());
+        let (v0, v1) = (d.v_interval().min(), d.v_interval().max());
+        let n = 5000;
+        let us: Vec<f64> = (0..n)
+            .map(|i| u0 + (u1 - u0) * i as f64 / (n - 1) as f64)
+            .collect();
+        let mut knots = vec![u0];
+        knots.extend(&us);
+        knots.push(u1);
+        let mut pw = Vec::new();
+        for &u in &us {
+            for v in [v0, v1] {
+                let p = c.rev.base.evaluate_point(Point2::new(u, v)).unwrap();
+                pw.extend_from_slice(&[p.x, p.y, p.z, 1.0]);
+            }
+        }
+        let net = super::Nurbs {
+            p: 1,
+            q: 1,
+            nu: n,
+            nv: 2,
+            u: knots,
+            v: vec![v0, v0, v1, v1],
+            pw,
+        };
+        assert!(n > super::MAX_PIECES);
+        let b = net_to_surface_bound(&k, &s, &net).unwrap().unwrap();
+        assert!(b > 12.5, "{b:e}");
+    }
+
+    #[test]
     fn a_nan_net_gives_no_bound() {
         let k = Kernel::default();
         for (name, s, _, _) in cones(&k) {
@@ -1468,10 +1552,19 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert!(g >= across, "{e:e}: {g:e} under {across:e}");
-            assert!(
-                g >= residual,
-                "{e:e}: {g:e} under the residual {residual:e}"
-            );
+            // (the trim's box's residual: the seam's tear counted only near the seam)
+            let net = NetSurface::of(&k, &s, &[]).unwrap().unwrap();
+            let local = super::super::cone_net_offset(&k, &s, &net, &uv)
+                .unwrap()
+                .unwrap();
+            assert!(g >= local, "{e:e}: {g:e} under the residual {local:e}");
+            assert!(local <= residual, "{e:e}: {local:e} over {residual:e}");
+            if e >= 1e-4 {
+                assert!(
+                    local * 100.0 < residual,
+                    "{e:e}: {local:e} not local against {residual:e}"
+                );
+            }
         }
     }
 

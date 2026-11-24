@@ -1320,7 +1320,7 @@ pub fn curve_face_gap_bound(
         return Ok(None);
     };
     // (#20643 review: the bound is on the net's image; a cone's distance off its net added)
-    let Some(off) = cone_net_offset(k, &surface, &net)? else {
+    let Some(off) = cone_net_offset(k, &surface, &net, &correspondence)? else {
         return Ok(None);
     };
     let gap = certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)?;
@@ -1340,13 +1340,44 @@ pub(super) fn cone_net_offset(
     k: &Kernel,
     surface: &Surface,
     net: &NetSurface,
+    uv: &BSplineCurve,
 ) -> Result<Option<f64>> {
     use crate::surface::surface::SurfaceKind;
-    if net.offset.is_none() && matches!(surface.kind(), SurfaceKind::Cone(_)) {
-        net_to_surface_bound(k, surface, &net.net)
-    } else {
-        Ok(Some(0.0))
+    match surface.kind() {
+        SurfaceKind::Cone(c) if net.offset.is_none() => {
+            cone_residual::cone_net_residual_within(k, c, &net.net, uv_box(uv))
+        }
+        _ => Ok(Some(0.0)),
     }
+}
+
+/// Not upstream (#20643): a box `[[u0, u1], [v0, v1]]` holding every point of the UV curve
+/// `uv`: the hull of its control points (each point of a NURB with positive weights is a
+/// convex combination of them), each coordinate's quotient by its weight enclosed outward and
+/// the box padded by `2^-40` of its largest coordinate (plus `2^-1000`) for the rounding of
+/// the curve's evaluation. `None` (no box: the residual is then taken over the whole net)
+/// where a control point is not finite or a weight is not positive.
+fn uv_box(uv: &BSplineCurve) -> Option<[[f64; 2]; 2]> {
+    let n = polynomial_pieces::stored_nurbs(uv)?;
+    let mut b = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+    for c in n.pw.chunks_exact(4) {
+        let (&x, &y, &w) = (c.first()?, c.get(1)?, c.get(3)?);
+        if !(x.is_finite() && y.is_finite() && w.is_finite() && w > 0.0) {
+            return None;
+        }
+        for ([lo, hi], a) in b.iter_mut().zip([x, y]) {
+            let q = Ivl::from(a) / Ivl::from(w);
+            *lo = lo.min(q.lo);
+            *hi = hi.max(q.hi);
+        }
+    }
+    let big = b.iter().flatten().fold(0.0_f64, |m, x| m.max(x.abs()));
+    let pad = (Ivl::from(big) * Ivl::from(2f64.powi(-40)) + Ivl::from(2f64.powi(-1000))).hi;
+    for [lo, hi] in &mut b {
+        *lo = (Ivl::from(*lo) - Ivl::from(pad)).lo;
+        *hi = (Ivl::from(*hi) + Ivl::from(pad)).hi;
+    }
+    b.iter().flatten().all(|x| x.is_finite()).then_some(b)
 }
 
 /// Not upstream (#20643): `bound` plus `off` ([`cone_net_offset`]) rounded up, `bound` as it
@@ -1699,7 +1730,8 @@ fn bisection_residual(k: &Kernel, surface: &Surface, net: &NetSurface) -> Result
                 // base's distance off its net, at any distance. (The step to the formula's
                 // normal where `|S_u × S_v|² < EFF_ZERO_SQ` is never reached on a box
                 // [`NetSurface::partials`] bounds: it refuses one whose cross product may be
-                // under `1e3 EFF_ZERO`.)
+                // under `1e3 EFF_ZERO`.) Not counted here, as for every offset base: the
+                // rounding of that step's normal and of its product with the distance.
                 return net_to_surface_bound(k, base_surface, &net.net);
             }
             match net_to_surface_bound(k, base_surface, &net.net)? {
@@ -3980,14 +4012,23 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 assert!(g >= across, "{e:e}: {g:e} under {across:e}");
-                let (net, _) = correspondence(&k, &s, d, &line, [0.0, 1.0])
+                let (net, w) = correspondence(&k, &s, d, &line, [0.0, 1.0])
                     .unwrap()
                     .unwrap();
-                let residual = net_to_surface_bound(&k, &s, &net.net).unwrap().unwrap();
+                let residual = cone_net_offset(&k, &s, &net, &w).unwrap().unwrap();
                 assert!(
                     g >= residual,
                     "{e:e}: {g:e} under the residual {residual:e}"
                 );
+                // (the residual is the line's box's: the seam's tear only near the seam)
+                let whole = net_to_surface_bound(&k, &s, &net.net).unwrap().unwrap();
+                assert!(residual <= whole, "{e:e}: {residual:e} over {whole:e}");
+                if e >= 1e-4 {
+                    assert!(
+                        residual * 100.0 < whole,
+                        "{e:e}: {residual:e} not local against {whole:e}"
+                    );
+                }
             }
             checked += 1;
         }
