@@ -1653,8 +1653,19 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     }
     v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
-    if !curves.is_empty() {
-        v.push(cmd(app, "sketch.construction", "Normal / Construction").with(json!({ "curves": curves })));
+    // Points switch too (#18448): a construction point is reference geometry a Hole leaves out.
+    // The origin is the sketch's own and is not offered.
+    let construction_points: Vec<&str> =
+        app.session.selection.iter().filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel)).filter(|id| *id != "origin").collect();
+    if !curves.is_empty() || !construction_points.is_empty() {
+        let mut params = json!({});
+        if !curves.is_empty() {
+            params["curves"] = json!(curves);
+        }
+        if !construction_points.is_empty() {
+            params["points"] = json!(construction_points);
+        }
+        v.push(cmd(app, "sketch.construction", "Normal / Construction").with(params));
     }
     // Infinite lines (#1359): the selected lines switch together.
     let lines: Vec<String> = curves

@@ -114,6 +114,11 @@ pub struct SPoint {
     /// come to (`Document::apply_point_values` works them out before each solve).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exprs: Option<Box<PointExprs>>,
+    /// A point that only helps place or dimension other geometry, as a construction line does:
+    /// features that read a sketch's points (a Hole from the whole sketch) leave it out (#18448).
+    /// Not saved when false, so a design without one is written as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub construction: bool,
 }
 
 /// The expressions of a point placed by parameters, over the design's parameters; a coordinate
@@ -874,7 +879,7 @@ impl Default for Sketch {
 impl Sketch {
     pub fn new() -> Self {
         Sketch {
-            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None }],
+            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None, construction: false }],
             curves: Vec::new(),
             constraints: Vec::new(),
             patterns: Vec::new(),
@@ -1019,7 +1024,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.new_id(id, "p", taken)?;
-        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
+        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None, construction: false });
         Ok(self.points.len() - 1)
     }
 
