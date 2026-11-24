@@ -2767,6 +2767,15 @@ fn adding_to_a_whole_body_selection_keeps_it_and_a_refused_pick_changes_nothing(
 }
 
 #[test]
+fn inverting_a_whole_body_selection_leaves_nothing_selected() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "select.all", json!({}));
+    assert_eq!(run(&mut s, "select.invert", json!({}))["selected"], 0);
+    assert!(!s.has_selection() && !s.selection_all_bodies, "every shown body was selected");
+}
+
+#[test]
 fn delete_of_a_whole_body_selection_keeps_locked_bodies() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
