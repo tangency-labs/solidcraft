@@ -57,9 +57,9 @@ impl std::error::Error for PeriodicSeamError {
 
 /// Complete an import's periodic topology after its lifted pcurves are known, before the
 /// record is published. Returns the completed record and each output face's input index;
-/// `None` leaves a record with in-domain trims and complete sectors unchanged. The kernel
-/// removes crossed internal cuts, splits genuine boundaries at the base cut, inserts seams
-/// and translates the pieces.
+/// `None` leaves a record with in-domain trims and complete sectors unchanged, and so does a
+/// completion that cannot be made a record passing the import's checks. The kernel removes crossed internal
+/// cuts, splits genuine boundaries at the base cut, inserts seams and translates the pieces.
 ///
 /// # Errors
 /// Typed evaluation, conversion and topology failures, including a lost face origin.
@@ -130,8 +130,22 @@ pub fn complete_periodic_seams(
     if !changed {
         return Ok(None);
     }
-    let (completed, order) =
-        to_record(&mut kernel, &mut body).map_err(PeriodicSeamError::Conversion)?;
+    // The edit deletes the trims of the uses at the seams' vertices and builds them again by
+    // sampling their edges. Where an edge lies off its surface by more than its tolerance, which
+    // a fitted edge curve can, the sampling comes back over part of the edge's interval and off
+    // the edge's end: the body then cannot be made a valid record, or the record fails the
+    // checks the import makes of every record. The record as imported passed them, so it
+    // stands: a body keeps its lifted trims rather than being refused for the completion's sake.
+    // The kernel also moves every trim piece into the base period on its own. Where a loop's
+    // consecutive uses lie either side of the cut with no seam edge between them (a vertex sits
+    // on the cut), the pieces end a whole period apart and the record no longer agrees with
+    // itself: the same checks refuse that completion too.
+    let Ok((completed, order)) = to_record(&mut kernel, &mut body) else {
+        return Ok(None);
+    };
+    if !passes_import_checks(&completed) {
+        return Ok(None);
+    }
     let faces = order
         .faces
         .iter()
@@ -143,6 +157,13 @@ pub fn complete_periodic_seams(
         })
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(Some((completed, faces)))
+}
+
+/// Whether `record` passes the structural and geometric checks the import makes of every
+/// record before it publishes it ([`crate::record_check::validate`] and
+/// [`crate::record_check::agreement`]).
+pub(crate) fn passes_import_checks(record: &solidcore_record::brep::Brep) -> bool {
+    crate::record_check::validate(record).is_ok() && crate::record_check::agreement(record).is_ok()
 }
 
 /// One oriented edge of a loop, as [`pcurves`] reads it: the edge's index (a seam edge, used
@@ -329,6 +350,17 @@ pub fn monotone_breaks(c: &Curve2) -> crate::Result<Vec<f64>> {
 #[must_use]
 pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     k::eval(&solidcore_convert::curve2(c), t)
+}
+
+/// The points of `surface` at each of `uvs`, in the surface's own (u, v) (`None` for a surface
+/// that does not convert, or a parameter off it) ([`solidcore::eval::SurfaceEval::point`]).
+#[must_use]
+pub fn surface_points(surface: &Surface, uvs: &[[f64; 2]]) -> Option<Vec<[f64; 3]>> {
+    let kernel = solidcore_convert::surface(surface).ok()?;
+    let eval = solidcore::eval::SurfaceEval::new(&kernel).ok()?;
+    uvs.iter()
+        .map(|uv| eval.point(*uv).map(|p| [p.x, p.y, p.z]))
+        .collect()
 }
 
 /// The point of pcurve `c` at `t` and its first derivative there (`None` outside its interval or

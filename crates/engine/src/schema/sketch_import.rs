@@ -1,5 +1,6 @@
 //! Contracts and result types for the commands in `cmd/sketch_import.rs`: `sketch.insert_dxf`,
-//! `sketch.insert_svg`, `sketch.insert_airfoil`, `sketch.drawing_bounds` and `sketch.export_dxf`.
+//! `sketch.insert_svg`, `sketch.insert_airfoil`, `sketch.drawing_bounds`, `sketch.export_dxf` and
+//! `sketch.export_svg`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a file can be read or written, a sketch
@@ -717,6 +718,78 @@ pub enum DxfExported {
         dxf: String,
         /// How many entities it holds.
         entities: usize,
+    },
+}
+
+/// Save a sketch as an SVG drawing at its real size: to the file `path`, or, without it, as text in
+/// the reply. The file's `width` and `height` carry the unit and its `viewBox` is the same size
+/// without one, so it opens 1:1. Each closed profile is one closed path with its holes as further
+/// sub-paths; circles, arcs and lines stay what they are and other curves are written as line
+/// segments. Construction curves are left out.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportSvgParams {
+    /// The sketch: its feature id or its name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The file to write. Default (also when blank): none, and the SVG text is returned.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// The drawing's unit (any case): `mm`, `cm`, or `in` or `inch`. Default: mm.
+    #[serde(default, deserialize_with = "svg_units")]
+    #[schemars(schema_with = "svg_units_schema")]
+    pub units: Option<String>,
+}
+
+/// The units `sketch.export_svg` takes, in lower case (the handler reads them in any case).
+const SVG_UNITS: [&str; 4] = ["mm", "cm", "in", "inch"];
+
+fn svg_units<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(units)) => {
+            let lower = units.to_ascii_lowercase();
+            if SVG_UNITS.contains(&lower.as_str()) {
+                Ok(Some(lower))
+            } else {
+                Err(D::Error::custom(whole(format!("unsupported unit `{lower}` (use \"mm\", \"cm\" or \"in\")"))))
+            }
+        }
+        Some(_) => Err(D::Error::custom(whole("`units` must be a string"))),
+    }
+}
+
+fn svg_units_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "description": "mm, cm, in or inch, in any case. Default: mm."})
+}
+
+/// What `sketch.export_svg` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExportSvgResult {
+    #[serde(flatten)]
+    pub exported: SvgExported,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Where the SVG went.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SvgExported {
+    /// With a `path`: the file was written.
+    Written {
+        /// The file written, as given.
+        path: String,
+        /// How many drawn elements it holds (a closed profile with its holes is one).
+        elements: usize,
+    },
+    /// Without one: the SVG as text.
+    Text {
+        /// The SVG file's text.
+        svg: String,
+        /// How many drawn elements it holds (a closed profile with its holes is one).
+        elements: usize,
     },
 }
 

@@ -1373,9 +1373,11 @@ pub(super) fn sheet_eval(
             // the later one's is cut.
             let order = doc.feature_index(f.id).unwrap_or(usize::MAX);
             let mut made = Vec::with_capacity(picks.len());
+            let mut square = Vec::with_capacity(picks.len());
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
                 // One bend for each run: a split edge's butt where its runs meet.
-                let joints = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                square.push(sides);
                 if let Some((relief, size)) = own {
                     for &joint in &joints {
                         sk.corner_reliefs.push((joint, relief, size, order));
@@ -1386,6 +1388,11 @@ pub(super) fn sheet_eval(
             let mut open = Vec::new();
             for (k, joints) in made.iter().enumerate() {
                 open.extend(sk.close_flange_corners(joints).map_err(named(k))?);
+            }
+            // A side laid on square no other bend met carries on the edge beside it again, now
+            // that every corner of the feature is closed (#19833).
+            for (k, sides) in square.iter().enumerate() {
+                sk.slant_open_sides(sides).map_err(named(k))?;
             }
             // The corners on the outside of a bend that stay open (#20720): each pair of bends is
             // met once, so each corner once.
@@ -1559,6 +1566,42 @@ pub(super) fn sheet_eval(
                 None if !st.surface_sheets.is_empty() => DocError::Invalid("the fold line must lie on a flat face of the sheet".into()),
                 _ => no_sheet(body),
             })
+        }
+        FeatureKind::SheetTab { sketch, profiles, body } => {
+            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
+            let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
+            // The named sheet, else the one sheet with a face that takes the profile: which is never
+            // a matter of the sheets' order, so a tab two sheets would take is refused.
+            let candidates: Vec<usize> = match body {
+                Some(n) => vec![
+                    st.surface_sheets
+                        .iter()
+                        .position(|s| &s.body == n)
+                        .ok_or_else(|| DocError::Invalid(format!("`{n}` is not a sheet metal body")))?,
+                ],
+                None => (0..st.surface_sheets.len()).collect(),
+            };
+            let mut first_error = None;
+            let mut took = Vec::new();
+            for i in candidates {
+                let Some(mut sk) = st.surface_sheets.get(i).cloned() else { continue };
+                match sk.add_tab(&ss.plane, &regions) {
+                    Ok(_) => took.push((i, sk)),
+                    Err(e) => {
+                        first_error.get_or_insert(e);
+                    }
+                }
+            }
+            match <[(usize, crate::SurfaceSheet); 1]>::try_from(took) {
+                Ok([(i, sk)]) => {
+                    if let Some(slot) = st.surface_sheets.get_mut(i) {
+                        *slot = sk;
+                    }
+                    rebuild_surface_sheet(st, i)
+                }
+                Err(took) if !took.is_empty() => Err(DocError::Invalid(sheet::TAB_SEVERAL.into())),
+                Err(_) => Err(first_error.unwrap_or_else(|| DocError::Invalid(sheet::TAB_OFF_SHEET.into()))),
+            }
         }
         FeatureKind::SheetUnfold { body, refold, fixed } => {
             let i = surface_sheet_for(st, body, |s| s.unfolded == *refold).ok_or_else(|| match body {

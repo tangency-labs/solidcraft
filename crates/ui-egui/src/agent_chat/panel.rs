@@ -235,7 +235,7 @@ impl PanelView {
         let current = agents::current(app);
         let permission_agent =
             if app.agent_chat.state().running() { Some(app.agent_chat.running_id.clone()) } else { current.as_ref().map(|e| e.id.clone()) };
-        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_for(&app.preferences, id));
+        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_in_force(app, id));
         PanelView {
             shown: shown(app),
             document: app.session.doc.name.clone(),
@@ -2883,21 +2883,31 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
             ui.indent(id.with("detail"), |ui| {
                 if let Some(input) = call.input {
                     let text = serde_json::to_string_pretty(input).unwrap_or_default();
-                    tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                    let copy = tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:tool:{n}:copy:arguments"), copy.rect.center());
                 }
                 if let Some(o) = call.output {
-                    tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                    let copy = tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:tool:{n}:copy:result"), copy.rect.center());
                 }
             });
         });
     });
 }
 
-/// One part of a card's Details: its heading and the raw text, cut short and scrolling.
+/// One part of a card's Details: a bounded, scrolling preview and a Copy action for the full text.
 #[cfg(not(target_arch = "wasm32"))]
-fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
+fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) -> egui::Response {
     let t = Tokens::get();
-    ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+    let copy = ui
+        .horizontal(|ui| {
+            ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small)).inner
+        })
+        .inner;
+    if copy.clicked() {
+        ui.ctx().copy_text(text.to_owned());
+    }
     let shown: String =
         if text.chars().count() > MAX_DETAIL { text.chars().take(MAX_DETAIL).chain(std::iter::once('…')).collect() } else { text.to_string() };
     ui_kit::assistant_tool_detail(ui, |ui| {
@@ -2906,6 +2916,7 @@ fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
             ui.add(egui::Label::new(RichText::new(shown).monospace().size(t.font_small)).selectable(true).wrap());
         });
     });
+    copy
 }
 
 /// A small status mark drawn as a shape (no glyph a system font might lack): filled when the

@@ -507,19 +507,36 @@ fn material_fingerprint(doc: &Document, material: &str) -> Result<Option<String>
     doc.user_material(material).map(LinkedBodyProperties::fingerprint).transpose().map_err(|e| EngineError::Other(e.to_string()))
 }
 
+/// `name` without the ` (linked N)` suffixes inheriting a linked material may have added.
+fn linked_stem(name: &str) -> &str {
+    let mut stem = name;
+    while let Some(rest) = stem.strip_suffix(')')
+        && let Some((head, n)) = rest.rsplit_once(" (linked ")
+        && !n.is_empty()
+        && n.bytes().all(|b| b.is_ascii_digit())
+    {
+        stem = head;
+    }
+    stem
+}
+
 /// Copy a design-owned definition without changing a same-named assembly material.
 fn inherit_material(doc: &mut Document, source: &SourceProperties, previous: Option<&str>) -> Result<String> {
     let Some(definition) = &source.definition else { return Ok(source.material.clone()) };
-    for existing in &doc.user_materials {
-        // Equal density/optics do not make differently named materials interchangeable.
-        // A previous disambiguated copy can be reused on subsequent source updates.
-        if !existing.name.eq_ignore_ascii_case(&definition.name) && previous != Some(existing.name.as_str()) {
-            continue;
-        }
-        let mut candidate = definition.clone();
-        candidate.name.clone_from(&existing.name);
-        if &candidate == existing {
-            return Ok(existing.name.clone());
+    let stem = linked_stem(&definition.name);
+    let short: String = stem.chars().take(64).collect();
+    // Equal density/optics do not make differently named materials interchangeable. The same
+    // name, or the previous disambiguated copy on a source update, is reused first; then an equal
+    // `(linked N)` copy of the same name another body made.
+    let exact = |m: &UserMaterial| m.name.eq_ignore_ascii_case(&definition.name) || previous == Some(m.name.as_str());
+    let copy = |m: &UserMaterial| [stem, short.as_str()].iter().any(|n| linked_stem(&m.name).eq_ignore_ascii_case(n));
+    for same_name in [&exact as &dyn Fn(&UserMaterial) -> bool, &copy] {
+        for existing in doc.user_materials.iter().filter(|m| same_name(m)) {
+            let mut candidate = definition.clone();
+            candidate.name.clone_from(&existing.name);
+            if &candidate == existing {
+                return Ok(existing.name.clone());
+            }
         }
     }
     if doc.user_materials.len() >= solidcraft_doc::MAX_USER_MATERIALS {
