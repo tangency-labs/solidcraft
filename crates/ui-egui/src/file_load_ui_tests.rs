@@ -1177,6 +1177,49 @@ fn a_newer_design_opens_with_a_notice_and_no_dialog() {
     assert!(app.dialog.is_none() && !app.ui.palette_open);
 }
 
+#[test]
+fn newer_drawing_notices_put_the_name_in_the_translated_sentence() {
+    use solidcraft_engine::doc::format::DRAWING;
+
+    let dir = scratch("newer_drawing_notice");
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+    design.execute("drawing.create", &json!({"name": "Plate {format}"})).unwrap();
+    let source = serde_json::from_str::<serde_json::Value>(&design.doc.to_json()).unwrap();
+    for newer_format in [true, false] {
+        let mut file = source.clone();
+        let drawing = &mut file["drawings"][0];
+        drawing["future_ink_type"] = json!("unreadable");
+        let expected = if newer_format {
+            let format = DRAWING.current() + 1;
+            drawing["format"] = json!(DRAWING.format_string(format));
+            format!("Format {format}")
+        } else {
+            let mut pending = DRAWING.pending_names();
+            pending.push("future-ink".into());
+            drawing["format_pending"] = json!(pending);
+            "Änderung `future-ink`".into()
+        };
+        let path = dir.join(format!("drawing-{newer_format}.json"));
+        std::fs::write(&path, file.to_string()).unwrap();
+
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.language = "de".into();
+        let _lang = solidcraft_ui_text::scope("de");
+        app.open_path_with(&path.to_string_lossy(), &Default::default()).unwrap();
+
+        let (text, _, error) = app.status.as_ref().unwrap();
+        assert!(!error && text.starts_with("Die Zeichnung „Plate {format}“") && text.contains(&expected), "{text}");
+        assert!(app.messages.iter().any(|message| {
+            !message.error
+                && message.text.starts_with("SolidCraft konnte")
+                && message.text.contains("future_ink_type")
+                && message.text.contains("in der Zeichnung „Plate {format}“")
+        }));
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A design with the data of a plugin that isn't installed opens as usual: the status line names
 /// the plugin, and the data is kept as it came.
 #[test]
@@ -1410,6 +1453,8 @@ fn an_insert_runs_again_for_a_design_edited_meanwhile_and_lands_after_the_edit()
     let dir = scratch("insert-again");
     let step = step_box(&dir);
     let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
     w.app.home.open = false;
     w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-50, 0, 0]})).unwrap();
     let (started, release) = hold_next(&mut w);
@@ -1438,6 +1483,8 @@ fn a_waiting_result_does_not_hold_the_queue_and_a_closed_tab_releases_it() {
     let step = step_box(&dir);
     let other = large_design(&dir, 2);
     let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
     w.app.home.open = false;
     w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
     // An insert for the design in tab 0, with another tab shown when its result comes in.
@@ -1470,6 +1517,8 @@ fn an_insert_waits_for_its_designs_tab() {
     let dir = scratch("insert-tab");
     let step = step_box(&dir);
     let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
     w.app.home.open = false;
     w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-50, 0, 0]})).unwrap();
     let (started, release) = hold_next(&mut w);
@@ -1583,6 +1632,8 @@ fn settle_waits_for_the_stand_up_estimate_after_the_bodies_are_meshed() {
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
     let mut h = crate::scenario::Harness::new();
+    // This test is about the estimate, not the import-options window it would ask first.
+    h.app.preferences.ask_import_options = false;
     // Still running for more frames than `settle` ran once the meshing was done.
     crate::stand_up::hold_estimate(30);
     h.app.open_path_async(&path);

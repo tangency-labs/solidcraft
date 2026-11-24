@@ -99,7 +99,7 @@ path on every read and write; hidden paths require explicit authorization. Decla
 name does not itself grant access. Reading a file that does not exist returns `invalid-input`
 (field `path`, reason "no such file") without failing the run, so an entry can create its file
 on first use. A write into a sub-folder that does not exist yet makes that folder inside the
-grant; if the run does not publish, the folders it made are removed again while still empty.
+grant (under `--allow-path` when its nearest existing folder is allowed, however many levels are missing; a path may have at most 64 components); if the run does not publish, the folders it made are removed again while still empty.
 Only a refusal by the system is reported as `permission-denied`; another write failure, such as a
 file where a folder should be, is `invalid-input` for `path`. Writes use temporary sibling files,
 and reads in the same call see their staged content. Targets are replaced only after successful guest execution and app
@@ -123,7 +123,7 @@ the user grants it, as folders are:
 
 | Group | Commands |
 |---|---|
-| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
+| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sketch.export_svg`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
 | `doc` | `doc.*`: opening, recovering or switching designs |
 | `app` | `settings.*`, `ui.*`, `diagnostics.*`: app state outside any design |
 | `plugin` | `plugin.*`: inspecting or running plugins |
@@ -274,6 +274,11 @@ previously approved package. Desktop results prepared under changed ceilings, gr
 are discarded rather than adopted into the current design. Settings survive new/open design
 operations and scratch copies, but are never serialized as design data.
 
+A component is compiled in memory: first with Winch, Wasmtime's baseline compiler, which compiles
+a large component in about a second; after that call, again with Cranelift on one background thread,
+whose faster code replaces it for later calls. A component Winch refuses is compiled with Cranelift
+straight away. Fuel and epoch interruption are the same under both compilers.
+
 Fuel and epoch checks contain guest execution, not arbitrary native work. Component compilation
 happens before the guest deadline; its input size is bounded, but compiler memory/time are not
 covered by guest fuel. Each approved native command runs under its existing engine/kernel limits;
@@ -293,8 +298,12 @@ Normal command output and plugin result JSON are unchanged. The counter message 
 model data or package paths.
 
 Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)).
-Compiled components are kept between sessions in Wasmtime's own compilation cache, in the
-`plugin-compile` folder of the per-user cache folder (`solidcraft_engine::plugin::configure_compile_cache`).
+Compiled components are kept between sessions in Wasmtime's own compilation cache, in
+`plugin-compile/wasmtime` under the per-user cache folder (`solidcraft_engine::plugin::configure_compile_cache`).
+Only Cranelift's code is cached. `plugin-compile/optimized` holds one empty file per cached component
+(named for a hash of its bytes and the compile settings), which tells the next session to load
+Cranelift's code instead of starting with Winch; it lives outside Wasmtime's folder because Wasmtime's
+cleanup removes files it didn't write there.
 Its key covers the component's bytes, the Wasmtime version and every compile setting, fuel metering and
 epoch interruption included; an entry that fails Wasmtime's checks is compiled again. Wasmtime checks an
 entry's format and settings, not its machine code, so whoever can write that folder can change the code

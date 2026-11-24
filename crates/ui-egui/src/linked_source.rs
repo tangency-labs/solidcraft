@@ -279,7 +279,7 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     ask.retain(|(c, _)| now.iter().any(|(k, s)| k == c && s.is_some()));
     for (c, s) in now {
         if !app.docs.link_stamps.iter().any(|(k, _)| *k == c) {
-            app.docs.link_stamps.push((c, s));
+            app.docs.link_stamps.push((c, if changed.contains(&c) { None } else { s }));
         }
     }
     crate::link_folders_prompt::ask(app, ask);
@@ -295,6 +295,9 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
 pub(crate) fn read(app: &mut SolveApp, components: Vec<u64>) {
     let mut request = crate::file_load::Request::new("", crate::file_load::Kind::UpdateLinks);
     request.options.insert("components".into(), json!(components));
+    // A linked design saved without the bodies of its own links reads them no further than this
+    // design's folder and its own: the user allowed those two, not what the design names.
+    request.options.insert("linked_bodies".into(), json!("folder"));
     request.design.clone_from(&app.session.path);
     let _ = crate::file_load::begin_request(app, request);
 }
@@ -1031,6 +1034,77 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A design saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`) reads none from another folder unasked as it opens: the link has
+    /// no bodies until Load reads its file, which is the same question a changed file asks.
+    #[test]
+    fn a_design_saved_without_linked_bodies_asks_before_it_reads_a_link_in_another_folder() {
+        let root = std::env::temp_dir().join(format!("solidcraft-link-folders-left-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("received")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        let housing = root.join("parts").join("housing.solidcraft");
+        save_part(&housing, [10.0, 20.0, 30.0], false);
+        let case = root.join("received").join("case.solidcraft");
+        let mut saved = SolveApp::new(Session::default(), Default::default());
+        saved.run("component.insert_design", json!({"path": housing})).unwrap();
+        saved.run("file.save", json!({"path": case, "linked_bodies": false})).unwrap();
+        drop(saved);
+        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        open(&mut app, &case, false);
+        let prompt = app.link_folders_prompt.first().cloned().expect("asked");
+        assert_eq!(prompt.folders, std::slice::from_ref(&folder));
+        assert!(volume(&app).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
+        assert!(out_of_date(&mut app));
+        crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::Load);
+        settle(&mut app);
+        assert!((volume(&app) - 6000.0).abs() < 1e-6, "Load reads the link: {}", volume(&app));
+        assert!(!out_of_date(&mut app));
+        assert_eq!(app.preferences.linked_file_folders, [folder]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Recovering a design saved without linked bodies asks as opening it does: a link in
+    /// another folder that the autosaved copy has no bodies of is not read until Load.
+    #[test]
+    fn recovering_a_design_saved_without_linked_bodies_asks_before_it_reads_a_link_in_another_folder() {
+        let root = std::env::temp_dir().join(format!("solidcraft-link-folders-left-out-recover-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("received")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        let housing = root.join("parts").join("housing.solidcraft");
+        save_part(&housing, [10.0, 20.0, 30.0], false);
+        let case = root.join("received").join("case.solidcraft");
+        let mut saved = Session::default();
+        saved.execute("component.insert_design", &json!({"path": housing})).unwrap();
+        saved.execute("file.save", &json!({"path": case, "linked_bodies": false})).unwrap();
+        // The design as the app had it when it stopped: the link not read yet, and a change.
+        let mut stopped = Session::default();
+        stopped.execute("doc.open", &json!({"path": case, "linked_bodies": "folder"})).unwrap();
+        stopped.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]})).unwrap();
+        let recovery = root.join("recovery");
+        let mut autosaver = solidcraft_engine::recovery::Autosaver::new(&recovery, std::time::Duration::ZERO).unwrap();
+        assert!(autosaver.save(&stopped).unwrap());
+        drop(autosaver);
+        let entry = solidcraft_engine::recovery::orphans(&recovery).pop().unwrap();
+        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let kind = crate::file_load::Kind::Recover { id: entry.id.clone(), dir: Some(recovery.to_string_lossy().into_owned()) };
+        crate::file_load::begin_request(&mut app, crate::file_load::Request::new(&entry.name, kind)).unwrap();
+        settle(&mut app);
+        // Only its own 5 x 5 x 5 box.
+        assert!((volume(&app) - 125.0).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
+        let prompt = app.link_folders_prompt.first().cloned().expect("asked");
+        assert_eq!(prompt.folders, std::slice::from_ref(&folder));
+        crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::Load);
+        settle(&mut app);
+        assert!((volume(&app) - 6125.0).abs() < 1e-6, "Load reads the link: {}", volume(&app));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Not now leaves the link out of date and remembers nothing; Update Links still reads it.
     #[test]
     fn not_now_keeps_a_link_in_another_folder_out_of_date_until_update_links() {
@@ -1246,6 +1320,129 @@ mod tests {
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("check this component's joints") && *error));
         assert!(app.session.log.iter().any(|s| s.contains("check this component's joints")));
+        let _ = std::fs::remove_dir_all(folder);
+    }
+    /// A saved design's STEP link to a file outside the design's own folder is asked about when
+    /// the tab comes back, and the file is not read meanwhile (the other test uses an unsaved
+    /// design, which has no folder).
+    #[test]
+    fn a_saved_designs_step_link_outside_its_folder_asks_on_tab_return_and_reads_nothing() {
+        let root = std::env::temp_dir().join(format!("solidcraft-step-link-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("received")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        let source = root.join("parts").join("bracket.step");
+        let export = |length: u32| {
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": length, "width": 10, "height": 10})).unwrap();
+            part.execute("file.export", &json!({"path": source})).unwrap();
+        };
+        export(10);
+        let case = root.join("received").join("case.solidcraft");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("file.insert_step", json!({"path": source})).unwrap();
+        app.run("file.save", json!({"path": case})).unwrap();
+        assert!(app.session.path.is_some(), "the design is saved");
+        assert!((volume(&app) - 1000.0).abs() < 1e-6, "{}", volume(&app));
+        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        // Away to another tab; the source is replaced there by a longer part.
+        crate::documents::open_tab(&mut app, Session::default()).unwrap();
+        export(30);
+        crate::documents::switch(&mut app, 0);
+        let prompt = app.link_folders_prompt.first().cloned().expect("asked about the folder on tab return");
+        assert_eq!(prompt.folders, std::slice::from_ref(&folder));
+        assert!(app.file_load.idle(), "the file is not read while the question is open");
+        assert!((volume(&app) - 1000.0).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
+        assert_eq!(app.session.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn step_links_refresh_on_tab_return_obey_preferences_and_offer_link_actions() {
+        let shot = |app: &mut SolveApp, name: &str| {
+            if let Some(folder) = solidcraft_engine::geom::env::var("SCENARIO_SHOTS") {
+                #[cfg(not(target_arch = "wasm32"))]
+                if solidcraft_engine::capture::installed().is_none() {
+                    solidcraft_engine::capture::install(Arc::new(|scene, cam, width, height| {
+                        let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, width, height)?;
+                        Ok(solidcraft_engine::capture::Picture { rgba, renderer })
+                    }));
+                }
+                std::fs::create_dir_all(&folder).unwrap();
+                app.run("view.fit", json!({})).unwrap();
+                if let Some(animation) = app.cam_anim.take() {
+                    app.cam = animation.to;
+                }
+                let path = PathBuf::from(folder).join(format!("{name}.png"));
+                let (request, _reply) = crate::control::ControlRequest::new("ui.render", json!({"path": path, "width": 1000, "height": 700}));
+                match crate::control::handle(app, &crate::fonts::test_context(), &request) {
+                    crate::control::Outcome::Done(reply) => assert_eq!(reply["ok"], true, "{reply}"),
+                    _ => panic!("ui.render must finish without a window"),
+                }
+            }
+        };
+        let folder = std::env::temp_dir().join(format!("solidcraft-step-links-ui-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("bracket.step");
+        let export = |length| {
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": length, "width": 10, "height": 10})).unwrap();
+            part.execute("file.export", &json!({"path": source})).unwrap();
+        };
+        export(10);
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let linked = app.run("file.insert_step", json!({"path": source})).unwrap()["component"].as_u64().unwrap();
+        for target in [Target::Component { id: linked }, Target::Occurrence { path: app.session.doc.first_path(linked) }] {
+            let items = context_menu::items(&app, &target);
+            // Main's component menu no longer lists Update Links or Break Link; a STEP link still
+            // offers none of the linked-design actions.
+            assert!(!items.iter().any(|item| matches!(item.id.as_str(), "ui.editInPlace" | "ui.openLinkedDesign" | "ui.relinkSource")));
+        }
+        app.start("component.update_links");
+        assert!(app.file_load.busy(), "Update Links runs as a background update");
+        settle(&mut app);
+        shot(&mut app, "step-link-before");
+        app.run("file.insert_step", json!({"path": source, "link": false})).unwrap();
+        assert_eq!(app.session.doc.links.len(), 1, "link: false inserts an independent copy");
+        // A request from the file picker or control channel passes the same option on.
+        let mut request = crate::file_load::Request::new(source.to_str().unwrap(), crate::file_load::Kind::Insert);
+        request.options.insert("link".into(), json!(false));
+        crate::file_load::begin_request(&mut app, request).unwrap();
+        settle(&mut app);
+        assert_eq!(app.session.doc.links.len(), 1);
+        crate::documents::open_tab(&mut app, Session::default()).unwrap();
+        export(20);
+        app.preferences.update_changed_links = false;
+        crate::documents::switch(&mut app, 0);
+        assert!(app.file_load.idle());
+        let feature = app.session.doc.links[&linked].feature;
+        let volume = |app: &SolveApp| {
+            solidcraft_engine::kernel::measure(&app.session.model.state().bodies.iter().find(|b| b.feature == feature).unwrap().body).unwrap().volume
+        };
+        assert!((volume(&app) - 1000.0).abs() < 1e-6);
+        app.preferences.update_changed_links = true;
+        crate::documents::switch(&mut app, 1);
+        crate::documents::switch(&mut app, 0);
+        settle(&mut app);
+        assert!((volume(&app) - 2000.0).abs() < 1e-6);
+        shot(&mut app, "step-link-after");
+        // Corrupt source on tab return keeps the import and remains retryable.
+        crate::documents::switch(&mut app, 1);
+        std::fs::write(&source, b"corrupt STEP").unwrap();
+        crate::documents::switch(&mut app, 0);
+        settle(&mut app);
+        assert!((volume(&app) - 2000.0).abs() < 1e-6);
+        assert_eq!(app.session.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        crate::documents::switch(&mut app, 1);
+        crate::documents::switch(&mut app, 0);
+        assert!(app.file_load.busy(), "the same corrupt source is retried next time");
+        settle(&mut app);
+        assert!((volume(&app) - 2000.0).abs() < 1e-6);
+        crate::documents::switch(&mut app, 1);
+        export(30);
+        crate::documents::switch(&mut app, 0);
+        settle(&mut app);
+        assert!((volume(&app) - 3000.0).abs() < 1e-6);
         let _ = std::fs::remove_dir_all(folder);
     }
 }

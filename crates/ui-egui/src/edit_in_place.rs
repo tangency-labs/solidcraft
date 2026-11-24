@@ -123,7 +123,7 @@ impl EditInPlace {
 pub(crate) fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
     app.preferences.double_click_components
         && app.session.path.is_some()
-        && app.session.doc.links.contains_key(&component)
+        && app.session.doc.links.get(&component).is_some_and(|link| link.step_names.is_none())
         && !is_internal(app, component)
 }
 

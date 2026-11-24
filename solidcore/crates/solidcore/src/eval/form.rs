@@ -409,7 +409,9 @@ fn reaches(s: &Surface, v: [f64; 2], tolerance: f64) -> (f64, f64) {
 /// than one turn then has a form past one turn (a NURBS that covers part of its surface twice); a
 /// whole turn has a form of four quarters from the one it starts in, which ends short of the
 /// face's seam, so the seam's second use lies off the form. [`turned`] puts its start on a quarter
-/// line. `None` for another surface.
+/// line. A whole turn's start is on a quarter line only as its seam circle's is ([`conic`], no
+/// tolerance reach): its seam is a whole-turn circle on the same grid, whose form needs a fifth
+/// quarter whenever it starts off the line, however close. `None` for another surface.
 pub fn turn_quarters(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Option<usize> {
     if !matches!(
         s,
@@ -420,7 +422,12 @@ pub fn turn_quarters(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Opti
     ) {
         return None;
     }
-    Some(quarters(u, reaches(s, v, tolerance).0)?.1)
+    let reach = if u[1] - u[0] >= TAU * (1.0 - TURN_ROUNDING) {
+        0.0
+    } else {
+        reaches(s, v, tolerance).0
+    };
+    Some(quarters(u, reach)?.1)
 }
 
 /// A cylinder, cone, sphere or torus with its frame turned by `angle` about its own axis (its x

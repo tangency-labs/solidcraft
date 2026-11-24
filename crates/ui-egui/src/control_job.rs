@@ -98,6 +98,7 @@ const AHEAD_AREAS: &[&str] = &[
     "explode",
     "expr",
     "face",
+    "frame",
     "joint",
     "material",
     "mesh",
@@ -141,6 +142,10 @@ const READ_ON_A_COPY: &[&str] = &[
     "inspect.clearance",
     "inspect.interference",
     "inspect.parameter_variants",
+    // The collisions of a motion study: the study plays on a copy, and the check of a slow pair
+    // took the window thread minutes, so the window stopped answering and the app was closed
+    // as not responding (#15333).
+    "motion.interference",
     // Physical properties of a component or placement: every body of every placement (#8706).
     "component.properties",
     "occurrence.properties",
@@ -241,6 +246,10 @@ enum Work {
         grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants>,
         limits: solidcraft_engine::plugin::HostLimits,
         level: Option<solidcraft_engine::schema::ParamCheck>,
+        /// What the plugin reports as it runs (`control.progress`): its step and how far, in per cent.
+        progress: Arc<Progress>,
+        /// The plugin's name and the entry's, for the operations panel.
+        names: (String, String),
     },
 }
 
@@ -271,6 +280,32 @@ impl ControlJob {
 /// Most steps still to come that the agent row's tooltip lists: a 100-step batch must not fill
 /// the screen.
 pub(crate) const MAX_NEXT_SHOWN: usize = 12;
+
+/// A plugin run's names in the operations panel: the plugin's and the entry's, from the dialog that
+/// runs it, else the plugin's folder and the entry as the request names them (an agent's run).
+fn plugin_names(app: &SolveApp, params: &Value) -> (String, String) {
+    let path = params.get("path").and_then(Value::as_str).unwrap_or_default();
+    let entry = params.get("entry").and_then(Value::as_str).unwrap_or_default();
+    if let Some(dialog) = app.plugin_menu.dialogs.iter().find(|d| d.plugin.path == path && d.entry == entry) {
+        return (dialog.plugin.name.clone(), dialog.label.clone());
+    }
+    let folder = std::path::Path::new(path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    (folder, entry.to_string())
+}
+
+/// "Gears: Pocket", with the step the plugin reports ("Gears: Pocket, roughing"). A plugin with
+/// one command titles it with the plugin's own name: that name is said once.
+fn plugin_label((plugin, entry): &(String, String), step: Option<&str>) -> String {
+    let step = step.map(str::trim).filter(|s| !s.is_empty());
+    match step {
+        _ if entry.is_empty() || entry == plugin => match step {
+            Some(step) => solidcraft_ui_text::format("operations.plugin_job", &[("plugin", plugin), ("entry", step)]),
+            None => plugin.clone(),
+        },
+        Some(step) => solidcraft_ui_text::format("operations.plugin_job_step", &[("plugin", plugin), ("entry", entry), ("step", step)]),
+        None => solidcraft_ui_text::format("operations.plugin_job", &[("plugin", plugin), ("entry", entry)]),
+    }
+}
 
 fn label(app: &SolveApp, command: &str) -> String {
     crate::agent_label::name_in(solidcraft_ui_text::Locale::for_language(&app.preferences.language), command)
@@ -510,8 +545,23 @@ impl SolveApp {
     pub fn agent_computing(&self) -> Option<(f64, String)> {
         self.control_job
             .as_ref()
-            .map(|j| (j.started, j.steps.as_ref().map_or_else(|| j.label.clone(), |s| s.shown())))
+            .map(|j| {
+                let label = match (&j.work, &j.steps) {
+                    (Work::Plugin { progress, names, .. }, _) => plugin_label(names, progress.item().as_ref().map(|(step, _, _)| step.as_str())),
+                    (_, Some(steps)) => steps.shown(),
+                    (_, None) => j.label.clone(),
+                };
+                (j.started, label)
+            })
             .or_else(|| self.agent.computing())
+    }
+
+    /// How far the plugin running as the agent's command says it is, in per cent, once it says.
+    pub(crate) fn agent_plugin_percent(&self) -> Option<usize> {
+        match self.control_job.as_ref().map(|j| &j.work) {
+            Some(Work::Plugin { progress, .. }) => progress.item().map(|(_, done, total)| done.saturating_mul(100).checked_div(total).unwrap_or(0)),
+            _ => None,
+        }
     }
 
     /// How far the agent's design change computing off the window thread is, when it counts its
@@ -630,6 +680,8 @@ impl SolveApp {
             let gate = self.apply_gate.clone();
             let progress = progress_of(&req.ticket);
             let warm_progress = progress.clone();
+            let reported = progress.clone();
+            let names = plugin_names(self, &params);
             let Some(done) = spawn(scope, progress, move || {
                 #[cfg(test)]
                 if let Some(gate) = gate {
@@ -650,7 +702,7 @@ impl SolveApp {
             };
             req.ticket.computing(true);
             self.control_job = Some(ControlJob {
-                label: label(self, "plugin.run"),
+                label: plugin_label(&names, None),
                 req,
                 work: Work::Plugin {
                     prepared,
@@ -658,6 +710,8 @@ impl SolveApp {
                     grants: self.preferences.plugin_grants.clone(),
                     limits: self.session.plugin_limits,
                     level,
+                    progress: reported,
+                    names,
                 },
                 done,
                 started: crate::now_ms(),
@@ -846,7 +900,7 @@ impl SolveApp {
         }
         let Some(job) = self.control_job.take() else { return };
         ctx.request_repaint();
-        if let Work::Plugin { prepared, disabled, grants, limits, level } = &job.work {
+        if let Work::Plugin { prepared, disabled, grants, limits, level, .. } = &job.work {
             if !job.req.ticket.back() {
                 let _ = job.req.reply.send(stopped_reply(&job.label, true));
                 return;

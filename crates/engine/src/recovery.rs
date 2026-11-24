@@ -299,6 +299,9 @@ struct Snapshot {
     /// is still that part and saves back to its place.
     kind: solidcraft_io::DesignKind,
     internal_of: Option<solidcraft_io::InternalOf>,
+    /// Whether the design's saves keep the bodies of linked designs ([`Session::linked_bodies`]).
+    /// The copy holds them either way; it carries the choice, so a recovered design keeps it.
+    linked_bodies: bool,
 }
 
 impl Snapshot {
@@ -308,10 +311,13 @@ impl Snapshot {
     fn write(&self) -> Result<Vec<String>> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
         let (doc, left_out) = drawing::openable(&self.doc);
-        let saved = crate::as_saved(&doc, &self.visibility, &self.dimension_values);
+        let mut design = crate::as_saved(&doc, &self.visibility, &self.dimension_values);
+        if !self.linked_bodies {
+            design.to_mut().linked_bodies_left_out = true;
+        }
         let bytes = match self.kind {
-            solidcraft_io::DesignKind::Single => solidcraft_io::write_design_container(&saved)?,
-            kind => solidcraft_io::write_design_container_as(&saved, kind, solidcraft_io::DesignCompression::Fast, None, None, None, None)?,
+            solidcraft_io::DesignKind::Single => solidcraft_io::write_design_container(&design)?,
+            kind => solidcraft_io::write_design_container_as(&design, kind, solidcraft_io::DesignCompression::Fast, None, None, None, None)?,
         };
         // A tag that can't be written leaves a copy without one: still the design, recovered.
         let bytes = match self.internal_of.as_ref().map(|tag| solidcraft_io::with_internal_of(&bytes, Some(tag))) {
@@ -409,6 +415,7 @@ impl Autosaver {
                         path: s.path.clone(),
                         kind: s.design_kind,
                         internal_of: s.internal_of.clone(),
+                        linked_bodies: s.linked_bodies,
                     };
                     let written = snapshot.write();
                     self.written(s, snapshot.doc, snapshot.visibility, written)?;
@@ -452,6 +459,7 @@ impl Autosaver {
             path: s.path.clone(),
             kind: s.design_kind,
             internal_of: s.internal_of.clone(),
+            linked_bodies: s.linked_bodies,
         })
     }
 

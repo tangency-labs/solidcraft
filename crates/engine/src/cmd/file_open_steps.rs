@@ -36,6 +36,10 @@ pub struct OpenSteps {
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
     /// The file's provenance records, read with the design.
     chain: Option<solidcraft_io::ProvenanceChain>,
+    /// What reading the bodies of linked designs said, of a design saved without them.
+    linked: Vec<String>,
+    /// Whether the design's saves keep the bodies of linked designs ([`Session::linked_bodies`]).
+    linked_bodies: bool,
 }
 
 impl OpenSteps {
@@ -66,6 +70,9 @@ impl OpenSteps {
         let signed = file.signed;
         let checked = verify.then_some(file.report);
         super::super::component_link::resolve_design_links(&mut doc, Some(path));
+        let which = super::super::component_link::LinkedRead::read(p, "doc.open")?;
+        let linked = super::super::component_link::read_left_out_bodies(&mut doc, Some(path), validation, which);
+        let linked_bodies = !std::mem::take(&mut doc.linked_bodies_left_out);
         // What `Session::opened` does before it evaluates.
         solidcraft_io::vfs::install_checks();
         let visibility = std::mem::take(&mut doc.visibility);
@@ -88,6 +95,8 @@ impl OpenSteps {
             model: adopted.unwrap_or_else(|| under(validation)),
             checked,
             chain,
+            linked,
+            linked_bodies,
         };
         Ok(Some(steps))
     }
@@ -144,8 +153,9 @@ impl OpenSteps {
             // `Session::opened` keeps.
             self.model.evaluate_shared(&self.doc);
         }
-        let opened = Session::with_model(self.doc, self.visibility, self.model).located_with(Some(&self.path), self.chain.clone());
-        opened_design(s, opened, &self.path, self.read_only, self.as_copy, self.disk, self.checked, self.chain)
+        let opened = Session { linked_bodies: self.linked_bodies, ..Session::with_model(self.doc, self.visibility, self.model) }
+            .located_with(Some(&self.path), self.chain.clone());
+        opened_design(s, opened, &self.path, self.read_only, self.as_copy, self.disk, self.checked, self.chain, self.linked)
     }
 }
 
