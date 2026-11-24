@@ -1357,11 +1357,12 @@ impl TopologyFailure {
             | Self::VertexLoopInSharedFace
             | Self::WireEndSqueezed => ErrorKind::Unsupported,
             Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::EdgeEndOffVertex { .. } => ErrorKind::NotWithinTolerance,
+            Self::EdgeEndOffVertex { .. } | Self::TrimCurveOffEnd { .. } => {
+                ErrorKind::NotWithinTolerance
+            }
             Self::FaceNotMade { class }
             | Self::MatrixNotDecomposed { class }
             | Self::NoPlaneThroughCurves { class } => *class,
-            Self::TrimCurveOffEnd { .. } => ErrorKind::NotWithinTolerance,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -1847,15 +1848,6 @@ impl crate::SolidError {
         Self::topology(operation, TopologyFailure::Missing(what))
     }
 
-    /// [`crate::SolidError::Failed`] for a value a topology routine computes with that has
-    /// no defined result, as the phrase says, with status [`SM_ERR_INVALID_INPUT`]
-    /// (upstream `return(SM_ERR_INVALID_INPUT)`, or `SER` of a vector operation that
-    /// returns it).
-    #[must_use]
-    pub(crate) fn topology_invalid_value(operation: &'static str, what: &'static str) -> Self {
-        Self::topology(operation, TopologyFailure::InvalidValue(what))
-    }
-
     /// The topology failure behind this error, for a [`crate::SolidError::Failed`] with a
     /// [`Reason::Topology`].
     #[must_use]
@@ -1934,10 +1926,6 @@ mod tests {
                 "topology::op: the vertex use has no point ({})",
                 EntityRef::Vertexuse(VertexuseId::from_index(3))
             )
-        );
-        assert_eq!(
-            SolidError::topology_invalid_value("topology::op", "x").kind(),
-            ErrorKind::InvalidInput
         );
         assert_eq!(
             SolidError::topology_failed("topology::op", "x").kind(),
@@ -2950,7 +2938,6 @@ mod tests {
                 Builder::Variant("TopologyFailure", "OutOfMemory"),
                 Builder::Method("topology_failed", Some(1)),
                 Builder::Method("topology_missing", Some(1)),
-                Builder::Method("topology_invalid_value", Some(1)),
             ],
             wrappers: Wrappers::Phrase,
         };
