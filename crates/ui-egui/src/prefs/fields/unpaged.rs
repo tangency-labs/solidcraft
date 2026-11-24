@@ -54,6 +54,8 @@ macro_rules! unpaged_preferences {
             personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
             /// Approved install permissions survive page resets and Cancel, like installed files.
             plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
+            /// Last-run importer options, by plugin id and entry name. Bookkeeping, never design data.
+            plugin_importer_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>> = std::collections::BTreeMap::new();
             /// Resource identities and history belong to the user, never the design.
             render_library_favorites: std::collections::BTreeSet<(String, String)> = Default::default();
             render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();

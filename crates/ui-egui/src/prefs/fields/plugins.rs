@@ -10,8 +10,6 @@ macro_rules! plugins_preferences {
         $next! { $($rest),* ; $($fields)*
             /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
-            /// Last-run importer options, by plugin id and entry name. Bookkeeping, never design data.
-            plugin_importer_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>> = std::collections::BTreeMap::new();
             /// Show the global fuel and memory controls on Preferences > Plugins (#18764).
             /// Off keeps advanced controls folded; on exposes the prior always-visible controls.
             plugin_limits_expanded: bool = false, PAGE_PLUGINS;
