@@ -53,9 +53,12 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::extend::Continuity;
+use crate::surface::side::BoxSide;
 use crate::surface::surface::exact_pieces::certified_lift;
 use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::Surface;
 use crate::topology::brep::p2::{self as brep_p2, NotifyArg};
 use crate::topology::brep::p3::{self as brep_p3, with_kernel_callbacks, DeleteFaceOptions};
 use crate::topology::edge::{self, SetCurveOptions};
@@ -133,8 +136,175 @@ fn is_circle(curve: &Curve) -> bool {
     matches!(curve.kind(), CurveKind::Ellipse(ellipse) if ellipse.is_circle())
 }
 
+/// An owned affine seam UV supplies the correspondence between a circular isocurve
+/// and the original edge. The two sides of a periodic seam can have different fixed UVs.
+struct SeamIso {
+    curve: Curve,
+    fixed_axis: SurfParamType,
+    v0: f64,
+    v1: f64,
+    uv_interval: Extent1d,
+}
+
+impl SeamIso {
+    fn from_trim(k: &Kernel, surface: &Surface, trim: &Curve, tol: f64) -> Result<Option<Self>> {
+        let Some(part) = bspline_part_with_nurb(trim)? else {
+            return Ok(None);
+        };
+        // Equal homogeneous weights cancel exactly, including on STEP/record splines.
+        if part.degree()? != 1
+            || part.number_control_points()? != 2
+            || (part.is_rational()?
+                && !matches!(part.control_points()?, [a, b] if a.w.is_finite() && a.w != 0.0 && a.w == b.w))
+        {
+            return Ok(None);
+        }
+        let ends = part.ends()?;
+        let (start, end) = (ends.start, ends.end);
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let (fixed_axis, fixed, fixed_span, v0, v1, varying) = if start.x == end.x {
+            (
+                SurfParamType::U,
+                start.x,
+                domain.u_interval(),
+                start.y,
+                end.y,
+                domain.v_interval(),
+            )
+        } else if start.y == end.y {
+            (
+                SurfParamType::V,
+                start.y,
+                domain.v_interval(),
+                start.x,
+                end.x,
+                domain.u_interval(),
+            )
+        } else {
+            return Ok(None);
+        };
+        if v0 == v1
+            || !(v1 - v0).is_finite()
+            || !fixed.is_finite()
+            || !fixed_span.contains_value(fixed, 0.0)
+        {
+            return Ok(None);
+        }
+        let curve = surface
+            .create_iso_parametric_curve(k, fixed_axis, fixed, tol, None, false)?
+            .curve;
+        if !is_circle(&curve) || curve.natural_interval() != varying {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            curve,
+            fixed_axis,
+            v0,
+            v1,
+            uv_interval: part.natural_interval(),
+        }))
+    }
+
+    fn edge_parameter(&self, v: f64) -> f64 {
+        self.uv_interval
+            .evaluate((v - self.v0) / (self.v1 - self.v0))
+    }
+
+    /// The arc missing from this end of a meridian or tube circle, measured on the
+    /// circle from its natural boundary in the direction of the selected edge end.
+    fn missing_arc(
+        &self,
+        k: &Kernel,
+        point: Point3,
+        at_high: bool,
+        tol: f64,
+    ) -> Result<Option<(BoxSide, f64)>> {
+        let varying = self.curve.natural_interval();
+        let drop = self.curve.drop_point(
+            k,
+            &varying,
+            point,
+            None,
+            tol,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if !drop.success {
+            return Err(stage_failed());
+        }
+        if drop.distance <= tol {
+            return Ok(None);
+        }
+        let high = at_high == (self.v1 > self.v0);
+        let t = if high { varying.max() } else { varying.min() };
+        let evaluated = self.curve.evaluate(k, t, 1, high, true)?;
+        let [start, derivative, ..] = evaluated.as_slice() else {
+            return Err(stage_failed());
+        };
+        let CurveKind::Ellipse(circle) = self.curve.kind() else {
+            return Err(stage_failed());
+        };
+        let center = circle.position().origin();
+        let radius = circle.radius();
+        let radial = (*start - center).unitize()?;
+        let forward = if high { *derivative } else { -*derivative }.unitize()?;
+        let target = point - center;
+        if (target.length() - radius).abs() > tol || target.dot(radial.cross(forward)).abs() > tol {
+            return Err(refused(R::SeamTrimMissesNewVertex));
+        }
+        let angle = target.dot(forward).atan2(target.dot(radial));
+        if angle <= 0.0 || !angle.is_finite() {
+            return Err(refused(R::SeamTrimMissesNewVertex));
+        }
+        let side = match (self.fixed_axis == SurfParamType::U, high) {
+            (true, false) => BoxSide::VMin,
+            (true, true) => BoxSide::VMax,
+            (false, false) => BoxSide::UMin,
+            (false, true) => BoxSide::UMax,
+        };
+        // Include the requested vertex in the search interval. Its eventual distance
+        // and the entire new pair of pcurves are checked at the original tolerance.
+        Ok(Some((side, radius * angle + tol)))
+    }
+}
+
+/// Replacing geometry invalidates the face's edge uses. The extension kept the old
+/// parameters, so each existing pcurve, including either side of a seam, still applies.
+fn install_extended_surface(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    surface: Surface,
+) -> Result<()> {
+    let domain = crate::topology::face::p2::uv_domain(b, f)?;
+    let mut trims = Vec::new();
+    for eu in crate::topology::face::p4::upward_edgeuses(b, f, false, None)? {
+        if let (Some(trim), Some(owner)) = eu1::uv_trim_curve(b, eu)? {
+            trims.push((owner, trim.clone_for_evaluation()?));
+        }
+    }
+    let owner = b.owner_identity(crate::error::EntityRef::Face(f));
+    with_kernel_callbacks(k, b, |k, b, env| {
+        brep_p2::replace_surface(
+            k,
+            b,
+            env,
+            f,
+            surface,
+            owner,
+            brep_p2::OldSurface::Delete,
+            false,
+        )
+    })?;
+    crate::topology::face::p2::set_uv_domain(b, f, &domain)?;
+    for (eu, trim) in trims {
+        eu1::set_uv_trim_curve(b, eu, UvTrimCurveArg::New(Box::new(trim)), 0.0, true, None)?;
+    }
+    Ok(())
+}
+
 /// Continue a straight seam along its end span, using the rail gap to bound the search.
-fn extend_line_seam(
+pub(super) fn extend_line_seam(
     k: &Kernel,
     curve: &Curve,
     at_high: bool,
@@ -552,7 +722,14 @@ impl RingFilletRemoval {
                     let search = longer.natural_interval();
                     (longer, search)
                 } else if is_circle(&side_curve) {
-                    self.extend_circular_seam(k, b, ii, side)?
+                    Self::extend_circular_seam(
+                        k,
+                        b,
+                        self.tan_face(ii)?,
+                        side,
+                        self.side_at_high(ii)?,
+                        tol,
+                    )?
                 } else {
                     return Err(curved_seam_without_crossing());
                 };
@@ -638,16 +815,94 @@ impl RingFilletRemoval {
         Ok(())
     }
 
+    /// A STEP sphere may end exactly at the fillet rail. Continue its meridian (or
+    /// a torus's tube) without moving any of the face's existing UV parameters.
+    pub(super) fn extend_circular_support(
+        k: &mut Kernel,
+        b: &mut Brep,
+        side: EdgeId,
+        ends: [Option<Point3>; 2],
+        tol: f64,
+    ) -> Result<()> {
+        if !edge::curve(b, side)?.is_some_and(is_circle) {
+            return Ok(());
+        }
+        let edge_uses = b.edge(side)?.edgeuses.clone();
+        for f in edge_faces(b, side)? {
+            let tol = tol
+                .min(crate::topology::face::p2::tolerance(b, f)?)
+                .min(edge::tolerance(b, side)?);
+            for (at_high, point) in [false, true].into_iter().zip(ends) {
+                let Some(point) = point else { continue };
+                let surface = ner(crate::topology::face::p2::surface(b, f)?)?;
+                let swap = match surface.kind() {
+                    SurfaceKind::Sphere(s) => s.base().swap_uv(),
+                    SurfaceKind::Torus(t) => t.base().swap_uv(),
+                    _ => break,
+                };
+                let mut extension = None;
+                for &eu in &edge_uses {
+                    if eu1::face(b, eu)? != Some(f) {
+                        continue;
+                    }
+                    if let Some(trim) = eu1::uv_trim_curve_pointer(b, eu)? {
+                        if let Some(iso) = SeamIso::from_trim(k, surface, trim, tol)? {
+                            extension = iso.missing_arc(k, point, at_high, tol)?;
+                            break;
+                        }
+                    }
+                }
+                let Some((side, distance)) = extension else {
+                    continue;
+                };
+                // Every meridian or tube has the same radius as the one measured at
+                // the middle of the domain by the parameter-preserving extender.
+                if side.is_u() != swap {
+                    return Err(curved_seam_without_crossing());
+                }
+                let grown = surface.extended_sides_keeping_parameters(
+                    k,
+                    &[side],
+                    Continuity::Natural,
+                    distance,
+                )?;
+                let deviation = grown.source + grown.extension;
+                if !deviation.is_finite() || deviation > tol {
+                    return Err(stage_failed());
+                }
+                let SurfaceKind::BSpline(net) = grown.surface.kind() else {
+                    return Err(stage_failed());
+                };
+                // Analytic recognition keeps the certified extended net, its knots
+                // and its UVs; rebuilding the canonical sphere would change the old UVs.
+                let continued = match surface.kind() {
+                    SurfaceKind::Sphere(_) => {
+                        crate::surface::sphere::Sphere::is_nurb_surface_sphere(k, net, 1.0)?
+                            .map(Surface::from)
+                    }
+                    SurfaceKind::Torus(_) => {
+                        crate::surface::torus::Torus::is_nurb_surface_torus(k, net, 1.0)?
+                            .map(Surface::from)
+                    }
+                    _ => None,
+                }
+                .ok_or_else(stage_failed)?;
+                install_extended_surface(k, b, f, continued)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Lift the seam's affine UV line on its support, keeping the edge's parameter.
     /// Search only beyond the end at the fillet and within the support's natural domain.
-    fn extend_circular_seam(
-        &self,
+    pub(super) fn extend_circular_seam(
         k: &Kernel,
         b: &Brep,
-        which_side: usize,
+        face: FaceId,
         side: EdgeId,
+        at_high: bool,
+        tol: f64,
     ) -> Result<(Curve, Extent1d)> {
-        let face = self.tan_face(which_side)?;
         let surface = ner(crate::topology::face::p2::surface(b, face)?)?;
         if !matches!(
             surface.kind(),
@@ -655,57 +910,21 @@ impl RingFilletRemoval {
         ) {
             return Err(curved_seam_without_crossing());
         }
-        let domain = surface.natural_uv_domain_with_nurb(k)?;
         let edge_ivl = edge::interval(b, side)?;
-        let at_high = self.side_at_high(which_side)?;
         for &eu in &b.edge(side)?.edgeuses {
+            if eu1::face(b, eu)? != Some(face) {
+                continue;
+            }
             let (uv, owner) = eu1::uv_trim_curve(b, eu)?;
             let Some(uv) = uv.filter(|_| owner == Some(eu)) else {
                 continue;
             };
-            let Some(part) = bspline_part_with_nurb(uv)? else {
+            let Some(iso) = SeamIso::from_trim(k, surface, uv, tol)? else {
                 continue;
             };
-            // A degree-one, two-point polynomial spline is affine in the edge parameter.
-            if part.degree()? != 1 || part.number_control_points()? != 2 || part.is_rational()? {
-                continue;
-            }
-            let ends = part.ends()?;
-            let (start, end) = (ends.start, ends.end);
-            let (param, fixed, fixed_span, v0, v1, varying) = if start.x == end.x {
-                (
-                    SurfParamType::U,
-                    start.x,
-                    domain.u_interval(),
-                    start.y,
-                    end.y,
-                    domain.v_interval(),
-                )
-            } else if start.y == end.y {
-                (
-                    SurfParamType::V,
-                    start.y,
-                    domain.v_interval(),
-                    start.x,
-                    end.x,
-                    domain.u_interval(),
-                )
-            } else {
-                continue;
-            };
-            let delta = v1 - v0;
-            if delta == 0.0
-                || !delta.is_finite()
-                || !fixed.is_finite()
-                || !fixed_span.contains_value(fixed, 0.0)
-            {
-                continue;
-            }
-
-            let uv_ivl = part.natural_interval();
-            let t_at = |v| uv_ivl.evaluate((v - v0) / delta);
-            let ta = t_at(varying.min());
-            let tb = t_at(varying.max());
+            let varying = iso.curve.natural_interval();
+            let ta = iso.edge_parameter(varying.min());
+            let tb = iso.edge_parameter(varying.max());
             if !ta.is_finite() || !tb.is_finite() {
                 return Err(stage_failed());
             }
@@ -718,13 +937,8 @@ impl RingFilletRemoval {
             if search.length() <= 0.0 || !edge_ivl.is_contained_by(&extended, 0.0) {
                 continue;
             }
-            let mut arc = surface
-                .create_iso_parametric_curve(k, param, fixed, self.tol_3d, None, false)?
-                .curve;
-            if !is_circle(&arc) || arc.natural_interval() != varying {
-                continue;
-            }
-            if v1 < v0 {
+            let mut arc = iso.curve;
+            if iso.v1 < iso.v0 {
                 arc.reverse_parameterization(k, &varying)?;
             }
             arc.edit_parameterization_exactly(k, &extended)?;
