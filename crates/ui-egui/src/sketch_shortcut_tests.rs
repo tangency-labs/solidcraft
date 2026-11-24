@@ -923,3 +923,54 @@ fn undo_does_not_bring_back_a_chain_ended_with_esc() {
     assert!(chain.pts[0].1.is_none(), "a new chain, from the click, not the old one's point: {:?}", chain.pts);
     assert_eq!(lines(&h).len(), 1, "only the first segment is left");
 }
+
+/// #12889: a line that starts on a circle is drawn, and it stays held there: its start on the
+/// circle's edge, its end away from it. The reporter drew a centre rectangle and a circle in a
+/// new sketch, then a line that starts on the circle: the line was not attached to it, while
+/// the line's end was held on the geometry it ended on.
+#[test]
+fn a_line_started_on_a_circle_is_drawn_and_held_on_it() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    // The centre rectangle and the circle the reporter drew.
+    h.step(&json!({"start":"sketch.rectangle.center"})).unwrap();
+    h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[30,15]}})).unwrap();
+    h.step(&json!({"start":"sketch.circle.center"})).unwrap();
+    h.step(&json!({"click":{"sketch":[60,0]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[70,0]}})).unwrap();
+    h.settle();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.camera", json!({"target":[15,0,0],"distance":220}));
+    h.settle();
+    let before = lines(&h).len();
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    // The start on the circle's edge, the end away from it. The pointer moves between the two
+    // clicks, as a hand does.
+    for at in [[70.0, 0.0], [-40.0, -30.0]] {
+        h.step(&json!({"move":{"sketch":at}})).unwrap();
+        h.step(&json!({"click":{"sketch":at}})).unwrap();
+    }
+    h.settle();
+    let _ = h.step(&json!({"shot":"12889-line-from-the-circle"}));
+    let drawn = lines(&h);
+    assert_eq!(drawn.len(), before + 1, "no line from the circle; {:?}", h.app.status);
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.world_state().unwrap();
+    let sketch = &state.sketch(sid).unwrap().sketch;
+    let Some(CurveKind::Line { a, .. }) = sketch.curves.last().map(|c| c.kind.clone()) else {
+        panic!("no new line");
+    };
+    let circle = sketch.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).expect("the circle");
+    let kinds = || sketch.constraints.iter().map(|k| &k.kind).collect::<Vec<_>>();
+    assert!(
+        sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == a && c == circle)),
+        "the line's start is not held on the circle: {:?}",
+        kinds()
+    );
+    // The start is on the circle's edge, where the pointer was: a click comes from an f32 screen
+    // position, so it is a hair off the edge.
+    let start = sketch.point(a).unwrap();
+    assert!((start.x - 70.0).abs() < 1e-3 && start.y.abs() < 1e-3, "the line's start is at {start:?}");
+}
