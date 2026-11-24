@@ -303,6 +303,14 @@ fn closed_forms(n: f64) -> (f64, f64) {
     (area, volume)
 }
 
+/// The rows where WR-495's exact mate (retired after WR-545) keeps an inner circle whole
+/// instead of main's two arcs, so the body has one vertex fewer (`goldens::wr495_rows`'
+/// `ONE_CIRCLE` proves the counts and that every circle edge is closed). The removed vertex
+/// set main's vertex box, so its bounds cannot be compared one by one. The check is still
+/// derived: every remaining vertex moves by at most the tolerance, and removing a vertex can
+/// only shrink the box. So the new box must lie inside main's box grown by the tolerance.
+const ONE_CIRCLE: [&str; 1] = ["api_shell_cylinder_r5_top_open_tol_1e6"];
+
 /// Main's `shell_mass_properties` of the two `blend.fillet_executive_p3` rows.
 const MAIN_SHELL_MASS: [(&str, f64, [f64; 3]); 2] = [
     (
@@ -420,6 +428,22 @@ fn wr545_moved_rows_replay_and_are_exact() {
                     continue;
                 }
                 bounds += 1;
+                if ONE_CIRCLE.contains(&name) {
+                    // vertices only removed or moved within the tolerance: the box of the
+                    // rest is inside main's grown by it (min bounds 1..4, max bounds 4..7)
+                    let inside = if i < 4 {
+                        new[i] >= old[i] - new[0]
+                    } else {
+                        new[i] <= old[i] + new[0]
+                    };
+                    if !inside {
+                        bad.push(format!(
+                            "{unit}/{name} {key}[{i}]: {} -> {} outside main's box grown by {:e}",
+                            old[i], new[i], new[0]
+                        ));
+                    }
+                    continue;
+                }
                 let moved = (new[i] - old[i]).abs();
                 if !(moved <= new[0]) {
                     bad.push(format!(

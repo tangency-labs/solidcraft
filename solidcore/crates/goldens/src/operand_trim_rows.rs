@@ -1222,13 +1222,16 @@ mod local_operation {
     }
 
     /// A trim off its edge's tolerance on an edge no moved value touches passes only as
-    /// main's own trim (#19318). `box_face0_in` moves no value; the first two trimmed uses of
-    /// its first edge with two swap their trims (each now in the other face's parameters),
-    /// so neither lies on its edge, and neither is main's (main's record holds no trim).
+    /// main's own trim (#19318). `gen0002` moves no value (its row lists none, its `main` and
+    /// `new` digests are equal, it is not in [`crate::wr495_rows`]' rows or this unit's
+    /// trim-tolerance ledger, and `OFF_TRIMS` lists none of its trims); the first two trimmed
+    /// uses of its first edge with two swap their trims (each now in the other face's
+    /// parameters), so neither lies on its edge, and neither is main's. (`box_face0_in`
+    /// served until WR-495's exact mate left its result with no trimmed edge use, #21301.)
     #[test]
     #[should_panic(expected = "not main's")]
     fn an_off_trim_that_is_not_main_s_fails() {
-        let case = crate::case::regression_case(&Runner, "box_face0_in");
+        let case = crate::case::regression_case(&Runner, "gen0002");
         let out = Runner.run_rust(&case).unwrap();
         let (_, mut bodies) = result_breps(&case).unwrap();
         let (_, b) = &mut bodies[0];
@@ -1250,7 +1253,7 @@ mod local_operation {
         b.edgeuse_mut(u0).unwrap().uv_trim_curve = t1;
         b.edgeuse_mut(u1).unwrap().uv_trim_curve = t0;
         super::certify_body(
-            "box_face0_in",
+            "gen0002",
             &out,
             "",
             b,
