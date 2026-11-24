@@ -641,11 +641,11 @@ pub(crate) struct SketchLastViews {
 }
 
 impl SketchLastViews {
-    fn to_open(&self, sketch: u64, mode: prefs::SketchOpenView) -> Option<Camera> {
+    fn to_open(&self, sketch: u64, mode: sketch_palette::SketchOpenView) -> Option<Camera> {
         match mode {
-            prefs::SketchOpenView::Face => None,
-            prefs::SketchOpenView::Last => self.last.get(&sketch).copied(),
-            prefs::SketchOpenView::LastFinished => self.finished.get(&sketch).copied(),
+            sketch_palette::SketchOpenView::Face => None,
+            sketch_palette::SketchOpenView::Last => self.last.get(&sketch).copied(),
+            sketch_palette::SketchOpenView::LastFinished => self.finished.get(&sketch).copied(),
         }
     }
 
