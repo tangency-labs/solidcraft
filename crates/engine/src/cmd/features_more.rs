@@ -626,6 +626,22 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Worked out from the plane or the frame when the feature is evaluated.
     let held = |plane: &Option<solidcraft_doc::PlaneRef>, frame: &Option<AlignFrame>| plane.is_some() || frame.is_some();
+    // The bodies that move, by the names picks find them under in the world.
+    let moved: Vec<String> = {
+        let frames = s.placed_document().body_frames_with_source(&s.model.state());
+        let picked = frames.into_iter().filter(|(world, own, ..)| bodies.contains(world) || bodies.contains(own));
+        picked.map(|(world, ..)| world).chain(bodies.clone()).collect()
+    };
+    // A face or snap picked for the start lies on a body that moves (`at`: the pick and where it
+    // snaps to); a typed point is a coordinate, wherever it lies.
+    let on_side = |st: &solidcraft_doc::ModelState, key: &str, at: &[Vec3]| -> Result<()> {
+        let from = key.starts_with("from");
+        let Some((b, ..)) = at.iter().find_map(|&q| face_pick(st, q)) else { return Ok(()) };
+        if at.iter().any(|&q| face_pick_on(st, q, |b| moved.contains(&b.name) == from).is_some()) {
+            return Ok(());
+        }
+        if from { Err(bad(cmd, format!("`{key}` is on `{}`, which is not moved: pick the start on a body in `bodies`", b.name))) } else { Ok(()) }
+    };
     let world_pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
         if held {
             if p.get(pk).is_some() || p.get(fk).is_some() {
@@ -633,11 +649,18 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             }
             return Ok((Vec3::ZERO, None));
         }
+        let world = s.world_state()?;
+        let st = &*world;
         if let Some(fp) = p.get(fk).and_then(vec3) {
-            let n = planar_face_normal(&*s.world_state()?, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face of a solid body")))?;
+            on_side(st, fk, &[fp])?;
+            let n = planar_face_normal(st, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face of a solid body")))?;
             return Ok((fp, Some(n)));
         }
-        side_pick(&*s.world_state()?, p.get(pk), pk, fk).map_err(|why| bad(cmd, why))
+        let (at, way) = side_pick(st, p.get(pk), pk, fk).map_err(|why| bad(cmd, why))?;
+        if let Ok(SidePoint::Snap { at: near, .. }) = side_point(p.get(pk), pk, fk) {
+            on_side(st, pk, &[near, at])?;
+        }
+        Ok((at, way))
     };
     let pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
         let (at, n) = world_pick(s, pk, fk, held)?;
@@ -938,9 +961,18 @@ pub(crate) fn snap_pick(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -
 /// the display mesh: of the faces within the reach references take picks at (`pick_reach`), the
 /// nearest. Its body, its index and, when it is planar, its outward normal.
 fn face_pick(st: &solidcraft_doc::ModelState, at: Vec3) -> Option<(&solidcraft_doc::ModelBody, usize, Option<Vec3>)> {
+    face_pick_on(st, at, |_| true)
+}
+
+/// [`face_pick`] among the bodies `keep` takes.
+fn face_pick_on(
+    st: &solidcraft_doc::ModelState,
+    at: Vec3,
+    keep: impl Fn(&solidcraft_doc::ModelBody) -> bool,
+) -> Option<(&solidcraft_doc::ModelBody, usize, Option<Vec3>)> {
     use solidcraft_doc::kernel::{FaceSurface, face_surface};
     let mut best: Option<(f64, &solidcraft_doc::ModelBody, usize)> = None;
-    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh() && keep(b)) {
         let reach = solidcraft_doc::pick_reach(b);
         for f in 0..b.body.face_count() {
             if let Some(d) = b.body.point_lies_on_face(f, at, reach).ok().flatten().map(|q| q.dist(at))
