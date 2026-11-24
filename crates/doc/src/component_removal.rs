@@ -91,18 +91,18 @@ impl Document {
 
         let mut bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
         self.body_components.retain(|_, c| !inside.contains(c));
+        let surviving: BTreeSet<String> = self
+            .features
+            .iter()
+            .flat_map(|f| f.body_names.iter().cloned())
+            .chain(self.body_components.keys().cloned())
+            .collect();
         {
             let deleted_ids: BTreeSet<u64> = deleted.iter().copied().collect();
-            let surviving: BTreeSet<&str> = self
-                .features
-                .iter()
-                .flat_map(|f| f.body_names.iter().map(String::as_str))
-                .chain(self.body_components.keys().map(String::as_str))
-                .collect();
             for (id, names) in feature_bodies {
                 if deleted_ids.contains(&id) {
                     for name in names {
-                        if !name.is_empty() && !surviving.contains(name.as_str()) {
+                        if !name.is_empty() && !surviving.contains(&name) {
                             bodies.insert(name);
                         }
                     }
@@ -110,12 +110,13 @@ impl Document {
             }
         }
         self.body_offsets.retain(|name, _| !bodies.contains(name));
-        self.materials.retain(|name, _| !bodies.contains(name));
-        self.appearances.bodies.retain(|name, _| !bodies.contains(name));
-        self.appearances.faces.retain(|face| !bodies.contains(&face.body));
-        self.collision_shapes.retain(|name, _| !bodies.contains(name));
-        self.print_faces.retain(|name, _| !bodies.contains(name));
-        self.plastic.assigned.retain(|name, _| !bodies.contains(name));
+        let gone = |name: &str| bodies.contains(name) && !surviving.contains(name);
+        self.materials.retain(|name, _| !gone(name));
+        self.appearances.bodies.retain(|name, _| !gone(name));
+        self.appearances.faces.retain(|face| !gone(&face.body));
+        self.collision_shapes.retain(|name, _| !gone(name));
+        self.print_faces.retain(|name, _| !gone(name));
+        self.plastic.assigned.retain(|name, _| !gone(name));
         // A kept component sat under the tree it was made in: it moves up to the component the
         // removed root sat in, which is left (read before the root goes).
         let up = self.components.iter().find(|c| c.id == root).map_or(0, |c| c.parent);

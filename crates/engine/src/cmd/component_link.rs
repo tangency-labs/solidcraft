@@ -638,8 +638,9 @@ fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<Sele
 }
 
 /// Linked files' digests as [`file_sha256`] last worked them out, by file, with the time and
-/// size the file had then. Bounded, oldest first out.
-static DIGESTS: Mutex<Vec<(PathBuf, (std::time::SystemTime, u64), String)>> = Mutex::new(Vec::new());
+/// size the file had then, paired with a generation bumped on every save invalidation so an
+/// overlapping read cannot repopulate a stale entry. Bounded, oldest first out.
+static DIGESTS: Mutex<(u64, Vec<(PathBuf, (std::time::SystemTime, u64), String)>)> = Mutex::new((0, Vec::new()));
 const DIGESTS_SIZE: usize = 256;
 
 /// The digest of the design file at `file` now ([`DesignLink::file_digest`]), `None` when it
@@ -647,29 +648,38 @@ const DIGESTS_SIZE: usize = 256;
 /// when its time or size changed since; the browser build keeps no times and reads it each time.
 pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
     let file = absolute(file);
-    let stamp = solidcraft_io::vfs::design_path_stamp(&file.to_string_lossy(), own);
-    if let Some(stamp) = stamp
-        && let Some(known) = DIGESTS.lock().ok()?.iter().find(|(f, s, _)| *f == file && *s == stamp).map(|(_, _, d)| d.clone())
-    {
-        return Some(known);
-    }
-    let digest = DesignLink::file_digest(&read_link(&file, own).ok()?);
-    if let (Some(stamp), Ok(mut digests)) = (stamp, DIGESTS.lock()) {
-        digests.retain(|(f, _, _)| *f != file);
-        if digests.len() >= DIGESTS_SIZE {
-            digests.remove(0);
+    let generation = {
+        let digests = DIGESTS.lock().ok()?;
+        let generation = digests.0;
+        let stamp = solidcraft_io::vfs::design_path_stamp(&file.to_string_lossy(), own);
+        if let Some(stamp) = stamp
+            && let Some(known) = digests.1.iter().find(|(f, s, _)| *f == file && *s == stamp).map(|(_, _, d)| d.clone())
+        {
+            return Some(known);
         }
-        digests.push((file, stamp, digest.clone()));
+        (generation, stamp)
+    };
+    let (generation, stamp) = generation;
+    let digest = DesignLink::file_digest(&read_link(&file, own).ok()?);
+    if let (Some(stamp), Ok(mut digests)) = (stamp, DIGESTS.lock())
+        && digests.0 == generation
+    {
+        digests.1.retain(|(f, _, _)| *f != file);
+        if digests.1.len() >= DIGESTS_SIZE {
+            digests.1.remove(0);
+        }
+        digests.1.push((file, stamp, digest.clone()));
     }
     Some(digest)
 }
 
-/// Drop any cached digest for `file` after SolidCraft writes it, so a same-size save within the
-/// same filesystem timestamp tick still reports `changed: true`.
-pub(super) fn forget_file_digest(file: &Path) {
-    let file = absolute(file);
+/// Drop cached file digests after SolidCraft writes a file, invalidating any path aliases and
+/// preventing an overlapping [`file_sha256`] read from publishing a stale digest under the same
+/// timestamp tick and size.
+pub(super) fn forget_file_digests() {
     if let Ok(mut digests) = DIGESTS.lock() {
-        digests.retain(|(f, _, _)| *f != file);
+        digests.0 = digests.0.wrapping_add(1);
+        digests.1.clear();
     }
 }
 
@@ -1818,29 +1828,62 @@ fn realign_changed_body_count(
 
     let mut claimed = std::collections::HashSet::new();
     let mut claimed_names = std::collections::HashSet::new();
-    let mut next_names = Vec::with_capacity(new_names.len());
-    let mut next_inherited = Vec::with_capacity(new_names.len());
+    let mut matches: Vec<Option<(usize, String)>> = Vec::with_capacity(new_names.len());
 
+    // Pass 1: resolve every surviving body first so its stored assembly name is reserved before
+    // any unmatched new body is named.
     for name in new_names {
         let matched =
             (new_counts.get(name.as_str()) == Some(&1)).then(|| places.get(name.as_str()).copied()).flatten().filter(|k| claimed.insert(*k));
         if let Some(k) = matched {
             let kept_name = old_names.get(k).filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| name.clone());
             claimed_names.insert(kept_name.clone());
+            matches.push(Some((k, kept_name)));
+        } else {
+            matches.push(None);
+        }
+    }
+
+    // Pass 2: assign surviving bodies their stored names and baselines; give unmatched new bodies
+    // a fresh baseline and a name that cannot collide with any surviving body's stored name.
+    let mut reserved = claimed_names.clone();
+    let mut next_names = Vec::with_capacity(new_names.len());
+    let mut next_inherited = Vec::with_capacity(new_names.len());
+    for (name, matched) in new_names.iter().zip(matches) {
+        if let Some((k, kept_name)) = matched {
             next_names.push(kept_name);
             next_inherited.push(old_inherited.get(k).cloned().unwrap_or_default());
         } else {
-            next_names.push(name.clone());
+            let assigned = if !name.is_empty() && reserved.contains(name.as_str()) {
+                (2usize..)
+                    .map(|n| format!("{name} ({n})"))
+                    .find(|candidate| !reserved.contains(candidate.as_str()))
+                    .unwrap_or_else(|| name.clone())
+            } else {
+                name.clone()
+            };
+            if !assigned.is_empty() {
+                reserved.insert(assigned.clone());
+            }
+            next_names.push(assigned);
             next_inherited.push(LinkedBodyProperties::default());
         }
     }
 
-    let removed = old_names
-        .iter()
-        .enumerate()
-        .filter(|(k, name)| !claimed.contains(k) && !name.is_empty() && !claimed_names.contains(name.as_str()))
-        .map(|(_, name)| name.clone())
-        .collect();
+    // Only prune unmatched old names when we have the old STEP source names to prove which source
+    // bodies actually disappeared; without them (e.g. a design saved without linked bodies), a
+    // surviving body stored under a renamed/disambiguated assembly name would appear unmatched and
+    // must keep its local overrides.
+    let removed = if old_source.is_some() {
+        old_names
+            .iter()
+            .enumerate()
+            .filter(|(k, name)| !claimed.contains(k) && !name.is_empty() && !claimed_names.contains(name.as_str()))
+            .map(|(_, name)| name.clone())
+            .collect()
+    } else {
+        Vec::new()
+    };
     (next_names, next_inherited, removed)
 }
 
@@ -3264,5 +3307,42 @@ mod tests {
         let body = state.bodies.iter().find(|b| b.component == second).unwrap();
         assert_eq!(s.doc.model_body_look(body).unwrap().color, [20, 40, 60]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn realign_changed_body_count_preserves_survivor_name_when_new_body_collides() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-survivor-collision-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("part.sc");
+
+        save_material_boxes(&part, &[("Plate", 0.0, "Steel")]);
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": part}));
+        run(&mut s, "body.rename", json!({"body": "Plate", "name": "Cover"}));
+        run(&mut s, "material.assign", json!({"bodies": ["Cover"], "material": "Copper"}));
+
+        // Child now adds a brand-new body literally named "Cover" (colliding with the survivor's
+        // stored assembly name) ahead of surviving "Plate".
+        save_material_boxes(&part, &[("Cover", 0.0, "Brass"), ("Plate", 30.0, "Steel")]);
+        let updated = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        // The surviving body keeps its stored assembly name and local Copper override; the new
+        // body is disambiguated and inherits Brass.
+        assert_eq!(s.doc.body_material("Cover"), "Copper");
+        assert_eq!(s.doc.body_material("Cover (2)"), "Brass");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn component_delete_keeps_material_for_surviving_feature_body() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Shared"}));
+        run(&mut s, "material.assign", json!({"bodies": ["Shared"], "material": "Brass"}));
+        let comp = run(&mut s, "component.create", json!({"name": "Extra", "activate": false}))["component"].as_u64().unwrap();
+        // Legacy assignment pointing a surviving root feature's body at the deleted component.
+        s.doc_mut().body_components.insert("Shared".into(), comp);
+        run(&mut s, "component.delete", json!({"component": comp}));
+        assert_eq!(s.doc.body_material("Shared"), "Brass");
     }
 }
