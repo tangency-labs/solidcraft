@@ -41,6 +41,7 @@ pub mod expr;
 pub mod face_anchor;
 mod feature_geometry;
 mod feature_refs;
+mod flush_join;
 pub use face_anchor::FaceAnchor;
 pub use face_anchor::FaceAttachmentStatus;
 pub mod format;
