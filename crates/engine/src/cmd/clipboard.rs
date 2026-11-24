@@ -71,6 +71,47 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, CopyResult { copied: names, param_warnings: Vec::new() })
 }
 
+/// What a pasted feature's exact face attachment follows: the paste's move and the bodies it copies.
+struct AnchorPaste<'a> {
+    cmd: &'a str,
+    m: &'a solidcraft_doc::Mat,
+    shift: &'a solidcraft_doc::Mat,
+    frame_change: &'a BTreeMap<u64, solidcraft_doc::Mat>,
+    sketches: &'a BTreeMap<u64, u64>,
+    bodies: &'a BTreeMap<String, String>,
+    comp: u64,
+    author_path: &'a [u64],
+    moved: bool,
+}
+
+impl AnchorPaste<'_> {
+    /// An attachment to a face the paste copies follows the copy into its placement; one to a face
+    /// it leaves behind stays on that face, and is refused when the paste moves.
+    fn apply(&self, anchor: &mut solidcraft_doc::FaceAnchor, what: &str, notices: &mut Vec<String>) -> Result<()> {
+        let internal = self.bodies.contains_key(&anchor.target.body);
+        if !internal && self.moved {
+            return Err(bad(
+                self.cmd,
+                "a moved paste (translated, or into a component placed elsewhere) retains an external exact face attachment; \
+                 explicitly convert it to a fixed plane first",
+            ));
+        }
+        if internal {
+            let source = solidcraft_doc::mat_mul(self.shift, self.frame_change.get(&anchor.component).unwrap_or(&solidcraft_doc::IDENTITY));
+            anchor.reframe_placement(self.m, &source)?;
+        } else {
+            notices.push(format!("pasted {what} retains external exact face attachment to {}", anchor.target.body));
+        }
+        anchor.remap_target(self.sketches, self.bodies)?;
+        if internal {
+            anchor.component = self.comp;
+            anchor.path = self.author_path.to_vec();
+        }
+        anchor.author_path = self.author_path.to_vec();
+        Ok(())
+    }
+}
+
 /// Origin planes become explicit planes so a translation can move them.
 pub(in crate::cmd) fn explicit_planes(p: &mut PlaneRef) {
     match p {
@@ -157,6 +198,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         shift[3][1] = t.y;
         shift[3][2] = t.z;
     }
+    let world_shift = solidcraft_doc::mat_mul(&target_frame, &solidcraft_doc::mat_mul(&shift, &to_target));
     let copied_frames: BTreeMap<u64, solidcraft_doc::Mat> =
         feats.iter().map(|f| (f.id, solidcraft_doc::mat_mul(&shift, frame_change.get(&f.component).unwrap_or(&solidcraft_doc::IDENTITY)))).collect();
     let mut names: BTreeMap<String, String> = BTreeMap::new();
@@ -182,30 +224,31 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                     .unwrap_or(solidcraft_doc::IDENTITY)
             })?;
         }
+        let anchors = AnchorPaste {
+            cmd,
+            m: &m,
+            shift: &shift,
+            frame_change: &frame_change,
+            sketches: &sketches,
+            bodies: &bodies,
+            comp,
+            author_path: &author_path,
+            moved,
+        };
+        // A trim's face targets are pasted as a sketch's face is: onto the pasted face.
+        if let FeatureKind::FrameTrim { to, .. } = &mut kind {
+            for target in to {
+                if let solidcraft_doc::frame::TrimTarget::Plane { plane } = target
+                    && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+                {
+                    anchors.apply(anchor, "trim", &mut notices)?;
+                }
+            }
+        }
         if let FeatureKind::Sketch { plane, .. } = &mut kind
             && let Some(anchor) = super::sketch::face::anchor_mut(plane)
         {
-            let internal = bodies.contains_key(&anchor.target.body);
-            if !internal && moved {
-                return Err(bad(
-                    cmd,
-                    "a moved paste (translated, or into a component placed elsewhere) retains an external exact face attachment; \
-                     explicitly convert it to a fixed plane first",
-                ));
-            }
-            if !internal {
-                notices.push(format!("pasted sketch retains external exact face attachment to {}", anchor.target.body));
-            }
-            if internal {
-                let source = solidcraft_doc::mat_mul(&shift, frame_change.get(&anchor.component).unwrap_or(&solidcraft_doc::IDENTITY));
-                anchor.reframe_placement(&m, &source)?;
-            }
-            anchor.remap_target(&sketches, &bodies)?;
-            if internal {
-                anchor.component = comp;
-                anchor.path = author_path.clone();
-            }
-            anchor.author_path = author_path.clone();
+            anchors.apply(anchor, "sketch", &mut notices)?;
             let target = anchor.target.clone();
             if let FeatureKind::Sketch { sketch, .. } = &mut kind {
                 for link in &mut sketch.links {
@@ -250,6 +293,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                     *param = Some(doc.new_model_param(&e, &u));
                 }
             }
+            super::clipboard_foreign::reframe_wires(sketch, doc, &m, &world_shift);
         }
         if moved {
             if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &mut kind {

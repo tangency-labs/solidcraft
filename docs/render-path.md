@@ -168,7 +168,14 @@ Validation lives in `gpu::path::tests` and engine render job tests. Set
 `SOLIDCRAFT_REQUIRE_GPU=1` to make absence of an adapter fail device tests rather
 than skip them. The shared viewport crates (`solidcraft-viewport`, `-gpu`, `-egui`) read none of SolidCraft's
 variables: its own GPU tests take `VIEWPORT_TEST_GPU` (the adapter policy, as `SOLIDCRAFT_GPU`)
-and `VIEWPORT_TEST_REQUIRE_GPU=1` (a missing adapter fails), and CI sets both beside the app's. BRDF parity is checked against the f64 oracle with 0.3% relative
+and `VIEWPORT_TEST_REQUIRE_GPU=1` (a missing adapter fails), and CI sets both beside the app's.
+
+On a Linux machine with a GPU, the `software` policy picks lavapipe, but the Vulkan loader still
+loads every installed driver, and NVIDIA's driver then holds GPU memory in every test process.
+To run the tests as a runner without a GPU does, also set
+`VK_LOADER_DRIVERS_SELECT='*lvp*'`: Vulkan then sees lavapipe alone (#10232).
+
+BRDF parity is checked against the f64 oracle with 0.3% relative
 plus 2e-5 absolute tolerance. The near-white furnace allows 0.07 absolute error:
 the existing single-scattering Schlick model is not a perfectly conserving pure
 Lambertian surface, even at IOR 1. Same-adapter determinism compares the actual
