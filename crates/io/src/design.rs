@@ -213,12 +213,12 @@ pub fn write_design_container_with_thumbnail(
 }
 
 /// [`write_design_container_with_thumbnail`] reusing what `reuse` already holds: `reuse` is the
-/// container the design was opened from, and a blob of it whose name is the digest of content
-/// being written again is that content, compressed, and is copied instead of encoded again. A
-/// blob's name is the SHA-256 of its content, so a part found under it holds exactly the content
-/// this save would write; when that part was written by this writer the bytes are identical, and
-/// any other container's entry is the same content kept as it was saved, which reads back the
-/// same.
+/// container the design was opened from, and an import's blob it holds is copied as it is stored
+/// there instead of being encoded again, when its entry carries the content this save writes (its
+/// name is the content's SHA-256, and its length, CRC-32 and compression match). When that part
+/// was written by this writer the bytes are identical; any other container's entry is the same
+/// content kept as it was saved, which reads back the same. A part that does not match is
+/// encoded, so `reuse` can never put content other than the document's into the file.
 #[allow(clippy::too_many_arguments)]
 pub fn write_design_container_reusing(
     doc: &Document,
@@ -229,7 +229,12 @@ pub fn write_design_container_reusing(
     reuse: &[u8],
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, Some(reuse))
+    // Reusing is only ever a shortcut: a source that cannot be copied from (damaged or cut short
+    // on disk) never fails a save the document alone would make.
+    match write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, Some(reuse)) {
+        Err(_) if !crate::safe_write::cancelled() => write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None),
+        result => result,
+    }
 }
 
 /// Write a container with one signed provenance record appended to `save.chain` (see
@@ -262,7 +267,8 @@ fn write_container(
     reuse: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
-    let mut reuse = reuse.map(|bytes| PackageReader::new(Cursor::new(bytes))).transpose()?;
+    // A source that is not a container it can read is not reused; it never fails the save.
+    let mut reuse = reuse.and_then(|bytes| PackageReader::new(Cursor::new(bytes)).ok());
     let mut writer = PackageWriter::new();
     if provenance.is_some() {
         writer.track_parts(provenance::is_authoritative);
@@ -665,18 +671,10 @@ impl<R: Read + Seek> std::ops::DerefMut for PackageReader<R> {
     }
 }
 
-impl<R: Read + Seek> PackageReader<R> {
-    /// Copy `name` from this container into `writer` as it is stored here, when this container
-    /// holds it. The name is the blob's digest, so what it holds is what the caller hashed to it.
-    fn copy_blob(&mut self, writer: &mut PackageWriter, name: &str) -> Result<bool> {
-        writer.copy_blob(&mut self.0, name).map_err(IoError::from)
-    }
-}
-
 /// Add `bytes` as a blob, or copy it from `reuse` — the container the design was opened from —
-/// when that already holds it: the name is the digest of the content, so a part under it there
-/// is this content, compressed, and is copied as it is instead of being encoded again. The
-/// bytes written either way are the same.
+/// when that holds this content stored as this writer stores it ([`Writer::blob_reusing`] checks
+/// the part's name, length and CRC-32 against `bytes`): the bytes written either way read back
+/// as the same content.
 fn blob_reusing(
     writer: &mut PackageWriter,
     reuse: Option<&mut PackageReader<Cursor<&[u8]>>>,
@@ -684,13 +682,7 @@ fn blob_reusing(
     extension: &str,
     compressed: bool,
 ) -> Result<Value> {
-    let name = format!("blobs/{}.{extension}", digest(bytes));
-    if let Some(reader) = reuse
-        && reader.copy_blob(writer, &name)?
-    {
-        return Ok(Value::String(name));
-    }
-    writer.blob(bytes, extension, compressed).map_err(IoError::from)
+    writer.blob_reusing(bytes, extension, compressed, reuse.map(|r| &mut r.0)).map_err(IoError::from)
 }
 
 impl<R: Read + Seek> PackageReader<R> {
@@ -1654,6 +1646,13 @@ mod tests {
         assert_ne!(fresh, first, "an edited import is a new blob");
         let back = DesignContainerReader::new(Cursor::new(fresh)).unwrap().read_document().unwrap();
         assert_eq!(back.to_json(), edited.to_json(), "the edit is what the file holds");
+
+        // A source damaged or cut short on disk is not copied from, and never fails the save.
+        let broken = [&first[..first.len() / 2], b"not a container".as_slice(), &[]];
+        for source in broken {
+            let saved = write_design_container_reusing(&doc, DesignCompression::Fast, None, None, None, source).unwrap();
+            assert_eq!(saved, first, "a source that cannot be read is a save that encodes");
+        }
     }
 
     #[test]
