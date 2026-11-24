@@ -391,6 +391,16 @@ fn offsetting_the_outer_wall_of_a_thin_ring_moves_the_wall_and_not_the_bottom() 
 }
 
 #[test]
+fn shell_and_draft_of_a_mesh_body_are_refused_as_needing_a_solid_body() {
+    let p = [Vec3::ZERO, Vec3::X * 10.0, Vec3::Y * 10.0, Vec3::Z * 10.0];
+    let mesh = crate::mesh_body(&p, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+    let slant = Vec3::new(10.0, 10.0, 10.0) * (1.0 / 3.0);
+    for e in [crate::shell(&mesh, &[slant], 1.0).unwrap_err(), crate::draft(&mesh, &[slant], &Plane::XY, Vec3::Z, 0.1).unwrap_err()] {
+        assert!(matches!(e, crate::KernelError::Invalid(_)) && e.to_string().contains("needs a solid body"), "{e:?}");
+    }
+}
+
+#[test]
 fn shell_and_draft_on_a_thin_ring_take_the_outer_wall_and_not_the_bottom() {
     let (pi, h) = (std::f64::consts::PI, 0.1);
     let ring = thin_ring(h);

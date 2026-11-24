@@ -130,6 +130,7 @@ pub(crate) fn run(
 /// whole. SMLib is given one point inside each, never the pick itself, which may lie on the
 /// line between two pieces.
 pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
+    b.require_brep("shell")?;
     if !(thickness.is_finite() && thickness > 1e-6) {
         return Err(KernelError::Invalid("shell thickness must be positive".into()));
     }
