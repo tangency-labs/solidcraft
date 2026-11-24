@@ -1143,6 +1143,40 @@ fn a_round_hole_just_short_of_a_walls_end_at_a_closed_corner_is_a_hole_of_the_wa
     assert_eq!(after.2, before.2 + 1, "one more cut-out");
 }
 
+/// A U channel of 3 mm steel bent R5.25 from a contour run 440 along z, with four
+/// blade holes D4.5 drilled through its top web where the web runs into its bend: each hole
+/// crosses the line where the flat web turns tangent into the round. The crossing points sit on
+/// two faces that touch along that line, and moving them to the three faces' common point
+/// slid them 3e-6 along it, so the holes' rims no longer met and the cut was refused ("a loop
+/// not closed"). Through the flat web a hole takes π r² T; where it reaches over the bend its
+/// path from the outer round to the inner one is longer than T, never longer than the 5 mm
+/// drill: in all, more than 4 π r² · 3 and less than 4 π r² · 5.
+#[test]
+fn blade_holes_across_a_webs_tangent_line_into_its_bend_go_through() {
+    let mut s = session();
+    rule(&mut s, "SM", 3.0, 0.4, 5.25, 3.0);
+    let section = json!({"origin": [0, 0, 220], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]});
+    run(&mut s, "sketch.create", json!({"plane": section, "name": "Section"}));
+    let u = [[3660.0, 1180.0], [3660.0, 1230.25], [3690.0, 1230.25], [3690.0, 1200.0]];
+    run(&mut s, "sketch.line", json!({"points": u, "ids": ["l1", "l2", "l3"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let contour = json!({"type": "contour", "sketch": "Section", "curves": ["l1", "l2", "l3"], "distance": 440, "reverse": true, "body_name": "SM1"});
+    run(&mut s, "sheet.flange", contour);
+    let volume =
+        |s: &Session| s.model.state().bodies.first().map_or(f64::NAN, |b| solidcraft_kernel::measure_mass(&b.body).map_or(f64::NAN, |m| m.volume));
+    let v0 = volume(&s);
+    let across = json!({"origin": [0, 0, 0], "x_dir": [0, 0, 1], "y_dir": [1, 0, 0]});
+    run(&mut s, "sketch.create", json!({"plane": across, "name": "Blades"}));
+    for z in [-200.0, -100.0, 100.0, 200.0] {
+        run(&mut s, "sketch.circle.center", json!({"center": [z, 3682.0], "radius": 2.25}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Blades", "start_offset": 1226.25, "distance": 5, "direction": "positive", "operation": "cut"}));
+    assert_eq!(s.model.state().bodies.len(), 1);
+    let (taken, disc) = (v0 - volume(&s), PI * 2.25 * 2.25);
+    assert!(taken > 4.0 * disc * 3.0 && taken < 4.0 * disc * 5.0, "{v0} took {taken}");
+}
+
 /// #1095: a 100 x 60 base flange on XY (T 2, R 2, K 0.5) with a 20 high flange on its edge
 /// y = 60, unfolded, and a triangle cut through the flat whose corner lies on the flat's edge
 /// x = 0 at the middle of the bend's zone: it touches the sheet's outline at that point only, so

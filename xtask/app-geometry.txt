@@ -107,7 +107,6 @@ crates/doc/src/eval.rs:level_start_reason dot
 crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
-crates/doc/src/eval.rs:move_turn_line dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
 crates/doc/src/eval.rs:new_surface_faces cross,dot
 crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
@@ -481,7 +480,6 @@ crates/engine/src/cmd/features.rs:extrude_reach dot
 crates/engine/src/cmd/features.rs:hole normalized
 crates/engine/src/cmd/features.rs:leaving normalized
 crates/engine/src/cmd/features.rs:move_bodies normalized
-crates/engine/src/cmd/features.rs:move_turn_about cross,normalized
 crates/engine/src/cmd/features_more.rs:align dot,normalized
 crates/engine/src/cmd/features_more.rs:emboss cross,dot,normalized,triangles
 crates/engine/src/cmd/features_more.rs:snap_point dot
@@ -1206,13 +1204,14 @@ crates/ui-egui/src/browser_canvas.rs:on_image dot
 crates/ui-egui/src/canvas.rs:MoveRotation::point cross
 crates/ui-egui/src/canvas.rs:along dot
 crates/ui-egui/src/canvas.rs:anchor normalized
-crates/ui-egui/src/canvas.rs:chamfer_face_dirs cross,dot,normalized
+crates/ui-egui/src/canvas.rs:chamfer_face_dirs dot
 crates/ui-egui/src/canvas.rs:drag_arrow_to normalized
 crates/ui-egui/src/canvas.rs:draw dot,normalized
 crates/ui-egui/src/canvas.rs:draw_move_rotation cross
 crates/ui-egui/src/canvas.rs:draw_revolve cross,dot
 crates/ui-egui/src/canvas.rs:edge_bisector normalized
 crates/ui-egui/src/canvas.rs:edge_concave dot
+crates/ui-egui/src/canvas.rs:edge_face_dirs cross,dot,normalized
 crates/ui-egui/src/canvas.rs:edge_sides cross,normalized,triangles
 crates/ui-egui/src/canvas.rs:measure_components normalized
 crates/ui-egui/src/canvas.rs:nearest_on_polyline dot
