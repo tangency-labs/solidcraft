@@ -37,6 +37,10 @@ impl Backend for Solidcore {
     }
 
     fn export(&self, form: &Body) -> Result<Exported> {
+        // A mesh body's record is empty: its geometry is the mesh, which no record carries.
+        if form.is_mesh() {
+            return Err(KernelError::Failed("a mesh body has no B-rep record to export".into()));
+        }
         Ok(Exported { record: form.record().clone(), history: form.history().cloned() })
     }
 
@@ -98,7 +102,10 @@ impl From<KernelError> for BackendError {
             KernelError::TooLarge(why) => BackendError::TooLarge { why, largest: None },
             KernelError::Internal(m) => BackendError::Internal(m),
             KernelError::Failed(m) => BackendError::Failed(m),
-            e @ (KernelError::Lip(_) | KernelError::Repair(_) | KernelError::Heal(_)) => BackendError::Failed(e.to_string()),
+            // The words after "the operation failed: ", so the way back reads the same.
+            KernelError::Lip(r) => BackendError::Failed(format!("raising a band: {r}")),
+            KernelError::Repair(r) => BackendError::Failed(r.to_string()),
+            KernelError::Heal(h) => BackendError::Failed(h.to_string()),
         }
     }
 }
@@ -135,6 +142,25 @@ mod tests {
         ] {
             assert_eq!(KernelError::from(BackendError::from(e.clone())), e);
         }
+    }
+
+    #[test]
+    fn refusals_of_their_own_read_the_same_both_ways() {
+        for e in [
+            KernelError::Lip(crate::LipRefusal::BandFillsRim),
+            KernelError::Repair(crate::RepairRefusal::NothingToRepair),
+            KernelError::Heal(crate::HealFailure::Stopped),
+        ] {
+            assert_eq!(KernelError::from(BackendError::from(e.clone())).to_string(), e.to_string());
+        }
+    }
+
+    #[test]
+    fn a_mesh_body_does_not_export_as_an_empty_record() {
+        let points = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
+        let mesh = crate::mesh_body(&points, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+        assert!(mesh.is_mesh());
+        assert!(Solidcore.export(&mesh).is_err());
     }
 
     #[test]
