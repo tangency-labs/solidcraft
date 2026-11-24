@@ -361,9 +361,20 @@ Every face is in one of three classes:
 One kind is not in a class yet: a foot blend's section face (a weld bead's on curved faces,
 `blend::foot_blend`, #15129). Its feet are proved between its stations (Krawczyk on the foot
 equations over each piece, `generic-blend.md` §2.5; at a tapered or rounded end only where the legs
-are at least a quarter of the full ones), but its net's distance from the section is
-checked at samples, 0.01 mm at the midpoints between its stations, and it states that tolerance
-as its bound; it moves into the certified class with the net's bound.
+are at least a quarter of the full ones). The chord's net (sagitta 0) is proved: on
+each span between two stations it is the cubic Hermite through the feet and their rates, and its
+distance from the section is bounded by the Hermite remainder `h⁴/16 · max |a_4|` from the feet's
+Taylor series enclosed over the span (`FootBlend::feet_series`, solved order by order from the
+foot's equations in intervals), plus the stations' and the rates' distance from their enclosures
+and a rounding floor, within the fit tolerance (`FootBlend::chord_net`). An arc's net (a
+convex or concave bead) is proved the same way on its five rows in homogeneous form, the rows
+in their algebraic form (apex `m + h (e′ × c)/|e′ × c|`, corners the apex `∓ c (1/4 + h²/L²)`,
+weight `1/√(1 + 4h²/L²)`) as series from the feet's, its bound `(E_p + |S − c₀| E_w) / W`
+over the rows' point and weight bounds and their least weight (`FootBlend::arc_net`). Where a
+span's series are not enclosed (a support with no NURBS form, a foot's box across a knot line
+of a free-form support), and in a tapered or rounded end's zone (its legs and sagitta change
+along it), the net is still checked at samples, 0.01 mm at the midpoints between
+its stations, and is not certified.
 
 There is no fourth class. A face that is none of these (a bare NURBS a blend made) is a defect, and
 `blend::definition_check::bare_blend_faces` lists it. The kinds still bare are named in the ledger

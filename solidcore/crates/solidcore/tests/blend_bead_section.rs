@@ -2182,6 +2182,223 @@ fn the_feet_are_proved_between_the_stations() {
     assert!(proof.pieces >= 94, "{proof:?}");
 }
 
+/// The feet's Taylor series (the certificate's fourth derivatives) in a square corner: the
+/// leader is a line and each foot runs parallel to it, so past the first every coefficient
+/// holds 0 and is tiny, and the first holds the leader's rate.
+#[test]
+fn the_feet_series_in_a_corner_are_the_leader_s() {
+    use solidcore::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+    use solidcore::blend::fillet_section::interval::Ivl;
+    use solidcore::blend::foot_blend::{FootBlend, FEET_SERIES_ORDER};
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let (ta, tb) = (lo + 0.3 * (hi - lo), lo + 0.4 * (hi - lo));
+    let series = blend
+        .feet_series(&k, [SETBACK, 3.0], ta, tb)
+        .unwrap()
+        .expect("the piece is proved");
+    let cn = NurbsCurve::of(&blend.leader).unwrap();
+    let d = curve_derivs_over(&cn, Ivl::new(ta, tb), 1, None).unwrap();
+    for foot in &series {
+        for (got, want) in [
+            (foot[1].x, d[1].x),
+            (foot[1].y, d[1].y),
+            (foot[1].z, d[1].z),
+        ] {
+            assert!(
+                got.lo <= want.hi + 1e-9 && want.lo <= got.hi + 1e-9,
+                "{got:?} {want:?}"
+            );
+        }
+        for a in &foot[2..=FEET_SERIES_ORDER] {
+            for c in [a.x, a.y, a.z] {
+                assert!(c.lo <= 0.0 && c.hi >= 0.0 && c.mag() < 1e-6, "{a:?}");
+            }
+        }
+    }
+}
+
+/// Round a rod of radius `R` = 15 on a plate (the leader a rational circle, legs `L` = 6) the
+/// feet's Taylor series hold their closed forms in any parameter: the foot up the rod is the
+/// root moved up by the leg, so its coefficients past the first are the leader's; the foot on
+/// the plate is the root moved out along the radius, so its are the leader's times
+/// `(R + L) / R`. Over a tenth of the leader's first span each enclosure meets its closed
+/// form's; their widths are printed.
+#[test]
+fn the_feet_series_round_a_rod_hold_their_closed_forms() {
+    use solidcore::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+    use solidcore::blend::fillet_section::interval::Ivl;
+    use solidcore::blend::foot_blend::{FootBlend, FEET_SERIES_ORDER};
+    use solidcore::primitive::api_primitives::create_box;
+    let mut k = kernel();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 40.0).unwrap();
+    let mut part = boolean_union(&mut k, plate, rod).unwrap();
+    let joint = pick(&k, &part, [65.0, 50.0, 10.0]);
+    let (r, l) = (15.0, 6.0);
+    let blend = FootBlend::of_edge(&k, &mut part, joint, None).unwrap();
+    let lo = blend.interval.min();
+    let (knots, _) = blend.leader.knots(None).unwrap();
+    let next = knots
+        .iter()
+        .copied()
+        .find(|&x| x > lo + 1e-9)
+        .expect("the leader's first span ends");
+    let (ta, tb) = (lo + 0.45 * (next - lo), lo + 0.55 * (next - lo));
+    let series = blend
+        .feet_series(&k, [l; 2], ta, tb)
+        .unwrap()
+        .expect("the piece is proved");
+    let cn = NurbsCurve::of(&blend.leader).unwrap();
+    let d = curve_derivs_over(&cn, Ivl::new(ta, tb), FEET_SERIES_ORDER, None).unwrap();
+    let s = blend.station(&k, 0.5 * (ta + tb), [l; 2], None).unwrap();
+    let mut fact = 1.0;
+    for kk in 1..=FEET_SERIES_ORDER {
+        fact *= kk as f64;
+        for (i, foot) in s.feet.iter().enumerate() {
+            // up the rod (above the plate's top, z = 10) or out on the plate
+            let scale = if foot.z > 11.0 { 1.0 } else { (r + l) / r };
+            let a = series[i][kk];
+            let e = d[kk];
+            for (got, want) in [(a.x, e.x), (a.y, e.y), (a.z, e.z)] {
+                let (wlo, whi) = (want.lo * scale / fact, want.hi * scale / fact);
+                let slack = 1e-9 * (1.0 + wlo.abs().max(whi.abs()));
+                assert!(
+                    got.lo <= whi + slack && wlo <= got.hi + slack,
+                    "foot {i}, order {kk}: {got:?} against [{wlo}, {whi}]"
+                );
+                assert!(got.lo.is_finite() && got.hi.is_finite(), "{got:?}");
+                println!(
+                    "foot {i}, order {kk}: width {:.3e} against the closed form's {:.3e}",
+                    got.hi - got.lo,
+                    whi - wlo
+                );
+            }
+        }
+    }
+}
+
+/// The chord's section face is certified (step 3 of the foot blend's certificate): in a
+/// square corner and round a rod on a plate its net has a proved bound within the weld's fit
+/// tolerance, and at 41 parameters along the joint the net's two sides and its middle lie
+/// within that bound of the true feet and the chord's midpoint there.
+#[test]
+fn the_chord_s_section_face_is_within_its_proved_bound() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    use solidcore::primitive::api_primitives::create_box;
+    let mut k = kernel();
+    let (mut corner_part, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &corner_part, at);
+    let in_corner = FootBlend::of_edge(&k, &mut corner_part, edge, None).unwrap();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 40.0).unwrap();
+    let mut rod_part = boolean_union(&mut k, plate, rod).unwrap();
+    let joint = pick(&k, &rod_part, [65.0, 50.0, 10.0]);
+    let round_rod = FootBlend::of_edge(&k, &mut rod_part, joint, None).unwrap();
+    for (what, blend, legs) in [
+        ("corner", &in_corner, [SETBACK, 3.0]),
+        ("rod", &round_rod, [6.0, 6.0]),
+    ] {
+        let started = std::time::Instant::now();
+        let bound = blend
+            .section_bound(&k, legs, 0.0, WELD_FIT_TOLERANCE)
+            .unwrap()
+            .expect("the chord's net is certified");
+        println!("{what}: bound {bound:.3e}, {:?}", started.elapsed());
+        assert!(bound <= WELD_FIT_TOLERANCE, "{what}: {bound}");
+        let face = blend
+            .section_face(&k, legs, 0.0, WELD_FIT_TOLERANCE)
+            .unwrap();
+        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        for j in 0..=40 {
+            let t = lo + (hi - lo) * f64::from(j) / 40.0;
+            let s = blend.station(&k, t, legs, None).unwrap();
+            let [a, b] = s.feet;
+            for (v, want) in [(0.0, a), (0.5, a + (b - a) * 0.5), (1.0, b)] {
+                let got = face
+                    .evaluate_point(&k, solidcore::math::Point2::new(t, v))
+                    .unwrap();
+                assert!(
+                    got.distance(want) <= bound,
+                    "{what} at {t}, v {v}: {} past {bound}",
+                    got.distance(want)
+                );
+            }
+        }
+    }
+}
+
+/// The arc's section face is certified (step 4 of the foot blend's certificate): convex
+/// (sagitta 1) and concave (sagitta -0.5) beads in a square corner and round a rod on a plate
+/// have a proved bound within the weld's fit tolerance; at 21 parameters along each joint the
+/// net's sides and middle lie within it of the true feet and apex, and its quarter points
+/// within it of the true arc (sampled densely: 4000 points along it).
+#[test]
+fn the_arc_s_section_face_is_within_its_proved_bound() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    use solidcore::primitive::api_primitives::create_box;
+    let mut k = kernel();
+    let (mut corner_part, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &corner_part, at);
+    let in_corner = FootBlend::of_edge(&k, &mut corner_part, edge, None).unwrap();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 40.0).unwrap();
+    let mut rod_part = boolean_union(&mut k, plate, rod).unwrap();
+    let joint = pick(&k, &rod_part, [65.0, 50.0, 10.0]);
+    let round_rod = FootBlend::of_edge(&k, &mut rod_part, joint, None).unwrap();
+    for (what, blend, legs) in [
+        ("corner", &in_corner, [SETBACK, 3.0]),
+        ("rod", &round_rod, [6.0, 6.0]),
+    ] {
+        for h in [1.0, -0.5] {
+            let started = std::time::Instant::now();
+            let bound = blend
+                .section_bound(&k, legs, h, WELD_FIT_TOLERANCE)
+                .unwrap()
+                .expect("the arc's net is certified");
+            println!(
+                "{what}, sagitta {h}: bound {bound:.3e}, {:?}",
+                started.elapsed()
+            );
+            assert!(bound <= WELD_FIT_TOLERANCE, "{what} {h}: {bound}");
+            let face = blend.section_face(&k, legs, h, WELD_FIT_TOLERANCE).unwrap();
+            let (lo, hi) = (blend.interval.min(), blend.interval.max());
+            for j in 0..=20 {
+                let t = lo + (hi - lo) * f64::from(j) / 20.0;
+                let s = blend.station(&k, t, legs, None).unwrap();
+                let [a, b] = s.feet;
+                let convex = (a + (b - a) * 0.5) - s.root;
+                let arc = BeadArc::new(a, b, s.tangent, convex, h).unwrap();
+                let (rows, _) = arc.rows();
+                let (_, turn) = BeadArc::radius_and_turn(a.distance(b), h).unwrap();
+                let at = |v: f64| {
+                    face.evaluate_point(&k, solidcore::math::Point2::new(t, v))
+                        .unwrap()
+                };
+                for (v, want) in [(0.0, a), (0.5, rows[2]), (1.0, b)] {
+                    let d = at(v).distance(want);
+                    assert!(d <= bound, "{what} {h} at {t}, v {v}: {d} past {bound}");
+                }
+                for v in [0.25, 0.75] {
+                    let p = at(v);
+                    let d = (0..=4000)
+                        .map(|i| arc.point(turn * f64::from(i) / 4000.0).distance(p))
+                        .fold(f64::INFINITY, f64::min);
+                    // the samples' own gap: the chord between two of them sags by at most
+                    // R (turn / 4000)^2 / 8, far below the bound
+                    assert!(
+                        d <= bound + 1e-6,
+                        "{what} {h} at {t}, v {v}: {d} past {bound}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// The proof is not empty: stations whose last foot was moved onto the other branch (across
 /// the edge, on the plane's continuation) are not proved, a typed failure, not a pass.
 #[test]

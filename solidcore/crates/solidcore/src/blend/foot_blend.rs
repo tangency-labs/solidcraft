@@ -1011,8 +1011,11 @@ impl FootBlend {
     /// to foot 2 (1). The arcs are interpolated in homogeneous form (cubic in `u`) at stations
     /// on each of the leader's knots (at least four), doubled between them until, at the
     /// midpoint between each two stations, the net holds the feet, the section's middle and
-    /// the root within `tol`. Exact at its stations; between them that is a **sampled** check
-    /// at one point per interval, not a bound: nothing is certified yet.
+    /// the root within `tol`. Where its feet's series are enclosed the net is instead the
+    /// cubic Hermite net through the section's rows and their rates, **certified** within
+    /// `tol` of the true section ([`FootBlend::chord_net`], [`FootBlend::arc_net`]; the root
+    /// still sampled); elsewhere it is exact at its stations and between them **sampled** at
+    /// one point per interval, not bounded.
     ///
     /// # Errors
     ///
@@ -1052,6 +1055,24 @@ impl FootBlend {
     ) -> Result<FeetProof> {
         let (lo, hi) = (self.interval.min(), self.interval.max());
         Ok(self.segment(k, legs, sagitta, tol, lo, hi, None)?.proof)
+    }
+
+    /// The proved distance of [`Self::section_face`]'s net (with the same arguments) from the
+    /// true section: `Some` where the net is certified ([`FootBlend::chord_net`],
+    /// [`FootBlend::arc_net`]: its feet's series enclosed), `None` where it is sampled.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::section_face`].
+    pub fn section_bound(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        sagitta: f64,
+        tol: f64,
+    ) -> Result<Option<f64>> {
+        let (lo, hi) = (self.interval.min(), self.interval.max());
+        Ok(self.segment(k, legs, sagitta, tol, lo, hi, None)?.bound)
     }
 
     /// [`Self::section_face`] over the leader's parameters `a..b` inside its interval, with
@@ -1144,13 +1165,33 @@ impl FootBlend {
                 }
             }
             weigh_tips(&mut rows)?;
-            let (face, feet) = net_through_rows(&params, &rows, sagitta)?;
+            // the net certified where the segment has no shaped end (its net parameter is the
+            // leader's, its legs and sagitta the weld's) and its feet's series are enclosed;
+            // else the net through the rows, sampled
+            let certified = match ramp {
+                Some(_) => Chord::NotEnclosed,
+                None if sagitta == 0.0 => self.chord_net(k, legs, &solved, tol)?,
+                None => self.arc_net(k, legs, &solved, sagitta, tol)?,
+            };
+            let (face, feet, bound) = match certified {
+                Chord::Net(face, feet, bound) => (face, feet, Some(bound)),
+                Chord::Over(bound) => {
+                    worst = bound;
+                    count *= 2;
+                    continue;
+                }
+                Chord::NotEnclosed => {
+                    let (face, feet) = net_through_rows(&params, &rows, sagitta)?;
+                    (face, feet, None)
+                }
+            };
             // the root's curve in the leader's own parameter (in the angle it would stand still
             // at a rounded end's tip)
             let root = through_at(&roots, &stations)?;
             // sampled, not proved: at the midpoint between each two stations (in the net's
-            // parameter), the feet, the section's middle and the root
-            worst = 0.0_f64;
+            // parameter), the root, and where the net is not certified the feet and the
+            // section's middle
+            worst = bound.unwrap_or(0.0);
             for (j, pair) in params.windows(2).enumerate() {
                 let &[lo, hi] = pair else { continue };
                 let u = 0.5 * (lo + hi);
@@ -1166,9 +1207,11 @@ impl FootBlend {
                     continue;
                 };
                 let middle = section_middle(&row.0, h);
-                for (v, want) in [(0.0, first), (0.5, middle), (1.0, last)] {
-                    let got = face.evaluate_point(Point2::new(u, v))?;
-                    worst = worst.max(got.distance(want));
+                if bound.is_none() {
+                    for (v, want) in [(0.0, first), (0.5, middle), (1.0, last)] {
+                        let got = face.evaluate_point(Point2::new(u, v))?;
+                        worst = worst.max(got.distance(want));
+                    }
                 }
                 worst = worst.max(root.evaluate_point(t)?.distance(s.root));
             }
@@ -1183,6 +1226,7 @@ impl FootBlend {
                     root,
                     start_uv,
                     proof,
+                    bound,
                 });
             }
             count *= 2;
@@ -1325,6 +1369,9 @@ struct Segment {
     start_uv: [Point2; 2],
     /// The feet's proof between its stations.
     proof: FeetProof,
+    /// The section face's proved distance from the true section ([`FootBlend::chord_net`]),
+    /// where it is certified.
+    bound: Option<f64>,
 }
 
 /// The cubic through `points` at the parameters `stations`.
@@ -2663,6 +2710,10 @@ fn isub(
     }
 }
 
+/// A proved piece of a foot ([`FootBlend::prove_piece`]): the box of its parameters on the
+/// support's form over the whole piece, and `w = S − e` there in its centred form.
+type ProvedPiece = ([Ivl; 2], crate::blend::fillet_section::series::V3<Ivl>);
+
 /// What [`FootBlend::prove_feet`] proved: the spans' pieces and how many halvings they took.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FeetProof {
@@ -2776,7 +2827,7 @@ impl FootBlend {
                 if depth > 0 {
                     *guess = None;
                 }
-                if !Self::prove_piece(k, support, &leader, a.t, b.t, z, fa, fb, guess)? {
+                if Self::prove_piece(k, support, &leader, a.t, b.t, z, fa, fb, guess)?.is_none() {
                     proved = false;
                     break;
                 }
@@ -2812,6 +2863,9 @@ impl FootBlend {
     /// together, and the centred form keeps them together (enclosed apart, the toe's travel
     /// along the joint would enter the Jacobian at its full size). The unknowns are `δ`, about
     /// 0; the equations `G₁ = w·e′`, `G₂ = |w|² − z²` hold for every `t` in the piece.
+    /// Proved, the box of the foot's parameters on the form over the whole piece (the path
+    /// plus the correction's box) and `w` over it in its centred form (narrow: the root's
+    /// and the toe's travel along the joint cancel in it); `None` where it is not proved.
     #[allow(clippy::too_many_arguments)]
     fn prove_piece(
         k: &Kernel,
@@ -2823,7 +2877,7 @@ impl FootBlend {
         fa: Point3,
         fb: Point3,
         guess: &mut Option<Point2>,
-    ) -> Result<bool> {
+    ) -> Result<Option<ProvedPiece>> {
         use crate::blend::fillet_section::certificate::curve_derivs_over;
         use crate::blend::fillet_section::series::V3;
         use crate::geom::krawczyk::{inverse_of_columns2, krawczyk};
@@ -2833,11 +2887,11 @@ impl FootBlend {
             Some(uv) => uv,
             None => match support.place(k, fa, None)? {
                 Some(uv) => uv,
-                None => return Ok(false),
+                None => return Ok(None),
             },
         };
         let Some(ub) = support.place(k, fb, Some(ua))? else {
-            return Ok(false);
+            return Ok(None);
         };
         let unwrap = |x: f64, near: f64, p: Option<f64>| match p {
             Some(p) if p > 0.0 => x + p * ((near - x) / p).round(),
@@ -2851,7 +2905,7 @@ impl FootBlend {
         let dt = Ivl::new(lo, hi) - Ivl::from(tm);
         let span = tb - ta;
         if span == 0.0 {
-            return Ok(false);
+            return Ok(None);
         }
         let mid = [0.5 * (ua.x + ub.x), 0.5 * (ua.y + ub.y)];
         let slope = [(ub.x - ua.x) / span, (ub.y - ua.y) / span];
@@ -2860,7 +2914,7 @@ impl FootBlend {
         let (Some(&em), Some(&dm), Some(&d), Some(&dd)) =
             (at_mid.first(), at_mid.get(1), over.get(1), over.get(2))
         else {
-            return Ok(false);
+            return Ok(None);
         };
         let scale = |v: V3<Ivl>, a: Ivl| V3 {
             x: v.x * a,
@@ -2915,16 +2969,24 @@ impl FootBlend {
         };
         // the preconditioner: the Jacobian's middle inverted
         let Some(j) = jacobian([Ivl::from(0.0); 2])? else {
-            return Ok(false);
+            return Ok(None);
         };
         let middle = j.map(|col| col.map(Ivl::mid));
         let Some(c) = inverse_of_columns2(&middle) else {
-            return Ok(false);
+            return Ok(None);
         };
         // proved: one foot in the box for every t, and the box holds the path's ends (the
         // stations' feet, δ = 0 there), so that foot is theirs
-        Ok(krawczyk::<2>([0.0; 2], c, &value, &jacobian)?
-            .is_some_and(|b| b.iter().all(|x| x.lo <= 0.0 && x.hi >= 0.0)))
+        let Some(delta) = krawczyk::<2>([0.0; 2], c, &value, &jacobian)?
+            .filter(|b| b.iter().all(|x| x.lo <= 0.0 && x.hi >= 0.0))
+        else {
+            return Ok(None);
+        };
+        let Some((w, ..)) = centred(delta)? else {
+            return Ok(None);
+        };
+        let ([d0, d1], [s0, s1]) = (delta, s);
+        Ok(Some(([m0 + d0 + s0 * dt, m1 + d1 + s1 * dt], w)))
     }
 
     /// The failure of a span from `a` to `b` that stays unproved: no toe at the leg where the
@@ -2977,4 +3039,812 @@ impl FootBlend {
             },
         ))
     }
+}
+
+/// The highest power of the leader's parameter [`FootBlend::feet_series`] encloses: the cubic
+/// Hermite remainder of a section's rows over a piece takes their fourth derivative.
+pub const FEET_SERIES_ORDER: usize = 4;
+
+/// A foot's Taylor coefficients in the leader's parameter, `a_k = a⁽ᵏ⁾ / k!` for
+/// `k <= FEET_SERIES_ORDER`, each enclosed over a piece.
+pub type FootSeries = [crate::blend::fillet_section::series::V3<Ivl>; FEET_SERIES_ORDER + 1];
+
+impl FootBlend {
+    /// Each foot's Taylor coefficients in the leader's parameter `t` ([`FootSeries`]) for
+    /// every `t` in `[ta, tb]`, with the legs `legs`: the span cut into pieces as
+    /// [`FootBlend::prove_feet`] cuts it (no longer than a share of the smaller leg, a piece
+    /// not proved halved), each piece's feet proved, then the coefficients of the foot's
+    /// parameters solved order by order from the foot's equations as series (`G₁ = w·e′`,
+    /// `G₂ = |w|² − z²`, `w = S(x(t)) − e(t)`), each in intervals over the piece's box, the
+    /// foot's point composed from them, and the pieces' enclosures hulled. `None` where a
+    /// piece stays unproved, the span runs across a knot of the leader, a foot's box across
+    /// a knot line of a support that is not analytic (its form is only as smooth as its knots
+    /// allow there), or the equations' linear part is not proved invertible over a box. Feet
+    /// on a support with no NURBS form are not enclosed (`None` too).
+    ///
+    /// # Errors
+    ///
+    /// Native invalid input for a leg that is not finite and positive; those of the
+    /// evaluations and the enclosures.
+    pub fn feet_series(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        ta: f64,
+        tb: f64,
+    ) -> Result<Option<[FootSeries; 2]>> {
+        use crate::blend::fillet_section::certificate::NurbsCurve;
+        use crate::blend::fillet_section::series::v_hull;
+        use crate::surface::surface::p2::SurfaceKind;
+        check_legs(legs)?;
+        let (lo, hi) = (ta.min(tb), ta.max(tb));
+        if hi - lo <= 0.0
+            || !(hi - lo).is_finite()
+            || self.breaks()?.iter().any(|&x| lo < x && x < hi)
+        {
+            return Ok(None);
+        }
+        let leader = NurbsCurve::of(&self.leader)?;
+        let mut supports = Vec::new();
+        for side in &self.sides {
+            let Some(support) = ProofSupport::of(k, &side.surface)? else {
+                return Ok(None);
+            };
+            let analytic = matches!(
+                side.surface.kind(),
+                SurfaceKind::Plane(_)
+                    | SurfaceKind::Cone(_)
+                    | SurfaceKind::Sphere(_)
+                    | SurfaceKind::Torus(_)
+            );
+            supports.push((support, analytic));
+        }
+        let Ok(first) = self.try_station(k, lo, legs, None)? else {
+            return Ok(None);
+        };
+        let Ok(last) = self.try_station(k, hi, legs, Some(&first))? else {
+            return Ok(None);
+        };
+        // pieces as prove_feet cuts a span, each from a work list with its depth
+        let reach = legs.iter().fold(f64::INFINITY, |m, z| m.min(*z)) * PIECE_OF_LEG;
+        let count = (first.root.distance(last.root) / reach)
+            .ceil()
+            .clamp(1.0, MAX_PIECES) as usize;
+        let mut work: Vec<(FootStation, FootStation, usize)> = Vec::new();
+        let mut from = first;
+        for j in 1..=count {
+            let to = if j == count {
+                last
+            } else {
+                let t = lo + (hi - lo) * j as f64 / count as f64;
+                let Ok(s) = self.try_station(k, t, legs, Some(&from))? else {
+                    return Ok(None);
+                };
+                s
+            };
+            work.push((from, to, 0));
+            from = to;
+        }
+        work.reverse();
+        let mut hull: [Option<FootSeries>; 2] = [None, None];
+        while let Some((a, b, depth)) = work.pop() {
+            let mut made: Vec<FootSeries> = Vec::new();
+            for (i, (support, analytic)) in supports.iter().enumerate() {
+                let (Some(&z), Some(&fa), Some(&fb)) = (legs.get(i), a.feet.get(i), b.feet.get(i))
+                else {
+                    return Err(defect("a station lacked the foot of a support it is solved on, though every station is built with both"));
+                };
+                let proved = Self::prove_piece(
+                    k,
+                    support,
+                    &leader,
+                    a.t,
+                    b.t,
+                    Ivl::from(z),
+                    fa,
+                    fb,
+                    &mut None,
+                )?;
+                let crosses =
+                    |iv: Ivl, knots: &[f64]| knots.iter().any(|&u| iv.lo < u && u < iv.hi);
+                let series = match proved {
+                    Some(([xu, xv], _))
+                        if !analytic
+                            && (crosses(xu, &support.cn.u) || crosses(xv, &support.cn.v)) =>
+                    {
+                        return Ok(None);
+                    }
+                    Some((x, w0)) => foot_series_over(support, &leader, Ivl::new(a.t, b.t), x, w0)?,
+                    None => None,
+                };
+                match series {
+                    Some(s) => made.push(s),
+                    None => break,
+                }
+            }
+            if let [s1, s2] = made.as_slice() {
+                for (h, s) in hull.iter_mut().zip([*s1, *s2]) {
+                    *h = Some(match h.take() {
+                        None => s,
+                        Some(old) => {
+                            let mut out = old;
+                            for (o, n) in out.iter_mut().zip(s) {
+                                *o = v_hull(*o, n);
+                            }
+                            out
+                        }
+                    });
+                }
+                continue;
+            }
+            if depth >= PROOF_HALVINGS {
+                return Ok(None);
+            }
+            let Ok(mid) = self.try_station(k, 0.5 * (a.t + b.t), legs, Some(&a))? else {
+                return Ok(None);
+            };
+            work.push((mid, b, depth + 1));
+            work.push((a, mid, depth + 1));
+        }
+        Ok(match hull {
+            [Some(f1), Some(f2)] => Some([f1, f2]),
+            _ => None,
+        })
+    }
+}
+
+/// The share of a span [`FootBlend::chord_net`] reads each end's rate over (one-sided: a
+/// station on a knot of the leader ends two spans whose rates differ).
+const RATE_PIECE: f64 = 1e-6;
+
+/// The rounding [`FootBlend::chord_net`] adds to its bound, relative to `1 +` the net's
+/// largest coordinate: the control points' few operations and the net's evaluation, far
+/// below it (definitions-and-certificates.md §4.4's floors are about `1e-10` at part scale).
+const NET_ROUNDING: f64 = 1e-10;
+
+/// `|v|` over an enclosure: the root of the sum of its components' largest squares.
+fn ivl_norm(v: crate::blend::fillet_section::series::V3<Ivl>) -> f64 {
+    let m = [v.x.mag(), v.y.mag(), v.z.mag()];
+    (m.iter().map(|c| c * c).sum::<f64>()).sqrt() * (1.0 + 4.0 * f64::EPSILON)
+}
+
+/// The middle of an enclosure, and its largest distance from it.
+fn ivl_mid(v: crate::blend::fillet_section::series::V3<Ivl>) -> (Vec3, f64) {
+    let mid = Vec3::new(v.x.mid(), v.y.mid(), v.z.mid());
+    let r = [v.x, v.y, v.z]
+        .iter()
+        .zip([mid.x, mid.y, mid.z])
+        .map(|(c, m)| (c.hi - m).max(m - c.lo))
+        .map(|d| d * d)
+        .sum::<f64>()
+        .sqrt();
+    (mid, r * (1.0 + 4.0 * f64::EPSILON))
+}
+
+/// The largest distance of a point from `p` in an enclosure.
+fn ivl_off(v: crate::blend::fillet_section::series::V3<Ivl>, p: Point3) -> f64 {
+    [(v.x, p.x), (v.y, p.y), (v.z, p.z)]
+        .iter()
+        .map(|(c, x)| (c.hi - x).abs().max((x - c.lo).abs()))
+        .map(|d| d * d)
+        .sum::<f64>()
+        .sqrt()
+        * (1.0 + 4.0 * f64::EPSILON)
+}
+
+/// What [`FootBlend::chord_net`] made: the net, its sides and its bound; or the bound of the
+/// first span past the tolerance (the net is not made); or nothing, a span's series not
+/// enclosed.
+#[allow(clippy::large_enum_variant)] // one made per round of stations, never stored
+enum Chord {
+    Net(BSplineSurface, [BSplineCurve; 2], f64),
+    Over(f64),
+    NotEnclosed,
+}
+
+impl FootBlend {
+    /// The chord's section face certified over the stations `solved` (in order along the
+    /// leader, legs `legs`): on each span `[t_i, t_(i+1)]`, length `h`, each side of the net is
+    /// the cubic Hermite through the stations' feet with each end's rate, the middle of its
+    /// foot's first coefficient over a sliver of the span at that end
+    /// ([`FootBlend::feet_series`] over [`RATE_PIECE`] of it); the net is linear across between
+    /// its sides, as the chord is between its feet, so it is within the larger side's bound of
+    /// the true section. A side's bound on the span is the Hermite remainder `h⁴/384 · max
+    /// |a⁗| = h⁴/16 · max |a_4|` (the foot's series over the span) plus the net's distance from
+    /// the Hermite of the true feet and rates (at each end the foot's distance from its series'
+    /// enclosure plus `h/3` times the rate's distance from its own: the control points move by
+    /// those, and the Bernstein basis sums to 1) plus [`NET_ROUNDING`]. The stations sit at
+    /// the leader's knots, so no span runs across one. The net (u the leader's parameter,
+    /// cubic, each station a knot of multiplicity 3: C1 within a span of the leader, C0 at
+    /// its knots; v from foot 1 to foot 2, linear), its two sides, and the bound: the largest
+    /// of the spans' ([`Chord::Net`]); the first span's bound past `tol` ([`Chord::Over`]: the
+    /// rest are not enclosed); [`Chord::NotEnclosed`] where a span's series are not.
+    ///
+    /// # Errors
+    ///
+    /// Those of the series and of the net's construction.
+    fn chord_net(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        solved: &[FootStation],
+        tol: f64,
+    ) -> Result<Chord> {
+        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+        let mut sides: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
+        let mut knots = Vec::new();
+        let mut mults = Vec::new();
+        let mut bound = 0.0_f64;
+        let mut size = 0.0_f64;
+        for pair in solved.windows(2) {
+            let &[a, b] = pair else { continue };
+            let h = b.t - a.t;
+            let sliver = RATE_PIECE * h;
+            let (Some(whole), Some(start), Some(end)) = (
+                self.feet_series(k, legs, a.t, b.t)?,
+                self.feet_series(k, legs, a.t, a.t + sliver)?,
+                self.feet_series(k, legs, b.t - sliver, b.t)?,
+            ) else {
+                return Ok(Chord::NotEnclosed);
+            };
+            if knots.is_empty() {
+                knots.push(a.t);
+                mults.push(4);
+            } else if let Some(m) = mults.last_mut() {
+                *m = 3;
+            }
+            knots.push(b.t);
+            mults.push(4);
+            for (i, side) in sides.iter_mut().enumerate() {
+                let (Some(w), Some(s0), Some(s1), Some(&fa), Some(&fb)) = (
+                    whole.get(i),
+                    start.get(i),
+                    end.get(i),
+                    a.feet.get(i),
+                    b.feet.get(i),
+                ) else {
+                    return Err(defect("a station or a series lacked the foot of a support, though both are made for the two"));
+                };
+                let (Some(&a4), Some(&p0), Some(&r0), Some(&p1), Some(&r1)) =
+                    (w.get(4), s0.first(), s0.get(1), s1.first(), s1.get(1))
+                else {
+                    return Err(defect("a foot's series lacked an order it is made to"));
+                };
+                let (rate_a, da) = ivl_mid(r0);
+                let (rate_b, db) = ivl_mid(r1);
+                let ends = (ivl_off(p0, fa) + h / 3.0 * da).max(ivl_off(p1, fb) + h / 3.0 * db);
+                let hermite = h.powi(4) / 16.0 * ivl_norm(a4);
+                bound = bound.max(hermite + ends);
+                if bound > tol {
+                    return Ok(Chord::Over(bound));
+                }
+                if side.is_empty() {
+                    side.push(fa);
+                }
+                side.push(fa + rate_a * (h / 3.0));
+                side.push(fb - rate_b * (h / 3.0));
+                side.push(fb);
+                size = size.max(fa.max_dimension()).max(fb.max_dimension());
+            }
+        }
+        let [s1, s2] = &sides;
+        if s1.len() < 4 || s1.len() != s2.len() {
+            return Ok(Chord::NotEnclosed);
+        }
+        let bound = bound + NET_ROUNDING * (1.0 + size);
+        let curve = |points: &[Point3]| {
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: points,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &mults,
+                knots: &knots,
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+        };
+        let mut points = Vec::new();
+        for (p, q) in s1.iter().zip(s2) {
+            points.push(*p);
+            points.push(*q);
+        }
+        let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &mults,
+            v_multiplicities: &[2, 2],
+            u_knots: &knots,
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })?;
+        Ok(Chord::Net(net, [curve(s1)?, curve(s2)?], bound))
+    }
+}
+
+/// One row of a section, as series in the leader's parameter about a point `c₀`: its point
+/// less `c₀`, times its weight, and its weight.
+type RowSeries = (
+    crate::blend::fillet_section::series::VSer<Ivl>,
+    crate::blend::fillet_section::series::Ser<Ivl>,
+);
+
+/// The arc's five rows (`BeadArc::rows`: foot, corner, apex, corner, foot, weights `[1, w, 1,
+/// w, 1]`) as series over a piece, from the feet's series `feet` and the leader's
+/// derivatives `d` over it (at least to order `FEET_SERIES_ORDER + 1`), about `about`, for
+/// the sagitta `sagitta` on the side `side` (`±1`: the sign of `(e′ × c)·(m − e)` there). In
+/// their algebraic form, which is `BeadArc`'s: with `c = b − a` and `L = |c|`, the apex is
+/// `m + side · h (e′ × c) / |e′ × c|` (`m` the chord's middle), the corners are the apex
+/// `∓ c (1/4 + h²/L²)` (where the arc's tangents at its ends meet the one at its apex, at
+/// `R tan(φ)` from it, `tan φ = 2|h|/L`), and `w = cos φ = 1/√(1 + 4h²/L²)`. `None` where `L`
+/// or `|e′ × c|` is not proved positive.
+///
+/// # Errors
+///
+/// Those of the series.
+fn arc_rows_series(
+    feet: &[FootSeries; 2],
+    d: &[crate::blend::fillet_section::series::V3<Ivl>],
+    side: f64,
+    sagitta: f64,
+    about: Point3,
+) -> Result<Option<[RowSeries; 5]>> {
+    use crate::blend::fillet_section::series::{Ser, Trunc, VSer, V3};
+    const N: usize = FEET_SERIES_ORDER;
+    let tr = Trunc::new(N, 0)?;
+    let zero = V3 {
+        x: Ivl::from(0.0),
+        y: Ivl::from(0.0),
+        z: Ivl::from(0.0),
+    };
+    let one = || Ser::constant(Ivl::from(1.0));
+    let of = |f: &FootSeries| {
+        let mut v = VSer::constant(zero);
+        for (kk, c) in f.iter().enumerate() {
+            let at = if kk == 0 {
+                [
+                    c.x - Ivl::from(about.x),
+                    c.y - Ivl::from(about.y),
+                    c.z - Ivl::from(about.z),
+                ]
+            } else {
+                [c.x, c.y, c.z]
+            };
+            for (comp, x) in v.a.iter_mut().zip(at) {
+                comp.set(kk, 0, x);
+            }
+        }
+        v
+    };
+    let [fa, fb] = feet;
+    let (a, b) = (of(fa), of(fb));
+    // the leader's rate: e′_k = D_(k+1) / k!
+    let mut de = VSer::constant(zero);
+    let mut fact = 1.0_f64;
+    for kk in 0..=N {
+        if kk > 0 {
+            fact *= kk as f64;
+        }
+        let Some(dk) = d.get(kk + 1) else {
+            return Ok(None);
+        };
+        let f = Ivl::from(1.0) / Ivl::from(fact);
+        for (comp, x) in de.a.iter_mut().zip([dk.x, dk.y, dk.z]) {
+            comp.set(kk, 0, x * f);
+        }
+    }
+    let c = b.sub(&a, tr);
+    let l2 = c.dot(&c, tr);
+    let u = de.cross(&c, tr);
+    let uu = u.dot(&u, tr);
+    if !(l2.at(0, 0).is_positive() && uu.at(0, 0).is_positive()) {
+        return Ok(None);
+    }
+    let inv_l = l2.inv_sqrt(tr)?;
+    let toward = u.times(&uu.inv_sqrt(tr)?, tr);
+    let half = Ser::constant(Ivl::from(0.5));
+    let apex = a.add(&b, tr).times(&half, tr).add(
+        &toward.times(&Ser::constant(Ivl::from(side * sagitta)), tr),
+        tr,
+    );
+    let h2 = Ivl::from(sagitta) * Ivl::from(sagitta);
+    let r = inv_l.mul(&inv_l, tr).scale(h2, tr);
+    let q = Ser::constant(Ivl::from(0.25)).add(&r, tr);
+    let w = one().add(&r.scale(Ivl::from(4.0), tr), tr).inv_sqrt(tr)?;
+    let cq = c.times(&q, tr);
+    let p1 = apex.sub(&cq, tr).times(&w, tr);
+    let p3 = apex.add(&cq, tr).times(&w, tr);
+    Ok(Some([
+        (a, one()),
+        (p1, w.clone()),
+        (apex, one()),
+        (p3, w),
+        (b, one()),
+    ]))
+}
+
+/// The arc's five rows at one station, as [`arc_rows_series`] makes them (its constant
+/// terms), from the feet `fa`, `fb`, the leader's direction `along` and the root `root`; and
+/// the side `±1` (`None` where the chord or `along × c` vanishes).
+fn arc_rows_at(
+    fa: Point3,
+    fb: Point3,
+    along: Vec3,
+    root: Point3,
+    sagitta: f64,
+) -> Option<([Point3; 5], [f64; 5], f64)> {
+    let c = fb - fa;
+    let l2 = c.dot(c);
+    let u = along.cross(c);
+    let m = fa + c * 0.5;
+    let toward = u.unitize().ok()?;
+    let side = if toward.dot(m - root) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    if l2.is_nan() || l2 <= 0.0 {
+        return None;
+    }
+    let apex = m + toward * (side * sagitta);
+    let r = sagitta * sagitta / l2;
+    let q = 0.25 + r;
+    let w = 1.0 / (1.0 + 4.0 * r).sqrt();
+    Some((
+        [fa, apex - c * q, apex, apex + c * q, fb],
+        [1.0, w, 1.0, w, 1.0],
+        side,
+    ))
+}
+
+impl FootBlend {
+    /// The arc's section face certified over the stations `solved` (legs `legs`, the sagitta
+    /// `sagitta`), as [`FootBlend::chord_net`] certifies the chord's, on its five rows in
+    /// homogeneous form about each span's first root `c₀` ([`arc_rows_series`]): each row's
+    /// point and weight the cubic Hermite through the stations' rows and their one-sided
+    /// rates; on a span, with `E_p` and `E_w` the largest of the rows' point and weight bounds
+    /// (each the Hermite remainder `h⁴/16 · max |r_4|`, plus the stations' rows' and rates'
+    /// distance from their enclosures), the net is within `(E_p + |S − c₀| E_w) / W` of the
+    /// true section, `W` the least weight (the rows' least less `E_w`), `|S − c₀|` the largest
+    /// row's reach (the arc lies in its rows' hull), plus [`NET_ROUNDING`]. The net: u cubic
+    /// (as the chord's), v the arc's two rational quadratic pieces. [`Chord::Over`] at the
+    /// first span past `tol`, or with an infinite bound where a span is too long for its
+    /// rows' enclosure (a weight or a length not proved positive): more stations narrow it;
+    /// [`Chord::NotEnclosed`] where a span's feet's series are not enclosed or its side is not
+    /// decided.
+    ///
+    /// # Errors
+    ///
+    /// Those of the series, the leader's derivatives and the net's construction.
+    fn arc_net(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        solved: &[FootStation],
+        sagitta: f64,
+        tol: f64,
+    ) -> Result<Chord> {
+        use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+        let leader = NurbsCurve::of(&self.leader)?;
+        // per row: the net's control points (in model space) and weights along u
+        let mut rows: [(Vec<Point3>, Vec<f64>); 5] = Default::default();
+        let mut knots = Vec::new();
+        let mut mults = Vec::new();
+        let mut bound = 0.0_f64;
+        let mut size = 0.0_f64;
+        for pair in solved.windows(2) {
+            let &[a, b] = pair else { continue };
+            let h = b.t - a.t;
+            let sliver = RATE_PIECE * h;
+            let (Some(at_a), Some(at_b)) = (
+                arc_rows_at(a.feet[0], a.feet[1], a.tangent, a.root, sagitta),
+                arc_rows_at(b.feet[0], b.feet[1], b.tangent, b.root, sagitta),
+            ) else {
+                return Ok(Chord::NotEnclosed);
+            };
+            let side = at_a.2;
+            if at_b.2 != side {
+                return Ok(Chord::NotEnclosed);
+            }
+            let about = a.root;
+            let mut series = Vec::new();
+            for (lo, hi) in [(a.t, b.t), (a.t, a.t + sliver), (b.t - sliver, b.t)] {
+                let Some(feet) = self.feet_series(k, legs, lo, hi)? else {
+                    return Ok(Chord::NotEnclosed);
+                };
+                let d = curve_derivs_over(&leader, Ivl::new(lo, hi), FEET_SERIES_ORDER + 1, None)?;
+                // a span too long for its rows' enclosure: more stations
+                let Some(r) = arc_rows_series(&feet, &d, side, sagitta, about)? else {
+                    return Ok(Chord::Over(f64::INFINITY));
+                };
+                series.push(r);
+            }
+            let Ok([whole, start, end]) = <[[RowSeries; 5]; 3]>::try_from(series) else {
+                return Err(defect("the arc's rows were enclosed over the span and its two ends, three pieces, but not three came back"));
+            };
+            if knots.is_empty() {
+                knots.push(a.t);
+                mults.push(4);
+            } else if let Some(m) = mults.last_mut() {
+                *m = 3;
+            }
+            knots.push(b.t);
+            mults.push(4);
+            let pt = |v: &crate::blend::fillet_section::series::VSer<Ivl>, kk: usize| {
+                let [x, y, z] = &v.a;
+                crate::blend::fillet_section::series::V3 {
+                    x: x.at(kk, 0),
+                    y: y.at(kk, 0),
+                    z: z.at(kk, 0),
+                }
+            };
+            let (mut e_p, mut e_w, mut reach, mut w_min) =
+                (0.0_f64, 0.0_f64, 0.0_f64, f64::INFINITY);
+            let ends = [(&start, &at_a), (&end, &at_b)];
+            // each row's Hermite control points in homogeneous form about c₀: (point, weight)
+            let mut controls: [[(Vec3, f64); 4]; 5] = [[(Vec3::new(0.0, 0.0, 0.0), 0.0); 4]; 5];
+            for (j, ((wp, ww), control)) in whole.iter().zip(controls.iter_mut()).enumerate() {
+                // the Hermite remainder of the row's point and weight
+                let hp = h.powi(4) / 16.0 * ivl_norm(pt(wp, 4));
+                let hw = h.powi(4) / 16.0 * ww.at(4, 0).mag();
+                let p0 = pt(wp, 0);
+                let w0 = ww.at(0, 0);
+                if !w0.is_positive() {
+                    return Ok(Chord::Over(f64::INFINITY));
+                }
+                w_min = w_min.min(w0.lo);
+                reach = reach.max(ivl_norm(p0) / w0.lo);
+                let mut off_p = 0.0_f64;
+                let mut off_w = 0.0_f64;
+                let mut ends_hw =
+                    [(Vec3::new(0.0, 0.0, 0.0), 0.0, Vec3::new(0.0, 0.0, 0.0), 0.0); 2];
+                for ((rows_end, at), e) in ends.iter().zip(ends_hw.iter_mut()) {
+                    let (Some((sp, sw)), Some(&p), Some(&wt)) =
+                        (rows_end.get(j), at.0.get(j), at.1.get(j))
+                    else {
+                        return Err(defect("a row of the arc lacked its end's series or value, though every end has its five"));
+                    };
+                    // the station's row in homogeneous form about c₀
+                    let ph = (p - about) * wt;
+                    let (rate_p, dp) = ivl_mid(pt(sp, 1));
+                    let rw = sw.at(1, 0);
+                    let (rate_w, dw) = (rw.mid(), (rw.hi - rw.mid()).max(rw.mid() - rw.lo));
+                    off_p = off_p.max(ivl_off(pt(sp, 0), Point3::ZERO + ph) + h / 3.0 * dp);
+                    let w_enc = sw.at(0, 0);
+                    off_w =
+                        off_w.max((w_enc.hi - wt).abs().max((wt - w_enc.lo).abs()) + h / 3.0 * dw);
+                    *e = (ph, wt, rate_p, rate_w);
+                }
+                e_p = e_p.max(hp + off_p);
+                e_w = e_w.max(hw + off_w);
+                let [(pa, wa, ra, rwa), (pb, wb, rb, rwb)] = ends_hw;
+                *control = [
+                    (pa, wa),
+                    (pa + ra * (h / 3.0), wa + rwa * (h / 3.0)),
+                    (pb - rb * (h / 3.0), wb - rwb * (h / 3.0)),
+                    (pb, wb),
+                ];
+            }
+            let least = w_min - e_w;
+            if least.is_nan() || least <= 0.0 {
+                return Ok(Chord::Over(f64::INFINITY));
+            }
+            bound = bound.max((e_p + reach * e_w) / least);
+            if bound > tol {
+                return Ok(Chord::Over(bound));
+            }
+            size = size.max(about.max_dimension() + reach);
+            for ((points, weights), control) in rows.iter_mut().zip(&controls) {
+                let skip = usize::from(!points.is_empty());
+                for &(ph, wt) in control.iter().skip(skip) {
+                    if wt.is_nan() || wt <= 0.0 {
+                        return Ok(Chord::Over(f64::INFINITY));
+                    }
+                    points.push(about + ph * (1.0 / wt));
+                    weights.push(wt);
+                }
+            }
+        }
+        let bound = bound + NET_ROUNDING * (1.0 + size);
+        let [(first, _), .., (last, _)] = &rows;
+        if first.len() < 4 {
+            return Ok(Chord::NotEnclosed);
+        }
+        let mut points = Vec::new();
+        let mut weights = Vec::new();
+        for i in 0..first.len() {
+            for (p, w) in &rows {
+                let (Some(&pi), Some(&wi)) = (p.get(i), w.get(i)) else {
+                    return Err(defect("a row of the arc's net had fewer control points than the others, though every span adds the same to each"));
+                };
+                points.push(pi);
+                weights.push(wi);
+            }
+        }
+        let curve = |points: &[Point3]| {
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: points,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &mults,
+                knots: &knots,
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+        };
+        let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 2,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &mults,
+            v_multiplicities: &[3, 2, 3],
+            u_knots: &knots,
+            v_knots: &[0.0, 0.5, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&weights),
+            uv_domain: None,
+        })?;
+        Ok(Chord::Net(net, [curve(first)?, curve(last)?], bound))
+    }
+}
+
+/// A foot's [`FootSeries`] over the leader's parameters `t`, `x` a proved box of the foot's
+/// parameters on `support`'s form for every `t` there and `w0` an enclosure of `w = S − e`
+/// there (the centred one of the piece's proof: `w` over the box would count the toe's and
+/// the root's travel twice, and with it the linear part would not be proved invertible): the
+/// parameters'
+/// coefficients `x_k` (`k >= 1`) solved from `J x_k = −r_k`, `r_k` the equations' `k`th
+/// coefficient with `x_k` left 0 and `J` their linear part, enclosed by `x_k ∈ −C r_k +
+/// (I − C J) x_k` with `C` the inverse of `J`'s middle and `‖x_k‖ <= ‖C r_k‖ / (1 − q)`,
+/// `q = ‖I − C J‖ < 1`; then the foot's point `S(x(t))` composed (`Σ P_ab Δu^a Δv^b / a! b!`
+/// over the partials `P` enclosed on the box). Each coefficient holds the true one at every
+/// `t` in `t`, the foot there being in the box. `None` where the partials are not enclosed
+/// or `q` is not proved below 1.
+///
+/// # Errors
+///
+/// Those of the enclosures and the series.
+fn foot_series_over(
+    support: &ProofSupport,
+    leader: &crate::blend::fillet_section::certificate::NurbsCurve,
+    t: Ivl,
+    x: [Ivl; 2],
+    w0: crate::blend::fillet_section::series::V3<Ivl>,
+) -> Result<Option<FootSeries>> {
+    use crate::blend::fillet_section::certificate::curve_derivs_over;
+    use crate::blend::fillet_section::series::{Ser, Trunc, VSer, V3};
+    use crate::geom::krawczyk::inverse_of_columns2;
+    const N: usize = FEET_SERIES_ORDER;
+    let tr = Trunc::new(N, 0)?;
+    let zero = V3 {
+        x: Ivl::from(0.0),
+        y: Ivl::from(0.0),
+        z: Ivl::from(0.0),
+    };
+    let Some(p) = support.partials(x, N)? else {
+        return Ok(None);
+    };
+    let d = curve_derivs_over(leader, t, N + 1, None)?;
+    // the leader e and its rate e′ as series: e_k = D_k / k!, e′_k = D_(k+1) / k!
+    let mut e = VSer::constant(zero);
+    let mut de = VSer::constant(zero);
+    let mut fact = 1.0_f64;
+    for kk in 0..=N {
+        if kk > 0 {
+            fact *= kk as f64;
+        }
+        let (Some(dk), Some(dk1)) = (d.get(kk), d.get(kk + 1)) else {
+            return Ok(None);
+        };
+        let f = Ivl::from(1.0) / Ivl::from(fact);
+        for (ser, v) in [(&mut e, dk), (&mut de, dk1)] {
+            for (c, vj) in ser.a.iter_mut().zip([v.x, v.y, v.z]) {
+                c.set(kk, 0, vj * f);
+            }
+        }
+    }
+    // S(x0 + Δ) to order N, Δ = (du, dv) without constant terms, from the partials on the box
+    let compose = |du: &Ser<Ivl>, dv: &Ser<Ivl>| -> VSer<Ivl> {
+        let mut pu = vec![Ser::constant(Ivl::from(1.0))];
+        let mut pv = vec![Ser::constant(Ivl::from(1.0))];
+        for a in 1..=N {
+            if let (Some(lu), Some(lv)) = (pu.last().cloned(), pv.last().cloned()) {
+                pu.push(lu.mul_valued(du, a - 1, 1, tr));
+                pv.push(lv.mul_valued(dv, a - 1, 1, tr));
+            }
+        }
+        let mut s = VSer::constant(zero);
+        let mut fa = 1.0_f64;
+        for (a, pua) in pu.iter().enumerate() {
+            if a > 0 {
+                fa *= a as f64;
+            }
+            let mut fb = 1.0_f64;
+            for (b, pvb) in pv.iter().enumerate().take(N - a + 1) {
+                if b > 0 {
+                    fb *= b as f64;
+                }
+                let mono = pua.mul_valued(pvb, a, b, tr);
+                let f = Ivl::from(1.0) / Ivl::from(fa * fb);
+                let c = p.at(a, b);
+                for (o, cj) in s.a.iter_mut().zip([c.x, c.y, c.z]) {
+                    o.add_scaled(&mono, cj * f, tr);
+                }
+            }
+        }
+        s
+    };
+    let Some(&e1) = d.get(1) else {
+        return Ok(None);
+    };
+    let (su, sv) = (p.at(1, 0), p.at(0, 1));
+    let two = Ivl::from(2.0);
+    // the linear part by columns (in x_u, then x_v), and its middle's inverse by rows
+    let j = [
+        [idot(su, e1), two * idot(w0, su)],
+        [idot(sv, e1), two * idot(w0, sv)],
+    ];
+    let Some(c) = inverse_of_columns2(&j.map(|col| col.map(Ivl::mid))) else {
+        return Ok(None);
+    };
+    // I − C J, by rows, and q its row norm
+    let mut m = [[Ivl::from(0.0); 2]; 2];
+    let mut q = 0.0_f64;
+    for (row, (mi, ci)) in m.iter_mut().zip(c).enumerate() {
+        let mut sum = 0.0_f64;
+        for (col, (mij, jc)) in mi.iter_mut().zip(j).enumerate() {
+            let cj = Ivl::from(ci[0]) * jc[0] + Ivl::from(ci[1]) * jc[1];
+            let id = if row == col { 1.0 } else { 0.0 };
+            *mij = Ivl::from(id) - cj;
+            sum += mij.mag();
+        }
+        q = q.max(sum);
+    }
+    // rounded up: the sum of magnitudes, and 1 − q below
+    let q = crate::blend::fillet_section::interval::round_up(q * (1.0 + 4.0 * f64::EPSILON));
+    if !q.is_finite() || q >= 1.0 {
+        return Ok(None);
+    }
+    let mut du = Ser::constant(Ivl::from(0.0));
+    let mut dv = Ser::constant(Ivl::from(0.0));
+    for kk in 1..=N {
+        let mut w = compose(&du, &dv).sub(&e, tr);
+        // w's constant term the centred one
+        for (c, v) in w.a.iter_mut().zip([w0.x, w0.y, w0.z]) {
+            c.set(0, 0, v);
+        }
+        let r = [w.dot(&de, tr).at(kk, 0), w.dot(&w, tr).at(kk, 0)];
+        let cr = c.map(|ci| Ivl::from(ci[0]) * r[0] + Ivl::from(ci[1]) * r[1]);
+        let size = cr.iter().fold(0.0_f64, |a, x| a.max(x.mag()));
+        let rho = (Ivl::from(size) / (Ivl::from(1.0) - Ivl::from(q))).hi;
+        if !rho.is_finite() {
+            return Ok(None);
+        }
+        let ball = Ivl::new(-rho, rho);
+        let ([cr0, cr1], [m0, m1]) = (cr, m);
+        du.set(kk, 0, Ivl::from(0.0) - cr0 + m0[0] * ball + m0[1] * ball);
+        dv.set(kk, 0, Ivl::from(0.0) - cr1 + m1[0] * ball + m1[1] * ball);
+    }
+    let s = compose(&du, &dv);
+    let mut out = [zero; N + 1];
+    let [sx, sy, sz] = &s.a;
+    for (kk, o) in out.iter_mut().enumerate() {
+        *o = V3 {
+            x: sx.at(kk, 0),
+            y: sy.at(kk, 0),
+            z: sz.at(kk, 0),
+        };
+    }
+    Ok(Some(out))
 }
