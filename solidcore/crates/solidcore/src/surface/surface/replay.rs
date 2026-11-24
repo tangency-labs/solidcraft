@@ -1,7 +1,8 @@
 //! A test-only seam (feature `wr57-replay`, off by default and never on in `cargo build`,
 //! a release or a wasm build) at the two WR-57 entry points:
 //! [`Surface::find_degen_param_for_direction`] and the singular point inversion
-//! ([`Surface::invert_point_near_singularity`]).
+//! ([`Surface::invert_point_near_singularity`]), and at WR-450's two choices
+//! ([`Seam::AnalyticCopy`], [`Seam::SplitTrims`]) for the goldens' `wr450_rows` replay.
 //!
 //! The goldens crate's substitution replay (`wr57_replay`, #17856) gives a kernel a
 //! [`ReplaySeam`] ([`Kernel::replay`]): a hook that sees each outermost call's inputs,
@@ -38,6 +39,15 @@ pub enum Seam {
     Degen,
     /// The singular point inversion (closest point or maximize).
     Invert,
+    /// WR-450: whether `BSplineSurface::copy_and_add_analytics` keeps an exact copy (`[1]`)
+    /// or the recognised analytic (`[0]`, upstream's choice); the call's surface is the
+    /// analytic, its input empty.
+    AnalyticCopy,
+    /// WR-450: whether `MakeEdgeInFaceWithVU` drops the UV trims of the new face's edge
+    /// uses (`[1]`) once its surface is the copy of the split face's, as main did before
+    /// the retirement where the copy is of another kind (input `[1]`); never now (`[0]`).
+    /// The call's surface is the split face's.
+    SplitTrims,
 }
 
 /// A call's answer: its value as bits, or its error.
@@ -147,6 +157,35 @@ impl Bits for SingularityInversion {
             reason,
         })
     }
+}
+
+impl Bits for bool {
+    fn to_bits(&self) -> Vec<u64> {
+        vec![u64::from(*self)]
+    }
+    fn from_bits(bits: &[u64]) -> Option<Self> {
+        match *bits {
+            [0] => Some(false),
+            [1] => Some(true),
+            _ => None,
+        }
+    }
+}
+
+/// The choice `own` of `seam` ([`Seam::AnalyticCopy`], [`Seam::SplitTrims`]) on
+/// `surface` with `input`, through `k`'s hook ([`wrap`]).
+///
+/// # Errors
+///
+/// As [`wrap`].
+pub(crate) fn choose(
+    k: &Kernel,
+    surface: &Surface,
+    seam: Seam,
+    input: &[u64],
+    own: bool,
+) -> Result<bool> {
+    wrap(k, surface, seam, input, false, || Ok(own))
 }
 
 /// Runs `f`, a call of `seam` on `surface` with `input`, through `k`'s hook. With no hook,

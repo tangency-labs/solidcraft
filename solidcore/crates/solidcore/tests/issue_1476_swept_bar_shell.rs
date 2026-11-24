@@ -205,8 +205,8 @@ fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
 /// SolidCraft's configuration with `shell_edges_on_analytics_exact` on as well (the
 /// rig's run of shell/566, which failed with `Unported(topology.face_p2)`): the shell
 /// builds and no edge changes. The inner straight walls are certified nets (WR-718) that
-/// do not give the recognised plane's points at the same parameters, so with
-/// `analytic_copy_keeps_parameterization` (WR-450) the merge keeps them as B-splines; no
+/// do not give the recognised plane's points at the same parameters, so the merge keeps
+/// them as B-splines (`CopyAndAddAnalytics`, WR-450); no
 /// marched edge then lies between two analytic faces, and the shell has the lines and
 /// the volume of the test without the pass (with `N_SrfOffset`'s fits two edges became
 /// lines). The fork (tangency-labs/smlib 68fb9162) gives V = 1299.4823. Slow in debug

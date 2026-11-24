@@ -25,8 +25,9 @@
 //! | [`BSplineSurface::adjust_step_uv_domain`]         | `AdjustSTEPUVDomain`             |
 //! | `transpose` (private)                             | `SmTArray<T>::Transpose`         |
 //!
-//! Opt-in ([`UpstreamFixes::analytic_copy_keeps_parameterization`](crate::kernel::UpstreamFixes::analytic_copy_keeps_parameterization), WR-450):
-//! `CopyAndAddAnalytics` keeps an exact copy where its analytic surface differs from the source at the same parameters.
+//! WR-450: `CopyAndAddAnalytics` keeps an exact copy where its analytic surface differs from
+//! the source at the same parameters (7 x 7 grid), so a face that keeps its UV domain and
+//! trims on the copy keeps trims that lie on its edges.
 //!
 //! WR-103: `CreateSphereFromArcs` refuses an arc whose centre is farther than the 3D tolerance from
 //! the first arc's, instead of reproducing upstream's aliased (dead) centre check.
@@ -424,35 +425,37 @@ impl BSplineSurface {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
         // SmPlane
         if let Some(plane) = Plane::is_nurb_surface_plane(k, self, 1.0)? {
-            return Ok(self.analytic_or_exact_copy(k, Surface::from(plane)));
+            return self.analytic_or_exact_copy(k, Surface::from(plane));
         }
         // SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion
         if let Some(analytic) = recognise_analytic(k, self)? {
-            return Ok(self.analytic_or_exact_copy(k, analytic));
+            return self.analytic_or_exact_copy(k, analytic);
         }
         // arrive here - make sure it's a copy
         Ok(Surface::from(self.copy()))
     }
 
-    /// The recognised analytic `analytic`, or an exact copy when
-    /// `Kernel::fixes.analytic_copy_keeps_parameterization` is on and `analytic` does not
+    /// The recognised analytic `analytic`, or an exact copy when `analytic` does not
     /// give this surface's points at the same parameters (the fork's
     /// `sm_SameParameterization`, WR-450, #387): a face split with
     /// `MakeEdgeInFaceWithVU` keeps its UV domain and trims on the copy.
-    fn analytic_or_exact_copy(&self, k: &Kernel, analytic: Surface) -> Surface {
-        if !k.fixes.analytic_copy_keeps_parameterization {
-            return analytic;
-        }
+    ///
+    /// # Errors
+    ///
+    /// Only the test-only replay seam's (feature `wr57-replay`).
+    fn analytic_or_exact_copy(&self, k: &Kernel, analytic: Surface) -> Result<Surface> {
         let domain = self.natural_uv_domain();
         let steps = 6.0;
         let mut pairs = Vec::with_capacity(49);
         let mut bbox = crate::geom::extent3d::Extent3d::default();
+        // (the points come from a copy: an analytic makes its NURB on first evaluation,
+        // and the analytic returned is the one recognised, untouched by the check)
+        let probe = analytic.clone();
         for i in 0..=6u8 {
             for j in 0..=6u8 {
                 let uv = domain.evaluate(f64::from(i) / steps, f64::from(j) / steps);
-                let (Ok(a), Ok(b)) = (self.evaluate_point(uv), analytic.evaluate_point(k, uv))
-                else {
-                    return Surface::from(self.copy());
+                let (Ok(a), Ok(b)) = (self.evaluate_point(uv), probe.evaluate_point(k, uv)) else {
+                    return self.analytic_or_exact(k, analytic, true);
                 };
                 bbox.add_point(a);
                 pairs.push((a, b));
@@ -460,10 +463,32 @@ impl BSplineSurface {
         }
         let tol = k.tolerances.zone_tol_3d.max(1.0e-9 * bbox.size().length());
         // (`!(d <= tol)`: a NaN distance is a mismatch)
-        if pairs.iter().all(|&(a, b)| a.distance(b) <= tol) {
-            analytic
+        let exact = !pairs.iter().all(|&(a, b)| a.distance(b) <= tol);
+        self.analytic_or_exact(k, analytic, exact)
+    }
+
+    /// `analytic`, or an exact copy when `exact`.
+    ///
+    /// # Errors
+    ///
+    /// Only the test-only replay seam's (feature `wr57-replay`).
+    fn analytic_or_exact(&self, k: &Kernel, analytic: Surface, exact: bool) -> Result<Surface> {
+        #[cfg(not(feature = "wr57-replay"))]
+        let _ = k;
+        // (test-only seam of the WR-450 replay, feature `wr57-replay`: the goldens put
+        // upstream's choice, the analytic, in place to show which rows the copy moved)
+        #[cfg(feature = "wr57-replay")]
+        let exact = crate::surface::surface::replay::choose(
+            k,
+            &analytic,
+            crate::surface::surface::replay::Seam::AnalyticCopy,
+            &[],
+            exact,
+        )?;
+        if exact {
+            Ok(Surface::from(self.copy()))
         } else {
-            Surface::from(self.copy())
+            Ok(analytic)
         }
     }
 
@@ -2655,15 +2680,14 @@ mod tests {
         BSplineSurface::from_nurb(nurb, false)
     }
 
-    /// WR-450 (#387): the analytic copy of the rational half cylinder has SMLib's own
-    /// parameterization, so a face's UV trims no longer fit it. With
-    /// `analytic_copy_keeps_parameterization` the copy keeps the exact surface.
+    /// WR-450 (#387): the recognised analytic of the rational half cylinder has SMLib's
+    /// own parameterization, so a face's UV trims would no longer fit it: the copy keeps
+    /// the exact surface.
     #[test]
     fn rational_half_cylinder_copy_keeps_parameterization() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let s = rational_half_cylinder();
         let domain = s.natural_uv_domain();
-        let off = s.copy_and_add_analytics(&k).unwrap();
         let worst = |k: &Kernel, c: &crate::surface::surface::Surface| {
             let mut worst = 0.0_f64;
             for i in 0..=6 {
@@ -2675,14 +2699,13 @@ mod tests {
             }
             worst
         };
-        assert!(
-            !matches!(off.kind(), crate::surface::surface::SurfaceKind::BSpline(_)),
-            "recognised as analytic"
-        );
-        let off_gap = worst(&k, &off);
-        assert!(off_gap > 1e-3, "default copy is off by {off_gap}");
+        // upstream's copy: the recognised analytic, off the surface at the same parameters
+        let analytic = recognise_analytic(&k, &s)
+            .unwrap()
+            .expect("recognised as analytic");
+        let off_gap = worst(&k, &analytic);
+        assert!(off_gap > 1e-3, "the analytic is off by {off_gap}");
 
-        k.fixes.analytic_copy_keeps_parameterization = true;
         let on = s.copy_and_add_analytics(&k).unwrap();
         assert!(matches!(
             on.kind(),

@@ -107,8 +107,16 @@ pub(crate) fn with_seam(mut k: Kernel) -> Kernel {
     k
 }
 
+/// Whether a test here has a seam installed on this thread ([`crate::replay_active`]).
+pub(crate) fn active() -> bool {
+    SEAM.with(|s| s.borrow().is_some())
+}
+
 /// Runs `f` with `hook` installed as this thread's seam.
-fn with_hook<R>(hook: impl FnMut(Call<'_>) -> Answer + Send + 'static, f: impl FnOnce() -> R) -> R {
+pub(crate) fn with_hook<R>(
+    hook: impl FnMut(Call<'_>) -> Answer + Send + 'static,
+    f: impl FnOnce() -> R,
+) -> R {
     SEAM.with(|s| *s.borrow_mut() = Some(ReplaySeam::new(Box::new(hook))));
     let r = f();
     SEAM.with(|s| *s.borrow_mut() = None);
@@ -137,14 +145,14 @@ pub(super) type Row = (
     &'static [(u32, Ans)],
 );
 
-fn unit(id: &str) -> Box<dyn UnitDiff> {
+pub(crate) fn unit(id: &str) -> Box<dyn UnitDiff> {
     crate::registry()
         .into_iter()
         .find(|u| u.id() == id)
         .unwrap_or_else(|| panic!("no unit {id}"))
 }
 
-fn cases(u: &dyn UnitDiff) -> BTreeMap<String, Case> {
+pub(crate) fn cases(u: &dyn UnitDiff) -> BTreeMap<String, Case> {
     let ctx = CaseContext {
         root: repo_root(),
         seeds: SEEDS,
@@ -156,7 +164,7 @@ fn cases(u: &dyn UnitDiff) -> BTreeMap<String, Case> {
         .collect()
 }
 
-fn run(u: &dyn UnitDiff, case: &Case) -> Value {
+pub(crate) fn run(u: &dyn UnitDiff, case: &Case) -> Value {
     let out = u.run_rust(case);
     encode(
         &case.name,
@@ -255,6 +263,10 @@ fn substituted(u: &dyn UnitDiff, case: &Case, subs: &[(u32, Ans)], certify: bool
     let s = Arc::clone(&seen);
     let line = with_hook(
         move |c: Call<'_>| {
+            // (the WR-450 seams are not WR-57's calls)
+            if !matches!(c.seam, Seam::Degen | Seam::Invert) {
+                return c.own;
+            }
             let mut s = s.lock().unwrap();
             let i = s.calls;
             s.calls += 1;
@@ -496,6 +508,10 @@ fn record() {
         let l2 = Arc::clone(&log);
         let line = with_hook(
             move |c: Call<'_>| {
+                // (the WR-450 seams are not WR-57's calls)
+                if !matches!(c.seam, Seam::Degen | Seam::Invert) {
+                    return c.own;
+                }
                 let mut log = l2.lock().unwrap();
                 let i = log.len();
                 let enc = |a: &Answer| match a {

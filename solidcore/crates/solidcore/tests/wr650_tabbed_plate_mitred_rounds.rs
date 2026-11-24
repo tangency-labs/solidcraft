@@ -155,7 +155,6 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 /// SolidCraft's preset of fixes (all 182 of `solidcraft-flags/612ac9a36`) on.
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
-    k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;

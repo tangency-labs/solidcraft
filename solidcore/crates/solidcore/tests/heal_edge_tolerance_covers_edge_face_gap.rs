@@ -334,7 +334,6 @@ fn fit_spheres(k: &Kernel, data: &mut BrepData) -> usize {
     use solidcore::surface::plane::Plane;
     use solidcore::surface::sphere::Sphere;
     use solidcore::surface::surface::{Surface, SurfaceKind};
-    assert!(!k.fixes.analytic_copy_keeps_parameterization);
     let mut replaced = 0;
     for s in &mut data.surfaces {
         let SurfaceKind::BSpline(srf) = s.object.kind() else {
