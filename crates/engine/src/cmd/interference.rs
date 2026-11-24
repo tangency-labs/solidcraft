@@ -225,8 +225,13 @@ fn check(job: &Job) -> Done {
 
 fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool) -> Outcome {
     let threshold = 1e-9 * size.max(1.0).powi(3);
-    // A pair whose shared part can't be worked out is reported, not passed as clear.
-    let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
+    // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
+    // check of the shared part runs here: a part it refuses is reported, not measured.
+    let shared = match solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+        solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect)
+    })
+    .0
+    {
         Ok(Some(o)) => o,
         Ok(None) => return Outcome::Clear,
         Err(e) => return Outcome::Unchecked(e.to_string()),
