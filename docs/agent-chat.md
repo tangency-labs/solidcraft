@@ -338,7 +338,7 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
-  `https://api.cheaperinference.com/v1`, OpenRouter
+  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
   in the agent's settings. This routes requests to `/responses` and lets the model continue
@@ -358,7 +358,9 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
 - The **Model** picker lists the endpoint's models, without a key where the endpoint allows that
   (OpenRouter does), once you leave the address and key fields; opening it asks again after a
-  failure. You can also type a model.
+  failure. You can also type a model. When an endpoint names the API of each listed model in
+  `type` (AI/ML API does), only chat models are listed, and a model listed more than once
+  appears once.
 - An endpoint's card under Preferences → AI → **Agents** has the same **Model** picker. While the
   agent isn't running, opening the picker lists the models (just viewing the page asks nothing),
   and a pick becomes the model for its next connection. While it runs, a pick changes the chat's

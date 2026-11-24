@@ -908,6 +908,11 @@ pub fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &str) ->
 /// 12.500 g"). True on the click that copied.
 pub fn copy_cell(ui: &mut Ui, value: &str, name: &str, mono: bool, hint: &str) -> bool {
     let response = text_impl(ui, value, if mono { Text::MonoCell } else { Text::Cell }, Some(hint));
+    let response = if ui.stack().iter().any(|node| node.tags().contains(super::table::CELL_SELECTION)) {
+        response.interact(egui::Sense::click())
+    } else {
+        response
+    };
     // A copy control rather than a label: it reads as a button, and keyboard focus shows a ring
     // (Enter or Space copies, as a click does).
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), name));
@@ -962,7 +967,11 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
     let response = if fixed {
         let (rect, response) = ui.allocate_exact_size(
             vec2(dimension(ui.available_width()), row_height()),
-            if matches!(style, Text::Value(_, _)) { egui::Sense::hover() } else { egui::Sense::click() },
+            if matches!(style, Text::Value(_, _)) || ui.stack().iter().any(|node| node.tags().contains(super::table::CELL_SELECTION)) {
+                egui::Sense::hover()
+            } else {
+                egui::Sense::click()
+            },
         );
         let tooltip = hover_hint.map(|hint| {
             if ui.painter().layout_no_wrap(text.to_owned(), font.clone(), ink).size().x > rect.width() {

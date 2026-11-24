@@ -50,10 +50,9 @@
 //!   test (its sweep amount is unused); `SM_DEBUG_CODE` blocks, `SM_ASSERT`s and
 //!   `smos_WriteBuffer` messages are dropped.
 //! - **Analytic revolutions** (not upstream: WR-448, tangency-labs/solidcore#545;
-//!   SolidCraft change, tangency-labs/smlib 0b143f7). With
-//!   [`RotationalSweepGeometry::set_analytic_revolutions`] (off by default, so the
-//!   default follows `c9c5979`; `PrimitiveCreation`'s partial rotational sweep sets it
-//!   from `Kernel::fixes.revolve_analytic_profile_faces`), `EdgeSweepHigher` gives a line or circular arc its
+//!   SolidCraft change, tangency-labs/smlib 0b143f7; the only path since
+//!   tangency-labs/solidcraft#14425). With `make_analytics` set (the default),
+//!   `EdgeSweepHigher` gives a line or circular arc its
 //!   cylinder, cone, sphere or torus in the B-spline surface's layout (a line
 //!   falling along the axis: the reversed line's, its cylinder or cone built from the
 //!   low end and never inside out, as 9853e54's `AnalyticSurface`, #1463) instead of
@@ -505,9 +504,6 @@ pub struct RotationalSweepGeometry {
     angle: f64,
     /// `m_dEps`: the tolerance for geometry on the axis, zero sweep lengths, lines.
     eps: f64,
-    /// SolidCraft change (tangency-labs/smlib 0b143f7): sweep a line or circular arc
-    /// to its analytic surface (see [`Self::set_analytic_revolutions`]).
-    analytic_revolutions: bool,
 }
 
 impl RotationalSweepGeometry {
@@ -522,7 +518,6 @@ impl RotationalSweepGeometry {
             axis: axis.unitize_or_z(),
             angle: angle_deg,
             eps,
-            analytic_revolutions: false,
         }
     }
 
@@ -532,24 +527,7 @@ impl RotationalSweepGeometry {
     pub fn copy(&self) -> Self {
         let mut new = Self::new(self.base_pt, self.axis, self.angle, self.eps);
         new.base.set_make_analytics(self.base.make_analytics);
-        new.analytic_revolutions = self.analytic_revolutions;
         new
-    }
-
-    /// SolidCraft change (tangency-labs/smlib 0b143f7, tangency-labs/solidcore#545):
-    /// with `make_analytics` also set, [`Self::edge_sweep_higher`] gives an edge
-    /// whose curve is a line or circular arc in a plane through the axis its
-    /// cylinder, cone, sphere or torus ([`analytic_revolution`]) in place of the
-    /// B-spline surface of revolution, laid out as that B-spline so that its boundary
-    /// makes the same loop. Off by default, as upstream at `c9c5979`.
-    pub fn set_analytic_revolutions(&mut self, on: bool) {
-        self.analytic_revolutions = on;
-    }
-
-    /// Whether [`Self::set_analytic_revolutions`] is on.
-    #[must_use]
-    pub const fn analytic_revolutions(&self) -> bool {
-        self.analytic_revolutions
     }
 
     /// `m_sBasePt`.
@@ -959,7 +937,7 @@ impl RotationalSweepGeometry {
         // cone, sphere or torus the curve sweeps, in place of the B-spline before its
         // normal is taken (AnalyticSurface precedes it), which CopyAndAddAnalytics
         // does not give
-        let analytic = if self.base.make_analytics && self.analytic_revolutions && !is_plane {
+        let analytic = if self.base.make_analytics && !is_plane {
             analytic_revolution(
                 k,
                 &copied_orig_edge_curve,
@@ -1565,6 +1543,9 @@ mod tests {
         assert_eq!(s.face_tol, -1.0);
     }
 
+    /// Every line and circular arc swept a part turn is its analytic surface, never
+    /// inside out, laid out so that its boundary makes the loop the B-spline surface of
+    /// revolution (`make_analytics` off) makes (tangency-labs/solidcraft#14425).
     #[test]
     fn analytic_revolutions_keep_the_b_spline_loop() {
         use crate::surface::surface::SurfaceKind;
@@ -1621,11 +1602,10 @@ mod tests {
             ),
         ];
         for (name, (b, e)) in cases {
-            let upstream = RotationalSweepGeometry::new(Vec3::ZERO, Vec3::Z, 90.0, 1e-6);
-            assert!(!upstream.analytic_revolutions());
-            let mut g = upstream.copy();
-            g.set_analytic_revolutions(true);
-            assert!(g.copy().analytic_revolutions());
+            let g = RotationalSweepGeometry::new(Vec3::ZERO, Vec3::Z, 90.0, 1e-6);
+            let mut upstream = g.copy();
+            upstream.base.set_make_analytics(false);
+            assert!(g.copy().base.make_analytics);
             let old = upstream.edge_sweep_higher(&k, &b, e).unwrap();
             let new = g.edge_sweep_higher(&k, &b, e).unwrap();
             let surface = new.surface.as_ref().unwrap();
