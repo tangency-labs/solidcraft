@@ -91,7 +91,7 @@ use solidcraft_geom::drawing_view::{Scale, ViewFrame, is_paper_coordinate};
 use solidcraft_geom::hlr::Source;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun, font_in};
-use solidcraft_geom::paper::{Clip, DrawnFor, Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
+use solidcraft_geom::paper::{Clip, DrawnFor, Group, Item, MAX_COORDINATE_MM, MAX_RECORDS, ObjectKind, Picture, Scene, check_path};
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid, PixelGridError};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
@@ -543,8 +543,8 @@ pub fn line_at(s: &mut Session, sheet: u64, point_mm: Vec2, band_mm: f64) -> Res
         return Ok(None);
     };
     let path = match group.items.get(at) {
-        // A shift keeps an arc's radius and angles, as [`moved`] has it.
-        Some(Item::Stroke { path, .. }) => path.iter().map(|seg| seg.mapped(|p| p + centre, ArcMap::turn(0.0, false))).collect(),
+        // Moved as the sheet draws it ([`moved`]).
+        Some(Item::Stroke { path, .. }) => shifted(path, centre),
         _ => Vec::new(),
     };
     Ok(Some(LineHit { view, body, source, distance_mm, path }))
@@ -1825,7 +1825,8 @@ fn assemble<D: Borrow<Drawn>>(
                         "with its lines the sheet is more than a paper scene's {MAX_RECORDS} records: put it on another sheet, or choose a smaller scale"
                     ));
                 }
-                Err(LeftOut::Invalid(e)) => status = Status::Failed(format!("{e}: choose a smaller scale")),
+                // Named by the line it refuses, rather than a guess that another scale mends it.
+                Err(LeftOut::Invalid(e)) => status = Status::Failed(refused_line(drawn, centre).unwrap_or(e)),
             }
         }
         let boundary_mm = drawn.boundary.map(|b| Aabb2 { min: b.min + centre, max: b.max + centre });
@@ -1875,22 +1876,62 @@ fn group_bounds(group: &Group, fonts: &[Font]) -> Aabb2 {
 }
 
 /// `group` moved `by` on paper: each point plus `by`, exactly, so the same lines moved to the same
-/// centre are the same bytes however they got there.
+/// centre are the same bytes however they got there. A piece far shorter than the paper can show
+/// can have its ends rounded to one point by the shift: it is left out ([`shifted`]).
 pub(crate) fn moved(group: &Group, by: Vec2) -> Group {
-    let segs = |path: &[Seg2]| -> Vec<Seg2> {
-        // A shift keeps an arc's radius and angles: no turn, no mirror.
-        path.iter().map(|seg| seg.mapped(|p| p + by, ArcMap::turn(0.0, false))).collect()
-    };
-    let ring = |l: &Loop2| Loop2 { segs: segs(&l.segs) };
-    let items = group.items.iter().map(|item| match item {
-        Item::Stroke { path, closed, width_mm, pattern } => {
-            Item::Stroke { path: segs(path), closed: *closed, width_mm: *width_mm, pattern: pattern.clone() }
-        }
-        Item::Fill { region } => Item::Fill { region: Region2 { outer: ring(&region.outer), holes: region.holes.iter().map(ring).collect() } },
-        Item::Text(run) => Item::Text(TextRun { origin: run.origin + by, ..run.clone() }),
-        Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),
+    let ring = |l: &Loop2| Loop2 { segs: shifted(&l.segs, by) };
+    let items = group.items.iter().filter_map(|item| {
+        Some(match item {
+            Item::Stroke { path, closed, width_mm, pattern } => {
+                let (path, closed) = moved_path(path, *closed, by)?;
+                Item::Stroke { path, closed, width_mm: *width_mm, pattern: pattern.clone() }
+            }
+            Item::Fill { region } => Item::Fill { region: Region2 { outer: ring(&region.outer), holes: region.holes.iter().map(ring).collect() } },
+            Item::Text(run) => Item::Text(TextRun { origin: run.origin + by, ..run.clone() }),
+            Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),
+        })
     });
     Group { object: group.object, kind: group.kind, items: items.collect() }
+}
+
+/// The pieces of `path` moved `by`. A shift changes no radius, sweep, weight or degree, so a piece the
+/// paper scene takes ([`Seg2Geom::check`]) but refuses once moved, however large the limit, had its
+/// points rounded to one point: it is left out. Any other piece is kept for the scene to judge.
+fn shifted(path: &[Seg2], by: Vec2) -> Vec<Seg2> {
+    // A shift keeps an arc's radius and angles: no turn, no mirror.
+    let moved = |seg: &Seg2| seg.mapped(|p| p + by, ArcMap::turn(0.0, false));
+    // The moved piece first: a good piece passes it, so one check is all it costs.
+    let collapsed = |was: &Seg2, now: &Seg2| now.check(f64::MAX).is_err() && was.check(MAX_COORDINATE_MM).is_ok();
+    path.iter().map(|was| (was, moved(was))).filter(|(was, now)| !collapsed(was, now)).map(|(_, now)| now).collect()
+}
+
+/// A stroke's `path` moved `by` ([`shifted`]) and whether it closes: nothing when the shift left out
+/// all its pieces, and open when it left a closed path one straight line, which never closes on itself.
+fn moved_path(path: &[Seg2], closed: bool, by: Vec2) -> Option<(Vec<Seg2>, bool)> {
+    let kept = shifted(path, by);
+    if kept.is_empty() && !path.is_empty() {
+        return None;
+    }
+    let closed = closed && (kept.len() == path.len() || !matches!(kept.as_slice(), [Seg2::Line { .. }]));
+    Some((kept, closed))
+}
+
+/// The first line of view `drawn` the sheet can't take once moved to `centre`, named by what drew it,
+/// and why ([`check_path`]); none when the sheet takes every stroke or nothing owns the one refused.
+fn refused_line(drawn: &Drawn, centre: Vec2) -> Option<String> {
+    let (group, owners) = (drawn.group.as_deref()?, drawn.owners.as_deref()?);
+    let (at, why) = group.items.iter().enumerate().find_map(|(at, item)| {
+        let Item::Stroke { path, closed, .. } = item else { return None };
+        let (path, closed) = moved_path(path, *closed, centre)?;
+        check_path(&path, closed).err().map(|why| (at, why))
+    })?;
+    let (shown, source) = owners.items.get(at).copied().flatten()?;
+    let body = owners.bodies.get(shown).map_or("a body", |b| b.body.as_str());
+    let line = match source {
+        Source::Edge { edge, .. } => format!("{body}'s edge {edge}"),
+        Source::Silhouette { face } => format!("the silhouette of {body}'s face {face}"),
+    };
+    Some(format!("{line} can't be drawn on the sheet: {why}"))
 }
 
 /// The text cells of sheet `sheet` of `d` as `s`'s design shows them ([`title_block_text::shown`]).

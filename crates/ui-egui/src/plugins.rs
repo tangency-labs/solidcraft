@@ -312,6 +312,56 @@ pub(crate) enum PackageAction {
 
 type PackageReply = Result<(serde_json::Value, solidcraft_engine::plugin::AppState), String>;
 
+/// How long a package job may run before the app gives up on it and takes the next one (#20814).
+/// Reading, checking and unpacking even the largest package takes seconds; a job still silent after
+/// this long is stuck, and it must not leave the app refusing every install and removal for good.
+pub(crate) const PACKAGE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// What the control channel says about a running package job (`control.pending`, `control.running`).
+struct JobInfo {
+    key: u64,
+    command: &'static str,
+    subject: Option<String>,
+    started: std::time::Instant,
+}
+
+static RUNNING_JOBS: std::sync::Mutex<Vec<JobInfo>> = std::sync::Mutex::new(Vec::new());
+static JOB_KEYS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The running package jobs as the control channel lists them: never their parameters, only the
+/// command and the archive or plugin it works on.
+pub(crate) fn running_jobs() -> Vec<serde_json::Value> {
+    let Ok(jobs) = RUNNING_JOBS.lock() else { return Vec::new() };
+    jobs.iter()
+        .map(|job| {
+            let running = job.started.elapsed();
+            let mut row = serde_json::json!({
+                "job": "plugin_package",
+                "command": job.command,
+                "running_s": running.as_secs(),
+                "ends_by_itself_in_s": PACKAGE_DEADLINE.saturating_sub(running).as_secs(),
+                "note": "holds plugin.install and plugin.remove; it is abandoned by itself when its time is up",
+            });
+            if let Some(subject) = &job.subject {
+                row["subject"] = serde_json::json!(subject);
+            }
+            row
+        })
+        .collect()
+}
+
+/// The archive or plugin a package command works on, short enough to repeat in a message.
+#[cfg(not(target_arch = "wasm32"))]
+fn job_subject(command: &str, params: &serde_json::Value) -> Option<String> {
+    let name = if command == "plugin.remove" {
+        params.get("id")?.as_str()?.to_owned()
+    } else {
+        let path = params.get("path")?.as_str()?;
+        Path::new(path).file_name().map_or_else(|| path.to_owned(), |name| name.to_string_lossy().into_owned())
+    };
+    Some(name.chars().take(80).collect())
+}
+
 /// Package I/O keeps running when Preferences closes; only its application policy is adopted.
 pub(crate) struct PackageJob {
     command: &'static str,
@@ -320,6 +370,55 @@ pub(crate) struct PackageJob {
     /// `PrefsWindow::grants_revision` when the job started.
     revision: u64,
     done: std::sync::mpsc::Receiver<PackageReply>,
+    started: std::time::Instant,
+    /// Its entry in [`RUNNING_JOBS`], removed when the job ends.
+    key: u64,
+}
+
+impl Drop for PackageJob {
+    fn drop(&mut self) {
+        if let Ok(mut jobs) = RUNNING_JOBS.lock() {
+            jobs.retain(|job| job.key != self.key);
+        }
+    }
+}
+
+impl PackageJob {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn new(
+        command: &'static str,
+        subject: Option<String>,
+        action: PackageAction,
+        grants_before: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants>,
+        revision: u64,
+        done: std::sync::mpsc::Receiver<PackageReply>,
+    ) -> Self {
+        let key = JOB_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let started = std::time::Instant::now();
+        if let Ok(mut jobs) = RUNNING_JOBS.lock() {
+            jobs.push(JobInfo { key, command, subject, started });
+        }
+        PackageJob { command, action, grants_before, revision, done, started, key }
+    }
+}
+
+/// What refuses a new install or removal while a package job runs: which, on what, for how long, and
+/// that it ends by itself.
+pub(crate) fn busy_message(app: &SolveApp) -> String {
+    busy_message_at(app, std::time::Instant::now())
+}
+
+fn busy_message_at(app: &SolveApp, now: std::time::Instant) -> String {
+    let Some(job) = app.prefs_window.plugin_job.as_ref() else { return app.tr("prefs.plugin_busy").to_owned() };
+    let subject = RUNNING_JOBS.lock().ok().and_then(|jobs| jobs.iter().find(|info| info.key == job.key).and_then(|info| info.subject.clone()));
+    let what = match subject {
+        Some(subject) => format!("{} ({subject})", job.command),
+        None => job.command.to_owned(),
+    };
+    let running = now.saturating_duration_since(job.started).as_secs().to_string();
+    // The saved language, as `SolveApp::tr` reads it: the control channel has no render scope.
+    solidcraft_ui_text::Locale::for_language(&app.preferences.language)
+        .format("prefs.plugin_busy_running", &[("what", &what), ("seconds", &running), ("limit", &PACKAGE_DEADLINE.as_secs().to_string())])
 }
 
 pub(crate) fn busy(app: &SolveApp) -> bool {
@@ -339,7 +438,7 @@ fn spawn_package(
     action: PackageAction,
 ) -> Result<(), String> {
     if busy(app) {
-        return Err(app.tr("prefs.plugin_busy").to_owned());
+        return Err(busy_message(app));
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -349,6 +448,7 @@ fn spawn_package(
         if let Some(level) = level {
             copy.param_check = level;
         }
+        let subject = job_subject(command, &params);
         let (send, done) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("plugin-package".into())
@@ -359,7 +459,7 @@ fn spawn_package(
                 let _ = send.send(reply);
             })
             .map_err(|e| e.to_string())?;
-        app.prefs_window.plugin_job = Some(PackageJob { command, action, grants_before, revision: app.prefs_window.grants_revision, done });
+        app.prefs_window.plugin_job = Some(PackageJob::new(command, subject, action, grants_before, app.prefs_window.grants_revision, done));
         Ok(())
     }
     #[cfg(target_arch = "wasm32")]
@@ -371,17 +471,26 @@ fn spawn_package(
 
 /// Poll package I/O on every frame, including after Preferences closes. Tests drain deterministically.
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
+    tick_at(app, ctx, wait, std::time::Instant::now());
+}
+
+/// [`tick`] at the time `now`. A job still silent after [`PACKAGE_DEADLINE`] is abandoned: it fails
+/// like any other, and its reply, should it ever come, has nowhere to go (the job worked on a copy of
+/// the session, so nothing of it reaches this one).
+fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: std::time::Instant) {
     let Some(job) = app.prefs_window.plugin_job.take() else { return };
     let result = if wait {
         job.done.recv().unwrap_or_else(|e| Err(e.to_string()))
     } else {
         match job.done.try_recv() {
             Ok(result) => result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            Err(std::sync::mpsc::TryRecvError::Empty) if now.saturating_duration_since(job.started) < PACKAGE_DEADLINE => {
                 app.prefs_window.plugin_job = Some(job);
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
                 return;
             }
+            Err(std::sync::mpsc::TryRecvError::Empty) => Err(solidcraft_ui_text::Locale::for_language(&app.preferences.language)
+                .format("prefs.plugin_job_abandoned", &[("command", job.command), ("seconds", &PACKAGE_DEADLINE.as_secs().to_string())])),
             Err(error) => Err(error.to_string()),
         }
     };
@@ -432,7 +541,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
         Ok(reply)
     });
     let result = app.command_completed(job.command, result);
-    if let PackageAction::Control { request, level } = job.action {
+    if let PackageAction::Control { request, level } = &job.action {
         let mut reply = match result {
             Ok(value) => serde_json::json!({"ok":true,"result":value}),
             Err(error) => serde_json::json!({"ok":false,"error":error}),
@@ -586,6 +695,20 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
+        let plugins = crate::plugin_slots::preferences_inventory(app, dir);
+        if plugins.is_empty() {
+            // First-time users need the package format and a way to find the guide before
+            // global host resource limits, which are rarely useful without a plugin (#18764).
+            let intro =
+                crate::ui_kit::text(ui, solidcraft_ui_text::tr("prefs.plugins_get_started"), crate::ui_kit::Text::Hint("plugins_get_started"));
+            crate::scenario::publish_rect("prefs:plugins:get_started", intro.rect);
+            let guide = ui.hyperlink_to(
+                RichText::new(solidcraft_ui_text::tr("prefs.plugins_guide")),
+                "https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md",
+            );
+            crate::scenario::publish_target("prefs:plugins:guide", guide.rect);
+            ui.add_space(8.0);
+        }
         // Install plugin…: pick a .zip, review what it asks for, install it.
         let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.menu"), "import", !busy(app), false);
         crate::scenario::publish_target("prefs:plugins:install", install.rect);
@@ -606,7 +729,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             );
             ui.add_space(8.0);
         }
-        let plugins = crate::plugin_slots::preferences_inventory(app, dir);
         let skipped = crate::plugin_slots::skipped(app).to_vec();
         let query = app.prefs_window.plugin_query.clone();
         crate::ui_kit::settings_list_section(
@@ -655,7 +777,17 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             }
         }
         ui.add_space(8.0);
-        resource_controls(app, ui);
+        let was_expanded = app.preferences.plugin_limits_expanded;
+        let advanced =
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.plugins_advanced_limits"), &mut app.preferences.plugin_limits_expanded);
+        crate::scenario::publish_target("prefs:plugins:advanced_limits", advanced.rect);
+        if was_expanded && !app.preferences.plugin_limits_expanded {
+            // Do not leave a hidden, unfinished fuel or memory change pending for Apply.
+            app.prefs_window.plugin_limit_inputs = None;
+        }
+        if app.preferences.plugin_limits_expanded {
+            resource_controls(app, ui);
+        }
         crate::ui_kit::checkbox(
             ui,
             solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
@@ -683,7 +815,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
 }
 
 /// What was approved at install for `plugin`'s current package, in plain words: command groups,
-/// folders with their access, and memory. Grants made for another version count for nothing.
+/// folders with their access, fuel and memory. Grants made for another version count for nothing.
 pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
     use solidcraft_ui_text::{format, tr};
     let Some(grants) = app.session.plugin_state.grants.get(&plugin.id).filter(|g| g.package_hash.as_deref() == Some(plugin.approval.as_str())) else {
@@ -704,6 +836,9 @@ pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
             _ => "prefs.plugin_folder_read",
         });
         parts.push(format("prefs.plugin_folder", &[("name", &folder.name), ("access", access)]));
+    }
+    if let Some(fuel) = grants.fuel {
+        parts.push(format("prefs.plugin_approved_fuel", &[("fuel", &fuel.to_string())]));
     }
     if let Some(memory) = grants.memory_mib {
         parts.push(format("prefs.plugin_approved_memory", &[("memory", &memory.to_string())]));
@@ -1066,6 +1201,82 @@ mod tests {
         }
     }
 
+    /// #20814: the refusal follows the saved language even where no render scope is set, as the control
+    /// channel has none.
+    #[test]
+    fn the_busy_message_follows_the_saved_language_without_a_render_scope() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "de".into();
+        let (request, _reply) = crate::control::ControlRequest::new("engine.execute", serde_json::json!({"command":"plugin.remove"}));
+        let (_send, done) = std::sync::mpsc::channel();
+        let job =
+            PackageJob::new("plugin.remove", Some("gears".into()), PackageAction::Control { request, level: None }, Default::default(), 0, done);
+        let started = job.started;
+        h.app.prefs_window.plugin_job = Some(job);
+        let message = busy_message_at(&h.app, started + std::time::Duration::from_secs(7));
+        assert!(message.contains("Plugin-Paketauftrag") && message.contains("plugin.remove (gears)"), "{message}");
+        h.app.preferences.language = "en".into();
+        assert!(busy_message_at(&h.app, started).contains("plugin package job"), "English still reads English");
+    }
+
+    /// #20814: a package job whose thread never answers must not leave the app refusing installs for good.
+    #[test]
+    fn a_package_job_that_never_replies_is_abandoned_and_the_next_install_runs() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.join("installed"));
+        let (request, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command":"plugin.install"}));
+        let (send, done) = std::sync::mpsc::channel();
+        let job = PackageJob::new(
+            "plugin.install",
+            Some("stuck-20814.zip".into()),
+            PackageAction::Control { request, level: None },
+            Default::default(),
+            0,
+            done,
+        );
+        let started = job.started;
+        h.app.prefs_window.plugin_job = Some(job);
+        assert!(busy(&h.app));
+
+        // The refusal says what runs, on what, for how long, and that it ends by itself.
+        let message = busy_message_at(&h.app, started + std::time::Duration::from_secs(42));
+        for expected in ["plugin.install", "stuck-20814.zip", "42", &PACKAGE_DEADLINE.as_secs().to_string()] {
+            assert!(message.contains(expected), "{expected}: {message}");
+        }
+        let refused = start_package(&mut h.app, "plugin.install", json!({"path":"x.zip","dry_run":true}), PackageAction::Install).unwrap_err();
+        assert!(refused.contains("plugin.install") && refused.contains("stuck-20814.zip"), "{refused}");
+
+        // `control.pending` and `control.running` list it.
+        let listed = |jobs: Vec<serde_json::Value>| jobs.into_iter().any(|j| j["subject"] == "stuck-20814.zip" && j["command"] == "plugin.install");
+        assert!(listed(running_jobs()));
+
+        // Before its time it keeps running; at its time it is abandoned and reported as failed.
+        tick_at(&mut h.app, &h.ctx, false, started + PACKAGE_DEADLINE - std::time::Duration::from_secs(1));
+        assert!(busy(&h.app));
+        assert!(reply.try_recv().is_err());
+        tick_at(&mut h.app, &h.ctx, false, started + PACKAGE_DEADLINE);
+        assert!(!busy(&h.app));
+        assert!(!listed(running_jobs()));
+        let reply = reply.try_recv().unwrap();
+        assert_eq!(reply["ok"], false, "{reply}");
+        let error = reply["error"].as_str().unwrap();
+        assert!(
+            error.contains("plugin.install") && error.contains("abandoned") && error.contains(&PACKAGE_DEADLINE.as_secs().to_string()),
+            "{error}"
+        );
+
+        // A late reply has nowhere to go: nothing is applied and the next install runs.
+        assert!(send.send(Ok((json!({"installed":true,"id":"late-plugin"}), h.app.session.plugin_state.clone()))).is_err());
+        assert!(!h.app.session.plugin_state.packages.contains_key("late-plugin"));
+        let path = package(&h, "workshop-helper");
+        let zip = zip_package(&path);
+        let archive = zip.to_string_lossy().into_owned();
+        start_package(&mut h.app, "plugin.install", json!({"path":zip,"dry_run":true}), PackageAction::Describe { path: archive }).unwrap();
+        tick(&mut h.app, &h.ctx, true);
+        assert!(!busy(&h.app));
+    }
+
     #[test]
     fn a_scoped_caller_cannot_grant_a_folder_outside_its_scope() {
         use serde_json::json;
@@ -1249,6 +1460,38 @@ mod tests {
             assert!(!dir.exists(), "production layout does not create the plugin folder");
         }
         solidcraft_theme::set_dark(previous);
+    }
+
+    /// A new user's Plugins page leads with installation help. Resource controls remain
+    /// available under Advanced, and the saved preference restores their earlier layout (#18764).
+    #[test]
+    fn empty_plugins_page_leads_with_install_help_and_folds_advanced_limits() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("no-plugins");
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        let help = crate::scenario::rect_of("prefs:plugins:get_started").expect("how to install a plugin");
+        let guide = crate::scenario::rect_of("prefs:plugins:guide").expect("link to plugin guide");
+        let install = crate::scenario::rect_of("prefs:plugins:install").expect("Install plugin button");
+        assert!(help.bottom() < guide.top(), "help comes before documentation");
+        assert!(guide.bottom() < install.top(), "the page leads with how to get plugins");
+        assert!(!h.app.preferences.plugin_limits_expanded);
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_none(), "global resource fields start folded");
+        assert!(!dir.exists(), "looking at an empty page creates no plugin folder");
+
+        click_page(&mut h.app, &ctx, &dir, "prefs:plugins:advanced_limits");
+        assert!(h.app.preferences.plugin_limits_expanded);
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_some(), "Advanced shows the old resource fields");
+
+        let mut reopened = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        reopened.load_prefs(&h.app.prefs());
+        assert!(reopened.preferences.plugin_limits_expanded, "the old layout remains a saved preference");
+        click_page(&mut h.app, &ctx, &dir, "prefs:plugins:advanced_limits");
+        assert!(!h.app.preferences.plugin_limits_expanded, "the controls can be folded again");
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_none(), "folding clears hidden draft edits");
+        capture_page(&mut h.app, &dir, "plugins-get-started.png");
     }
 
     #[test]
