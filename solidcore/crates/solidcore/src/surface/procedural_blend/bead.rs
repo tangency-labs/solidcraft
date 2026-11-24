@@ -64,7 +64,8 @@ impl BeadDefinition {
     ///
     /// `InvalidInput` for a sagitta that is not finite (0 is the flat bead); for a
     /// sagitta past its bound ([`BeadDefinition::check`]) the refusal
-    /// [`NoRoomReason::BeadCutsFace`] with the bound as its fit ([`FitMeasure::Sagitta`]).
+    /// [`NoRoomReason::BeadCutsFace`] with the largest sagitta below the open bound as its fit
+    /// ([`FitMeasure::Sagitta`], a magnitude), so a retry at the fit builds.
     pub fn new(chamfer: ChamferDefinition, sagitta: f64) -> Result<Self> {
         if !sagitta.is_finite() {
             return Err(SolidError::invalid_input(OP, "a bead's sagitta is finite"));
@@ -72,7 +73,7 @@ impl BeadDefinition {
         let bead = Self { chamfer, sagitta };
         bead.check().map_err(|r| {
             Failure::new(OP, BlendFailure::NoRoom(NoRoomReason::BeadCutsFace))
-                .with_fit(Fit::new(r.bound, FitMeasure::Sagitta, None))
+                .with_fit(Fit::new(r.bound.next_down(), FitMeasure::Sagitta, None))
                 .into_error()
         })?;
         Ok(bead)

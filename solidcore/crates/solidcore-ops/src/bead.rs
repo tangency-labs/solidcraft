@@ -1,10 +1,10 @@
 //! Beads laid along joints, each a body of its own (#15130): the bead an application's welds,
 //! sealant and glue share. The kernel builds them ([`beads_apart`]); ops picks the joints'
-//! entities, makes one kernel call per body and gives the refusals as [`Error`]s. The parts are
-//! never changed or merged into.
+//! entities, makes one kernel call per body, on a copy of it, and gives the refusals as
+//! [`Error`]s. The parts are never changed or merged into.
 //!
 //! So far a joint is a straight edge between two planes in an inside corner of one body, sized
-//! by its two legs; one sagitta gives every bead of a call its profile.
+//! by its two legs; one sagitta gives every bead of a call its profile (one call, one weld).
 
 use solidcore::blend::weld_bead::beads_apart;
 use solidcore::error::{FitMeasure, TargetEdge};
@@ -13,7 +13,7 @@ use solidcore::{Brep, Kernel, SolidError};
 
 use crate::blend::{sized_on, MAX_SIZE};
 use crate::body::{finish_under, Body, Contract, Expect};
-use crate::session::with_body;
+use crate::session::measure_body;
 use crate::{Error, FitKind, Result};
 
 /// A joint a bead is laid along, on one of the bodies of a [`beads`] call.
@@ -23,7 +23,8 @@ pub enum Joint {
     /// Edge `edge` (its index in the body's native edge list) of `bodies[body]`: straight,
     /// between two planes, in an inside corner. `legs` run from the edge to the bead's toes,
     /// the first along face `along` (its index in the body's native face list, one of the
-    /// edge's two faces) when given, else along the face the kernel takes first.
+    /// edge's two faces) when given, else along the face the kernel takes first. Each joint's
+    /// `along` is its own: it never orders another joint's legs.
     Edge {
         /// The body's index in the call's `bodies`.
         body: usize,
@@ -38,18 +39,21 @@ pub enum Joint {
 
 /// The beads along `joints`, one body each in the order of `joints`, every one with the
 /// profile `sagitta` (the arc's height over the chord between the toes: `> 0` convex, `< 0`
-/// concave, `0` flat). `bodies` are left as they were, whether the beads are built or refused.
-/// Each body is a distinct body; the joints refer to them by index.
+/// concave, `0` flat). The beads are built on a copy of each body, so `bodies` are left as they
+/// were, their proofs and caches included, whether the beads are built or refused. Each body
+/// is a distinct body; the joints refer to them by index.
 ///
 /// # Errors
 /// [`Error::Argument`] for no joints, a sagitta not finite, a body listed twice, a body,
 /// edge or face index past its list, or a leg not finite, positive and at most
-/// [`MAX_SIZE`]; [`Error::TooLarge`] with the largest leg ([`FitKind::Leg`], at the middle of
-/// its edge) or sagitta ([`FitKind::Sagitta`]) that builds, and [`Error::NoRoom`] where none
-/// does; [`Error::BlendFailed`] with the kernel's statement for joints it does not build yet
-/// (two beads meeting at a vertex, an edge not straight between two planes, an obtuse toe) and
-/// a leg below the body's resolution; [`Error::Refused`] for an edge listed twice or not in an
-/// inside corner; the kernel's other errors.
+/// [`MAX_SIZE`]; [`Error::TooLarge`] with the largest leg that builds ([`FitKind::Leg`]: `at`
+/// the middle of its edge, `face` a point on the face its toe runs off, so the leg to shrink
+/// is the one along that face) or the largest sagitta that builds ([`FitKind::Sagitta`], a
+/// magnitude, `at` the middle of the edge it was found on); `size` 0 where none builds;
+/// [`Error::BlendFailed`] with the kernel's statement for joints it does not build yet (two
+/// beads meeting at a vertex, an edge not straight between two planes, an obtuse toe) and a
+/// leg below the body's resolution; [`Error::Refused`] for an edge listed twice or not in an
+/// inside corner and an `along` that is not one of its edge's faces; the kernel's other errors.
 pub fn beads(bodies: &[&Body], joints: &[Joint], sagitta: f64) -> Result<Vec<Body>> {
     let leg_ok = |l: f64| l.is_finite() && l > 0.0 && l <= MAX_SIZE;
     let distinct = bodies
@@ -75,7 +79,7 @@ pub fn beads(bodies: &[&Body], joints: &[Joint], sagitta: f64) -> Result<Vec<Bod
         if on.is_empty() {
             continue;
         }
-        let beads = with_body("beads", body, |k, b| on_body(k, b, &on, sagitta))??;
+        let beads = measure_body("beads", body, |k, b| on_body(k, b, &on, sagitta))??;
         made.extend(on.iter().map(|(j, _)| *j).zip(beads));
     }
     made.sort_by_key(|(j, _)| *j);
@@ -105,12 +109,13 @@ fn on_body(
         };
         edges.push(e);
         sizes.push(ChamferSize::Distances(legs));
-        if let Some(f) = face {
-            let Some(&f) = b.face_list().get(f) else {
-                return Ok(Err(Error::Argument));
-            };
-            along.push(f);
-        }
+        along.push(match face {
+            Some(f) => match b.face_list().get(f) {
+                Some(&f) => Some(f),
+                None => return Ok(Err(Error::Argument)),
+            },
+            None => None,
+        });
     }
     let beads = match beads_apart(k, b, &edges, &sizes, sagitta, &along) {
         Ok(beads) => beads,
@@ -127,8 +132,9 @@ fn on_body(
 }
 
 /// The kernel's refusal `e` of the beads on `b` as ops': a leg or a sagitta too large with
-/// the size that builds, a failure the kernel states in words with its statement
-/// ([`crate::blend::failure`]); any other error as it is.
+/// the size that builds, its edge's middle and the point the kernel names on the limiting
+/// face; a failure the kernel states in words with its statement ([`crate::blend::failure`]);
+/// any other error as it is.
 fn refused(k: &Kernel, b: &Brep, e: SolidError) -> solidcore::Result<Error> {
     if let Some(fit) = e.fit() {
         let kind = match fit.measure {
@@ -137,17 +143,16 @@ fn refused(k: &Kernel, b: &Brep, e: SolidError) -> solidcore::Result<Error> {
             _ => None,
         };
         if let Some(kind) = kind {
-            if fit.size <= 0.0 {
-                return Ok(Error::NoRoom);
-            }
+            let site = e.site();
+            let edge = fit.edge.or_else(|| site.and_then(|s| s.edge));
             let too_large = Error::TooLarge {
                 size: fit.size,
                 kind,
                 at: None,
-                face: None,
+                face: site.and_then(|s| s.face.and(s.at)).map(|p| [p.x, p.y, p.z]),
                 why: None,
             };
-            return sized_on(k, b, fit.edge.map(TargetEdge::id), too_large);
+            return sized_on(k, b, edge.map(TargetEdge::id), too_large);
         }
     }
     crate::blend::failure(&e).ok_or(e)

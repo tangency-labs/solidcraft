@@ -97,14 +97,7 @@ fn beads_come_back_in_the_order_of_their_joints() {
 #[test]
 fn the_first_leg_runs_along_the_face_named() {
     let t = tee(0.0);
-    let e = edge_at(&t, [45.0, 50.0, 10.0]);
-    // the base's top faces up, the web's side does not
-    let faces = edge_faces_along(&t, e, [0.0, 0.0, 1.0]).unwrap();
-    let (base, web) = if faces[0].1 > faces[1].1 {
-        (faces[0].0, faces[1].0)
-    } else {
-        (faces[1].0, faces[0].0)
-    };
+    let (e, base, web) = left_corner(&t);
     for (along, reach) in [
         (base, [45.0 - 4.0, 10.0 + 8.0]),
         (web, [45.0 - 8.0, 10.0 + 4.0]),
@@ -143,32 +136,135 @@ fn one_call_lays_beads_on_two_bodies_and_leaves_both() {
     assert_eq!([a.to_smb(false).unwrap(), b.to_smb(false).unwrap()], before);
 }
 
-#[test]
-fn a_leg_past_its_face_is_refused_with_the_leg_that_fits() {
-    let t = tee(0.0);
-    let before = t.to_smb(false).unwrap();
-    let e = edge_at(&t, [45.0, 50.0, 10.0]);
-    // the base reaches 45 from the joint, the web 50
-    let got = beads(&[&t], &[joint(0, e, [60.0, 60.0])], 0.0);
-    let Err(Error::TooLarge { size, kind, at, .. }) = got else {
-        panic!("{got:?}")
-    };
-    assert_eq!(kind, FitKind::Leg);
-    assert!(size > 0.0 && size <= 50.0, "{size}");
-    assert!(at.is_some());
-    assert_eq!(t.to_smb(false).unwrap(), before, "the tee changed");
+/// The tee's left inside corner, with the faces on it that the base's top and the web's
+/// side are there.
+fn left_corner(t: &Body) -> (usize, usize, usize) {
+    let e = edge_at(t, [45.0, 50.0, 10.0]);
+    let faces = edge_faces_along(t, e, [0.0, 0.0, 1.0]).unwrap();
+    if faces[0].1 > faces[1].1 {
+        (e, faces[0].0, faces[1].0)
+    } else {
+        (e, faces[1].0, faces[0].0)
+    }
 }
 
 #[test]
-fn a_sagitta_past_its_bound_is_refused_with_the_sagitta_that_fits() {
+fn a_leg_past_its_face_is_refused_with_the_leg_that_fits_and_its_face() {
     let t = tee(0.0);
-    let e = edge_at(&t, [45.0, 50.0, 10.0]);
-    let got = beads(&[&t], &[joint(0, e, [LEG, LEG])], 20.0);
-    let Err(Error::TooLarge { size, kind, .. }) = got else {
+    let before = t.to_smb(false).unwrap();
+    let (e, base, _) = left_corner(&t);
+    // the base reaches 45 from the joint; the web's leg fits
+    let along = |legs| Joint::Edge {
+        body: 0,
+        edge: e,
+        legs,
+        along: Some(base),
+    };
+    let got = beads(&[&t], &[along([60.0, LEG])], 0.0);
+    let Err(Error::TooLarge {
+        size,
+        kind,
+        at,
+        face: Some(face),
+        ..
+    }) = got
+    else {
         panic!("{got:?}")
     };
-    assert_eq!(kind, FitKind::Sagitta);
-    assert!(size > 0.0 && size < 20.0, "{size}");
+    assert_eq!(kind, FitKind::Leg);
+    // 45 less the face's tolerance
+    assert!(size < 45.0 && size > 45.0 - 1e-5, "{size}");
+    assert!(at.is_some());
+    // the toe at that leg, on the base's top: the leg along the base is the one to shrink
+    assert!(
+        close(face[2], 10.0) && (face[0] - (45.0 - size)).abs() < 1e-9,
+        "{face:?}"
+    );
+    assert_eq!(t.to_smb(false).unwrap(), before, "the tee changed");
+    beads(&[&t], &[along([size, LEG])], 0.0).unwrap();
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)] // the bounds' closed forms
+fn a_sagitta_past_its_bound_is_refused_with_the_sagitta_that_builds() {
+    let t = tee(0.0);
+    let (e, _, _) = left_corner(&t);
+    let one = [joint(0, e, [LEG, LEG])];
+    // the toes at 45 degrees: convex below (c / 2) tan(67.5), concave below (c / 2) tan(22.5)
+    let half = 3.0 * 2.0_f64.sqrt();
+    for (h, bound) in [(20.0, half + 6.0), (-5.0, 6.0 - half)] {
+        let got = beads(&[&t], &one, h);
+        let Err(Error::TooLarge { size, kind, at, .. }) = got else {
+            panic!("{h}: {got:?}")
+        };
+        assert_eq!(kind, FitKind::Sagitta);
+        assert!(close(size, bound), "{h}: {size} {bound}");
+        assert!(at.is_some(), "{h}");
+        let retry = if h < 0.0 { -size } else { size };
+        beads(&[&t], &one, retry).unwrap();
+    }
+}
+
+#[test]
+fn each_joint_s_along_orders_its_own_legs_only() {
+    // a block on a plate: the plate's top runs along both of the block's opposite foot edges
+    let plate = make_box([0.0, 0.0, 0.0], [100.0, 100.0, 10.0]).unwrap();
+    let block = make_box([40.0, 40.0, 10.0], [20.0, 20.0, 20.0]).unwrap();
+    let part = union_all(vec![plate, block]).unwrap();
+    let up = |e| {
+        let f = edge_faces_along(&part, e, [0.0, 0.0, 1.0]).unwrap();
+        if f[0].1 > f[1].1 {
+            (f[0].0, f[1].0)
+        } else {
+            (f[1].0, f[0].0)
+        }
+    };
+    let (front, back) = (
+        edge_at(&part, [50.0, 40.0, 10.0]),
+        edge_at(&part, [50.0, 60.0, 10.0]),
+    );
+    let (top, _) = up(front);
+    let (_, side) = up(back);
+    let j = |edge, along| Joint::Edge {
+        body: 0,
+        edge,
+        legs: [4.0, 8.0],
+        along: Some(along),
+    };
+    let got = beads(&[&part], &[j(front, top), j(back, side)], 0.0).unwrap();
+    // front: 4 along the plate, 8 up the block; back: 4 up the block, 8 along the plate
+    let (lo, hi) = got[0].bounds().unwrap();
+    assert!(close(lo[1], 36.0) && close(hi[2], 18.0), "{lo:?} {hi:?}");
+    let (_, hi) = got[1].bounds().unwrap();
+    assert!(close(hi[1], 68.0) && close(hi[2], 14.0), "{hi:?}");
+}
+
+#[test]
+fn the_kernel_s_refusals_of_its_input_come_through() {
+    let t = tee(0.0);
+    let (e, _, web) = left_corner(&t);
+    let right = edge_at(&t, [55.0, 50.0, 10.0]);
+    let top = edge_at(&t, [45.0, 50.0, 60.0]);
+    // a face not on the joint's edge
+    let off = Joint::Edge {
+        body: 0,
+        edge: right,
+        legs: [LEG, LEG],
+        along: Some(web),
+    };
+    for (joints, what) in [
+        (
+            vec![joint(0, e, [LEG, LEG]), joint(0, e, [LEG, LEG])],
+            "an edge twice",
+        ),
+        (vec![joint(0, top, [LEG, LEG])], "an outside edge"),
+        (vec![off], "an along off its edge"),
+    ] {
+        let got = beads(&[&t], &joints, 0.0);
+        assert!(matches!(got, Err(Error::Refused { .. })), "{what}: {got:?}");
+    }
+    let got = beads(&[&t], &[joint(0, e, [1e-9, LEG])], 0.0);
+    assert!(matches!(got, Err(Error::BlendFailed { .. })), "{got:?}");
 }
 
 #[test]
@@ -202,6 +298,16 @@ fn bad_arguments_are_refused() {
         (vec![&t], vec![joint(0, e, [0.0, LEG])], 0.0),
         (vec![&t], vec![joint(0, e, [LEG, f64::INFINITY])], 0.0),
         (vec![&t], vec![joint(0, usize::MAX, [LEG, LEG])], 0.0),
+        (
+            vec![&t],
+            vec![Joint::Edge {
+                body: 0,
+                edge: e,
+                legs: [LEG, LEG],
+                along: Some(usize::MAX),
+            }],
+            0.0,
+        ),
     ] {
         let got = beads(&bodies, &joints, h);
         assert!(matches!(got, Err(Error::Argument)), "{got:?}");
