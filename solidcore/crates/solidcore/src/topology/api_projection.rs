@@ -14,6 +14,13 @@
 //! | `plane_projection` (private)       | `SmCurve::CreatePlaneProjection` (virtual dispatch: the `SmBSplineCurve` override, `SM_ERR` otherwise) |
 //! | `crv_on_surf_plane_projection` (private) | `SmCrvOnSurf::CreatePlaneProjection`        |
 //!
+//! [`project_brep_onto_plane`] draws what is visible, not the body's outline: it projects the
+//! visible curves of hidden-curve removal ([`crate::blend::hcr`]), so an edge between two faces
+//! that both face the viewer is drawn (a smooth one is not), and any part another face hides is
+//! left out, an outline edge included. The outline of a whole body for a sketch's projection is
+//! [`crate::eval::outline`]: every stretch of an edge between a face that faces the viewer and
+//! one that does not, hidden or not.
+//!
 //! Deviations:
 //! - **Context.** `SmApiGetOrCreateContext()` is the caller's [`Kernel`].
 //! - **Null pointers.** A null B-rep, curve or surface is `None`. Where upstream

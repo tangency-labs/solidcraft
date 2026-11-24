@@ -485,13 +485,13 @@ pub struct PointSetSummary {
 }
 
 /// The arithmetic centroid and mean radial distance of a non-empty point set.
-pub fn point_set_summary(points: &[[f64; 2]]) -> Result<PointSetSummary> {
+pub fn centroid_and_mean_radius(points: &[[f64; 2]]) -> Result<PointSetSummary> {
     let points = points
         .iter()
         .copied()
         .map(point2)
         .collect::<Result<Vec<_>>>()?;
-    let summary = q::point_set_summary(&points).map_err(status)?;
+    let summary = solidcore::math::centroid_and_mean_radius(&points).map_err(status)?;
     Ok(PointSetSummary {
         centroid: summary.centroid.to_array(),
         mean_distance: summary.mean_distance,
@@ -885,9 +885,12 @@ impl Body {
     }
 
     /// Every point where the ray from `origin` along `direction` meets a face, nearest first
-    /// (the kernel's `query::brep::face_hits`): the face, the point and the distance. A face the
-    /// ray crosses twice gives two hits; a ray through an edge meets each face there at one
-    /// distance; a stretch along a face is no hit. Empty where the ray meets no face. The
+    /// (the kernel's `query::brep::face_hits`): the face, the point and the distance. A hit is a
+    /// point on the body within its zone tolerance, as for [`Body::face_hit_by_ray`]. A face the
+    /// ray crosses twice gives two hits, a crossing on its seam or pole one; a ray through an
+    /// edge or a vertex meets each face there at one point and distance, those hits in `order`'s
+    /// face order, of which [`Body::face_hit_by_ray`] names one. A hit at the origin is at
+    /// distance 0; a stretch along a face is no hit. Empty where the ray meets no face. The
     /// kernel's solves may add UV trim curves to the body.
     ///
     /// # Errors
@@ -904,7 +907,8 @@ impl Body {
         let hits = with_body("face_hits_by_ray", self, |k, b| {
             solidcore::query::brep::face_hits(k, b, ray)
         })?;
-        hits.into_iter()
+        let mut hits = hits
+            .into_iter()
             .map(|hit| {
                 let face = order
                     .faces
@@ -917,7 +921,10 @@ impl Body {
                     distance: hit.distance,
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        // ties (one point, one distance) in the record's face order
+        hits.sort_by(|p, q| p.distance.total_cmp(&q.distance).then(p.face.cmp(&q.face)));
+        Ok(hits)
     }
 
     /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure
@@ -1655,6 +1662,28 @@ impl Body {
         Ok(Some(SquareFaceLevel { level, tolerance }))
     }
 
+    /// How far record face `face` strays across `direction`, when the kernel proves a bound
+    /// ([`solidcore::prism::measure::face_straying`]): the face lies within it of a surface swept
+    /// along `direction`, taken over the face's own size. Within the zone tolerance
+    /// ([`crate::sweep::zone_tolerance`]) the face runs straight along `direction`. `None` where
+    /// no bound is proved (see the kernel's list), or for a `direction` of no length.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or a `direction` that is not finite; the
+    /// errors of the session.
+    pub fn face_straying(
+        &self,
+        order: &Order,
+        face: usize,
+        direction: [f64; 3],
+    ) -> Result<Option<f64>> {
+        let f = order::face(order, face)?;
+        let d = point(direction)?;
+        read_body("face_straying", self, |k, b| {
+            Ok(solidcore::prism::measure::face_straying(k, b, f, d))
+        })
+    }
+
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
     /// the kernel's contract takes it (ops passes it on as given).
     ///
@@ -2021,8 +2050,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn point_set_summary_and_displacement_adapt_kernel_results() {
-        let summary = point_set_summary(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
+    fn centroid_and_mean_radius_and_displacement_adapt_kernel_results() {
+        let summary = centroid_and_mean_radius(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
         assert_eq!(summary.centroid, [2.0, 2.0]);
         // (2√2 + 4√5) / 3, evaluated independently.
         let expected = 3.924_233_011_581_783;
@@ -2031,12 +2060,15 @@ pub(crate) mod tests {
             point_displacement([2.0, 2.0], [5.0, 6.0]).unwrap(),
             [3.0, 4.0]
         );
-        assert_eq!(point_set_summary(&[[f64::NAN, 0.0]]), Err(Error::Argument));
+        assert_eq!(
+            centroid_and_mean_radius(&[[f64::NAN, 0.0]]),
+            Err(Error::Argument)
+        );
         assert_eq!(
             point_displacement([0.0, 0.0], [f64::INFINITY, 0.0]),
             Err(Error::Argument)
         );
-        assert!(point_set_summary(&[]).is_err());
+        assert!(centroid_and_mean_radius(&[]).is_err());
     }
 
     #[test]

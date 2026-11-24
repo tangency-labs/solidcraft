@@ -15,7 +15,7 @@ The board substrate always comes in:
 - **Cutouts**: a closed contour inside the outline is a hole through the board (even-odd nesting, so an island inside a cutout is board again).
 - **Drilled holes**: pad drills and via drills, round or slotted, are removed from the substrate. If a drill that touches a cutout defeats the profile, the board is rebuilt without the drills rather than failing.
 - **Placement**: the board's lower-left corner (the smallest X and Y of its outline) comes in at X = Y = 0. A board drawn anywhere on KiCad's project sheet lands at the design's origin with its corner there, not at the coordinates the file stores; the import's component carries that one shift, so its contents keep the board's own coordinates inside it.
-- **Thickness**: the board's own `general.thickness`, unless the `thickness` option overrides it. The substrate top is Z = 0, so components sit above it and back-side parts below.
+- **Thickness**: the board's own `general.thickness`, unless the `thickness` option overrides it. The board's substrate spans Z = 0 (the back face) to Z = thickness (the front face), so front-side components stand on the front face at Z = thickness and back-side parts hang below Z = 0, as in KiCad's own STEP export.
 - **Solid substrate**: the board is a B-rep solid (`representation: "brep"`, the default): an Import feature of its own, so its faces and edges can be picked and used in later features. A profile the kernel cannot build falls back to the mesh, with a warning; `representation: "mesh"` keeps the triangle mesh deliberately.
 
 The other layers are options:

@@ -53,8 +53,8 @@ pub(crate) struct State {
     y: Option<f32>,
     /// The plugins listed when the menu last opened.
     pub(crate) listed: Vec<Listed>,
-    /// `listed` has been read at least once since the plugins last changed (the ribbon reads it
-    /// once rather than every frame).
+    /// `listed` has been read since the plugins last changed: by the background discovery, which
+    /// the ribbon and menus wait for rather than reading the plugin folders themselves.
     pub(crate) loaded: bool,
     /// The open entry dialogs, oldest first: each plugin entry has its own, with its own window,
     /// title and field values, so several can be open at once.
@@ -836,7 +836,8 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
     buttons
 }
 
-/// Read the installed plugins when they have not been read since they last changed.
+/// Read the installed plugins now when no discovery has listed them since they last changed. For
+/// a plugin's own request (a form to open): never from a frame, which waits for the discovery.
 pub(crate) fn ensure_listed(app: &mut SolveApp) {
     if !app.plugin_menu.loaded && !cfg!(target_arch = "wasm32") {
         refresh(app);
@@ -929,6 +930,20 @@ pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::
 pub(crate) fn refresh(app: &mut SolveApp) {
     solidcraft_engine::plugin::sync_panels(&mut app.session);
     app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
+    app.plugin_menu.loaded = true;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// Take a background discovery's plugins as the listed ones. No file is read here but the panel
+/// declarations of the plugins that have panels, and only when the installed plugins changed.
+pub(crate) fn adopt(app: &mut SolveApp, plugins: &[Listed]) {
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
+    let mut listed = plugins.to_vec();
+    for plugin in &mut listed {
+        plugin.disabled = !crate::plugins::enabled(app, &plugin.id);
+    }
+    app.plugin_menu.listed = listed;
+    app.plugin_menu.loaded = true;
 }
 
 /// Run the Plugins menu's row `id` (from the menu or the File submenu).
@@ -2207,7 +2222,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     }
     if let Some(key) = browse {
         let id = dialog.id;
-        app.pick_folder(move |app, path| {
+        app.pick_folder("", move |app, path| {
             if let Some(path) = path {
                 apply_browsed_folder(app, id, &key, path);
             }
