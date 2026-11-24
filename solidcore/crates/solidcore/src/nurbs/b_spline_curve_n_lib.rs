@@ -3819,6 +3819,68 @@ mod tests {
         }
     }
 
+    // A quadratic UV curve with the knots `knots` and the control points `xs` on the u
+    // axis.
+    fn uv_curve_on_u_axis(knots: &[f64], xs: &[f64]) -> BSplineCurve {
+        let mut nurb = allocate_nurb_curve(xs.len() - 1, 2, knots.len() - 1).unwrap();
+        for (cpt, &x) in nurb.cpts_mut().iter_mut().zip(xs) {
+            *cpt = CPoint::new(x, 0.0, 0.0, NOW);
+        }
+        nurb.knots_mut().copy_from_slice(knots);
+        BSplineCurve::from_nurb(nurb, 2, false)
+    }
+
+    #[test]
+    fn uv_trim_removes_the_whole_run_of_pole_spans_at_an_end() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_trim_preserves_uv_spans = true;
+        let pole_tol = ZONE_TOL_3D / 10.0;
+        // (curve, where the first span that is no pole starts); the trim's end at 0.9
+        // moves only the last two control points. In the first curve
+        // the second span is no pole on the curve's control points, but cutting the
+        // first span off moves its first control point to C(1e-4) = (0.4e-6, 0), and
+        // then it is one. In the second the second span is a pole longer than the
+        // zone tolerance mapped to the parameter (1e-5 / 0.18 at the start).
+        let cases = [
+            (
+                uv_curve_on_u_axis(
+                    &[0.0, 0.0, 0.0, 1e-4, 2e-4, 0.5, 1.0, 1.0, 1.0],
+                    &[0.0, 0.0, 0.8e-6, 1.1e-6, 0.5, 1.0],
+                ),
+                2e-4,
+            ),
+            (
+                uv_curve_on_u_axis(
+                    &[0.0, 0.0, 0.0, 1e-5, 1e-2, 0.5, 1.0, 1.0, 1.0],
+                    &[0.0, 0.9e-6, 0.0, 0.9e-6, 0.5, 1.0],
+                ),
+                1e-2,
+            ),
+        ];
+        for (at, (original, kept)) in cases.into_iter().enumerate() {
+            let ivl = Extent1d::from_min_max(0.0, 0.9);
+            let mut trimmed = original.clone();
+            let mut trimmed_ivl = ivl;
+            trimmed
+                .trim(&k, &mut trimmed_ivl, TrimMode::Notify)
+                .unwrap();
+            assert_eq!(trimmed_ivl, ivl, "case {at}");
+            assert_eq!(trimmed.natural_interval(), ivl, "case {at}");
+            // two spans are left, the restriction to [kept, 0.9]
+            assert_eq!(trimmed.knots(None).unwrap().0.len(), 3, "case {at}");
+            let restriction = crv_trim(original.nurb.as_ref().unwrap(), kept, 0.9).unwrap();
+            assert_eq!(
+                trimmed.nurb.as_ref().unwrap().cpts(),
+                restriction.cpts(),
+                "case {at}"
+            );
+            assert!(
+                !trimmed.has_internal_pole(&k, pole_tol).unwrap(),
+                "case {at}"
+            );
+        }
+    }
+
     #[test]
     fn uv_trim_fix_preserves_interval_only_and_curve_dispatch() {
         let mut k = Kernel::default();
