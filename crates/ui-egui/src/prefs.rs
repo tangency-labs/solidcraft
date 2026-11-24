@@ -7283,24 +7283,6 @@ mod tests {
         }
     }
 
-    /// Hiding a sketch dimension's default length unit is opt-in, persists across
-    /// sessions and leaves the value input itself unchanged (#16315).
-    #[test]
-    fn sketch_dimension_unit_visibility_preference_is_optional_and_persistent() {
-        let mut h = crate::scenario::Harness::new();
-        assert!(!h.app.preferences.dimension_hide_design_unit);
-        let reply = h.call("ui.prefs", json!({"dimension_hide_design_unit":true}));
-        assert!(reply["error"].is_null(), "{reply}");
-        assert!(h.app.preferences.dimension_hide_design_unit);
-
-        let mut reopened = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        reopened.load_prefs(&h.app.prefs());
-        assert!(reopened.preferences.dimension_hide_design_unit);
-        let reply = h.call("ui.prefs", json!({"dimension_hide_design_unit":false}));
-        assert!(reply["error"].is_null(), "{reply}");
-        assert!(!h.app.preferences.dimension_hide_design_unit);
-    }
-
     /// #14121: the size and colour of sketch dimension text are saved preferences of their own.
     /// An out-of-range scale and a value that is not an RGB colour are refused; a saved bad value
     /// falls back to its default without discarding the other preferences.

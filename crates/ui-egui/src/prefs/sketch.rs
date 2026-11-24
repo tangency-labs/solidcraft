@@ -675,13 +675,6 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
 /// factor of the theme's dimension text size; the colour is the theme's or one the user picks.
 /// Selection, hover and conflicts keep their own colours.
 fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
-    check(
-        ui,
-        "dimension_hide_design_unit",
-        "prefs.dimension_hide_design_unit",
-        Some("prefs.dimension_hide_design_unit_note"),
-        &mut app.preferences.dimension_hide_design_unit,
-    );
     let t = Tokens::get();
     // The custom colour starts at the theme's dimension colour, so switching to Custom changes
     // nothing until the user picks a colour, and stays visible in either theme.

@@ -412,6 +412,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => false,
     };
     let mut set: Option<(String, bool)> = None;
+    let hide_design_unit = app.ui.dimension_hide_design_unit;
+    let mut toggle_hide_design_unit = false;
     let mut linetype = None;
     let mut construction = false;
     let mut look = false;
@@ -516,6 +518,14 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             {
                 set = Some((key.to_string(), !shown(key)));
             }
+            if key == "show_dimensions" {
+                toggle_hide_design_unit = crate::ui_kit::checkbox_row(
+                    ui,
+                    "dimension_hide_design_unit",
+                    solidcraft_ui_text::tr("ui.palette_hide_design_unit"),
+                    hide_design_unit,
+                );
+            }
         }
         construction = crate::ui_kit::checkbox_row(
             ui,
@@ -568,6 +578,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     if set.is_none() && slice_changed {
         set = Some(("slice".into(), !opts.slice));
+    }
+    if toggle_hide_design_unit {
+        // A view-only palette choice; never modify the sketch or its undo history.
+        app.ui.dimension_hide_design_unit = !hide_design_unit;
     }
     if let Some((key, on)) = set {
         let mut params = serde_json::Map::new();
@@ -626,6 +640,23 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sketch_palette_controls_dimension_unit_suffix_without_a_saved_preference() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        assert!(!h.app.ui.dimension_hide_design_unit, "old label display stays the default");
+        let undo = h.app.session.undo.len();
+        let at = crate::scenario::handle_at("sketch_palette:toggle:dimension_hide_design_unit")
+            .expect("Sketch Palette exposes the display choice beside Dimensions");
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        assert!(h.app.ui.dimension_hide_design_unit);
+        assert_eq!(h.app.session.undo.len(), undo, "changing a view label never edits geometry");
+        let at = crate::scenario::handle_at("sketch_palette:toggle:dimension_hide_design_unit").unwrap();
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        assert!(!h.app.ui.dimension_hide_design_unit);
+    }
 
     #[test]
     fn card_uses_design_dimensions_and_all_options_still_run_commands() {

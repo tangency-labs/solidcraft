@@ -1,34 +1,26 @@
 {
   "en": {
-    "prefs.dimension_hide_design_unit": "Hide design units on sketch dimensions",
-    "prefs.dimension_hide_design_unit_note": "Leave the design's length unit out of dimension labels. Input fields still show units and angle labels keep degrees."
+    "ui.palette_hide_design_unit": "Hide dimension units"
   },
   "ar": {
-    "prefs.dimension_hide_design_unit": "إخفاء وحدات التصميم من أبعاد الرسم",
-    "prefs.dimension_hide_design_unit_note": "إخفاء وحدة الطول من تسميات الأبعاد. تظل الوحدات ظاهرة في حقول الإدخال وتحتفظ الزوايا بالدرجات."
+    "ui.palette_hide_design_unit": "إخفاء وحدات التصميم من أبعاد الرسم"
   },
   "he": {
-    "prefs.dimension_hide_design_unit": "הסתרת יחידות התכנון במידות הסקיצה",
-    "prefs.dimension_hide_design_unit_note": "הסתרת יחידת האורך מתוויות המידות. יחידות ימשיכו להופיע בשדות הקלט וסימן המעלות יישאר במידות זווית."
+    "ui.palette_hide_design_unit": "הסתרת יחידות התכנון במידות הסקיצה"
   },
   "ja": {
-    "prefs.dimension_hide_design_unit": "スケッチ寸法の設計単位を隠す",
-    "prefs.dimension_hide_design_unit_note": "寸法ラベルから設計の長さ単位を省きます。入力欄には単位を表示し、角度の度記号は残します。"
+    "ui.palette_hide_design_unit": "スケッチ寸法の設計単位を隠す"
   },
   "vi": {
-    "prefs.dimension_hide_design_unit": "Ẩn đơn vị thiết kế trên kích thước phác thảo",
-    "prefs.dimension_hide_design_unit_note": "Ẩn đơn vị chiều dài trong nhãn kích thước. Ô nhập vẫn hiển thị đơn vị và góc vẫn có ký hiệu độ."
+    "ui.palette_hide_design_unit": "Ẩn đơn vị thiết kế trên kích thước phác thảo"
   },
   "zh": {
-    "prefs.dimension_hide_design_unit": "隐藏草图尺寸中的设计单位",
-    "prefs.dimension_hide_design_unit_note": "在尺寸标签中省略设计长度单位。输入框仍显示单位，角度标签仍保留度数符号。"
+    "ui.palette_hide_design_unit": "隐藏草图尺寸中的设计单位"
   },
   "de": {
-    "prefs.dimension_hide_design_unit": "Konstruktionseinheiten bei Skizzenmaßen ausblenden",
-    "prefs.dimension_hide_design_unit_note": "Längeneinheiten in Maßbeschriftungen ausblenden. Eingabefelder zeigen weiterhin Einheiten und Winkel behalten das Gradsymbol."
+    "ui.palette_hide_design_unit": "Konstruktionseinheiten bei Skizzenmaßen ausblenden"
   },
   "ko": {
-    "prefs.dimension_hide_design_unit": "스케치 치수에서 설계 단위 숨기기",
-    "prefs.dimension_hide_design_unit_note": "치수 레이블에서 설계 길이 단위를 생략합니다. 입력 필드에는 단위가 계속 표시되고 각도에는 도 기호가 유지됩니다."
+    "ui.palette_hide_design_unit": "스케치 치수에서 설계 단위 숨기기"
   }
 }

@@ -22,10 +22,6 @@ macro_rules! sketch_preferences {
             /// theme's dimension colours (Preferences › Sketch › Dimension color, #14121). Selection, hover
             /// and conflicts keep their own colours.
             dimension_colour: Option<[u8; 3]> = None, PAGE_SKETCH;
-            /// Omit the design's length-unit suffix from dimension labels drawn in a sketch or
-            /// in Show Dimensions (#16315). The value editor and angle labels still show units.
-            /// Off keeps the prior labels, including mm and in.
-            dimension_hide_design_unit: bool = false, PAGE_SKETCH;
             /// Where a dimension's value is typed: in a box on the dimension (the default), or in a small
             /// window at it whose arrows step the value (#7246, `dim_view::window`).
             dimension_input: DimensionInput = DimensionInput::View, PAGE_SKETCH;

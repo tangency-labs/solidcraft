@@ -3878,7 +3878,7 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
                         app.preferences.angle_decimals,
                     ),
                     &app.session.doc.units,
-                    app.preferences.dimension_hide_design_unit,
+                    app.ui.dimension_hide_design_unit,
                 ),
                 FontId::proportional(tk.font_caption * crate::prefs::dimension_text_scale(&app.preferences)),
                 col,

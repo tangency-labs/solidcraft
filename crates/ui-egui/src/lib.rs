@@ -478,6 +478,10 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Whether sketch and Show Dimensions labels omit the design's length unit (#16315).
+    /// A Sketch Palette display choice, never a saved Preferences row or geometry edit.
+    #[serde(skip)]
+    pub dimension_hide_design_unit: bool,
     /// Dark theme (the default); a preference kept between runs.
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
@@ -524,6 +528,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            dimension_hide_design_unit: false,
             dark: true,
             pick_off: Vec::new(),
             render_pick: "face".into(),

@@ -1120,7 +1120,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             canvas_label(
                 frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals, app.preferences.angle_decimals),
                 &app.session.doc.units,
-                app.preferences.dimension_hide_design_unit,
+                app.ui.dimension_hide_design_unit,
             ),
             font.clone(),
             col,
