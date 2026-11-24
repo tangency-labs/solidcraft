@@ -1035,7 +1035,7 @@ impl Worker {
                         return;
                     }
                     if self.cfg.protocol == Protocol::Anthropic {
-                        drop_thinking(&mut self.history);
+                        drop_finished_thinking(&mut self.history);
                     }
                     self.emit(Event::Text { thought: true, text: solidcraft_ui_text::tr("ui.agent_chat_context_trimmed").to_owned() });
                     continue;
@@ -1510,9 +1510,18 @@ fn context_full(error: &str) -> bool {
     }
     let e = error.to_lowercase();
     e.starts_with("http 400")
-        && ["context window", "context length", "context_length", "maximum context", "prompt is too long", "too many tokens", "input is too long"]
-            .iter()
-            .any(|p| e.contains(p))
+        && [
+            "context window",
+            "context length",
+            "context limit",
+            "context_length",
+            "maximum context",
+            "prompt is too long",
+            "too many tokens",
+            "input is too long",
+        ]
+        .iter()
+        .any(|p| e.contains(p))
 }
 
 /// Removes the oldest turn (its message, replies and tool results) when a later turn is left, so
@@ -1707,6 +1716,15 @@ fn drop_old_views(history: &mut [Value], keep: usize) -> bool {
 /// the conversation before it, so once a dropped view or trimmed message changes that, the API
 /// refuses the whole request (#9417); leaving earlier thinking out is allowed. A reply that was
 /// only thinking keeps a note, as the API takes no assistant message without content.
+/// [`drop_thinking`] for the finished turns only: the turn under way keeps its reasoning, which
+/// Anthropic needs back unchanged with the tool results it led to.
+fn drop_finished_thinking(history: &mut [Value]) {
+    let current = history.iter().rposition(starts_a_turn).unwrap_or(0);
+    if let Some(finished) = history.get_mut(..current) {
+        drop_thinking(finished);
+    }
+}
+
 fn drop_thinking(history: &mut [Value]) {
     for msg in history.iter_mut().filter(|m| m["role"] == "assistant") {
         let Some(content) = msg.get_mut("content").and_then(Value::as_array_mut) else { continue };
@@ -2287,6 +2305,19 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, Event::Error(e) if e.starts_with("HTTP 400") && e.ends_with(hint))), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "error"), "{events:?}");
         assert!(context_full("HTTP 413: too large") && !context_full("HTTP 400 (unknown model)") && !context_full("HTTP 500 (context window)"));
+        assert!(context_full("HTTP 400: input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000"));
+        // A retry in the middle of a turn keeps that turn's reasoning: only finished turns lose it.
+        let thinking = json!({"type": "thinking", "thinking": "plan", "signature": "s"});
+        let mut history = vec![
+            json!({"role": "user", "content": "one"}),
+            json!({"role": "assistant", "content": [thinking.clone(), {"type": "text", "text": "ok"}]}),
+            json!({"role": "user", "content": "two"}),
+            json!({"role": "assistant", "content": [thinking.clone(), {"type": "tool_use", "id": "t", "name": "x", "input": {}}]}),
+            json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "done"}]}),
+        ];
+        drop_finished_thinking(&mut history);
+        assert_eq!(history[1]["content"], json!([{"type": "text", "text": "ok"}]), "a finished turn loses its reasoning");
+        assert_eq!(history[3]["content"][0], thinking, "the turn under way keeps its reasoning");
         b.shutdown(true);
     }
 
