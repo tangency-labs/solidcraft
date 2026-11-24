@@ -1,6 +1,6 @@
 # Goldens rows moved by retiring `brep_ray_classifies_current_trims` (WR-732, #18934)
 
-Measured against `main` at 2be90afe5b: each row the retirement moves, its first moved value
+Measured against `main` at f957c05f33: each row the retirement moves, its first moved value
 (main's, then this branch's), how many values of the row move, and why (below the table; the
 WR-732 addendum of 2026-11-23 has the change itself).
 
