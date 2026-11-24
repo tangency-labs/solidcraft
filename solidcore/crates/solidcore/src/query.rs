@@ -6,6 +6,7 @@
 
 pub mod api_queries;
 pub mod brep;
+pub mod circle_edge;
 pub mod contact;
 pub mod continuity;
 pub mod curve;

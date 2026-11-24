@@ -25,6 +25,7 @@ use solidcore::query::api_queries::{
     edge_face_gap_samples, face_normal_at_edge,
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
+use solidcore::query::circle_edge;
 use solidcore::query::face::p1 as face_p1;
 use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::outward_solid_failure;
@@ -99,6 +100,17 @@ fn centroidal_properties(
         store: &store,
         key_of: &|_| ObjectKey(0),
     })
+}
+
+/// A circular edge with its axis out of the body ([`Body::rim_circle`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RimCircle {
+    /// The circle's centre.
+    pub center: [f64; 3],
+    /// The unit axis of the circle, pointing out of the body the edge bounds.
+    pub axis: [f64; 3],
+    /// The circle's radius.
+    pub radius: f64,
 }
 
 /// A planar face square to a direction ([`Body::face_square_level`]).
@@ -2105,6 +2117,85 @@ impl Body {
         })
     }
 
+    /// The circular record edge (through `order`) point `p` picks, of the edges listed in
+    /// `among` (every edge when it is empty), with its distance: the edge whose circle
+    /// ([`circle_edge::edge_circle`]) is nearest `p` within `tolerance`, measured to the edge
+    /// (`edge_closest_point`) or to the circle's centre (`point_distance`), whichever is nearer,
+    /// so a pick on a rim or at its centre takes it. The first of equally near edges; `None`
+    /// when no circular edge is within `tolerance`.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges, or a coordinate or a tolerance that is
+    /// not finite; the kernel's error.
+    pub fn circle_edge_at(
+        &self,
+        order: &Order,
+        p: [f64; 3],
+        tolerance: f64,
+        among: &[usize],
+    ) -> Result<Option<(usize, f64)>> {
+        let at = point(p)?;
+        if !tolerance.is_finite() {
+            return Err(Error::Argument);
+        }
+        let all: Vec<usize> = (0..order.edges.len()).collect();
+        let among = if among.is_empty() { &all[..] } else { among };
+        let edges = among
+            .iter()
+            .map(|&i| order::edge(order, i).map(|e| (i, e)))
+            .collect::<Result<Vec<_>>>()?;
+        read_body("circle_edge_at", self, |k, b| {
+            let mut best: Option<(usize, f64)> = None;
+            for (i, e) in edges {
+                let Some(c) = circle_edge::edge_circle(k, b, e)? else {
+                    continue;
+                };
+                let to_centre = q::point_distance(at, c.center)?.value;
+                let d = match answer(q::edge_closest_point(k, b, e, at))? {
+                    Some(on) if on.closest.distance < to_centre => on.closest.distance,
+                    _ => to_centre,
+                };
+                if d <= tolerance && best.is_none_or(|(_, x)| d < x) {
+                    best = Some((i, d));
+                }
+            }
+            Ok(best)
+        })
+    }
+
+    /// Record edge `edge`'s circle ([`circle_edge::edge_circle`]) with its axis pointing out of
+    /// the body ([`circle_edge::axis_out_of_material`], from the outward normals of the faces
+    /// along the edge at its middle, [`Body::face_normal_at_edge`]): out of a hole's or a
+    /// boss's cap. `None` for an edge that is no circle, and for a circle between two faces
+    /// that lean neither way along its axis (two walls).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges; those of
+    /// [`Body::face_normal_at_edge`]; the kernel's error.
+    pub fn rim_circle(&self, order: &Order, edge: usize) -> Result<Option<RimCircle>> {
+        let e = order::edge(order, edge)?;
+        with_body("rim_circle", self, |k, b| {
+            let Some(c) = circle_edge::edge_circle(k, b, e)? else {
+                return Ok(Ok(None));
+            };
+            let mut normals = Vec::new();
+            for f in edge::faces(b, e, None)? {
+                let fu = match outer_faceuse(b, f)? {
+                    Ok(fu) => fu,
+                    Err(e) => return Ok(Err(e)),
+                };
+                let n = face_normal_at_edge(k, b, e, f, fu)?;
+                normals.push((n.normal.value, n.normal.bound));
+            }
+            let axis = circle_edge::axis_out_of_material(c.axis, &normals)?;
+            Ok(Ok(axis.map(|axis| RimCircle {
+                center: array(c.center),
+                axis: array(axis),
+                radius: c.radius,
+            })))
+        })?
+    }
+
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
     /// the kernel's contract takes it (ops passes it on as given).
     ///
@@ -3160,6 +3251,64 @@ pub(crate) mod tests {
         ));
         assert_eq!(located[2], Ok(Located::OnBoundary));
         assert_eq!(located[3], Err(LocateFailure::NotFinite));
+    }
+
+    /// A 20 x 20 x 10 block with a hole r 3 through it at (6, 6) and a boss r 2, 5 high, on its
+    /// top at (14, 14): a pick on a rim or at its centre takes that rim, and its axis points out
+    /// of the block's top or bottom there (up at the hole's top and on the boss's top, down at
+    /// the hole's bottom); a point far from every circle, or a box's edge, takes none.
+    #[test]
+    fn a_rim_is_picked_on_it_or_at_its_centre_and_points_out_of_its_cap() {
+        all_fixes();
+        let block = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+        let hole = crate::make_cylinder([6.0, 6.0, -1.0], 3.0, 12.0).unwrap();
+        let boss = crate::make_cylinder([14.0, 14.0, 10.0], 2.0, 5.0).unwrap();
+        let b = crate::boolean::boolean(block, hole, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let b = crate::boolean::boolean(b, boss, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let o = kernel_order(&b);
+        let rim = |p: [f64; 3]| {
+            let (e, d) = b.circle_edge_at(&o, p, 0.1, &[]).unwrap().expect("a rim");
+            (b.rim_circle(&o, e).unwrap().expect("faces a way"), d)
+        };
+        let near = |a: [f64; 3], b: [f64; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-7);
+        for (pick, centre, up, gap) in [
+            ([9.0, 6.0, 10.0], [6.0, 6.0, 10.0], 1.0, 0.0),
+            ([6.0, 6.0, 10.05], [6.0, 6.0, 10.0], 1.0, 0.05),
+            ([6.0, 3.0, 0.0], [6.0, 6.0, 0.0], -1.0, 0.0),
+            ([14.0, 14.0, 15.0], [14.0, 14.0, 15.0], 1.0, 0.0),
+            ([14.0, 16.0, 10.0], [14.0, 14.0, 10.0], 1.0, 0.0),
+        ] {
+            let (c, d) = rim(pick);
+            assert!(near(c.center, centre), "{pick:?}: {c:?}");
+            assert!(near(c.axis, [0.0, 0.0, up]), "{pick:?}: {c:?}");
+            assert!((d - gap).abs() < 1e-7, "{pick:?}: {d}");
+        }
+        assert_eq!(
+            b.circle_edge_at(&o, [10.0, 0.0, 0.0], 0.1, &[]).unwrap(),
+            None
+        );
+        assert_eq!(
+            b.circle_edge_at(&o, [6.0, 6.0, 5.0], 0.1, &[]).unwrap(),
+            None
+        );
+        // among some edges only: the nearer of the hole's two rims to a point on its wall
+        let rims: Vec<usize> = [[9.0, 6.0, 10.0], [9.0, 6.0, 0.0]]
+            .iter()
+            .map(|&p| b.circle_edge_at(&o, p, 0.1, &[]).unwrap().unwrap().0)
+            .collect();
+        let (e, d) = b
+            .circle_edge_at(&o, [9.0, 6.0, 2.0], 100.0, &rims)
+            .unwrap()
+            .unwrap();
+        assert_eq!((e, (d - 2.0).abs() < 1e-7), (rims[1], true));
+        assert_eq!(
+            b.circle_edge_at(&o, [0.0; 3], 0.1, &[o.edges.len()]),
+            Err(Error::Argument)
+        );
     }
 
     /// Two 10 mm cubes and the cube [3, 7]^3 inside the first, its faces turned
