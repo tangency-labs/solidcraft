@@ -229,6 +229,15 @@ pub struct InsertDesignKeys {
     /// another occurrence of it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
+    /// An installed importer plugin's `plugin.entry`, to read `path` with it instead of as a
+    /// design (default: the importer that claims the file's extension, when `path` is not a
+    /// design). The link keeps the plugin's id and version, so Update Links reads the file again
+    /// with it. Not with `configuration`.
+    #[serde(default)]
+    pub format: Option<String>,
+    /// The importer's declared options, as `file.import` takes them. Kept with the link.
+    #[serde(default)]
+    pub options: Option<serde_json::Map<String, Value>>,
 }
 
 /// `component.insert_design` parameters: [`InsertDesignKeys`].

@@ -592,7 +592,10 @@ pub mod storage;
 pub use package::{remove, store_grants, validate_grants};
 
 pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
-pub use import::{FormatSlot, Importer, describe as describe_importers, format_slots, import_file, importer_for, importers, open_filters};
+pub use import::{
+    FormatSlot, ImportedBytes, Importer, describe as describe_importers, format_slots, import_design_bytes, import_file, importer_for, importers,
+    open_filters,
+};
 pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;

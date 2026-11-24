@@ -169,7 +169,18 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
     convert(session, importer, path, options).map_err(super::messages::named(&importer.name, Some(&file)))
 }
 
-fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+// What an importer wrote: the design's bytes and, in the desktop app, what it could not carry over.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+use craft_plugin_wasm::Imported;
+#[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[allow(dead_code)]
+struct Imported {
+    design: Vec<u8>,
+}
+
+/// Run `importer` on `path` as the caller's file scope allows, without touching the open design: what
+/// the importer wrote, and the version of the plugin that ran.
+fn run_importer(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<(Imported, String)> {
     let package = checked_package(session, importer)?;
     let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     if !options.is_object() {
@@ -234,6 +245,45 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
+        Ok((imported, package.manifest.version.clone()))
+    }
+    #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+    {
+        let _ = (package, input_folder, options);
+        Err(error("opening a file with an importer plugin needs the desktop app"))
+    }
+}
+
+/// What an importer wrote for a linked import: the design as file bytes, the version of the plugin
+/// that wrote it, and what it could not carry over, one line each.
+pub struct ImportedBytes {
+    pub design: Vec<u8>,
+    pub version: String,
+    pub notes: Vec<String>,
+}
+
+/// Run `importer` on `path` and give back the design it wrote. The open design is not touched: a
+/// linked import takes its bodies from the result. A failure names the plugin and file.
+pub fn import_design_bytes(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedBytes> {
+    let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
+    let (imported, version) = run_importer(session, importer, path, options).map_err(super::messages::named(&importer.name, Some(&file)))?;
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    let notes = {
+        let report = &imported.report;
+        let items =
+            report.items.iter().take(20).map(|i| if i.subject.is_empty() { i.message.clone() } else { format!("{}: {}", i.subject, i.message) });
+        let lines: Vec<String> = std::iter::once(report.summary.clone()).filter(|s| !s.is_empty()).chain(items).collect();
+        lines.into_iter().map(|l| format!("{}: {l}", importer.name)).collect()
+    };
+    #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+    let notes = Vec::new();
+    Ok(ImportedBytes { design: imported.design, version, notes })
+}
+
+fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    let (imported, _) = run_importer(session, importer, path, options)?;
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
         let mut doc = solidcraft_io::read_design(&imported.design)
             .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("it wrote a design SolidCraft can't read: {e}") })?;
         if let Some(stem) = Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned())
@@ -264,7 +314,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (package, input_folder, options);
+        let _ = imported;
         Err(error("opening a file with an importer plugin needs the desktop app"))
     }
 }

@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSERT_DESIGN_CONTRACT)
         .output(output_schema_for::<InsertDesignResult>)
         .params(
-        "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design, its canvases and decals where the design shows them, and a copy of its design properties; \
+        "path: a .sc design, or a file an installed importer plugin reads (format?: its plugin.entry, default the importer that claims the extension; options?: its declared options) → a new component linked to it, holding its solid bodies as placed in that design, its canvases and decals where the design shows them, and a copy of its design properties; \
          configuration?: a row name or id (null or omitted: the saved source state); name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
          axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
@@ -263,7 +263,8 @@ fn remember_read(
 }
 
 /// The bytes of the source at `file`, which must not be the design saved at `own`.
-fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
+/// `any`: an importer plugin's file, which may have any name.
+fn read_link(file: &Path, own: Option<&str>, any: bool) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
     // A network location only when its server is allowed, a device never: judged from the text
     // before anything is asked of the disk (on Windows, resolving or reading `\\host\share\x`
@@ -273,7 +274,7 @@ fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     if reachable && own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    read_linked_file(file, own).map_err(|e| EngineError::Other(e.reason))
+    read_linked_file(file, own, any).map_err(|e| EngineError::Other(e.reason))
 }
 
 /// Read a configuration selector before any I/O. An explicit null follows the saved state.
@@ -303,7 +304,7 @@ const DIGESTS_SIZE: usize = 256;
 /// The digest of the design file at `file` now ([`DesignLink::file_digest`]), `None` when it
 /// can't be read. `component.links` asks each time a tab is shown, so a file is read again only
 /// when its time or size changed since; the browser build keeps no times and reads it each time.
-pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
+pub(super) fn file_sha256(file: &Path, own: Option<&str>, any: bool) -> Option<String> {
     let file = absolute(file);
     let stamp = solidcraft_io::vfs::design_path_stamp(&file.to_string_lossy(), own);
     if let Some(stamp) = stamp
@@ -311,7 +312,7 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
     {
         return Some(known);
     }
-    let digest = DesignLink::file_digest(&read_link(&file, own).ok()?);
+    let digest = DesignLink::file_digest(&read_link(&file, own, any).ok()?);
     if let (Some(stamp), Ok(mut digests)) = (stamp, DIGESTS.lock()) {
         digests.retain(|(f, _, _)| *f != file);
         if digests.len() >= DIGESTS_SIZE {
@@ -854,6 +855,16 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let selection = configuration_key(p, None, cmd)?;
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+    let importer = insert_importer(s, p, given)?;
+    if importer.is_some() && selection.is_some() {
+        return Err(bad(cmd, "`configuration` selects a row of a design; a file an importer reads has none"));
+    }
+    let options = match p.get("options") {
+        None | Some(Value::Null) => json!({}),
+        Some(o) if o.is_object() && importer.is_some() => o.clone(),
+        Some(_) if importer.is_none() => return Err(bad(cmd, "`options` applies to a file an importer plugin reads")),
+        Some(_) => return Err(bad(cmd, "`options` must be an object")),
+    };
     let (transform, expressed) = placement_transform(s, p, cmd)?;
     // A network or device path is judged from its text, as given, before anything reads it.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
@@ -863,7 +874,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Named selections must be resolved against the source before deciding which definition
     // to reuse. Keep the same bytes for evaluation, so the selection and bodies agree.
-    let selected_bytes = selection.map(|_| read_link(&file, s.path.as_deref())).transpose()?;
+    let selected_bytes = selection.map(|_| read_link(&file, s.path.as_deref(), false)).transpose()?;
     let configuration = match &selected_bytes {
         Some(bytes) => configuration_id(bytes, selection).map_err(|e| bad(cmd, e.to_string()))?,
         None => None,
@@ -874,7 +885,12 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             .doc
             .links
             .iter()
-            .find(|(_, link)| selected_configuration(link) == configuration && link_target(&resolve(s.path.as_deref(), &link.path)) == target)
+            .find(|(_, link)| {
+                selected_configuration(link) == configuration
+                    && link_target(&resolve(s.path.as_deref(), &link.path)) == target
+                    && link.importer.as_ref().map(|i| (&i.format, linked_options(&i.options)))
+                        == importer.as_ref().map(|i| (&i.id, linked_options(&options)))
+            })
             .map(|(id, _)| *id);
         if let Some(component) = existing {
             let parent = if p.get("parent").is_some() { component_key(s, p, "parent", cmd)? } else { s.active_component };
@@ -891,10 +907,31 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let bytes = match selected_bytes {
         Some(bytes) => bytes,
-        None => read_link(&file, s.path.as_deref())?,
+        None => read_link(&file, s.path.as_deref(), importer.is_some())?,
     };
+    // An importer's file is read by the plugin, which writes the design the bodies come from; the
+    // link keeps what the file's own bytes were, so a changed file is told from an unchanged one.
+    let (record, produced) = match &importer {
+        Some(importer) => {
+            let made = crate::plugin::import_design_bytes(s, importer, &file.to_string_lossy(), &options)?;
+            let record = solidcraft_doc::LinkImporter {
+                format: importer.id.clone(),
+                plugin: Some(importer.plugin_id.clone()),
+                version: Some(made.version),
+                options: linked_options(&options).clone(),
+            };
+            (Some(record), Some((made.design, made.notes)))
+        }
+        None => (None, None),
+    };
+    let design_bytes = produced.as_ref().map_or(bytes.as_slice(), |(design, _)| design.as_slice());
     let ((design_name, mut sf, faces, metadata, properties, meshes), (images, image_warnings)) =
-        design_bodies(&file, &bytes, configuration, s.validation())?;
+        design_bodies(&file, design_bytes, configuration, s.validation())?;
+    if let Some((_, notes)) = produced {
+        // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
+        remember_read(&file, None, digest(bytes.as_slice()), &sf, &faces, &properties, &metadata, &meshes);
+        sf.warnings.extend(notes);
+    }
     sf.warnings.extend(image_warnings);
     let read = DesignLink::file_digest(&bytes);
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
@@ -939,7 +976,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             inherited_metadata: metadata,
             file_sha256: Some(read),
             step_names: None,
-            importer: None,
+            importer: record,
         },
     );
     s.refresh();
@@ -962,6 +999,24 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         warnings: sf.warnings,
     };
     reply(cmd, InsertDesignResult { inserted, param_warnings: Vec::new() })
+}
+
+/// The importer plugin that reads the file `component.insert_design` is given: the one `format`
+/// names, or else the one that claims the file's extension when it is not a design's. `None`: it
+/// is read as a design.
+pub(super) fn insert_importer(s: &Session, p: &Value, given: &str) -> Result<Option<crate::plugin::Importer>> {
+    let format = str_(p, "format");
+    let design =
+        Path::new(given).extension().and_then(|x| x.to_str()).is_some_and(|x| ["sc", "solidcraft", "json"].iter().any(|d| x.eq_ignore_ascii_case(d)));
+    if format.is_none() && design {
+        return Ok(None);
+    }
+    crate::plugin::importer_for(s, given, format)
+}
+
+/// The options a link keeps: none (null) when an importer was given none.
+fn linked_options(options: &Value) -> &Value {
+    if options.as_object().is_some_and(|o| o.is_empty()) { &Value::Null } else { options }
 }
 
 /// The linked design's canvases and decals ([`design_images`]) added to its new component
@@ -1147,7 +1202,7 @@ fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result
     };
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
     let file = resolve(s.path.as_deref(), &link.path);
-    let bytes = read_link(&file, s.path.as_deref()).map_err(|e| e.to_string())?;
+    let bytes = read_link(&file, s.path.as_deref(), link.importer.is_some()).map_err(|e| e.to_string())?;
     Ok(((old.clone(), records.clone()), file, bytes))
 }
 
@@ -1248,7 +1303,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let same_source = same_link_source(s, &link, &file);
     let selection = configuration_key(p, if same_source { link.configuration } else { None }, cmd)?;
-    let bytes = read_link(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
+    let bytes = read_link(&file, s.path.as_deref(), false).map_err(|e| bad(cmd, e.to_string()))?;
     let configuration = configuration_id(&bytes, selection).map_err(|e| bad(cmd, e.to_string()))?;
     if same_source && p.get("configuration").is_none() && configuration != selected_configuration(&link) {
         return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
@@ -1450,8 +1505,11 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     let found = solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref());
                     // Whether the file is no longer what this design last read (#9739): `null`
                     // when it isn't found, or the link keeps no digest (made before they were).
-                    let current =
-                        l.file_sha256.as_ref().filter(|_| found == Some(true)).and_then(|_| file_sha256(Path::new(&shown), s.path.as_deref()));
+                    let current = l
+                        .file_sha256
+                        .as_ref()
+                        .filter(|_| found == Some(true))
+                        .and_then(|_| file_sha256(Path::new(&shown), s.path.as_deref(), l.importer.is_some()));
                     let changed = current.as_ref().zip(l.file_sha256.as_ref()).map(|(now, kept)| now != kept);
                     if let (Some(digest), Some(changed)) = (current, changed)
                         && (changed || s.plugin_state.link_changes.get(c).is_some_and(|change| !change.read))

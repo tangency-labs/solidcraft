@@ -2885,6 +2885,41 @@ mod importers {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Insert Design with an importer's file: the importer's design comes in as a linked component
+    /// and the link names the importer, so the file is read again by it.
+    #[test]
+    fn an_importers_file_inserts_as_a_linked_component_that_names_its_importer() {
+        let (mut s, root) = installed("insert-linked", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &design());
+        assert!(crate::cmd::runs_plugin_importer(&s, "component.insert_design", &json!({"path": file})));
+        assert!(!crate::cmd::runs_plugin_importer(&s, "component.insert_design", &json!({"path": "part.sc"})));
+        let before = s.doc.name.clone();
+        let inserted = s.execute("component.insert_design", &json!({"path": file, "name": "Bracket"})).unwrap();
+        assert_eq!(inserted["bodies"].as_array().map(Vec::len), Some(1), "{inserted}");
+        assert_eq!(s.doc.name, before, "the open design stays the open design");
+        assert!(s.path.is_none());
+        let comp = inserted["component"].as_u64().unwrap();
+        let link = &s.doc.links[&comp];
+        let importer = link.importer.as_ref().unwrap();
+        assert_eq!((importer.format.as_str(), importer.plugin.as_deref(), importer.version.as_deref()), ("smp.convert", Some("smp"), Some("1")));
+        assert!(importer.options.is_null() && link.step_names.is_none() && !link.is_design());
+        assert_eq!(link.file_sha256, Some(solidcraft_doc::DesignLink::file_digest(&std::fs::read(&file).unwrap())));
+        let listed = s.execute("component.links", &json!({})).unwrap();
+        assert_eq!(listed["links"][0]["importer"], json!({"format": "smp.convert", "plugin": "smp", "version": "1"}), "{listed}");
+        assert_eq!(listed["links"][0]["changed"], false, "{listed}");
+        // The file's own bytes decide whether it changed, not the design the importer made.
+        let mut bigger = design();
+        bigger.push(b' ');
+        std::fs::write(&file, bigger).unwrap();
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        // A design has configurations and an importer's file has none; options are for importers.
+        let refused = s.execute("component.insert_design", &json!({"path": file, "configuration": "A"})).unwrap_err().to_string();
+        assert!(refused.contains("configuration"), "{refused}");
+        let refused = s.execute("component.insert_design", &json!({"path": "part.sc", "options": {}})).unwrap_err().to_string();
+        assert!(refused.contains("options"), "{refused}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn imported_documents_do_not_share_the_converter_templates_identity() {
         let (mut s, root) = installed("distinct-identities", &[("smp", &["smp"], false)]);

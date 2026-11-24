@@ -15,7 +15,22 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<InsertDesignParams>(),
-        &["angle", "axis", "configuration", "matrix", "name", "origin", "parent", "path", "reuse", "to_matrix", "tolerance", "translate"],
+        &[
+            "angle",
+            "axis",
+            "configuration",
+            "format",
+            "matrix",
+            "name",
+            "options",
+            "origin",
+            "parent",
+            "path",
+            "reuse",
+            "to_matrix",
+            "tolerance",
+            "translate",
+        ],
     );
     assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
     assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "occurrence", "path"]);
