@@ -7843,8 +7843,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 p
             };
+            let moved = sels(d, 0).body_names();
             for (i, key) in [(1, "from"), (2, "to")] {
                 let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
+                // Not its centre point: a point has no direction to turn the bodies by, so Flip did nothing.
+                if !*components
+                    && matches!(snap, "picked" | "circle")
+                    && let Some(frame) = sels(d, i).first().and_then(|sel| crate::dialogs_align::circle_frame(s, sel, &moved))
+                {
+                    p[format!("{key}_frame")] = frame;
+                    continue;
+                }
                 match (sels(d, i).first(), snap) {
                     // Onto Plane sets the bodies on a plane: a planar face or a plane, nothing else.
                     (Some(sel), "plane") if key == "to" && !*components && !matches!(sel, Sel::Face { .. } | Sel::Plane { .. }) => {
