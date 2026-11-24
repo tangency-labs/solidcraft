@@ -3077,6 +3077,7 @@ fn body_scene(
     // Each repeated part's faces as its copies in one look draw them, worked out for the first
     // copy: the copies share the part's slots ([`CopyLook`]), so the rest would write the same.
     let mut copy_looks: std::collections::HashMap<(usize, u64, bool, crate::gpu::PaletteIndex, u32), CopyLook> = std::collections::HashMap::new();
+    arena.set_hover_colour(crate::scene_palette::hover_rgba(&Tokens::get()));
     let mut sc = GpuScene::with_palette(crate::gpu::Palette::with_stable(arena.entries()).with_motions(arena.motions()));
     let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
     // The whole scene's blocks' draws, in `sc.blocks` order, kept so a camera move patches the
@@ -6985,7 +6986,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // colour (see `light_whole_body`); this scene's own colours follow.
     // The key first: it reads the arena (`scene_key`), which is held below.
     let key = highlight_geometry_key(app);
-    let body_slots = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
+    let mut body_slots = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
+    body_slots.set_hover_colour(crate::scene_palette::hover_rgba(&Tokens::get()));
     let mut sc = GpuScene::with_palette(
         crate::gpu::Palette::with_stable(body_slots.entries()).with_materials(body_slots.materials()).with_motions(body_slots.motions()),
     );
