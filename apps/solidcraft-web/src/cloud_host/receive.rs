@@ -1,0 +1,28 @@
+//! Pull changed cached designs without downloading every unopened design in a repository.
+use super::*;
+
+pub(super) async fn refresh(connection: &Connection, store: &Store, job: &Job) -> Result<()> {
+    job.update(|status| status.phase = Phase::Syncing)?;
+    let remote = repository(connection, job).await?;
+    let mut observed = solidcraft_cloud::stored_designs(store.cached_entries().await?, Vec::new())?;
+    remote.list_with_status_cached(&mut observed, store).await?;
+    let mut first_error = None;
+    for entry in observed {
+        check_cancelled(job)?;
+        let result = async {
+            if !entry.outdated || pending_tip(store, &entry.destination).await?.is_some() {
+                return Ok(());
+            }
+            store.mark_outdated(&entry).await?;
+            let snapshot = download(&remote, store, &entry.destination, job).await?;
+            check_cancelled(job)?;
+            store.cache_remote(entry.destination, snapshot).await
+        }
+        .await;
+        check_cancelled(job)?;
+        if let Err(error) = result {
+            first_error.get_or_insert(error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}

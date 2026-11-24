@@ -8,6 +8,12 @@ const FORMAT: &str = "solidcraft-thumbnail/1";
 const PICTURE: solidcraft_format::container::Thumbnail =
     solidcraft_format::container::Thumbnail { format: FORMAT, app: env!("CARGO_PKG_VERSION"), size: THUMBNAIL_SIZE, max_bytes: MAX_BYTES };
 
+/// Whether `bytes` start as a design picture (a bounded PNG of [`THUMBNAIL_SIZE`]), for a store
+/// that keeps the picture outside a container.
+pub(crate) fn valid_header(bytes: &[u8]) -> bool {
+    PICTURE.valid(bytes)
+}
+
 pub(super) fn write(writer: &mut PackageWriter, png: &[u8], document: &[u8]) -> Result<()> {
     Ok(PICTURE.write(writer, png, document, max_design())?)
 }

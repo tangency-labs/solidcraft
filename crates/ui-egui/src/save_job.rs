@@ -36,6 +36,12 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     }
     // A save keeps print faces only when the user keeps them (#11512).
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    if command == "file.save" && params.get("path").is_none() && app.session.cloud_binding().is_some() {
+        // Cloud jobs already run asynchronously. Their capture must belong to the live
+        // session so only durable local acknowledgement can advance its saved baseline.
+        let _ = app.run(command, params);
+        return false;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load_holds() {
         let mut copy = app.session.scratch();

@@ -1,0 +1,2 @@
+| assets/locales/pending/cloud-management.json | SolidCraft contributors | original Cloud Saves management and multiple-repository interface translations for all supported languages | MIT OR Apache-2.0 |
+| docs/book/src/guide/images/cloud-saves-management.png | SolidCraft contributors | actual SolidCraft 0.40.0 desktop screenshot of design management and two signed saved revisions; isolated profile and public-safe examples | MIT OR Apache-2.0 |

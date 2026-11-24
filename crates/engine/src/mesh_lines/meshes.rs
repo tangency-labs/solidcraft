@@ -97,7 +97,8 @@ pub(super) fn claim(counter: &AtomicUsize, amount: usize, limit: usize) -> bool 
     }
 }
 
-pub(super) fn buffer_bytes(m: &Mesh) -> usize {
+/// The bytes a mesh's buffers hold, for budgets that copy or keep meshes.
+pub(crate) fn buffer_bytes(m: &Mesh) -> usize {
     m.positions.capacity() * size_of::<Vec3>()
         + m.normals.capacity() * size_of::<Vec3>()
         + m.triangles.capacity() * size_of::<[u32; 3]>()

@@ -10,9 +10,10 @@ use std::sync::Arc;
 mod drawing;
 mod import_cache;
 mod native_cache;
+pub(crate) mod package;
 mod provenance;
 mod text;
-mod thumbnail;
+pub(crate) mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
 pub use native_cache::read_design_geometry;
@@ -55,7 +56,7 @@ fn max_mesh_part() -> usize {
 fn max_part() -> usize {
     max_design()
 }
-fn max_expanded() -> usize {
+pub(crate) fn max_expanded() -> usize {
     max_step_part().saturating_add(max_design())
 }
 const MESH_MAGIC: &[u8; 8] = b"SCMESH01";
@@ -259,134 +260,11 @@ fn write_container(
     budget: usize,
     provenance: Option<&ProvenanceSave<'_>>,
 ) -> Result<Vec<u8>> {
-    doc.render.validate().map_err(invalid)?;
     let mut writer = PackageWriter::new();
     if provenance.is_some() {
         writer.track_parts(provenance::is_authoritative);
     }
-    let mut features = Vec::with_capacity(doc.features.len());
-    for feature in &doc.features {
-        let replacements = match &feature.kind {
-            FeatureKind::Import { step, records, .. } => {
-                // STEP is text and shrinks several times: always compressed, so an import as large
-                // as MAX_STEP_BYTES still fits in a design file.
-                let blob = writer.blob(step.as_bytes(), "step", true)?;
-                let mut replaced = fields([("step", Value::String(String::new())), ("step_blob", blob)]);
-                // An import kept as records: they go in a part of their own, compressed as STEP.
-                if let Some(r) = records {
-                    let text = solidcraft_kernel::records_text(r)?;
-                    replaced.insert("records".into(), Value::Null);
-                    replaced.insert("records_blob".into(), writer.blob(text.as_bytes(), "records", true)?);
-                }
-                replaced
-            }
-            FeatureKind::MeshImport { meshes, .. } => {
-                let mut metadata = Vec::with_capacity(meshes.len());
-                for mesh in meshes {
-                    let bytes = encode_mesh(mesh)?;
-                    // Fast saves store a mesh that fits. One past the file limit is deflated,
-                    // or it could never be saved (#6600). Compact deflates every mesh.
-                    let compress = compression == DesignCompression::Compact || bytes.len() > max_part();
-                    let blob = writer.blob(&bytes, "mesh", compress)?;
-                    let mut value = replace(mesh, fields([("positions", json!([])), ("triangles", json!([])), ("corner_normals", json!([]))]))
-                        .map_err(invalid)?;
-                    value.as_object_mut().ok_or_else(|| invalid("mesh metadata"))?.insert("mesh_blob".into(), blob);
-                    metadata.push(value);
-                }
-                fields([("meshes", Value::Array(metadata))])
-            }
-            _ => Map::new(),
-        };
-        // Extra reference fields are added after serializing existing fields.
-        let step_blob = replacements.get("step_blob").cloned();
-        let records_blob = replacements.get("records_blob").cloned();
-        let mut value = replace(feature, replacements).map_err(invalid)?;
-        for (key, blob) in [("step_blob", step_blob), ("records_blob", records_blob)] {
-            if let Some(blob) = blob {
-                value.as_object_mut().ok_or_else(|| invalid("feature metadata"))?.insert(key.into(), blob);
-            }
-        }
-        features.push(value);
-    }
-    let mut canvases = Vec::with_capacity(doc.canvases.len());
-    for canvas in &doc.canvases {
-        let bytes = canvas.bytes();
-        if !matches!(canvas.format.as_str(), "png" | "jpeg") || bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
-            return Err(invalid("invalid canvas format or size"));
-        }
-        let blob = writer.blob(bytes, &canvas.format, false)?;
-        let mut value = serde_json::to_value(canvas).map_err(invalid)?;
-        let object = value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?;
-        // The bytes are the blob; an empty `data` keeps the record readable by older releases.
-        object.insert("data".into(), json!(""));
-        object.insert("image_blob".into(), blob);
-        canvases.push(value);
-    }
-    let mut clouds = Vec::with_capacity(doc.point_clouds.len());
-    for cloud in &doc.point_clouds {
-        cloud.check().map_err(invalid)?;
-        let blob = writer.blob(&encode_cloud(cloud)?, "points", compression == DesignCompression::Compact)?;
-        let mut value = replace(cloud, fields([("points", json!("")), ("colors", json!(""))])).map_err(invalid)?;
-        let record = value.as_object_mut().ok_or_else(|| invalid("point cloud metadata"))?;
-        record.insert("points_blob".into(), blob);
-        // Its segments, triangles and properties' numbers are a part of their own; the record keeps
-        // their shape with empty numbers.
-        if let Some(complex) = encode_complex(&cloud.complex)? {
-            record.insert("complex_blob".into(), writer.blob(&complex, "complex", compression == DesignCompression::Compact)?);
-        }
-        clouds.push(value);
-    }
-    let mut replacements = fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases)), ("drawings", Value::Null)]);
-    if !clouds.is_empty() {
-        replacements.insert("point_clouds".into(), Value::Array(clouds));
-    }
-    if !doc.render.resources.is_empty() || !doc.render.texture_resources.is_empty() {
-        let mut changes = Map::new();
-        if !doc.render.resources.is_empty() {
-            let mut resources = Map::new();
-            for (id, resource) in doc.render.resources.iter() {
-                let blob = writer.blob(resource.bytes(), "hdr", false)?;
-                resources.insert(id.to_string(), json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
-            }
-            changes.insert("resources".into(), Value::Object(resources));
-        }
-        if !doc.render.texture_resources.is_empty() {
-            let mut resources = Map::new();
-            for (id, resource) in doc.render.texture_resources.iter() {
-                let blob = writer.blob(resource.bytes(), "texture", false)?;
-                resources.insert(id.to_string(), json!({"kind":"opaque_texture","data":"","texture_blob":blob,"provenance":resource.provenance()}));
-            }
-            changes.insert("texture_resources".into(), Value::Object(resources));
-        }
-        let render = replace(doc.render.as_ref(), changes).map_err(invalid)?;
-        replacements.insert("render".into(), render);
-    }
-    let mut metadata = replace(doc, replacements).map_err(invalid)?;
-    // The drawings have entries of their own, and plugin data goes beside the design, a part each,
-    // as it came: `document.json` is the same with them or without.
-    if let Some(object) = metadata.as_object_mut() {
-        object.remove("drawings");
-        object.remove("plugin_data");
-        // The parts the drawings' images are, named where a release that can't read the drawings'
-        // records (0.45.0) looks before it keeps a part, so its save keeps them.
-        let mut parts: Vec<String> = doc
-            .drawings
-            .iter()
-            .flat_map(|d| {
-                d.images
-                    .iter()
-                    .map(|i| solidcraft_doc::blob::part_name(&i.data, &i.format))
-                    .chain(d.newer_file.iter().flat_map(|file| file.part_names().map(String::from)))
-            })
-            .collect();
-        parts.sort();
-        parts.dedup();
-        if !parts.is_empty() {
-            object.insert("drawing_parts".into(), json!(parts));
-        }
-    }
-    solidcraft_doc::newer_file::restore(doc, &mut metadata);
-    let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
+    let metadata = package::encode(doc, compression, |bytes, extension, compressed| Ok(writer.blob(bytes, extension, compressed)?))?;
     writer.part("document.json", &metadata, true)?;
     // What a newer build's file holds beside the design goes back as it came.
     let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
@@ -619,7 +497,7 @@ fn decode_complex(bytes: &[u8], complex: &mut solidcraft_doc::point_cloud::Compl
 
 /// Each point cloud's `complex` (segments, triangles and properties), taken out of the metadata
 /// with the cloud's index.
-fn take_cloud_complexes(metadata: &mut Value) -> Vec<(usize, Value)> {
+pub(crate) fn take_cloud_complexes(metadata: &mut Value) -> Vec<(usize, Value)> {
     let Some(clouds) = metadata.get_mut("point_clouds").and_then(Value::as_array_mut) else {
         return Vec::new();
     };
@@ -674,6 +552,15 @@ impl<R: Read + Seek> std::ops::DerefMut for PackageReader<R> {
 impl<R: Read + Seek> PackageReader<R> {
     fn new(source: R) -> Result<Self> {
         Ok(Self(Reader::new(source, LIMITS)?))
+    }
+}
+
+impl<R: Read + Seek> package::BlobReader for PackageReader<R> {
+    fn blob(&mut self, value: &Value, field: &str, extension: &str) -> Result<&[u8]> {
+        Ok(self.0.blob(value, field, extension)?)
+    }
+    fn limited_blob(&mut self, value: &Value, field: &str, extension: &str, limit: usize) -> Result<&[u8]> {
+        Ok(self.0.limited_blob(value, field, extension, limit)?)
     }
 }
 
@@ -1096,7 +983,7 @@ impl RecordsParts {
     }
 
     /// The records of the part the feature `value` names in its `records_blob`.
-    fn get<R: Read + Seek>(&mut self, reader: &mut PackageReader<R>, value: &Value) -> Result<Arc<solidcraft_kernel::ImportRecords>> {
+    fn get(&mut self, reader: &mut impl package::BlobReader, value: &Value) -> Result<Arc<solidcraft_kernel::ImportRecords>> {
         // Every reference still counts against what a design may expand to.
         let text = reader.blob(value, "records_blob", "records")?;
         let name = value.get("records_blob").and_then(Value::as_str).ok_or_else(|| invalid("missing `records_blob` reference"))?;
@@ -1261,127 +1148,19 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
         return Err(IoError::Invalid("this file is a SolidCraft drawing, not a design: open it as a drawing".into()));
     }
     let bytes = reader.document(max_design())?;
-    let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
-    // What the drawings' images are, for a release that can't read the drawings: this build reads
-    // them from the drawings and writes the list again on every save.
-    let named_drawing_parts = metadata.as_object_mut().and_then(|object| object.remove("drawing_parts")).is_some();
     // A newer build's file opens whatever it holds: what doesn't read here is kept (`newer_file`).
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     let newer_container = !is_known_container(&container);
     let newer = newer_container || std::str::from_utf8(&bytes).is_ok_and(solidcraft_doc::format::says_newer);
-    // HDR's typed JSON representation is deliberately strict: no empty placeholders or
-    // container-only blob fields may reach the document deserializer. A newer build's section that
-    // doesn't pass stays as it is, which the document reader then leaves out.
-    // Their files are the container's parts, handed to the reader as bytes: never text.
-    let mut parts = solidcraft_doc::render_resources::ContainerParts::default();
-    let hydrated = if newer {
-        let mut copy = metadata.clone();
-        let mut found = solidcraft_doc::render_resources::ContainerParts::default();
-        let done = check_hdr_manifest(&bytes).and_then(|()| check_texture_manifest(&bytes)).and_then(|()| {
-            let hdr = hydrate_hdr_resources(&mut copy, reader, &mut found)?;
-            Ok(hydrate_texture_resources(&mut copy, reader, &mut found)? || hdr)
-        });
-        if done.is_ok() {
-            metadata = copy;
-            parts = found;
+    let says = newer_container.then(|| container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string());
+    let decoding = package::Decoding { newer, newer_container: says, record_bodies };
+    let mut doc = package::decode_with(&bytes, reader, decoding, |doc, metadata, reader, records| {
+        if doc.newer_file.is_some() {
+            hydrate_newer(doc, metadata, container, reader, records)?;
         }
-        done.unwrap_or(false)
-    } else {
-        check_hdr_manifest(&bytes)?;
-        check_texture_manifest(&bytes)?;
-        let hdr = hydrate_hdr_resources(&mut metadata, reader, &mut parts)?;
-        hydrate_texture_resources(&mut metadata, reader, &mut parts)? || hdr
-    };
-    // A cloud's points are in its blob, so its segments, triangles and properties are read and
-    // checked with them below (`decode_cloud`), not against the empty points the metadata holds
-    // (#14572). The metadata keeps them for what a newer build's file holds. A newer build's file
-    // reads them as before: what doesn't read here is kept whole (`newer_file`), unknown fields too.
-    let complexes = if newer { Vec::new() } else { take_cloud_complexes(&mut metadata) };
-    let hydrated_text;
-    let text = if hydrated || named_drawing_parts || !complexes.is_empty() {
-        hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
-        &hydrated_text
-    } else {
-        std::str::from_utf8(&bytes).map_err(invalid)?
-    };
-    // Migrations and all document validation run on the small parametric metadata.
-    // Binary arrays have their own equivalent numeric/index validation below.
-    let mut doc = solidcraft_doc::render_resources::with_container_parts(parts, || Document::from_json(text))?;
-    if !doc.drawings.is_empty() {
-        return Err(invalid("ambiguous drawings in document.json and in their own entries"));
-    }
-    for (index, complex) in complexes {
-        if let Some(cloud) = doc.point_clouds.get_mut(index) {
-            // A record with a part has empty numbers; an older one has them inline, base64.
-            cloud.complex = serde::Deserialize::deserialize(&complex).map_err(invalid)?;
-            if let Some(record) = metadata.get("point_clouds").and_then(|v| v.get(index)).filter(|v| v.get("complex_blob").is_some()) {
-                decode_complex(reader.blob(record, "complex_blob", "complex")?, &mut cloud.complex)?;
-            }
-        }
-        if let Some(cloud) = metadata.get_mut("point_clouds").and_then(|v| v.get_mut(index)).and_then(Value::as_object_mut) {
-            cloud.insert("complex".into(), complex);
-        }
-    }
-    if newer_container && doc.newer_file.is_none() {
-        let current = solidcraft_doc::format::FORMAT;
-        let says = container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string();
-        let file = solidcraft_doc::newer_file::newer_file(&solidcraft_doc::format::Newer {
-            format: current,
-            reads_up_to: current,
-            unknown_changes: vec![says],
-        });
-        doc.newer_file = Some(Arc::new(file));
-    }
-    let mut records_parts = RecordsParts::new(doc.newer_file.is_some(), record_bodies);
-    if doc.newer_file.is_some() {
-        hydrate_newer(&mut doc, &metadata, container, reader, &mut records_parts)?;
-    }
-    hydrate_plugin_data(&mut doc, reader);
-    for (index, feature) in doc.features.iter_mut().enumerate() {
-        let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
-        match &mut feature.kind {
-            FeatureKind::Import { step, records, .. } => {
-                if !step.is_empty() {
-                    return Err(invalid("ambiguous embedded STEP and blob"));
-                }
-                *step = std::str::from_utf8(reader.blob(value, "step_blob", "step")?).map_err(invalid)?.into();
-                if value.get("records_blob").is_some() {
-                    if records.is_some() {
-                        return Err(invalid("ambiguous embedded import records and blob"));
-                    }
-                    *records = Some(records_parts.get(reader, value)?);
-                }
-            }
-            FeatureKind::MeshImport { meshes, .. } => {
-                for (index, mesh) in meshes.iter_mut().enumerate() {
-                    if !mesh.positions.is_empty() || !mesh.triangles.is_empty() {
-                        return Err(invalid("ambiguous embedded mesh and blob"));
-                    }
-                    let value = value.get("meshes").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing mesh metadata"))?;
-                    decode_mesh(reader.blob(value, "mesh_blob", "mesh")?, mesh)?;
-                }
-            }
-            _ => {}
-        }
-    }
-    for (index, canvas) in doc.canvases.iter_mut().enumerate() {
-        if !canvas.data.is_empty() || !matches!(canvas.format.as_str(), "png" | "jpeg") {
-            return Err(invalid("invalid canvas metadata"));
-        }
-        let value = metadata.get("canvases").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing canvas metadata"))?;
-        let bytes = reader.blob(value, "image_blob", &canvas.format)?;
-        if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
-            return Err(invalid("canvas too large"));
-        }
-        canvas.data = bytes.into();
-    }
-    for (index, cloud) in doc.point_clouds.iter_mut().enumerate() {
-        if !cloud.points.is_empty() || !cloud.colors.is_empty() {
-            return Err(invalid("ambiguous embedded points and blob"));
-        }
-        let value = metadata.get("point_clouds").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing point cloud metadata"))?;
-        decode_cloud(reader.blob(value, "points_blob", "points")?, cloud)?;
-    }
+        hydrate_plugin_data(doc, reader);
+        Ok(())
+    })?;
     let (drawings, kept) = drawing::read(reader)?;
     doc.drawings = drawings;
     // A drawing a newer build saved that this build can't read is kept as it came: the rest of the
@@ -1410,7 +1189,7 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
 
 /// Admit the resource map before Value allocation or duplicate-key coalescing. Encoded
 /// sources in a container are mandatory blobs, never arbitrary inline base64 strings.
-fn check_hdr_manifest(bytes: &[u8]) -> Result<()> {
+pub(crate) fn check_hdr_manifest(bytes: &[u8]) -> Result<()> {
     use serde::{
         Deserialize,
         de::{MapAccess, Visitor},
@@ -1490,46 +1269,9 @@ fn check_hdr_manifest(bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Takes each HDR's part out for the reader (`parts`), leaving its record `{kind, data: ""}`.
-fn hydrate_hdr_resources<R: Read + Seek>(
-    metadata: &mut Value,
-    reader: &mut PackageReader<R>,
-    parts: &mut solidcraft_doc::render_resources::ContainerParts,
-) -> Result<bool> {
-    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES};
-
-    let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("resources")) else {
-        return Ok(false);
-    };
-    let resources = resources.as_object_mut().ok_or_else(|| invalid("HDR resources must be an object"))?;
-    if resources.len() > MAX_HDR_RESOURCES {
-        return Err(invalid("at most 64 embedded HDR resources"));
-    }
-    let mut total = 0usize;
-    for (key, value) in resources.iter_mut() {
-        let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
-        if !value.as_object().is_some_and(|fields| fields.len() == 3)
-            || value.get("kind").and_then(Value::as_str) != Some("radiance_hdr")
-            || value.get("data").and_then(Value::as_str) != Some("")
-        {
-            return Err(invalid("HDR metadata requires radiance_hdr, empty data and one blob; inline data plus blob is ambiguous"));
-        }
-        let remaining = MAX_HDR_RESOURCE_BYTES.saturating_sub(total).min(solidcraft_doc::render_resources::MAX_HDR_BYTES);
-        let bytes = reader.limited_blob(value, "hdr_blob", "hdr", remaining)?;
-        if HdrId::of(bytes) != id {
-            return Err(invalid("HDR resource key does not match its blob hash"));
-        }
-        total = total.checked_add(bytes.len()).ok_or_else(|| invalid("HDR resource size overflow"))?;
-        // The record keeps naming its part: a newer build's section this build keeps as it came
-        // still says which part it needs, so saving keeps the part too.
-        parts.hdr.insert(id, bytes.to_vec());
-    }
-    Ok(!resources.is_empty())
-}
-
 /// Texture manifests are checked before Value allocation, including duplicate keys,
 /// bounded provenance and strict empty-payload/blob markers.
-fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
+pub(crate) fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
     use serde::{
         Deserialize,
         de::{MapAccess, Visitor},
@@ -1620,42 +1362,6 @@ fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
     }
     let Metadata { render: Render { texture_resources: () } } = serde_json::from_slice(bytes).map_err(invalid)?;
     Ok(())
-}
-/// Takes each texture's part out for the reader (`parts`), as [`hydrate_hdr_resources`].
-fn hydrate_texture_resources<R: Read + Seek>(
-    metadata: &mut Value,
-    reader: &mut PackageReader<R>,
-    parts: &mut solidcraft_doc::render_resources::ContainerParts,
-) -> Result<bool> {
-    use solidcraft_doc::{
-        render_resources::HdrId,
-        render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
-    };
-    let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("texture_resources")) else {
-        return Ok(false);
-    };
-    let resources = resources.as_object_mut().ok_or_else(|| invalid("texture resources must be an object"))?;
-    if resources.len() > MAX_TEXTURE_RESOURCES {
-        return Err(invalid("at most 32 embedded texture resources"));
-    }
-    let mut total = 0usize;
-    for (key, value) in resources.iter_mut() {
-        let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
-        if !value.as_object().is_some_and(|fields| fields.len() == 4)
-            || value.get("kind").and_then(Value::as_str) != Some("opaque_texture")
-            || value.get("data").and_then(Value::as_str) != Some("")
-        {
-            return Err(invalid("texture metadata requires opaque_texture, empty data, provenance and one blob"));
-        }
-        let remaining = MAX_TEXTURE_RESOURCE_BYTES.saturating_sub(total).min(MAX_TEXTURE_BYTES);
-        let bytes = reader.limited_blob(value, "texture_blob", "texture", remaining)?;
-        if HdrId::of(bytes) != id {
-            return Err(invalid("texture resource key does not match its blob hash"));
-        }
-        total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
-        parts.textures.insert(id, bytes.to_vec());
-    }
-    Ok(!resources.is_empty())
 }
 
 #[cfg(test)]

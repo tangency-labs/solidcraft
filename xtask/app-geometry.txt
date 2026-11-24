@@ -487,7 +487,6 @@ crates/engine/src/cmd/features_more.rs:emboss cross,dot,normalized,triangles
 crates/engine/src/cmd/features_more.rs:snap_point dot
 crates/engine/src/cmd/file.rs:mesh_data triangles
 crates/engine/src/cmd/file.rs:saved_preview triangles
-crates/engine/src/cmd/file_thumbnail.rs:scene triangles
 crates/engine/src/cmd/joints.rs:circle_centre dot
 crates/engine/src/cmd/joints.rs:origin_on_part cross
 crates/engine/src/cmd/joints.rs:reach atan2,cross,dot
@@ -661,6 +660,7 @@ crates/engine/src/snap.rs:axis_ends dot
 crates/engine/src/snap.rs:face_points normalized
 crates/engine/src/snap.rs:same_circle dot
 crates/engine/src/snap.rs:whole_arc dot,tangent_chain
+crates/engine/src/thumbnail.rs:scene triangles
 crates/engine/src/view.rs:SectionIndex::new triangles
 crates/engine/src/view.rs:SectionIndex::segments dot,triangles
 crates/engine/src/view.rs:build_scene cross,dot
@@ -823,10 +823,10 @@ crates/io/src/design.rs:decode_mesh triangles
 crates/io/src/design.rs:encode_complex triangles
 crates/io/src/design.rs:encode_mesh triangles
 crates/io/src/design.rs:encode_preview triangles
-crates/io/src/design.rs:read_document_within triangles
 crates/io/src/design.rs:read_preview triangles
 crates/io/src/design.rs:validate_mesh hypot,triangles
 crates/io/src/design/native_cache.rs:geometry_preview triangles
+crates/io/src/design/package.rs:decode_with triangles
 crates/io/src/dxf.rs:Affine::uniform dot
 crates/io/src/dxf/text_entity.rs:mtext_placement atan2
 crates/io/src/excellon.rs:Reader::arc hypot

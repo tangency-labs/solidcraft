@@ -19,6 +19,7 @@ solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-step = { workspace = true }
 solidcore-tess = { workspace = true }
+solidcraft-cloud = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
@@ -75,6 +76,7 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
 # The computer's name for a design's lock file (src/design_lock.rs; the browser keeps no lock files).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures-lite = "2"
 gethostname = { workspace = true }
 # A temporary file in its target folder; also a rename that never replaces a file (src/safe_write.rs, create_atomic).
 tempfile = "3.27"
@@ -82,6 +84,14 @@ same-file = "1.0.6"
 # Whether the process named in a lock is still running (src/design_lock.rs); the workspace's
 # MIT-licensed process lookup, safe API.
 sysinfo = { workspace = true }
+# Cloud Saves' Git subprocesses (src/cloud/process.rs) and connection-specific SSH command quoting.
+process-wrap = { version = "10.0.1", default-features = false, features = ["std", "process-group", "job-object"] }
+shlex = "2.0.1"
+ssh-key = { version = "0.6.7", default-features = false, features = ["std", "ed25519", "encryption", "getrandom"] }
+rand_chacha = "0.3"
+zeroize = { version = "1", features = ["alloc"] }
+url = "2"
+percent-encoding = "2"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 trash = "5.2.9"

@@ -19,6 +19,7 @@ pub(crate) use meshes::Ask;
 pub(crate) use meshes::Placed;
 pub(crate) use meshes::Scene;
 pub(crate) use meshes::WORKERS;
+pub(crate) use meshes::buffer_bytes;
 pub(crate) use meshes::drawn_edges;
 pub(crate) use meshes::placed;
 pub(crate) use meshes::prepare;

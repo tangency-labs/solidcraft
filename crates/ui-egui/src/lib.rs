@@ -29,6 +29,10 @@ mod browser_search_tests;
 pub mod canvas;
 mod card_resize;
 pub mod cli_link;
+mod cloud;
+mod cloud_browser;
+mod cloud_settings;
+mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]
@@ -551,6 +555,8 @@ pub struct Services {
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
     /// build remembers files it saved to the disk); None: it can't.
     pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
+    /// Asynchronous repository storage, injected by the desktop or browser app.
+    pub cloud_host: Option<std::sync::Arc<dyn solidcraft_cloud::jobs::Host>>,
     /// The desktop's dark (`Some(true)`) or light preference as the host reads it, for Theme:
     /// System where the window toolkit does not report it (Linux desktops, #7944). Called every
     /// frame, so it only reads a value kept up to date elsewhere. None, or `None` from it: the
@@ -722,6 +728,7 @@ pub struct SolveApp {
     /// A feature dialog waiting while the sketch it asked for is drawn (New Sketch, #6383).
     pub inline_sketch: Option<command_sketch::InlineSketch>,
     pub services: Services,
+    pub(crate) cloud: cloud::State,
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
@@ -1082,6 +1089,12 @@ impl SolveApp {
         workspace::install_tabs();
         // The navigation slots stored bars are read against, likewise.
         navigation_slots::install();
+        if let Some(host) = &services.cloud_host {
+            session.set_cloud_host(Some(host.clone()));
+            if let Err(error) = session.execute("cloud.settings", &serde_json::json!({"reload":true})) {
+                log::error!("cloud settings: {error}");
+            }
+        }
         #[cfg(test)]
         solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-ui-test-imports-{}", std::process::id())));
         #[cfg(test)]
@@ -1127,6 +1140,7 @@ impl SolveApp {
             pre_edit_component: None,
             inline_sketch: None,
             services,
+            cloud: Default::default(),
             file_picker: None,
             slicer_wait: None,
             easyprint: Default::default(),
@@ -1709,7 +1723,9 @@ impl SolveApp {
         if id == "document.list" {
             return documents::command(self, id, &params);
         }
-        if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
+        if (self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some())
+            && !matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
+        {
             return Err("a file operation is in progress".into());
         }
         // The window has the design tabs, which the engine does not: it shows the design asked for.
@@ -1734,6 +1750,9 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        if let Some(error) = cloud::configuration::refusal(self, id, &params) {
+            return Err(error.into());
+        }
         workspace::command_receiver(self, id, &params)?;
         print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
@@ -1743,6 +1762,21 @@ impl SolveApp {
             return Ok(reply);
         }
         let params = if id == "drawing.create" { prefs::new_drawing_params(self, params) } else { params };
+        // Global cloud operations can outlive the tab from which they were started.
+        if matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
+            && let Some(operation) = params.get("operation").and_then(Value::as_str)
+            && !self.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation)
+        {
+            for slot in self.docs.background_mut() {
+                if slot.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation) {
+                    let result = slot.session.execute(id, &params).map_err(|e| e.to_string());
+                    if result.is_ok() && id == "cloud.cancel" {
+                        self.cloud.operations.cancel_requested(operation);
+                    }
+                    return result;
+                }
+            }
+        }
         let t0 = now_ms();
         let revision = self.session.revision;
         if matches!(id, "render.lights.solo" | "render.lights.mute") {
@@ -1810,6 +1844,9 @@ impl SolveApp {
         if self.status_undo && revision != self.session.revision {
             self.status_undo = false;
             self.status = None;
+        }
+        if let Ok(value) = &r {
+            cloud::operations::submitted(self, id, params, value);
         }
         let done = self.command_completed(id, r);
         issue_report::ticket::step_params(self, id, params);
@@ -2195,7 +2232,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "cloud.open.finish") {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -2464,6 +2501,27 @@ impl SolveApp {
             if agent_chat::shown(self) {
                 agent_chat::toggle(self);
             }
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if id == "cloud.configure" {
+            cloud_settings::git::open(self);
+            return;
+        }
+        if id == "cloud.settings" {
+            prefs::open_at(self, prefs::PAGE_CLOUD);
+            return;
+        }
+        if id == "cloud.connect" {
+            cloud_setup::open(self);
+            return;
+        }
+        if matches!(id, "cloud.list" | "cloud.save") {
+            cloud_browser::start(self, id);
+            return;
+        }
+        if matches!(id, "cloud.history" | "cloud.trash" | "cloud.rename" | "cloud.delete" | "cloud.restore" | "cloud.discard") {
+            cloud_browser::management::start(self, id);
             return;
         }
         if id == "ui.palette" {
@@ -4349,6 +4407,7 @@ impl SolveApp {
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
+        cloud::tick(self, ctx);
         edit_in_place::tick(self);
         browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();
@@ -4630,6 +4689,10 @@ impl SolveApp {
         issue_report::CadInput::block(self, ui, &mut report_input);
         semantic_content::begin(self, ui.ctx());
         self.cad_ui(ui, &mut report_input);
+        cloud_setup::show(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        cloud_settings::git::show(self, ui.ctx());
+        cloud_browser::show(self, ui.ctx());
         semantic_content::finalize(self, ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
         if !self.view_windows.is_child() {

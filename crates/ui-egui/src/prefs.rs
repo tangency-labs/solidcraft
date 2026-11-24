@@ -524,6 +524,7 @@ pub const PAGES: &[&str] = &[
     "Assistant",
     "Plugins",
     "Privacy",
+    "Cloud Saves",
 ];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
@@ -539,6 +540,7 @@ pub const PAGE_SHORTCUTS: usize = 10;
 pub const PAGE_ASSISTANT: usize = 11;
 pub const PAGE_PLUGINS: usize = 12;
 pub const PAGE_PRIVACY: usize = 13;
+pub const PAGE_CLOUD: usize = 14;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -668,6 +670,15 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         scroll: true,
         draw: page_draw::<PAGE_PRIVACY>,
         defaults: page_defaults::<PAGE_PRIVACY>,
+    }),
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("settings"),
+        label: "cloud.title",
+        group: None,
+        handle: "prefs:page:Cloud Saves",
+        scroll: true,
+        draw: page_draw::<PAGE_CLOUD>,
+        defaults: page_defaults::<PAGE_CLOUD>,
     }),
 ];
 
@@ -1308,6 +1319,8 @@ pub struct PrefsWindow {
     /// The window itself: open, the page shown (an index into [`PAGES`]), the search, and
     /// everything as it was when the dialog opened (or at the last Apply), for Cancel.
     pub shell: prefs_window::State<Snapshot>,
+    /// Ordinary settings accepted when an asynchronous cloud Apply starts.
+    applying_snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
     /// The Profile operations preference the profiler last followed: applied when it changes,
@@ -1841,6 +1854,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         default_units_changed(app);
     }
     match page {
+        PAGE_CLOUD => crate::cloud_settings::defaults(app),
         0 => {
             app.autosave_minutes = 5.0;
             set_autosave(app);
@@ -2469,6 +2483,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         panel_layout::closed(ctx);
     }
     crate::settings_profiles::rename_popup(app, ctx);
+    if let Some(close_after_apply) = crate::cloud_settings::advance(app) {
+        let snapshot = app.prefs_window.applying_snapshot.take().unwrap_or_else(|| Snapshot::take(app));
+        app.prefs_window.shell.set_snapshot(snapshot);
+        if close_after_apply {
+            prefs_window::close(app, false);
+        }
+    }
     // File › Keyboard Shortcuts and Help › Keyboard Shortcuts open this dialog at that page.
     if app.keymap.open {
         app.keymap.open = false;
@@ -2477,6 +2498,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     app.prefs_window.import_tile = None;
     if !app.prefs_window.shell.open {
         panel_layout::closed(ctx);
+        crate::cloud_settings::cancel(app);
+        app.prefs_window.applying_snapshot = None;
         // A question left up when the dialog closed is not still asked when it opens again.
         app.space_mouse.restore_pending = false;
         // Calibration opens from here and ends with it, so the cap moves the view again.
@@ -2549,7 +2572,34 @@ impl prefs_window::Host for SolveApp {
         Snapshot::take(self)
     }
     fn matches(&self, snapshot: &Snapshot) -> bool {
-        snapshot.matches(self) && !crate::plugins::resource_pending(self)
+        snapshot.matches(self) && !crate::plugins::resource_pending(self) && !crate::cloud_settings::changed(self)
+    }
+    fn apply_enabled(&self) -> bool {
+        !crate::cloud_settings::busy(self)
+    }
+    fn request_apply(&mut self, close: bool) -> Result<bool, String> {
+        let pending = crate::cloud_settings::busy(self);
+        if pending {
+            return Ok(false);
+        }
+        if !close {
+            self.apply()?;
+        }
+        let snapshot = Snapshot::take(self);
+        let done = crate::cloud_settings::apply(self, close);
+        if !pending && crate::cloud_settings::busy(self) {
+            self.prefs_window.applying_snapshot = Some(snapshot);
+        }
+        Ok(done)
+    }
+    fn before_close(&mut self, _revert: bool) {
+        if crate::cloud_settings::busy(self)
+            && let Some(applied) = self.prefs_window.applying_snapshot.take()
+        {
+            self.prefs_window.shell.set_snapshot(applied);
+        }
+        crate::cloud_settings::cancel(self);
+        self.prefs_window.applying_snapshot = None;
     }
     /// The panel layout goes back first, through the same transaction as its commands; only when
     /// that succeeds do the other settings.
@@ -2669,6 +2719,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_ASSISTANT => crate::agent_chat::settings::page(app, ui),
         PAGE_PLUGINS => crate::plugins::page(app, ui),
+        PAGE_CLOUD => crate::cloud_settings::show(app, ui),
         PAGE_GENERAL => general::show(app, ui),
         PAGE_APPEARANCE => interface::appearance(app, ui, t),
         PAGE_LAYOUT => interface::layout(app, ui),
@@ -6786,7 +6837,8 @@ mod tests {
                 "Shortcuts",
                 "Assistant",
                 "Plugins",
-                "Privacy"
+                "Privacy",
+                "Cloud Saves"
             ]
         );
         assert_eq!(WINDOW_PAGES.len(), PAGES.len());

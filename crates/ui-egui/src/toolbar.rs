@@ -616,6 +616,7 @@ impl FileAction {
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
+            Self::Command("cloud.save") => app.services.cloud_host.is_some() && !app.session.cloud_save_pending(),
             _ => true,
         };
         !app.file_picker_busy() && !app.file_load_holds() && !behind_report && (!needs_design || design_shown(app)) && available
@@ -738,6 +739,9 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    if app.services.cloud_host.is_some() {
+        rows.push(row("cloud.save", app.tr("cmd.cloud.save"), "", "save", FileAction::Command("cloud.save").enabled(app)));
+    }
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
     rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
@@ -829,6 +833,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.insert_step" => FileAction::Command("file.insert_step").run(app),
         "file.insert_mesh" => FileAction::Command("file.insert_mesh").run(app),
         "component.insert_design" => FileAction::Command("component.insert_design").run(app),
+        "cloud.save" => FileAction::Command("cloud.save").run(app),
         "file.export_stl" => FileAction::Command("file.export_stl").run(app),
         "file.export_3mf" => FileAction::Command("file.export_3mf").run(app),
         "file.export_step" => FileAction::Command("file.export_step").run(app),
@@ -899,11 +904,15 @@ pub fn save(app: &mut SolveApp) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
     }
-    if app.session.path.is_some() {
+    if app.session.cloud_binding().is_some() {
+        crate::save_job::start(app, "file.save", json!({}));
+    } else if app.session.path.is_some() {
         // Read-only, or changed on disk since it was opened: Save As, or a question, instead.
         if crate::open_elsewhere::check_save(app) {
             crate::save_job::start(app, "file.save", provenance_params(app));
         }
+    } else if app.services.cloud_host.is_some() && app.session.cloud_settings().default_connection.is_some() {
+        app.start("cloud.save");
     } else {
         save_as(app);
     }

@@ -17,6 +17,7 @@
 - [Plastic parts](guide/plastic.md)
 - [Import and export](guide/files.md)
 - [Keeping designs on a network share](guide/network-share.md)
+- [Cloud Saves](guide/cloud-saves.md)
 - [Keyboard shortcuts](guide/shortcuts.md)
 - [Updates and privacy](guide/updates.md)
 - [Managing SolidCraft in an organization](guide/managed-deployment.md)

@@ -1,0 +1,2 @@
+| assets/locales/pending/cloud-conflicts.json | SolidCraft contributors | Original conflict resolution translations | MIT OR Apache-2.0 |
+| docs/book/src/guide/images/cloud-saves-conflict.png | SolidCraft contributors | actual SolidCraft 0.40.0 desktop screenshot of explicit conflict resolution after preserving a competing original sample design; isolated profile and public-safe examples | MIT OR Apache-2.0 |

@@ -1372,6 +1372,8 @@ pub struct DocTab<'a> {
     pub list_name: &'a str,
     /// It has unsaved changes (a bullet after its name).
     pub dirty: bool,
+    /// Optional status drawn after its name in place of the unsaved-changes bullet.
+    pub status: Option<crate::FileStatus<'a>>,
     /// Its hover text (where it is saved); its full name goes above it when the tab cuts it short.
     pub place: &'a str,
     /// What the file's signing provenance says, as a shield beside the name: persistent, where
@@ -2023,7 +2025,7 @@ fn clear_view_width(ui: &egui::Ui, view: &ViewTab, label: f32, stage: CollapseSt
 fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed: Option<(usize, &str)>, room: f32) -> Geom {
     let t = Tokens::get();
     let n = tab.views.len();
-    let dot = if tab.dirty { 14.0 } else { 0.0 };
+    let dot = if tab.dirty || tab.status.is_some() { 14.0 } else { 0.0 };
     let mut name_w = text_width(ui, name, crate::type_face::semibold(t.font_button)) + if tab.security.is_some() { 18.0 } else { 0.0 };
     let label_w = |k: usize, v: &ViewTab| match view_typed {
         Some((i, text)) if i == k => text_width(ui, text, view_font(true)).max(RENAME_MIN),
@@ -3484,12 +3486,13 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 Some(text) if i == strip.selected => text.clone(),
                 _ => tab.name.to_string(),
             };
-            let label = format!("{shown_name}{}", if tab.dirty { " •" } else { "" });
+            let label = format!("{shown_name}{}", if tab.dirty && tab.status.is_none() { " •" } else { "" });
             let text = text_width(ui, &label, crate::type_face::semibold(t.font_button));
             let badge = if tab.security.is_some() { 18.0 } else { 0.0 };
+            let status = if tab.status.is_some() { t.space_14 } else { 0.0 };
             let plus = if small_plus(strip, i) { SMALL_PLUS } else { 0.0 };
             let count = if tab.views.len() > 1 { 7.0 + badge_width(ui, tab.views.len()) } else { 0.0 };
-            (text + 40.0 + badge + plus + count).clamp(72.0, MAX_FIT)
+            (text + 40.0 + badge + status + plus + count).clamp(72.0, MAX_FIT)
         })
         .collect();
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - new_tab_width;
@@ -3622,16 +3625,29 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
             tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
         }
         let ink = if active || lit { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.7) };
-        let label = format!("{}{}", tab.name, if tab.dirty && plain { " •" } else { "" });
+        let label = format!("{}{}", tab.name, if tab.dirty && plain && tab.status.is_none() { " •" } else { "" });
         let font = if active { crate::type_face::semibold(t.font_button) } else { FontId::proportional(t.font_button) };
         let g = ui.painter().layout_no_wrap(label, font, ink);
         let text_size = g.size();
         let badge = if tab.security.is_some() { 18.0 } else { 0.0 };
         let plus = if small_plus(strip, i) { SMALL_PLUS } else { 0.0 };
         let count = if tab.views.len() > 1 && plain { 7.0 + badge_width(ui, tab.views.len()) } else { 0.0 };
-        let (text_x, text_w) =
-            if plain { (tr.left() + 10.0, (tr.width() - 30.0 - badge - plus - count).max(10.0)) } else { (tr.left() + 13.0 + dot, name_w - badge) };
+        // A plain tab shows its status after its name; an expanded one where the unsaved dot goes.
+        let status_w = if tab.status.is_some() && plain { t.space_14 } else { 0.0 };
+        let (text_x, text_w) = if plain {
+            (tr.left() + 10.0, (tr.width() - 30.0 - badge - plus - count - status_w).max(10.0))
+        } else {
+            (tr.left() + 13.0 + dot, name_w - badge)
+        };
         let tip = tab_tip(tab.name, tab.place, text_size.x > text_w);
+        if let Some(status) = tab.status {
+            let centre =
+                if plain { pos2(text_x + text_size.x.min(text_w) + t.space_6, tr.center().y) } else { pos2(tr.left() + 13.0 + 3.5, tr.center().y) };
+            let sync = Rect::from_center_size(centre, vec2(t.space_6, t.space_6));
+            status.paint_dot(ui, sync);
+            solidcraft_ui_registry::publish_rect(&format!("{}{i}:sync-dot", h.tab), sync);
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, resp.enabled(), active, &tip));
+        }
         let clip = Rect::from_min_size(tr.min, vec2(text_x - tr.left() + text_w, tr.height()));
         match strip.rename.as_mut().filter(|_| active) {
             Some(rename) => {
@@ -3642,7 +3658,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 ui.painter().with_clip_rect(clip).galley(pos2(text_x, tr.center().y - text_size.y / 2.0), g, ink);
             }
         }
-        if dot > 0.0 && tab.dirty {
+        if dot > 0.0 && tab.dirty && tab.status.is_none() {
             ui.painter().circle_filled(pos2(tr.left() + 13.0 + 3.5, tr.center().y), 3.5, t.warning);
         }
         let shield_x = if plain { tr.right() - 31.0 - plus } else { text_x + text_w + 11.0 };
@@ -3658,7 +3674,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let mut closing = !strip.pop_out && (resp.middle_clicked() || (!plain && pen.close_design));
         if plain {
             if tab.views.len() > 1 {
-                let at = pos2(text_x + text_size.x.min(text_w) + 7.0, tr.center().y);
+                let at = pos2(text_x + text_size.x.min(text_w) + 7.0 + status_w, tr.center().y);
                 count_badge(ui, at, tab.views.len(), false);
             }
             if plus > 0.0 {
@@ -3729,7 +3745,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 .show(ui.ctx(), |ui| {
                     crate::menu::menu_frame(ui, |ui| {
                         for (i, tab) in strip.tabs.iter().enumerate() {
-                            let label = format!("{}{}", tab.list_name, if tab.dirty { " •" } else { "" });
+                            let label = format!("{}{}", tab.list_name, if tab.dirty && tab.status.is_none() { " •" } else { "" });
                             if crate::list_picker(ui, &format!("{}{i}", h.more_row), &label, i == strip.selected).clicked() {
                                 listed = Some(i);
                             }
