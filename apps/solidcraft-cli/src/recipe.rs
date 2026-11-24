@@ -294,6 +294,15 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
         let bodies = f.get("result_bodies").cloned().unwrap_or(json!([]));
         match f.get("op").and_then(Value::as_str) {
             Some("sketch") => sketch_cmds(f, &mut out)?,
+            Some("frame_member") => {
+                let mut p = json!({"name": name});
+                for key in ["sketch", "lines", "continuous", "profile", "profile_sketch", "profiles", "anchor", "angle", "mirror", "body_name"] {
+                    if let Some(v) = f.get(key) {
+                        p[key] = v.clone();
+                    }
+                }
+                out.push(json!({"command": "frame.member", "params": p}));
+            }
             Some("extrude") => {
                 let mut p = json!({"sketch": profile_sketch(f), "profiles": profiles_of(f), "operation": op(f), "name": name, "body_names": bodies});
                 // Thin: {sketch, curves, thickness, side?, thickness2?} instead of profiles.
