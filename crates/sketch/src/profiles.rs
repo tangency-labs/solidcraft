@@ -1226,6 +1226,61 @@ impl IslandLoop {
     }
 }
 
+/// Signed distance of `q` from `shape`: to the left of a line, outside a circle.
+fn side_of(shape: &Shape, q: Vec2) -> f64 {
+    match *shape {
+        Shape::Line { a, b } => {
+            let d = b - a;
+            let len = d.len();
+            if len > 0.0 { d.cross(q - a) / len } else { q.dist(a) }
+        }
+        Shape::Round { c, r, .. } => q.dist(c) - r,
+    }
+}
+
+/// The part of the free-form segment `seg` from `from` to `to` (two points on it), in that
+/// direction; `None` when either point lies further than `tol` from the segment or the two are
+/// one point of it.
+fn exact_between(seg: &Seg2, from: Vec2, to: Vec2, tol: f64) -> Option<Seg2> {
+    let (t0, t1) = (seg.closest_param(from), seg.closest_param(to));
+    if seg.point_at(t0).dist(from) > tol || seg.point_at(t1).dist(to) > tol || (t1 - t0).abs() < 1e-12 {
+        return None;
+    }
+    // `part` carries `hi` into the tail, whose parameter a conic's split re-normalises.
+    let part = seg.part(t0.min(t1), t0.max(t1));
+    Some(if t0 <= t1 { part } else { part.reversed() })
+}
+
+/// Samples of the free-form curve between a chord's ends that a crossing check looks at.
+const CHORD_SIDE_SAMPLES: usize = 16;
+
+/// Whether `chord`, a straight piece sampled from the free-form segment `seg`, crosses `other`
+/// only because it is straight: one end of the chord lies on `other` (within `tol`), the other
+/// end lies off it, and the segment itself, between the two ends, never gets more than `tol`
+/// to the far side of `other`. The chord then cuts across a bulge of `other` the curve only
+/// touches (a spline tangent to an arc where both end). Gives the chord's end on `other`: a
+/// crossing there is the touch itself, one further along the chord is sampling.
+fn chord_crossing_from_sampling(chord: &Shape, seg: &Seg2, other: &Shape, tol: f64) -> Option<Vec2> {
+    let Shape::Line { a, b } = *chord else { return None };
+    let (sa, sb) = (side_of(other, a), side_of(other, b));
+    let (on, off, s_off) = match (sa.abs() <= tol, sb.abs() <= tol) {
+        (true, false) => (a, b, sb),
+        (false, true) => (b, a, sa),
+        _ => return None,
+    };
+    if !s_off.is_finite() {
+        return None;
+    }
+    let (t0, t1) = (seg.closest_param(on), seg.closest_param(off));
+    (1..CHORD_SIDE_SAMPLES)
+        .all(|n| {
+            let t = t0 + (t1 - t0) * n as f64 / CHORD_SIDE_SAMPLES as f64;
+            let s = side_of(other, seg.point_at(t));
+            s.is_finite() && s * s_off.signum() >= -tol
+        })
+        .then_some(on)
+}
+
 /// How far apart two curves' pieces must be to search them separately: well past every
 /// tolerance the search uses (end joins at `ENDPOINT_JOIN_TOL`, crossings next to an end within
 /// `100 * tol` = 1e-3, node merging at `tol`).
@@ -1783,7 +1838,25 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 if gi == gj {
                     continue;
                 }
+                // A chord of a free-form curve that ends on a line or arc and crosses it again
+                // further on, where the curve itself only touches it (a spline tangent to an arc at
+                // their shared end), crosses it from sampling alone: no cut.
+                let sampled = |c: usize, other: &Shape| {
+                    let chord = shapes.get(c).map(|s| s.1);
+                    let tag = tags.get(c).copied().flatten();
+                    match (chord, tag) {
+                        (Some(chord), Some((ci, k, _, _))) => {
+                            exact.get(&ci).and_then(|ex| ex.get(k)).and_then(|seg| chord_crossing_from_sampling(&chord, seg, other, tol))
+                        }
+                        _ => None,
+                    }
+                };
+                let unsampled = |c: usize| tags.get(c).copied().flatten().is_none();
+                let touch = if unsampled(gj) { sampled(i, gy) } else { None }.or_else(|| if unsampled(gi) { sampled(j, gx) } else { None });
                 let mut pts = intersections_within(gx, gy, tol);
+                if let Some(on) = touch {
+                    pts.retain(|p| p.dist(on) <= tol * 100.0);
+                }
                 // A tangent touch gives two nearly equal roots: one point.
                 if let [p, q] = pts[..]
                     && p.dist(q) < tol * 100.0
@@ -2077,6 +2150,15 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         let e = edges.get(h / 2)?;
         Some(if h.is_multiple_of(2) { (e.seg, e.u, e.v) } else { (e.seg.reversed(), e.v, e.u) })
     };
+    // How a half-edge leaves its start and reaches its end: a chord sampled from a free-form
+    // curve by the part of the exact curve it stands for, so that the turn at a corner sees the
+    // curve's own tangent and bend (a chord of a spline that leaves a corner along an arc, on
+    // the arc's outside, starts off on its inside).
+    let course = |h: usize| -> Option<Seg2> {
+        let (seg, _, _) = half(h)?;
+        let Some((ci, k, _, _)) = edges.get(h / 2).and_then(|e| e.tag) else { return Some(seg) };
+        Some(exact.get(&ci).and_then(|ex| ex.get(k)).and_then(|ex| exact_between(ex, seg.start(), seg.end(), tol)).unwrap_or(seg))
+    };
     let mut pass = 0;
     let kept = loops.len();
     loop {
@@ -2132,7 +2214,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                     coverage_tags.push(None);
                     edge_analytic.push(false);
                 }
-                let back = (-seg.end_tangent()).angle();
+                let back = (-course(h).unwrap_or(seg).end_tangent()).angle();
                 let twin = h ^ 1;
                 // First clockwise turn from the way back. Directions are compared a short way
                 // along each segment (curvature decides between equal tangents, e.g. a line tangent
@@ -2140,14 +2222,14 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 // Tangents that [`leave_same_way`] are equal: a solved tangency leaves them that far
                 // apart either way, and the turn the round-off picked lost every region at a corner
                 // where two arcs leave along one line.
-                let kt = half(twin).map(|(ts, _, _)| curvature(&ts)).unwrap_or(0.0);
+                let kt = course(twin).map(|ts| curvature(&ts)).unwrap_or(0.0);
                 // (clockwise turn from the way back, curvature, chord, half-edge)
                 let mut turns: Vec<(f64, f64, f64, usize)> = Vec::new();
                 for &o in outgoing.get(to).map(Vec::as_slice).unwrap_or(&[]) {
                     if o == twin {
                         continue;
                     }
-                    let Some((os, _, _)) = half(o) else { continue };
+                    let Some(os) = course(o) else { continue };
                     let k = curvature(&os);
                     let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
                     // Leaving along the way back: just clockwise of it when it bends away to the
@@ -2949,6 +3031,18 @@ mod tests {
         let grid = Grid::new(&[small, inf]);
         assert!(grid.cells(&inf).is_none());
         assert!(grid.cells(&huge).is_none());
+    }
+
+    /// The part of a conic between two of its points ends at the second one: a conic's tail
+    /// after a split has its parameter re-normalised, so the end is not at the old fraction.
+    #[test]
+    fn exact_between_ends_a_conic_part_at_its_given_point() {
+        let conic = Seg2::Conic { a: Vec2::new(0.0, 0.0), apex: Vec2::new(1.0, 1.0), b: Vec2::new(2.0, 0.0), w: 0.5 };
+        let (from, to) = (conic.point_at(0.5), conic.point_at(0.75));
+        let part = exact_between(&conic, from, to, 1e-9).expect("both points lie on the conic");
+        assert!(part.start().dist(from) < 1e-9 && part.end().dist(to) < 1e-9, "{part:?}");
+        let back = exact_between(&conic, to, from, 1e-9).expect("both points lie on the conic");
+        assert!(back.start().dist(to) < 1e-9 && back.end().dist(from) < 1e-9, "{back:?}");
     }
 
     fn text_into(sk: &mut Sketch, text: &str, at: Vec2, height: f64) {

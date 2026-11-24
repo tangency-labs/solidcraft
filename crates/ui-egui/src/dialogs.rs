@@ -3908,7 +3908,6 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     d.sync_thread(s);
 }
 
-/// Feature patterns use the same source-fixed slot ordering and controls as sketch patterns.
 /// A rectangular pattern direction's distance type (`index` 0 or 1), from the dialog's extra
 /// parameters (#8523); count and spacing until one is chosen.
 pub(crate) fn pattern_distance(extra: &serde_json::Map<String, Value>, index: usize) -> PatternDistance {
@@ -3929,7 +3928,8 @@ fn pattern_values(p: &mut Value, k: &str, distance: PatternDistance, count: &str
     }
 }
 
-fn feature_pattern_alignment_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, index: usize) {
+/// Solid patterns use the same source-fixed slot ordering and controls as sketch patterns.
+fn solid_pattern_alignment_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, index: usize) {
     use solidcraft_engine::sketch::PatternAlignment;
     let (label, alignment_key, reversed_key) =
         if index == 0 { ("Alignment", "alignment", "reversed") } else { ("Alignment 2", "alignment2", "reversed2") };

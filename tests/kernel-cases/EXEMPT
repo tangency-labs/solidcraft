@@ -188,6 +188,7 @@ file.import_cache_clear           clears a cache of imported files
 file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
 file.move                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.open_in_easyprint            hands the file to another program
+file.revert_saved                 reads the open design again from its file: tested in crates/engine/src/cmd/file.rs tests
 file.save                         saving the design
 file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
