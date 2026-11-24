@@ -426,6 +426,20 @@ impl Vec3 {
         (parallel, anti)
     }
 
+    /// Not upstream: this direction, reversed when it points more than a right angle away from
+    /// `like` ([`Vec3::parallel_sense`]'s anti-parallel flag): a line's direction given the sense
+    /// of another, as a turn about an edge found again keeps the sense it was picked with.
+    /// `None` when either has zero length or a coordinate that is not finite.
+    #[must_use]
+    pub fn with_sense_of(self, like: Self) -> Option<Self> {
+        let finite = |v: Self| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !finite(self) || !finite(like) {
+            return None;
+        }
+        let anti = self.parallel_sense(like, 0.0).1?;
+        Some(if anti { -self } else { self })
+    }
+
     /// True when `self` and `o` are perpendicular within `ang_tol_deg` degrees
     /// (`IsPerpendicularTo`). Zero-length vectors are perpendicular to nothing.
     #[must_use]
@@ -1074,6 +1088,27 @@ mod tests {
                 .abs()
                 < 1e-12
         );
+    }
+
+    #[test]
+    fn a_direction_takes_the_sense_of_another_and_none_without_length() {
+        let y = Vec3::new(0.1, 1.0, 0.0);
+        assert_eq!(
+            Vec3::new(0.0, -2.0, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 2.0, 0.0))
+        );
+        assert_eq!(
+            Vec3::new(0.0, 2.0, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 2.0, 0.0))
+        );
+        // Not along one line at all: the sense of the nearer half.
+        assert_eq!(
+            Vec3::new(1.0, -1.0, 0.0).with_sense_of(Vec3::new(0.0, 1.0, 0.0)),
+            Some(Vec3::new(-1.0, 1.0, 0.0))
+        );
+        assert_eq!(Vec3::new(0.0, 0.0, 0.0).with_sense_of(y), None);
+        assert_eq!(y.with_sense_of(Vec3::new(0.0, 0.0, 0.0)), None);
+        assert_eq!(Vec3::new(f64::NAN, 1.0, 0.0).with_sense_of(y), None);
     }
 
     /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to

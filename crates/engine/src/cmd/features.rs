@@ -462,7 +462,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "bodies: [names]; ",
             "translate?: [x,y,z] (length exprs or numbers, applied after rotation); ",
             "axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); ",
-            "about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis and origin give the turn's sense and where it is now); ",
+            "about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis gives the turn's sense, and with origin the line used when the edge is not found); ",
             "angle?: angle expr; ",
             "origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); ",
             "matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); ",
@@ -2962,7 +2962,7 @@ fn move_split(s: &mut Session, moves: &[Value]) -> Result<Value> {
     let mut features = Vec::new();
     let mut lists: [(&str, Vec<Value>); 3] = [("created_bodies", Vec::new()), ("changed_bodies", Vec::new()), ("removed_bodies", Vec::new())];
     let mut last = Value::Null;
-    for p in moves {
+    for p in &about_once(moves) {
         let reply = move_body_feature(s, p)?;
         features.push(reply.get("feature").cloned().unwrap_or(Value::Null));
         for (key, list) in &mut lists {
@@ -3111,19 +3111,43 @@ fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMov
     Ok(out)
 }
 
+/// The parts of a split move with the turn's `about` (#17974) kept by one part only: the one
+/// that moves the edge's body (`about.body`), else the first. The parts run one after another, so
+/// a later part would look for the edge where an earlier part has already moved it, and a Move
+/// turning other bodies about an edge it doesn't move would follow that edge when it moves. The
+/// other parts turn about the line they are given.
+fn about_once(moves: &[Value]) -> Vec<Value> {
+    let Some(about) = moves.iter().find_map(|p| p.get("about")) else { return moves.to_vec() };
+    let holds = |p: &Value| {
+        let body = about.get("body").and_then(Value::as_str);
+        body.is_some_and(|b| p.get("bodies").and_then(Value::as_array).is_some_and(|l| l.iter().any(|n| n.as_str() == Some(b))))
+    };
+    let keeper = moves.iter().position(holds).unwrap_or(0);
+    moves
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let mut p = p.clone();
+            if i != keeper
+                && let Some(o) = p.as_object_mut()
+            {
+                o.remove("about");
+            }
+            p
+        })
+        .collect()
+}
+
 /// The edge or round face of the model a move's turn is about (`about`, #17974), kept so the turn
-/// follows it. It needs `axis`, along it, and `angle`; `axis` gives the turn's sense, and with
-/// `origin` the line the move turns about when the edge is no longer found.
+/// follows it. It needs `axis` and `angle`: the edge gives the line the move turns about, `axis`
+/// the sense of the turn, and with `origin` the line it turns about when the edge is not found.
 fn move_turn_about(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
     let Some(v) = p.get("about") else { return Ok(None) };
-    let Some((geo, _, d)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
+    let Some((geo, ..)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
         return Err(bad(cmd, "`about` must be {edge: [x,y,z], body?} or {face: [x,y,z], body?}"));
     };
-    let (Some(axis), Some(_)) = (p.get("axis").and_then(vec3).and_then(|a| a.normalized()), p.get("angle")) else {
+    if p.get("axis").and_then(vec3).is_none() || p.get("angle").is_none() {
         return Err(bad(cmd, "`about` needs `axis` and `angle`"));
-    };
-    if axis.cross(d).len() > 1e-6 {
-        return Err(bad(cmd, "`about` does not lie along `axis`"));
     }
     Ok(Some(geo))
 }
