@@ -337,6 +337,11 @@ fn missing_model_warnings_name_the_folder_and_repeats_are_counted() {
     let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("JST_SH")).collect();
     assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
     assert_eq!(lines[0].as_str(), "JST_SH.step: not found in /libs/jst (x3)");
+    // A model beside the board is named from the board, not by the folder's full path.
+    let beside = r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/work/board/models/X.step")))"#;
+    let imported = read_kicad(beside.as_bytes(), "/work/board/t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert!(imported.feature.warnings.iter().any(|w| w == "X.step: not found in the board's folder, models"), "{:?}", imported.feature.warnings);
     let mut unset = |_: &str| Err("unresolved environment variable `EASYEDA2KICAD`".to_string());
     let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut unset).unwrap();
     let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("EASYEDA2KICAD")).collect();

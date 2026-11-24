@@ -1081,7 +1081,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                 let file = match load(&model.path) {
                     Ok(file) => file,
                     Err(reason) => {
-                        warnings.push(load_failure(&model.path, &reason));
+                        warnings.push(load_failure(&model.path, &reason, Path::new(file).parent()));
                         continue;
                     }
                 };
@@ -1256,7 +1256,7 @@ fn unzip_stpz(bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
 /// The warning for a model that could not be read. The loader's reason starts with the path it
 /// tried (`<path>: no such file or directory (os error 2)`): a missing file says which folder was
 /// searched, in words rather than the operating system's, so the reader knows where to look.
-fn load_failure(reference: &str, reason: &str) -> String {
+fn load_failure(reference: &str, reason: &str, board_folder: Option<&Path>) -> String {
     let label = model_label(reference);
     // One variable that is not set leaves out every model that names it: one line for all of them.
     if reason.starts_with("unresolved environment variable") {
@@ -1266,7 +1266,17 @@ fn load_failure(reference: &str, reason: &str) -> String {
         && (head.contains('\\') || head.contains('/'))
         && tail.to_ascii_lowercase().starts_with("no such file or directory")
     {
-        let folder = Path::new(head).parent().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default();
+        let searched = Path::new(head).parent();
+        // A folder under the board's own is named from the board, so a long personal path is not repeated.
+        let folder = match (searched, board_folder.filter(|dir| !dir.as_os_str().is_empty())) {
+            (Some(dir), Some(board)) => match dir.strip_prefix(board) {
+                Ok(rest) if rest.as_os_str().is_empty() => "the board's folder".to_string(),
+                Ok(rest) => format!("the board's folder, {}", rest.to_string_lossy()),
+                Err(_) => dir.to_string_lossy().into_owned(),
+            },
+            (Some(dir), None) => dir.to_string_lossy().into_owned(),
+            (None, _) => String::new(),
+        };
         if !folder.is_empty() {
             return format!("{label}: not found in {folder}");
         }
