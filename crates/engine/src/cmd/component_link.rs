@@ -1096,6 +1096,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         let mut moved = None;
+        // The old names are read as the new ones were: a STEP link's own naming (source_bodies).
+        let naming = link.step_names.as_deref().and_then(solidcraft_io::StepNames::parse).unwrap_or_default();
         let before = s.model.result(link.feature).map(|r| r.state.clone());
         if let Some(f) = s.doc_mut().feature_mut(link.feature) {
             if !same {
@@ -1103,7 +1105,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 // them in another order (#21371).
                 if f.body_names.len() != sf.body_names.len() {
                     f.body_names = sf.body_names;
-                } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), &sf.body_names) {
+                } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), naming, &sf.body_names) {
                     f.body_names = reordered(&f.body_names, &order);
                     moved = Some(order);
                 }
@@ -1235,16 +1237,17 @@ fn numbered_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
 /// Where each body of a link's design was when the link last read it, for a design that kept
 /// its number of bodies but lists them in another order (#21371): `order[j]` is the place the
 /// design's body `j` had then. `step` is the STEP the link keeps from that read, which names the
-/// bodies as the design did; `now` are the names the design gives its bodies now. A body the
+/// bodies as the design did when read with `names` (the link's own naming for a STEP link, the
+/// default for a design); `now` are the names the design gives its bodies now. A body the
 /// design still has is found by its name; the bodies it has new take the places of the ones it no
 /// longer has, in order. `None` when nothing moved, and when the old STEP can't be read or its
 /// names, or the new ones, can't tell the bodies apart: the bodies then keep their places.
-fn moved_bodies(step: &str, file: &str, now: &[String]) -> Option<Vec<usize>> {
+fn moved_bodies(step: &str, file: &str, names: solidcraft_io::StepNames, now: &[String]) -> Option<Vec<usize>> {
     if step.is_empty() {
         return None;
     }
     // A second read of the STEP text: the link keeps no other record of the old names.
-    let was = solidcraft_io::step_import_feature(step.as_bytes(), file).ok()?.body_names;
+    let was = solidcraft_io::step_import_feature_named(step.as_bytes(), file, names).ok()?.body_names;
     let places: std::collections::HashMap<&str, usize> = was.iter().enumerate().map(|(k, n)| (n.as_str(), k)).collect();
     let distinct = now.iter().collect::<std::collections::HashSet<_>>().len() == now.len();
     if was.len() != now.len() || places.len() != was.len() || !distinct {
@@ -1321,7 +1324,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
             f.body_names = sf.body_names;
         } else if let FeatureKind::Import { step, .. } = &f.kind
             && !same_import_source(&f.kind, &sf.kind)
-            && let Some(order) = moved_bodies(step, &file.display().to_string(), &sf.body_names)
+            && let Some(order) = moved_bodies(step, &file.display().to_string(), solidcraft_io::StepNames::default(), &sf.body_names)
         {
             // The names, and what the link last took from each body, stay with their bodies (#21371).
             f.body_names = reordered(&f.body_names, &order);
