@@ -113,6 +113,24 @@ pub enum QueryFailure {
     /// The cache's poly B-rep has no face (the caller's poly B-rep: phase 1 gives it one).
     /// [`ErrorKind::InvalidInput`].
     PolyBrepWithoutFace,
+    /// The poly edge to remove from the vertex does not start at it.
+    /// [`ErrorKind::InvalidInput`].
+    PolyEdgeNotAtVertex,
+    /// The poly edge added does not start where the loop's last edge ends (farther than a
+    /// hundred times the zone tolerance). [`ErrorKind::InvalidInput`].
+    PolyEdgeNotContinuing,
+    /// A poly edge of the caller's poly B-rep has no start or no end vertex.
+    /// [`ErrorKind::InvalidInput`].
+    PolyEdgeWithoutVertex,
+    /// The poly loop to finish has no edge. [`ErrorKind::InvalidInput`].
+    PolyLoopEmpty,
+    /// The poly loop's last edge does not end at its first vertex (farther than the vertex's
+    /// tolerance), so the loop stays open. [`ErrorKind::InvalidInput`].
+    PolyLoopNotClosed,
+    /// The poly edge's radial ring does not lead back to it: an edge of the ring was linked
+    /// into another ring ([`crate::query::poly::PolyBrep::link_radials`] given an edge
+    /// that already had radials). [`ErrorKind::InvalidInput`].
+    PolyRadialRingNotClosed,
     /// No ray fired from the point found the region it lies in (every ray, both ways, failed
     /// or found none). Class `failed`.
     RegionNotFound,
@@ -132,6 +150,9 @@ pub enum QueryFailure {
     /// tangent is parallel to the edge's, so it has no direction across the sector. Class
     /// `failed`.
     TangentAlongEdge,
+    /// The scale given is undefined. Upstream returns `SM_ERR_INVALID_INPUT` as a status
+    /// here. [`ErrorKind::InvalidInput`].
+    UndefinedScale,
     /// The solution is on an object of a kind the routine does not take (not a vertex, curve,
     /// edge, surface or face). [`ErrorKind::Unsupported`].
     UnsupportedObjectKind,
@@ -168,6 +189,11 @@ impl QueryFailure {
             | Self::NoLoopTouches
             | Self::NoPatchInBox
             | Self::NoStationDropped
+            | Self::PolyEdgeNotAtVertex
+            | Self::PolyEdgeNotContinuing
+            | Self::PolyLoopEmpty
+            | Self::PolyLoopNotClosed
+            | Self::PolyRadialRingNotClosed
             | Self::RegionNotFound
             | Self::RegionWithoutShells
             | Self::SegmentOutsideTree
@@ -182,8 +208,11 @@ impl QueryFailure {
             | Self::NoPolyBrep
             | Self::NoTessDriver
             | Self::PolyBrepWithoutFace
+            | Self::PolyEdgeWithoutVertex
             | Self::UvLineNotMade => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) | Self::ZeroLengthVector => SM_ERR_INVALID_INPUT,
+            Self::InvalidValue(_) | Self::UndefinedScale | Self::ZeroLengthVector => {
+                SM_ERR_INVALID_INPUT
+            }
         }
     }
 
@@ -207,6 +236,13 @@ impl QueryFailure {
             | Self::NoPolyBrep
             | Self::NoTessDriver
             | Self::PolyBrepWithoutFace
+            | Self::PolyEdgeNotAtVertex
+            | Self::PolyEdgeNotContinuing
+            | Self::PolyEdgeWithoutVertex
+            | Self::PolyLoopEmpty
+            | Self::PolyLoopNotClosed
+            | Self::PolyRadialRingNotClosed
+            | Self::UndefinedScale
             | Self::UvLineNotMade => ErrorKind::InvalidInput,
             Self::SurfaceWithoutNurbs | Self::UnsupportedObjectKind => ErrorKind::Unsupported,
             _ => ErrorKind::of_status(self.comparison_status()),
@@ -249,6 +285,18 @@ impl core::fmt::Display for QueryFailure {
             Self::NoStationDropped => f.write_str("no station dropped onto the other"),
             Self::NoTessDriver => f.write_str("no tessellation driver was given"),
             Self::PolyBrepWithoutFace => f.write_str("the poly B-rep has no face"),
+            Self::PolyEdgeNotAtVertex => f.write_str("the poly edge does not start at the vertex"),
+            Self::PolyEdgeNotContinuing => {
+                f.write_str("the poly edge does not start where the loop's last edge ends")
+            }
+            Self::PolyEdgeWithoutVertex => f.write_str("the poly edge has no start or end vertex"),
+            Self::PolyLoopEmpty => f.write_str("the loop has no first edge"),
+            Self::PolyLoopNotClosed => {
+                f.write_str("the loop's last edge does not end at its first vertex")
+            }
+            Self::PolyRadialRingNotClosed => {
+                f.write_str("the poly edge's radial ring does not lead back to it")
+            }
             Self::RegionNotFound => f.write_str("no ray fired from the point found its region"),
             Self::RegionWithoutShells => f.write_str("the region has no shells"),
             Self::SegmentOutsideTree => f.write_str("the segment meets no subdivision tree node"),
@@ -257,6 +305,7 @@ impl core::fmt::Display for QueryFailure {
             Self::TangentAlongEdge => {
                 f.write_str("the curve's tangent is parallel to the edge's tangent")
             }
+            Self::UndefinedScale => f.write_str("the scale is undefined"),
             Self::UnsupportedObjectKind => {
                 f.write_str("the solution's object is not a vertex, curve, edge, surface or face")
             }
@@ -286,14 +335,6 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn query_missing(operation: &'static str, what: &'static str) -> Self {
         Self::query(operation, QueryFailure::Missing(what))
-    }
-
-    /// [`crate::SolidError::Failed`] for a value a query computes with that has no defined
-    /// result, as the phrase says, with status [`SM_ERR_INVALID_INPUT`] (upstream
-    /// `return(SM_ERR_INVALID_INPUT)`, or `SER` of a vector operation that returns it).
-    #[must_use]
-    pub(crate) fn query_invalid_value(operation: &'static str, what: &'static str) -> Self {
-        Self::query(operation, QueryFailure::InvalidValue(what))
     }
 
     /// The query failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -344,10 +385,6 @@ pub(super) mod tests {
             assert_eq!(typed.query_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::query_invalid_value("query::op", "x"),
-            SolidError::query("query::op", QueryFailure::InvalidValue("x"))
-        );
-        assert_eq!(
             SolidError::query_missing("query::op", "the edge's curve").to_string(),
             "query::op: the edge's curve is missing"
         );
@@ -356,7 +393,7 @@ pub(super) mod tests {
             "query::op: the loop does not close"
         );
         assert_eq!(
-            SolidError::query_invalid_value("query::op", "x").kind(),
+            SolidError::query("query::op", QueryFailure::InvalidValue("x")).kind(),
             ErrorKind::InvalidInput
         );
         assert_eq!(SolidError::sm_err("query::op").query_failure(), None);
@@ -400,6 +437,17 @@ pub(super) mod tests {
             (F::SegmentOutsideTree, SM_ERR, K::Failed),
             (F::NoTessDriver, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::PolyBrepWithoutFace, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::UndefinedScale, SM_ERR_INVALID_INPUT, K::InvalidInput),
+            (F::PolyEdgeNotContinuing, SM_ERR, K::InvalidInput),
+            (F::PolyLoopEmpty, SM_ERR, K::InvalidInput),
+            (F::PolyLoopNotClosed, SM_ERR, K::InvalidInput),
+            (
+                F::PolyEdgeWithoutVertex,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (F::PolyEdgeNotAtVertex, SM_ERR, K::InvalidInput),
+            (F::PolyRadialRingNotClosed, SM_ERR, K::InvalidInput),
         ];
         for (failure, code, kind) in cases {
             let e = SolidError::query("query::op", failure);
@@ -481,9 +529,6 @@ pub(super) mod tests {
             ("solidcore/src/query/brep/ray.rs", 2),
             ("solidcore/src/query/brep/ray/live.rs", 4),
             ("solidcore/src/query/face/p2.rs", 19),
-            ("solidcore/src/query/poly.rs", 13),
-            ("solidcore/src/query/poly/copy.rs", 11),
-            ("solidcore/src/query/poly_properties.rs", 2),
         ];
         assert_pinned("query phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }

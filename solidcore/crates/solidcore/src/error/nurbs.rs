@@ -280,6 +280,9 @@ pub enum BSplineFailure {
         /// The curve's degree.
         degree: usize,
     },
+    /// A Coons patch that is not bilinear needs four derivative curves, and none are given.
+    /// [`ErrorKind::InvalidInput`].
+    DerivativeCurvesMissing,
     /// The points are said to be of dimension `dim`; the method takes 2 or 3.
     /// [`ErrorKind::InvalidInput`].
     DimensionNot2Or3 {
@@ -311,6 +314,9 @@ pub enum BSplineFailure {
     },
     /// The curve's ends coincide (it is closed), so no scaling takes one end to the other.
     EndsCoincide,
+    /// Expanding the surface's boundary span changed its control point or knot counts,
+    /// which the expansion is to keep; the surface is left unchanged. Class `failed`.
+    ExpansionChangesCounts,
     /// The method failed, as the phrase says (e.g. "the end tangent is not given"): a site
     /// not yet converted to a typed cause.
     Failed(&'static str),
@@ -335,6 +341,10 @@ pub enum BSplineFailure {
     /// An end weight of the curves to join is zero, so no scaling makes the weights at the
     /// joint agree. [`ErrorKind::InvalidInput`].
     JoinEndWeightZero,
+    /// Joining the curves into one failed after the join's own check of the gap passed; the
+    /// failure's cause says why (for example ends farther apart than the construction takes).
+    /// Class `failed`; whether it is a defect or a refusal is its cause's.
+    JoinNotBuilt,
     /// Something the method needs is missing, as the phrase says (e.g. "the boundary
     /// curve").
     Missing(&'static str),
@@ -352,6 +362,12 @@ pub enum BSplineFailure {
     },
     /// The fit is asked for no control points (a count of 0). [`ErrorKind::InvalidInput`].
     NoControlPoints,
+    /// The point's search found no point of the surface within `tolerance` of it.
+    /// [`ErrorKind::NotWithinTolerance`].
+    NoFootWithinTolerance {
+        /// The distance searched within.
+        tolerance: f64,
+    },
     /// The curve or surface holds no NURBS form to work on.
     NoNurbsForm,
     /// A curve given as an arc is not one (within the tolerance). [`ErrorKind::InvalidInput`].
@@ -492,6 +508,7 @@ impl BSplineFailure {
             | Self::DegreeBelowCurrent { .. }
             | Self::DegreeTooLarge { .. }
             | Self::DegreeTooLowToReduce { .. }
+            | Self::DerivativeCurvesMissing
             | Self::DimensionNot2Or3 { .. }
             | Self::DirectionNotUOrV { .. }
             | Self::EmptyGrid { .. }
@@ -517,6 +534,7 @@ impl BSplineFailure {
             | Self::TangentsVanish => ErrorKind::Degenerate,
             Self::DegreeNotReducible { .. }
             | Self::IntervalNotSplittable { .. }
+            | Self::NoFootWithinTolerance { .. }
             | Self::PointOffSurface { .. }
             | Self::SubdivisionCap { .. } => ErrorKind::NotWithinTolerance,
             Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
@@ -602,6 +620,7 @@ impl core::fmt::Display for BSplineFailure {
             Self::DegreeTooLowToReduce { degree } => {
                 write!(f, "a curve of degree {degree} has no lower degree")
             }
+            Self::DerivativeCurvesMissing => f.write_str("the derivative curves are missing"),
             Self::DimensionNot2Or3 { dim } => {
                 write!(f, "the points are of dimension {dim}, not 2 or 3")
             }
@@ -620,6 +639,9 @@ impl core::fmt::Display for BSplineFailure {
                 "the ends to join are {distance} apart, farther than the tolerance {tolerance}"
             ),
             Self::EndsCoincide => f.write_str("the curve's ends coincide"),
+            Self::ExpansionChangesCounts => {
+                f.write_str("expanding the boundary span changes the surface's counts")
+            }
             Self::Failed(what) => f.write_str(what),
             Self::FreeBoundaryNotDegenerate => {
                 f.write_str("a boundary curve without a surface is not degenerate")
@@ -635,6 +657,7 @@ impl core::fmt::Display for BSplineFailure {
                 f.write_str("the interval selects no control point")
             }
             Self::JoinEndWeightZero => f.write_str("an end weight of the curves to join is zero"),
+            Self::JoinNotBuilt => f.write_str("the curves could not be joined into one"),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NetIndexOutside {
                 u_index,
@@ -646,6 +669,12 @@ impl core::fmt::Display for BSplineFailure {
                 "control point ({u_index}, {v_index}) is past the last, ({u_last}, {v_last})"
             ),
             Self::NoControlPoints => f.write_str("no control points are asked for"),
+            Self::NoFootWithinTolerance { tolerance } => {
+                write!(
+                    f,
+                    "no point of the surface was found within {tolerance} of the point"
+                )
+            }
             Self::NoNurbsForm => f.write_str("it holds no NURBS form"),
             Self::NotAnArc => f.write_str("a boundary curve is not an arc"),
             Self::NotIntersectionCurve => {
@@ -997,6 +1026,7 @@ mod tests {
             BSplineFailure::TooFewBoundaryCurves { given: 3 },
             BSplineFailure::TrimDomainOutside,
             BSplineFailure::FreeBoundaryNotDegenerate,
+            BSplineFailure::DerivativeCurvesMissing,
         ];
         let unsupported = [
             BSplineFailure::NotRational,
@@ -1030,7 +1060,10 @@ mod tests {
             },
             BSplineFailure::SubdivisionCap { limit: 8192 },
             BSplineFailure::IntervalNotSplittable { lo: 1.0, hi: 1.0 },
+            BSplineFailure::NoFootWithinTolerance { tolerance: 1e-6 },
         ];
+        // a result the method could not build from valid input: class `failed`
+        let failed = [BSplineFailure::ExpansionChangesCounts];
         // the caller's missing inputs keep upstream's `NER` status
         for cause in [
             BSplineFailure::BoundaryWithoutSurface,
@@ -1047,6 +1080,7 @@ mod tests {
             (&unsupported[..], ErrorKind::Unsupported),
             (&degenerate[..], ErrorKind::Degenerate),
             (&tolerance[..], ErrorKind::NotWithinTolerance),
+            (&failed[..], ErrorKind::Failed),
         ] {
             for &cause in causes {
                 let e = SolidError::b_spline("nurbs::op", cause);
@@ -1123,8 +1157,6 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/nurbs/b_spline_surface/p1.rs", 2),
-            ("solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs", 7),
         ];
         assert_pinned(
             "B-spline phrase-cause sites",
