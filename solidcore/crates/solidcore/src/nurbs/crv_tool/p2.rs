@@ -858,6 +858,27 @@ impl Curve {
     /// removal.
     pub fn remove_degen_segs(&self, tol: f64) -> Result<Option<DegenSegRemoval>> {
         const OP: &str = "nurbs::crv_tool::p2::Curve::remove_degen_segs";
+        check_short_degree(self.degree(), OP)?;
+
+        // Only check curves with at least two segments.
+        if self.n() <= self.degree() {
+            return Ok(None);
+        }
+
+        // Find degeneracies.
+        let segs = self.degen_segs(tol)?;
+        self.remove_segs(segs, tol)
+    }
+
+    /// The removal step of [`Curve::remove_degen_segs`] (`N_CrvRemoveDegenSegs`) for the
+    /// given segments instead of those [`Curve::degen_segs`] finds at `tol`: `segs` are
+    /// parameter intervals `[u1, u2]` between knots, ascending and disjoint, as
+    /// [`Curve::degen_segs`] returns them; `tol` bounds the knot removal of a curve the
+    /// segments cover whole. Not upstream as a routine of its own (#21524).
+    ///
+    /// Errors as [`Curve::remove_degen_segs`].
+    pub fn remove_segs(&self, segs: Vec<(f64, f64)>, tol: f64) -> Result<Option<DegenSegRemoval>> {
+        const OP: &str = "nurbs::crv_tool::p2::Curve::remove_degen_segs";
         let up = self.knots();
         let pu = self.degree();
         check_short_degree(pu, OP)?;
@@ -870,12 +891,7 @@ impl Curve {
             return Ok(None);
         }
 
-        // Find degeneracies.
-        let mut segs: Vec<[f64; 2]> = self
-            .degen_segs(tol)?
-            .into_iter()
-            .map(|(a, b)| [a, b])
-            .collect();
+        let mut segs: Vec<[f64; 2]> = segs.into_iter().map(|(a, b)| [a, b]).collect();
         let ns = sx(segs.len(), OP)? - 1;
         if ns < 0 {
             return Ok(None);
