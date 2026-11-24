@@ -43,9 +43,12 @@ use crate::output::Output;
 /// Main's expected lines for the moved cases (`(unit) (json line)` per line).
 const BASE: &str = include_str!("merged_vertex_rows_base.jsonl");
 
+/// A vertex tolerance row: (unit, case, [(old, new)]).
+type ToleranceRow = (&'static str, &'static str, &'static [(f64, f64)]);
+
 /// The vertex tolerance moves: (unit, case, [(old, new)]), each `new` the value the row
 /// now records, `old` main's.
-const TOLERANCE_ROWS: [(&str, &str, &[(f64, f64)]); 8] = [
+const TOLERANCE_ROWS: [ToleranceRow; 8] = [
     (
         "boolean.topology_intersector_p3",
         "gen0012",

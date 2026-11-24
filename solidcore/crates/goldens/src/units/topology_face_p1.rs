@@ -1427,9 +1427,12 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    /// Per edge end of `b`: (edge, vertex, the distance from the edge curve's end to the
-    /// vertex, the vertex's tolerance).
-    fn ends(b: &Brep) -> Vec<(u32, u32, f64, f64)> {
+    /// One edge end: (edge, vertex, the distance from the edge curve's end to the vertex,
+    /// the vertex's tolerance).
+    type End = (u32, u32, f64, f64);
+
+    /// Every edge end of `b` (see [`End`]).
+    fn ends(b: &Brep) -> Vec<End> {
         let k = Kernel::default();
         let mut ends = Vec::new();
         for (e, rec) in b.edges().iter() {
@@ -1468,7 +1471,7 @@ mod tests {
         assert_eq!(cases.len(), 36);
         let mut checked = 0;
         for case in cases {
-            let bodies: Rc<RefCell<Vec<Vec<(u32, u32, f64, f64)>>>> = Rc::default();
+            let bodies: Rc<RefCell<Vec<Vec<End>>>> = Rc::default();
             let into = Rc::clone(&bodies);
             let out = crate::trim_hook::with_hook(
                 Box::new(move |b: &mut Brep| into.borrow_mut().push(ends(b))),
