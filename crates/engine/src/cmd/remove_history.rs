@@ -279,7 +279,9 @@ fn trial(
     let creator = s.model.state().body(name).map(|b| b.feature);
     let needs_remove = creator.is_some_and(|c| !gone.contains(&c));
     let taken = |doc: &Document, n: &str| doc.features.iter().any(|f| f.name == n);
-    let base_name = solidcraft_doc::copy_name(&format!("{name} Base"), |n| taken(&doc, n));
+    // The name itself while it is free, else the first numbered one that is.
+    let free = |doc: &Document, n: String| if taken(doc, &n) { solidcraft_doc::copy_name(&n, |c| taken(doc, c)) } else { n };
+    let base_name = free(&doc, format!("{name} Base"));
     let base = doc.add_feature(
         FeatureKind::Import { file: name.to_string(), step: frozen.step.clone(), components: Vec::new(), skip: Vec::new(), records: None },
         Some(&base_name),
@@ -289,7 +291,7 @@ fn trial(
         f.body_names = vec![name.to_string()];
     }
     let remove = if needs_remove {
-        let remove_name = solidcraft_doc::copy_name(&format!("Remove {name}"), |n| taken(&doc, n));
+        let remove_name = free(&doc, format!("Remove {name}"));
         let id = doc.add_feature(FeatureKind::Remove { bodies: vec![BodyName(name.to_string())] }, Some(&remove_name))?;
         if let Some(f) = doc.feature_mut(id) {
             f.component = frozen.component;

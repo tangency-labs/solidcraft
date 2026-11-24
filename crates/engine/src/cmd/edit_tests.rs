@@ -2939,7 +2939,8 @@ fn remove_history_keeps_a_feature_another_body_shares() {
     assert_eq!(out["kept"], json!(["Box A", "Lift"]), "{out}");
     assert_eq!(out["broken"], json!([]), "{out}");
     let remove = out["remove"].as_str().unwrap().to_string();
-    assert_eq!(feature_names(&s), ["Box A", "Box B", "Lift", remove.as_str(), "A Base"]);
+    assert_eq!(feature_names(&s), ["Box A", "Box B", "Lift", "Remove A", "A Base"]);
+    assert_eq!(remove, "Remove A");
     same_body_shape(a, body_shape(&s, "A"));
     same_body_shape(b, body_shape(&s, "B"));
     assert!(s.model.results.iter().all(|r| r.error.is_none()));
