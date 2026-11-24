@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use egui::{Pos2, vec2};
 use solidcore_record::Vec3;
-use solidcraft_engine::geom::{Mesh, MeshIndex, PointCloudIndex, RaycastStart, raycast_mesh_with_start};
+use solidcraft_engine::geom::{Mesh, MeshIndex, PointCloudIndex, RaycastStart};
 
 use crate::viewport::Proj;
 
@@ -188,7 +188,7 @@ pub(crate) fn raycast(index: Option<&MeshIndex>, mesh: &Mesh, o: Vec3, d: Vec3) 
 pub(crate) fn raycast_with_start(index: Option<&MeshIndex>, mesh: &Mesh, o: Vec3, d: Vec3, start: RaycastStart) -> Option<(f64, usize)> {
     match index.filter(|_| !scanning()) {
         Some(index) => index.raycast_with_start(mesh, o, d, start),
-        None => raycast_mesh_with_start(mesh, o, d, start),
+        None => mesh.pick_ray(o, d, start)?.nearest(),
     }
 }
 

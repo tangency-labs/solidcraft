@@ -3,6 +3,8 @@
 //! kernel's, never decided from a display mesh.
 
 use serde::{Deserialize, Serialize};
+use solidcore::geom::geom_utility::p1::TriangleRay;
+use solidcore_convert::vec3;
 use solidcore_record::Vec3;
 
 /// An indexed triangle mesh with per-vertex normals, a face id per triangle (the B-rep face it
@@ -38,7 +40,65 @@ pub struct Mesh {
     pub edge_faces: Vec<Vec<u32>>,
 }
 
+/// Where a mesh ray starts accepting intersections.
+#[derive(Clone, Copy)]
+pub enum RaycastStart {
+    /// Ignore the ray's origin and the usual self-intersection margin just ahead of it.
+    SkipSelfHit,
+    /// Include the origin itself, for a ray starting on a kept clipping boundary.
+    IncludeOrigin,
+}
+
+/// A display or mesh-body pick against one mesh, using the kernel's triangle intersection.
+pub struct MeshRay<'a> {
+    mesh: &'a Mesh,
+    frame: TriangleRay,
+    start: RaycastStart,
+}
+
+impl MeshRay<'_> {
+    /// The ray parameter of a hit on the indexed triangle, within the accepted interval.
+    #[must_use]
+    pub fn hit(&self, index: usize) -> Option<f64> {
+        let vertices = self.mesh.tri(self.mesh.triangles.get(index)?)?;
+        let t = self.frame.hit(vertices.map(vec3))?;
+        match self.start {
+            RaycastStart::SkipSelfHit if t > 1e-9 => Some(t),
+            RaycastStart::IncludeOrigin if t >= 0.0 => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Closest hit without a spatial index. The first triangle wins an exact tie.
+    #[must_use]
+    pub fn nearest(&self) -> Option<(f64, usize)> {
+        let mut best = None;
+        for i in 0..self.mesh.triangle_count() {
+            let Some(t) = self.hit(i) else { continue };
+            if best.is_none_or(|(distance, _)| t < distance) {
+                best = Some((t, i));
+            }
+        }
+        best
+    }
+}
+
 impl Mesh {
+    /// Prepare a ray to pick this mesh, with an explicit rule for hits at its origin.
+    #[must_use]
+    pub fn pick_ray(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        start: RaycastStart,
+    ) -> Option<MeshRay<'_>> {
+        Some(MeshRay {
+            mesh: self,
+            frame: TriangleRay::new(vec3(origin), vec3(direction))?,
+            start,
+        })
+    }
+
     /// The number of triangles stored in the mesh.
     #[must_use]
     pub fn triangle_count(&self) -> usize {

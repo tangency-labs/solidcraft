@@ -1945,7 +1945,7 @@ fn view_pivot_at(app: &SolveApp, proj: &Proj, at: Pos2, model_middle: Option<Vec
         return None;
     }
     let centre = proj.rect.center();
-    let centred = at.distance(centre) < 0.5;
+    let centred = point_distance([f64::from(at.x), f64::from(at.y), 0.0], [f64::from(centre.x), f64::from(centre.y), 0.0]).ok()?.value < 0.5;
     let (origin, dir, material) = crate::view_pick::orbit_ray(app, proj, if centred { centre } else { at });
     // Keep the model centre chosen after a pan if the ray actually meets material there.
     // An assembly's bounds can span empty space between a near and a distant part.

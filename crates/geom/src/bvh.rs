@@ -4,7 +4,7 @@
 //! a mesh's triangles and one over its edge segments, for picking.
 
 use crate::prelude::*;
-use crate::{Aabb3, Mesh, RaycastStart, raycast_mesh_with_start};
+use crate::{Aabb3, Mesh, RaycastStart};
 use solidcore_record::Vec3;
 
 /// Most items in a leaf.
@@ -233,7 +233,7 @@ fn farthest_along(o: Vec3, d: Vec3, b: &Aabb3) -> f64 {
 /// a ray, and the edge segments near one. Built from one mesh and answers only for it.
 #[derive(Clone, Debug, Default)]
 pub struct MeshIndex {
-    triangles: Bvh,
+    triangle_tree: Bvh,
     triangle_count: usize,
     segments: Bvh,
     /// Per segment item: its edge, and its first point in that edge's polyline.
@@ -272,7 +272,7 @@ impl MeshIndex {
                 if bounds.is_empty() { bounds } else { pad_pick_bounds(bounds) }
             })
             .collect();
-        MeshIndex { triangles: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), ..Default::default() }
+        MeshIndex { triangle_tree: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), ..Default::default() }
     }
 
     /// Index the edge polylines separately when a tool can pick display outlines.
@@ -300,18 +300,16 @@ impl MeshIndex {
         self.raycast_with_start(mesh, o, dir, RaycastStart::SkipSelfHit)
     }
 
-    /// [`raycast_mesh_with_start`] through the index, with ties resolved as in the scan.
+    /// [`Mesh::pick_ray`] through the index, with ties resolved as in the plain scan.
     pub fn raycast_with_start(&self, mesh: &Mesh, o: Vec3, dir: Vec3, start: RaycastStart) -> Option<(f64, usize)> {
-        if mesh.triangles.len() != self.triangle_count {
-            return raycast_mesh_with_start(mesh, o, dir, start);
+        let ray = mesh.pick_ray(o, dir, start)?;
+        if mesh.triangle_count() != self.triangle_count {
+            return ray.nearest();
         }
-        let frame = crate::mesh::RayFrame::new(o, dir, start)?;
-        self.triangles
-            .nearest(o, dir, |i| mesh.triangles.get(i as usize).and_then(|t| mesh.tri(t)).and_then(|p| frame.hit(p)))
-            .map(|(t, i)| (t, i as usize))
+        self.triangle_tree.nearest(o, dir, |i| ray.hit(i as usize)).map(|(t, i)| (t, i as usize))
     }
 
-    /// Calls `f(edge, first point)` for every edge segment that may come within `a + b·t` of the
+    /// Calls `f(edge, first point)` for every edge segment that may come within `a + bВ·t` of the
     /// ray from `o` along unit `d`, `t` being the distance along it (each at most once). A
     /// constant `a` suits an orthographic view; a perspective view widens with `b`.
     pub fn segments_near(&self, o: Vec3, d: Vec3, a: f64, b: f64, mut f: impl FnMut(usize, usize)) {
@@ -435,7 +433,7 @@ impl PointCloudIndex {
         self.point_count
     }
 
-    /// Visit every point index whose leaf box may come within `a + b·t` of the ray from `o` along
+    /// Visit every point index whose leaf box may come within `a + bВ·t` of the ray from `o` along
     /// unit `d` ahead of `o` and within `*max_t` along `d`. Nearer child boxes are entered first,
     /// and `visit` may tighten `max_t` as front hits are found so boxes behind them are skipped.
     pub fn visit_near_ray(&self, o: Vec3, d: Vec3, a: f64, b: f64, max_t: &mut f64, mut visit: impl FnMut(u32, &mut f64)) {

@@ -48,6 +48,8 @@ pub use curve::curve_points;
 pub use iso::MAX_ISOPARMS;
 pub use iso::isoparms;
 pub use mesh::Mesh;
+pub use mesh::MeshRay;
+pub use mesh::RaycastStart;
 pub use mesher::MAX_ANGLE_BOUNDARY;
 pub use mesher::plan;
 pub use par::guarded;
