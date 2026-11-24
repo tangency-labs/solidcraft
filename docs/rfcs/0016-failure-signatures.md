@@ -65,7 +65,7 @@ Steps 1 to 3 give exact grouping on their own; 4 to 8 add reproduction and reduc
 
 ## 6. Limits
 
-- **State.** The kernel keeps state between calls (its random generator, caches, the fillet step latch; #13672). A case replayed from records can fail differently or not at all. That is detected (the replay's code differs) and marked on the ticket; it is not reproduced until a session starts from a known state.
+- **State.** The kernel keeps state between calls (its random generator, caches; #13672). A case replayed from records can fail differently or not at all. That is detected (the replay's code differs) and marked on the ticket; it is not reproduced until a session starts from a known state.
 - **Partial sites.** Until the generic failures name their sites, the reducer starts from the call's picks, which is slower and less local.
 - **Old clients and crashes.** Reports without a code keep today's regex signature; a panic has no kernel error and keeps the crash report's own replay (`solidcraft-cli crashes replay`).
 

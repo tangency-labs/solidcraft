@@ -49,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("view: the id of an open 3D view; on: whether its compass is visible → view, on"),
     CommandSpec::new("tab.view.open", "Open Another View", crate::checked!("tab.view.open", open))
         .icon("new").noundo().doc_only().key("Ctrl+T").contract(&OPEN_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("kind?: model|sheet|render|animation (default: the active view's kind); subject?: the sheet id; reuse?: bool (default: true with a subject); window?: id (default: last focused) → the request, id: the view now shown; the window opens a sub-tab of the shown design; never edits the design or opens a dialog"),
+        .params("kind?: model|sheet|render|animation (default: the active view's kind); subject?: encoded drawing id / encoded sheet id (legacy bare sheet id when unambiguous); reuse?: bool (default: true with a subject, false opens another view); window?: id (default: last focused) → the request, id: the view now shown; the window opens a sub-tab of the shown design; never edits the design or opens a dialog"),
     CommandSpec::new("tab.view.close", "Close View", crate::checked!("tab.view.close", close))
         .icon("close").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active one) → id; closes it, which Reopen Closed View undoes; the last view of a design never closes (an error); never opens a dialog"),
@@ -109,7 +109,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("from, to: places in tab order (0 first) → from, to; moves the view among the views of its design"),
     CommandSpec::new("tab.view.layout", "Show Views Together", crate::checked!("tab.view.layout", layout))
         .icon("list").noundo().doc_only().contract(&LAYOUT_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("layout: single|side_by_side|stacked|large_and_two|grid; window?: id (default: last focused) → layout, shown: how many views the window shows together; fills the layout with the window's Model and Render views in tab order (the active one among them); single shows one view at a time again; never edits the design"),
+        .params("layout: single|side_by_side|stacked|large_and_two|grid; window?: id (default: last focused) → layout, shown: how many views the window shows together; fills the layout with the window's Model, Sheet and Render views in tab order (the active one among them); single shows one view at a time again; never edits the design"),
     CommandSpec::new("tab.view.equal_sizes", "Equal Sizes", crate::checked!("tab.view.equal_sizes", equal_sizes))
         .icon("list").noundo().doc_only().contract(&VIEW_WINDOW_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("window?: id (default: last focused) → window; equalizes tile areas, keeping the same cells and views"),
@@ -121,7 +121,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("window?: id (default: last focused); mode: off|orientation|zoom|both → window, mode; sets how visible Model views share camera changes"),
     CommandSpec::new("tab.view.beside", "Show View Beside", crate::checked!("tab.view.beside", beside))
         .icon("copy").noundo().doc_only().contract(&BESIDE_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("id?: the open Model or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right); placement?: requires id and replaces edge, {kind:empty,index}, {kind:replace,target}, or {kind:split,target,edge}; window?: id (default: last focused) → id, edge or placement, shown; allows up to four views, including one Render view"),
+        .params("id?: the open Model, Sheet or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right); placement?: requires id and replaces edge, {kind:empty,index}, {kind:replace,target}, or {kind:split,target,edge}; window?: id (default: last focused) → id, edge or placement, shown; allows up to four views without a limit per kind"),
     CommandSpec::new("tab.view.collapse", "Collapse Views", crate::checked!("tab.view.collapse", collapse))
         .icon("list").noundo().doc_only().contract(&COLLAPSE_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("collapsed?: bool (default: the other way round from now) → collapsed: as the views are now; folds the shown design's sub-tabs into its tab (its name and how many views it has) or shows them again; the views themselves are unchanged"),

@@ -339,8 +339,9 @@ pub fn paint_focus(painter: &Painter, rect: Rect, radius: u8) {
 
 /// App-owned edit responses share the native item's paint offsets, including hover lift.
 pub fn paint_item_outline(ui: &egui::Ui, id: &str, rect: Rect, radius: u8, width: f32) {
-    let lift =
-        ui.ctx().data(|d| d.get_temp::<HoverLift>(egui::Id::unique(("appbar_hover_lift", ui.ctx().viewport_id(), id)))).map_or(0.0, |s| s.drawn);
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let lift_id = egui::Id::unique(("appbar_hover_lift", ui.ctx().viewport_id(), id));
+    let lift = ui.ctx().data(|d| d.get_temp::<HoverLift>(lift_id)).map_or(0.0, |s| s.drawn);
     paint_outline(ui.painter(), drawn_rect(ui.ctx(), id, rect).translate(vec2(0.0, lift)), radius, width);
 }
 
@@ -1979,11 +1980,10 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
     strip.view_text.more.replace("{n}", &hidden.to_string())
 }
 
-/// Whether tab `i` is the shown, selected design with a single view while views are sub-tabs: its
-/// tab carries a small + after its name. With a switcher the tab stays as it was before views.
+/// Whether tab `i` is the shown, selected design with a single view: its plain tab carries a
+/// small + after its name, regardless of the preference for sub-tabs or a view switcher.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    strip.views_as_tabs && i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
-        || folded(strip, i)
+    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1) || folded(strip, i)
 }
 
 /// What the chevron that folds the sub-tabs takes, after the +.
@@ -2244,6 +2244,46 @@ pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &
         let chip = painter.layout_job(job);
         painter.with_clip_rect(chip_rect).galley(chip_rect.left_center() + vec2(padding, -chip.size().y / 2.0), chip, t.text);
     }
+}
+
+/// The same sketch header with a separate, translated sheet/drawing-view owner chip.
+pub fn paint_sketch_header_owner(painter: &Painter, rect: Rect, name: &str, editing: &str, owner: Option<&str>) {
+    let Some(owner) = owner else {
+        paint_sketch_header(painter, rect, name, editing);
+        return;
+    };
+    if !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    let t = Tokens::get();
+    let text = painter.layout_no_wrap(owner.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+    let width = (text.size().x + 16.0).min(rect.width() * 0.45);
+    let left = Rect::from_min_max(rect.min, pos2((rect.right() - width - 6.0).max(rect.left()), rect.bottom()));
+    paint_sketch_header(painter, left, name, editing);
+    let chip = Rect::from_min_size(pos2(rect.right() - width, rect.center().y - 9.0), vec2(width, 18.0));
+    painter.with_clip_rect(rect).rect_filled(chip, 9, t.chip);
+    painter.with_clip_rect(chip.shrink2(vec2(8.0, 0.0))).galley(chip.left_center() + vec2(8.0, -text.size().y / 2.0), text, t.text);
+}
+
+/// Quiet, right-aligned metadata chips in a view header. Returns the width they occupy.
+pub fn paint_view_chips(painter: &Painter, rect: Rect, labels: &[&str]) -> f32 {
+    if !rect.is_finite() || !rect.is_positive() {
+        return 0.0;
+    }
+    let t = Tokens::get();
+    let mut right = rect.right();
+    for label in labels.iter().rev() {
+        let galley = painter.layout_no_wrap((*label).to_owned(), crate::type_face::semibold(t.font_small), t.text);
+        let width = galley.size().x + t.space_12;
+        if right - width < rect.left() {
+            break;
+        }
+        let chip = Rect::from_center_size(pos2(right - width * 0.5, rect.center().y), vec2(width, 18.0));
+        painter.rect_filled(chip, t.radius_sm, t.chip);
+        painter.with_clip_rect(chip).galley(chip.center() - galley.size() * 0.5, galley, t.text);
+        right -= width + t.space_6;
+    }
+    rect.right() - right
 }
 
 /// The rows of a menu: the id of the one chosen. Keys show with `keys`, rows that need others are
@@ -3293,7 +3333,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                         .collect();
                     menu_rows(ui, &rows, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
                 }
-                Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, None).map(|id| TabAction::PlusMenu { id }),
+                Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, Some(&mut flyout)).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
                 Popup::More => {
                     if strip.clear_view_tabs
@@ -3324,6 +3364,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         let id = sub?.inner?;
         match which {
             Popup::View(view) => Some(TabAction::ViewMenu { view, id }),
+            Popup::Plus => Some(TabAction::PlusMenu { id }),
             Popup::Switcher => Some(TabAction::SwitcherMenu { id }),
             _ => None,
         }

@@ -3274,7 +3274,7 @@
   "plugin_error.design_too_large": "el disseny que ha creat supera els {allowed} MiB, el màxim que pot lliurar un complement.",
   "plugin_error.failed": "{plugin}: {reason}",
   "plugin_error.failed_file": "{plugin} no ha pogut obrir {file}: {reason}",
-  "plugin_error.fuel_ceiling": "demana {requested} de fuel i els complements poden fer servir {allowed}. Apugeu el Màxim de fuel del complement a Preferències › Complements (a solidcraft-cli, max_fuel al fitxer --plugin-limits).",
+  "plugin_error.fuel_ceiling": "demana {requested} de fuel i els complements poden fer servir {allowed}. Torneu a instal·lar el complement i permeteu-ne la sol·licitud de fuel, o apugeu el Màxim de fuel del complement a Preferències › Complements (a solidcraft-cli, max_fuel al fitxer --plugin-limits).",
   "plugin_error.memory_ceiling": "demana {requested} MiB de memòria i els complements poden fer servir {allowed} MiB. Torneu a instal·lar el complement i permeteu la seva sol·licitud de memòria, o apugeu la Memòria màxima del complement (MiB) a Preferències › Complements (a solidcraft-cli, max_memory_mib al fitxer --plugin-limits).",
   "plugin_error.out_of_fuel": "ha consumit tot el fuel que demana ({allowed}) i s'ha aturat. Demaneu al seu autor que apugi el límit de fuel.",
   "plugin_error.out_of_memory": "necessitava més dels {allowed} MiB de memòria que demana i s'ha aturat. Demaneu al seu autor que apugi el límit de memòria.",
