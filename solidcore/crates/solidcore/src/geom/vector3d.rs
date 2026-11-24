@@ -429,14 +429,20 @@ impl Vec3 {
     /// Not upstream: this direction, reversed when it points more than a right angle away from
     /// `like` ([`Vec3::parallel_sense`]'s anti-parallel flag): a line's direction given the sense
     /// of another, as a turn about an edge found again keeps the sense it was picked with.
-    /// `None` when either has zero length or a coordinate that is not finite.
+    /// `None` when either has zero length or a coordinate that is not finite. The two are
+    /// compared scaled by their largest coordinate, so a vector whose squared length overflows
+    /// still has its sense.
     #[must_use]
     pub fn with_sense_of(self, like: Self) -> Option<Self> {
         let finite = |v: Self| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
         if !finite(self) || !finite(like) {
             return None;
         }
-        let anti = self.parallel_sense(like, 0.0).1?;
+        if self.length_squared() <= EFF_ZERO_SQ || like.length_squared() <= EFF_ZERO_SQ {
+            return None;
+        }
+        let scaled = |v: Self| v * (1.0 / v.x.abs().max(v.y.abs()).max(v.z.abs()));
+        let anti = scaled(self).parallel_sense(scaled(like), 0.0).1?;
         Some(if anti { -self } else { self })
     }
 
@@ -1109,6 +1115,20 @@ mod tests {
         assert_eq!(Vec3::new(0.0, 0.0, 0.0).with_sense_of(y), None);
         assert_eq!(y.with_sense_of(Vec3::new(0.0, 0.0, 0.0)), None);
         assert_eq!(Vec3::new(f64::NAN, 1.0, 0.0).with_sense_of(y), None);
+        // Squared lengths that overflow keep their sense (#21447 review).
+        assert_eq!(
+            Vec3::new(1e200, 0.0, 0.0).with_sense_of(Vec3::new(-1.0, 0.0, 0.0)),
+            Some(Vec3::new(-1e200, 0.0, 0.0))
+        );
+        assert_eq!(
+            Vec3::new(0.0, 1e200, 0.0).with_sense_of(Vec3::new(0.0, 1e300, 0.0)),
+            Some(Vec3::new(0.0, 1e200, 0.0))
+        );
+        // Tiny but above the zero-length tolerance: still compared.
+        assert_eq!(
+            Vec3::new(0.0, -1e-9, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 1e-9, 0.0))
+        );
     }
 
     /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to
