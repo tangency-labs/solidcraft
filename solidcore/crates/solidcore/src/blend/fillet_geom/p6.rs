@@ -49,11 +49,12 @@
 //!   constructions not built are named: a fillet end from a vertex not classified to a
 //!   side edge use ([`BlendFailure::FilletEndVertexOffSideEdge`]) and a squeeze at an end
 //!   that is not a rail/edge-use vertex ([`BlendFailure::SqueezeEndNotRailEdgeuse`]).
-//!   A copy between fillet geometries with different solvers (`copy_geom`,
-//!   `copy_geom_with_solver`) is the caller's set-up: both are public and take the two
-//!   geometries from the caller, so
-//!   [`BlendFailure::FilletSetUpInvalid`]`(`[`FilletSetUp::CopySourceSolver`]`)`, keeping
-//!   upstream's `SM_ERR` (it checks the solvers, it does not dereference them).
+//!   A copy between fillet geometries with different solvers, or from one without a
+//!   B-spline fillet surface or centre line (`copy_geom`, `copy_geom_with_solver`), is the
+//!   caller's set-up: both are public and take the two geometries from the caller, so
+//!   [`BlendFailure::FilletSetUpInvalid`] with [`FilletSetUp::CopySourceSolver`] (keeping
+//!   upstream's `SM_ERR`: it checks the solvers), [`FilletSetUp::CopySourceSurface`] or
+//!   [`FilletSetUp::CopySourceCentreLine`] (keeping the `NER`'s `SM_ERR_NULL_POINTER`).
 //! - **Object model.** As in parts 1 and 3, `this` is an id of the pseudo B-rep
 //!   [`FilletBrep`] (`self`); the B-rep being filleted is `target` (the fillet edges'
 //!   original edges and faces, the vertices' classification objects, the solvers' edge
@@ -1889,9 +1890,10 @@ impl FilletBrep {
     /// # Errors
     ///
     /// [`FilletSetUp::CopySourceSolver`] (`SM_ERR`) when the geometries have different
-    /// solvers; `SM_ERR_NULL_POINTER`
-    /// (leaving the copies made so far) when `other` has no B-spline fillet surface or
-    /// centre line, or a rail curve copy is not a B-spline;
+    /// solvers; [`FilletSetUp::CopySourceSurface`] or [`FilletSetUp::CopySourceCentreLine`]
+    /// (`SM_ERR_NULL_POINTER`, leaving the copies made so far) when `other` has no B-spline
+    /// fillet surface or centre line; a defect (`SM_ERR_NULL_POINTER`) when a rail curve
+    /// copy is not a B-spline;
     /// [`SolidError::InvalidInput`] without solver, rails or a solver missing from
     /// `solvers` (upstream dereferences `NULL`); those of the rail edits.
     pub fn copy_geom(
@@ -1946,12 +1948,12 @@ impl FilletBrep {
         let has_surface = copy_surface.is_some();
         self.geom_mut(g)?.set_fillet_surface(copy_surface);
         if !has_surface {
-            return Err(broken_link(OP_COPY, COPY_NO_SURFACE));
+            return Err(copy_source_lacks(FilletSetUp::CopySourceSurface));
         }
         let has_curve = copy_curve.is_some();
         self.geom_mut(g)?.center_line_curve = copy_curve;
         if !has_curve {
-            return Err(broken_link(OP_COPY, COPY_NO_CENTRE_LINE));
+            return Err(copy_source_lacks(FilletSetUp::CopySourceCentreLine));
         }
 
         // for both offset surfaces
@@ -3210,6 +3212,16 @@ fn copy_other_solver() -> SolidError {
     .into_error()
 }
 
+/// The fillet geometry a copy is taken from lacks `part` (its B-spline fillet surface or
+/// centre line): the caller's set-up, since the geometry is the caller's, keeping the
+/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+#[track_caller]
+fn copy_source_lacks(part: FilletSetUp) -> SolidError {
+    Failure::new(OP_COPY, BlendFailure::FilletSetUpInvalid(part))
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
 /// A defect ([`BlendFailure::Defect`]) with the status `SM_ERR` of the `SER` it replaces.
 #[track_caller]
 fn defect(op: &'static str, why: &'static str) -> SolidError {
@@ -3369,12 +3381,6 @@ const FE_NO_CURVE: &str = "the fillet edge has no curve, though it has an interv
 /// Why a corner has no vertex.
 const CORNER_NO_VERTEX: &str = "the fillet edge's corner has no vertex, though every corner is \
      built at a vertex of the body";
-/// Why the geometry copied has no B-spline fillet surface.
-const COPY_NO_SURFACE: &str = "the geometry copied has no B-spline fillet surface, though the \
-     solver builds every fillet surface as a B-spline before a geometry is copied";
-/// Why the geometry copied has no B-spline centre line.
-const COPY_NO_CENTRE_LINE: &str = "the geometry copied has no B-spline centre line, though the \
-     solver builds it as a B-spline with the fillet surface";
 /// Why an edge use has no radial use.
 const EU_NO_RADIAL: &str = "the side edge use has no radial use, though the kernel keeps every \
      edge use in a radial cycle around its edge";
@@ -3677,39 +3683,40 @@ mod tests {
         let (a, _) = two_rail_geom(&mut fb, &k);
         let (b, rails_b) = two_rail_geom(&mut fb, &k);
         let solvers = [solver(false)];
-
-        // different solvers: the caller's set-up, upstream's SM_ERR, through both entry
-        // points (the second is checked before it reads its solver)
-        fb.geom_mut(b).unwrap().solver = Some(FilletSolverId(1));
-        let set_up = BlendFailure::FilletSetUpInvalid(FilletSetUp::CopySourceSolver);
-        for err in [
-            fb.copy_geom(&k, b, a, &solvers).unwrap_err(),
-            fb.copy_geom_with_solver(&k, b, a, &solvers[0]).unwrap_err(),
-        ] {
-            assert_eq!(failure(&err), (Some(&set_up), Some(SM_ERR)));
+        let set_up = BlendFailure::FilletSetUpInvalid;
+        let caller_set_up = |err: &SolidError| {
             assert_eq!(err.kind(), ErrorKind::InvalidInput);
             assert!(!err.is_defect());
-        }
-        // nothing was copied
-        assert!(fb.geom(b).unwrap().fillet_surface(None).unwrap().is_none());
-        fb.geom_mut(b).unwrap().solver = Some(FilletSolverId(0));
+        };
 
-        // no fillet surface to copy: NULL, SM_ERR_NULL_POINTER
+        // no fillet surface to copy: the caller's set-up, upstream's SM_ERR_NULL_POINTER
         let err = fb.copy_geom(&k, b, a, &solvers).unwrap_err();
         assert_eq!(
             failure(&err),
             (
-                Some(&BlendFailure::Defect {
-                    why: COPY_NO_SURFACE
-                }),
+                Some(&set_up(FilletSetUp::CopySourceSurface)),
                 Some(SM_ERR_NULL_POINTER)
             )
         );
+        caller_set_up(&err);
 
-        // both: the rails take the other rails' types, faces and curves
+        // a fillet surface but no centre line: as above, after the surface is copied
         fb.geom_mut(a)
             .unwrap()
             .set_fillet_surface(Some(flat_patch()));
+        let err = fb.copy_geom(&k, b, a, &solvers).unwrap_err();
+        assert_eq!(
+            failure(&err),
+            (
+                Some(&set_up(FilletSetUp::CopySourceCentreLine)),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+        caller_set_up(&err);
+        assert!(fb.geom(b).unwrap().fillet_surface(None).unwrap().is_some());
+        fb.geom_mut(b).unwrap().set_fillet_surface(None);
+
+        // both: the rails take the other rails' types, faces and curves
         fb.geom_mut(a).unwrap().center_line_curve = Some(
             BSplineCurve::create_line_segment(
                 3,
@@ -3725,6 +3732,24 @@ mod tests {
             .unwrap()
             .set_original_face(Some(FaceId::from_index(7)));
         fb.brep_mut().edge_mut(rails_b[0]).unwrap().curve = None;
+
+        // different solvers, with everything else in place: the caller's set-up,
+        // upstream's SM_ERR, through both entry points, and nothing is copied
+        fb.geom_mut(b).unwrap().solver = Some(FilletSolverId(1));
+        for err in [
+            fb.copy_geom(&k, b, a, &solvers).unwrap_err(),
+            fb.copy_geom_with_solver(&k, b, a, &solvers[0]).unwrap_err(),
+        ] {
+            assert_eq!(
+                failure(&err),
+                (Some(&set_up(FilletSetUp::CopySourceSolver)), Some(SM_ERR))
+            );
+            caller_set_up(&err);
+        }
+        let gb = fb.geom(b).unwrap();
+        assert!(gb.fillet_surface(None).unwrap().is_none() && gb.center_line_curve().is_none());
+        fb.geom_mut(b).unwrap().solver = Some(FilletSolverId(0));
+
         fb.copy_geom(&k, b, a, &solvers).unwrap();
         let gb = fb.geom(b).unwrap();
         assert!(gb.fillet_surface(None).unwrap().is_some() && gb.center_line_curve().is_some());
@@ -4091,7 +4116,7 @@ mod tests {
             Some(&BlendFailure::SideEdgeTangentVanishes { edge: te, t: 0.0 }),
             "{err:?}"
         );
-        assert_eq!(err.kind(), crate::error::ErrorKind::SideEdgeDegenerate);
+        assert_eq!(err.kind(), ErrorKind::SideEdgeDegenerate);
         assert!(
             err.is_refusal() && !err.is_defect() && !err.sized(),
             "{err:?}"
