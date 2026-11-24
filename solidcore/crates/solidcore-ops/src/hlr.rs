@@ -428,4 +428,80 @@ mod tests {
             Err(HlrError::Unsupported("surface intersection curve"))
         ));
     }
+
+    #[test]
+    fn a_box_with_rounded_corners_is_drawn_with_its_ball_corners_as_spheres() {
+        use crate::blend::{blend, Blend, Corners};
+        use std::f64::consts::PI;
+
+        // A 10 mm box with all twelve edges rounded at 2 mm: 6 planes, 12 rounds and 8 ball
+        // corners, each corner a patch on the sphere of radius 2 about the corner of the inner
+        // 6 mm box.
+        let b = crate::body::make_box([0.; 3], [10.; 3]).unwrap();
+        let all: Vec<usize> = (0..12).collect();
+        blend(&b, Blend::Round, &all, &[2.; 12], &[], Corners::Filled).unwrap();
+        let (rec, _) = b.to_record().unwrap();
+        let balls = rec
+            .faces
+            .iter()
+            .filter(|f| matches!(f.surface, Surface::BallPatch { .. }))
+            .count();
+        assert_eq!((rec.faces.len(), rec.edges.len(), balls), (26, 48, 8));
+
+        let opts = Options {
+            tangent_edges: false,
+            ..Options::default()
+        };
+        let def = prepare(&rec, &opts).unwrap();
+        let surfaces: Vec<(&str, usize)> = def
+            .report
+            .surfaces
+            .iter()
+            .map(|(k, n)| (k.as_str(), *n))
+            .collect();
+        assert_eq!(surfaces, [("cylinder", 12), ("plane", 6), ("sphere", 8)]);
+        assert!(def.report.freeform_faces.is_empty());
+        assert_eq!(def.report.tangent_edges, 48);
+
+        // Seen along d = (-1, -2, -3) the convex body's outline is the inner box's outline, a
+        // hexagon whose sides are its edges seen along d, each edge e of length 6 drawn
+        // 6 * sqrt(1 - (e . d)^2) long, twice each, grown by the 2 mm circle: the hexagon's six
+        // sides as lines from the rounds, and the circle's whole turn as arcs of radius 2 from
+        // the corners. With tangent edges off nothing else is drawn, and nothing is hidden.
+        let view = View::new(Vec3::new(-1., -2., -3.), Vec3::new(0., 0., 1.)).unwrap();
+        let scene = [Placement {
+            body: 0,
+            rotation: [
+                Vec3::new(1., 0., 0.),
+                Vec3::new(0., 1., 0.),
+                Vec3::new(0., 0., 1.),
+            ],
+            translation: Vec3::new(0., 0., 0.),
+        }];
+        let d = hidden_lines(&[def], &scene, &view, &opts, &|| false).unwrap();
+        assert!(d.unsupported.is_empty());
+        let (mut lines, mut arcs) = (0., 0.);
+        for l in &d.lines {
+            assert!(matches!(l.source, Source::Silhouette { .. }), "{:?}", l.source);
+            for p in l.pieces.iter().filter(|p| !p.covered) {
+                assert_eq!(p.visibility, Visibility::Visible);
+                assert_eq!(p.accuracy, CurveAccuracy::Analytic);
+                for s in &p.geometry {
+                    match *s {
+                        Seg2::Line { a, b } => lines += (b.x - a.x).hypot(b.y - a.y),
+                        Seg2::Arc { radius, sweep, .. } => {
+                            assert!((radius - 2.).abs() <= 1e-9, "arc radius {radius}");
+                            arcs += radius * sweep.abs();
+                        }
+                        ref other => panic!("outline piece {other:?}"),
+                    }
+                }
+            }
+        }
+        let hexagon = 12. * ((13f64 / 14.).sqrt() + (10f64 / 14.).sqrt() + (5f64 / 14.).sqrt());
+        // The corners are drawn on the sphere their spline form is recognised as, to 1e-9 of the
+        // 10 mm body; twelve pieces end where they meet, far within a micrometre.
+        assert!((lines - hexagon).abs() <= 1e-6, "lines {lines}, hexagon {hexagon}");
+        assert!((arcs - 4. * PI).abs() <= 1e-6, "arcs {arcs}, circle {}", 4. * PI);
+    }
 }
