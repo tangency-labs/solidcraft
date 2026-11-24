@@ -1389,17 +1389,26 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             // Where on the picked face or edge to snap: as picked (a face turns to meet
             // the other, an edge at its middle), its center, a round one's center, or, for bodies,
             // the joint origin the Joint dialog makes of it (found again as the part changes, #6257).
+            // Bodies start on Auto, what is under the cursor: a round edge or face its circle, a
+            // flat face the face, anything else as picked.
             let snaps: &[(&str, &str)] = if *components {
                 &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle")]
             } else {
-                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
+                &[("Auto", "auto"), ("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
             };
             // A planar To face as the plane it lies in: the moved face comes onto it along its
             // normal only, without sliding across to the picked point.
             let to_snaps: &[(&str, &str)] = if *components {
                 snaps
             } else {
-                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin"), ("Onto Plane", "plane")]
+                &[
+                    ("Auto", "auto"),
+                    ("As Picked", "picked"),
+                    ("Center", "center"),
+                    ("Circle Center", "circle"),
+                    ("Joint Origin", "origin"),
+                    ("Onto Plane", "plane"),
+                ]
             };
             for (label, key, choices) in [("From Snap", "from_snap", snaps), ("To Snap", "to_snap", to_snaps)] {
                 form_row(ui, label, |ui| {

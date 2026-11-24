@@ -2454,6 +2454,7 @@ fn align_takes_sketch_frames_and_joint_origins() {
     d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
     let bottom = face(&app, Vec3::new(20.0, 15.0, 0.0));
     d.inputs[1].items = vec![bottom.clone()];
+    d.extra.insert("from_snap".into(), json!("picked"));
     d.active = 2;
     let ring = d
         .candidate(&app.session, &crate::viewport::Hit::SketchCurve { sketch, id: "ring".into(), straight: false, point: Vec3::new(63.0, 5.0, 0.0) });
@@ -2500,9 +2501,9 @@ fn align_with_cleared_axes_and_a_face_pick_says_what_axes_are_for() {
     d.extra.insert("to_snap".into(), json!("center"));
     let p = apply_commands(&app, &d).unwrap().remove(0).1;
     assert_eq!(p["axes"], json!([false, true, false]));
-    // All three ticked: faces align as before.
-    d.extra.remove("from_snap");
-    d.extra.remove("to_snap");
+    // All three ticked: faces as picked align as before.
+    d.extra.insert("from_snap".into(), json!("picked"));
+    d.extra.insert("to_snap".into(), json!("picked"));
     if let Kind::Align { axes, .. } = &mut d.kind {
         *axes = [true; 3];
     }
@@ -2518,6 +2519,7 @@ fn align_accepts_a_plane_click() {
     let mut d = start(&mut app, vec![], "solid.align");
     d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
     d.inputs[1].items = vec![face(&app, Vec3::new(20.0, 15.0, 0.0))];
+    d.extra.insert("from_snap".into(), json!("picked"));
     let plane = crate::viewport::Hit::Plane { name: "XZ".into(), point: Vec3::ZERO };
     d.active = 2;
     let sel = d.candidate(&app.session, &plane);
@@ -2553,6 +2555,7 @@ fn align_onto_a_faces_plane_moves_along_its_normal_only() {
     d.inputs[0].items = vec![Sel::Body { name: "Pad".into() }];
     d.inputs[1].items = vec![pad_bottom];
     d.inputs[2].items = vec![face(&app, Vec3::new(20.0, 15.0, 20.0))];
+    d.extra.insert("from_snap".into(), json!("picked"));
     d.extra.insert("to_snap".into(), json!("plane"));
     let p = apply_commands(&app, &d).unwrap().remove(0).1;
     assert_eq!(p["to_plane"], json!({"origin": [20.0, 15.0, 20.0], "normal": [0.0, 0.0, 1.0]}), "{p}");

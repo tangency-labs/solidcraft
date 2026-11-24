@@ -41,16 +41,18 @@ pub(crate) fn command(app: &SolveApp, d: &Dialog) -> Result<(&'static str, Value
         p
     };
     for (i, key) in [(1, "from"), (2, "to")] {
-        let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
+        // Bodies take what is under the cursor (Auto); components, which take no frames, as picked.
+        let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or(if *components { "picked" } else { "auto" });
         // A round edge is its circle, not its centre point: a point has no direction for the
         // bodies to turn by, nor for Flip to turn them over.
         // The command takes no frame on what moves as a target: a To pick there stays as picked.
-        let on_moved = key == "to" && matches!(sels(d, i).first(), Some(Sel::Face { body, .. } | Sel::Edge { body, .. }) if moved.contains(body));
-        if !*components
-            && !on_moved
-            && matches!(snap, "picked" | "circle")
-            && let Some(frame) = sels(d, i).first().and_then(|sel| circle_frame(s, sel, &moved))
-        {
+        let frame = |sel: &Sel| match snap {
+            _ if key == "to" && matches!(sel, Sel::Face { body, .. } | Sel::Edge { body, .. } if moved.contains(body)) => None,
+            "auto" => circle_frame(s, sel, &moved).or_else(|| face_frame(s, sel, &moved)),
+            "picked" | "circle" => circle_frame(s, sel, &moved),
+            _ => None,
+        };
+        if !*components && let Some(frame) = sels(d, i).first().and_then(frame) {
             p[format!("{key}_frame")] = frame;
             continue;
         }
@@ -112,14 +114,33 @@ pub(crate) fn command(app: &SolveApp, d: &Dialog) -> Result<(&'static str, Value
     Ok((if *components { "occurrence.align" } else { "solid.align" }, p))
 }
 
-/// A round edge picked for a side of bodies `moved`, as the circle it lies on (found from its
-/// exact curve): a joint origin at its centre whose z is its axis, which the bodies turn to meet
-/// and Flip turns over. `None` for any other pick, or where the command takes no frame: on another
-/// component than the bodies, or on one placed more than once.
+/// A round edge or cylindrical face picked for a side of bodies `moved`, as its circle (found
+/// from its exact geometry): a joint origin at its centre whose z is its axis, which the bodies
+/// turn to meet and Flip turns over. `None` for any other pick, or where the command takes no
+/// frame: on another component than the bodies, or on one placed more than once.
 pub(crate) fn circle_frame(s: &Session, sel: &Sel, moved: &[String]) -> Option<Value> {
-    let Sel::Edge { body, index, point } = sel else { return None };
-    crate::dialogs::edge_circle(s, body, *index)?;
+    let (body, point) = match sel {
+        Sel::Edge { body, index, point } if crate::dialogs::edge_circle(s, body, *index).is_some() => (body, point),
+        Sel::Face { body, index, point } if is_cylinder(s, body, *index) => (body, point),
+        _ => return None,
+    };
     frame_on(s, body, moved, json!({"circle": pt(*point)}))
+}
+
+/// A flat face picked for a side, as a frame at its centre whose z is its normal: the faces meet
+/// centre on centre. `None` as for [`circle_frame`].
+fn face_frame(s: &Session, sel: &Sel, moved: &[String]) -> Option<Value> {
+    let Sel::Face { body, index, point } = sel else { return None };
+    crate::dialogs::planar_face(s, body, *index)?;
+    frame_on(s, body, moved, json!({"face": pt(*point)}))
+}
+
+fn is_cylinder(s: &Session, body: &str, index: usize) -> bool {
+    use solidcraft_engine::kernel::{self, FaceSurface};
+    let st = crate::open_meshing::session_world(s);
+    st.body(body).is_some_and(|b| {
+        matches!(kernel::guard("align face surface", || Ok(kernel::face_surface(&b.body, index))), Ok(Some(FaceSurface::Cylinder { .. })))
+    })
 }
 
 /// `param` as a frame on `body`, with the placement it was picked on, when the command takes a
