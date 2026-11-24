@@ -40,6 +40,13 @@
 //! and the ball-zone end loop uses the base surface saved with its focal offset.
 //!
 //! Deviations:
+//! - **The class holds along the whole trace (#18913, not in the fork).** The class is
+//!   read at one station, and the exact surface replaces the trace, whose end stations
+//!   the corners and rails are built from. A trace whose end runs past a support's edge
+//!   onto its extension, where that support is not its quadric (a wall of extrusion
+//!   extended along its tangent), has its end centre off the offset quadric; no surface
+//!   of the class passes through it, so such a round is traced
+//!   ([`trace_ends_on_class`]).
 //! - **A round of the ball's radius as a face (solidcore #2403, not in the fork).** A
 //!   torus is read too ([`QuadricKind::Torus`]), so that one moved in by its tube
 //!   radius is its tube-centre circle
@@ -3527,6 +3534,44 @@ fn generator_type(ops: &dyn FilletSolverOps) -> Option<FilletSurfaceGeneratorTyp
         .map(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::fillet_surface_generator_type)
 }
 
+/// Not the fork (#18913): whether the ball's centre at each of the trace's `ends` lies
+/// on both of `blend`'s offset quadrics within `tol` (an offset of no quadric is not
+/// read). The class is read at one station; a trace that runs on past a support's edge
+/// onto its extension, where that support is not its quadric (a wall of extrusion
+/// extended along its tangent), ends off the offset quadric, and the surface of the class
+/// does not pass through the stations the corners and rails are built from.
+///
+/// # Errors
+///
+/// Those of `SetupOffsetValues` and the offset evaluations.
+fn trace_ends_on_class(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    blend: &ExactBlend,
+    ends: [&TsectPnt; 2],
+    tol: f64,
+) -> Result<bool> {
+    use crate::blend::fillet_solver::p2::eval_offset;
+    for t in ends {
+        ops.setup_offset_values(t, None)?;
+        for (rail, (o, srf)) in blend
+            .offsets
+            .iter()
+            .zip([SrfIndex::First, SrfIndex::Second])
+            .enumerate()
+        {
+            if o.kind == QuadricKind::None {
+                continue;
+            }
+            let centre = eval_offset(k, ops.solver_mut(), rail, t.uv_pos(srf))?;
+            if o.distance(centre) > tol {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// [`calc_exact_fillet_geom`]'s build by the class (`CalcExactFilletGeom`), without the
 /// definition kept.
 #[allow(clippy::too_many_arguments)]
@@ -3544,6 +3589,11 @@ fn exact_fillet_geom_of_class(
     let (Some(first), Some(last)) = (tsects.first(), tsects.last()) else {
         return Ok(false);
     };
+    if blend.spine != BlendSpine::Traced
+        && !trace_ends_on_class(ops, k, blend, [first, last], b.tolerance())?
+    {
+        return Ok(false);
+    }
     match blend.spine {
         BlendSpine::Line => {
             // a chamfer on a straight spine is traced (its line from rail to rail is the

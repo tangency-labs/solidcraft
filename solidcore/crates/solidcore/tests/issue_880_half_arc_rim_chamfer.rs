@@ -181,6 +181,41 @@ fn issue_880_one_half_chamfers() {
     assert!(lines.is_empty(), "{lines:?}");
 }
 
+/// #18913: one rim half chamfered by other offsets builds a closed solid (4 faces to 8)
+/// that the check passes, as the issue's pick does. The trace runs on past a seam vertex onto the wall's
+/// extension, which continues along its tangent and not round the cylinder, so the trace's
+/// end there is off the offset cylinder. The chamfer of a cylinder and a plane is of the
+/// exact conic class, and that surface cannot hold the trace's end. Built anyway, the End
+/// corner's rail end lay 1.4 to 3 off it, and these were refused with 1001
+/// (`calc_fillet_int_side_face`). The round is traced where its class does not hold to
+/// both ends of the trace.
+#[test]
+fn issue_18913_one_half_chamfers_at_other_offsets() {
+    for offsets in [
+        (1.0, 1.0),
+        (1.2, 1.2),
+        (1.7, 1.7),
+        (2.511_921_007_020_940_3, 1.819_271_047_841_166_4),
+    ] {
+        let mut k = Kernel::default();
+        let mut b = cut_cylinder(&mut k);
+        let before = p1::faces(&b, None).unwrap().len();
+        let e = rims(&k, &b)[0];
+        let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+        let built = chamfer(&mut k, &mut b, &[(e, u)], offsets);
+        assert!(built.is_ok(), "offsets {offsets:?}: {built:?}");
+        assert_eq!(
+            finish(&mut k, &mut b, before),
+            (4, 8, true),
+            "offsets {offsets:?}"
+        );
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "offsets {offsets:?}: {lines:?}");
+    }
+}
+
 /// The volume of `b`, by the mass integrator.
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     use solidcore::geom::attribute::{AttributeStore, ObjectKey};
