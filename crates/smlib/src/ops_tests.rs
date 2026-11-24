@@ -161,6 +161,59 @@ fn shell_a_box_open_at_the_top() {
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
+/// The top of an extruded closed spline outline, its top edge rounded r1.6 all round, moved up 10
+/// and down 2 (#18575): the round follows, taken off and put back. Taking it off intersects the
+/// top's plane with the spline's extrusion, a solve that needed the faces' trimmed caches, which
+/// are not ported for a surface's face. Each moved body is the extrusion's section times its new
+/// height, less the round's material, measured on the body before the move.
+#[test]
+fn offset_face_beside_a_round_all_round_a_spline_outline_moves_the_round() {
+    let pts: [[f64; 2]; 10] = [
+        [30.0, 0.0],
+        [30.0, 14.0],
+        [12.0, 22.0],
+        [-12.0, 22.0],
+        [-30.0, 14.0],
+        [-30.0, -14.0],
+        [-12.0, -22.0],
+        [12.0, -22.0],
+        [30.0, -14.0],
+        [30.0, 0.0],
+    ];
+    let mut knots = vec![0.0; 4];
+    knots.extend((1..7).map(|i| f64::from(i) / 7.0));
+    knots.extend([1.0; 4]);
+    // a closed clamped cubic, smooth where it closes (its end tangents both along +y)
+    let outline = crate::sweeps::Curve::Nurbs { degree: 3, points: pts.iter().map(|&[x, y]| [x, y, 0.0, 1.0]).collect(), knots };
+    let plain = Brep::extrude(&[outline], [0.0, 0.0, 1.0], 25.0, 0.0, crate::sweeps::DraftCorner::default(), true).unwrap();
+    let section = volume(&plain) / 25.0;
+    // through the record, as the app hands SMLib a body
+    let rounded = Brep::from_record(&plain.fillet(&[[-28.0, 0.0, 25.0]], 3.0, 1.6).unwrap().to_native().unwrap(), true).unwrap();
+    let round = volume(&plain) - volume(&rounded);
+    // the round's section (1 - pi/4) 1.6^2 along the outline, some 158 mm round
+    assert!((round / ((1.0 - std::f64::consts::FRAC_PI_4) * 1.6 * 1.6) - 158.0).abs() < 10.0, "round {round}");
+    for (distance, height) in [(10.0, 35.0), (-2.0, 23.0)] {
+        let moved = rounded.offset_faces(&[[0.0, 0.0, 25.0]], 0.1, distance).unwrap();
+        shot(&moved, &format!("offset_face_spline_round_{distance}"));
+        assert_close(volume(&moved), section * height - round, 1e-7, "moved top");
+        assert_eq!(moved.counts().unwrap()[0], rounded.counts().unwrap()[0], "the same faces");
+    }
+}
+
+/// Moving the top of a closed hollow out keeps the hollow (#18570): the faces moved are rebuilt
+/// with the cavity's walls, which were taken for walls between two pieces of material and
+/// deleted, filling the cavity in (a solid 20 × 20 × 25 block).
+#[test]
+fn offset_face_of_a_closed_hollow_keeps_the_hollow() {
+    let c = cube(20.0);
+    let hollow = c.shell(&[], 0.1, -2.0).unwrap();
+    let raised = hollow.offset_faces(&[[10.0, 10.0, 20.0]], 0.1, 5.0).unwrap();
+    shot(&raised, "offset_face_closed_hollow");
+    assert_close(volume(&raised), 20.0 * 20.0 * 25.0 - 16.0f64.powi(3), 1e-9, "raised hollow volume");
+    // The outside's 6 faces and the cavity's 6.
+    assert_eq!(raised.counts().unwrap()[0], 12);
+}
+
 #[test]
 fn fillet_takes_exactly_the_picked_edges() {
     // Round the vertical edge x = y = 20 first (r = 5): the top rim is then line, arc, line,
@@ -224,6 +277,31 @@ fn hostile_inputs_are_errors() {
     assert_eq!(c.offset_faces(&[[10.0, 10.0, 20.0]], 0.1, -20.0).unwrap_err(), Error::NoRoom);
     assert_eq!(c.thicken(1.0, false).unwrap_err(), Error::Argument, "a solid is no sheet");
     assert_untouched(&c, 8000.0, [6, 12, 8]);
+}
+
+/// A cone (Ø6 to Ø1, 10 tall) with a 0.12 mm square pad on its top, turned 45°, whose corner
+/// is `inset` inside the top's rim on the cone's seam, shelled 0.05 inward open at the top
+/// (#18568). 0.00002 in, the join merges the corner with the rim's seam vertex, and the shell
+/// fails; refused as a face whose outline touches itself, at the corner. 0.0001 in, the
+/// corner is its own vertex, and the pad shells.
+#[test]
+fn a_shell_of_a_face_whose_outline_touches_itself_is_refused_as_such() {
+    let padded = |inset: f64| {
+        let cone = Brep::make_cone([0.0; 3], 3.0, 0.5, 10.0).unwrap();
+        let (x, h) = (0.5 - inset, 0.12 / 2f64.sqrt());
+        let diamond = [[x, 0.0, 10.0], [x - h, h, 10.0], [x - 2.0 * h, 0.0, 10.0], [x - h, -h, 10.0]];
+        let sides: Vec<crate::sweeps::Curve> = (0..4).map(|i| crate::sweeps::Curve::Line { start: diamond[i], end: diamond[(i + 1) % 4] }).collect();
+        let pad = Brep::extrude(&sides, [0.0, 0.0, 1.0], 0.12, 0.0, crate::sweeps::DraftCorner::default(), true).unwrap();
+        cone.boolean(&pad, BooleanOp::Union).unwrap().unwrap()
+    };
+    let top = [[0.15, -0.25, 10.0]];
+    match padded(2e-5).shell(&top, 0.01, -0.05).unwrap_err() {
+        Error::OutlineTouches { at, .. } => {
+            assert!((at[0] - 0.5).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 10.0).abs() < 1e-9, "at {at:?}");
+        }
+        e => panic!("refused as {e}"),
+    }
+    shot(&padded(1e-4).shell(&top, 0.01, -0.05).unwrap(), "shell-pad-clear-of-the-rim");
 }
 
 /// Rig case shell/4711: a 60 x 40 x 10 block with an r3 through hole at (22.5, 7), 4 from the
@@ -356,6 +434,41 @@ fn chamfers_with_two_setbacks() {
     assert_eq!(c.chamfer_sides(&top, 0.1, 5.0, ChamferSecond::Distance(-2.0), [0.0, 0.0, 1.0]).unwrap_err(), Error::Argument);
 }
 
+/// A hollow cylinder (Ø3 × 4, walls 0.18) with a Ø0.36 notch centred on its rim, whose wall
+/// touches the void's along a line, keeps its void through an unequal chamfer of the rim
+/// (#18851): the stitch joins the void's walls to the rest at the line's two end vertices
+/// only, and the closed shell's split gave both sides of them to the material, which no
+/// record allows. The chamfered body's record has the regions and shells the notched one's
+/// has (the void with the outside, through the line).
+#[test]
+fn chamfer_of_a_hollow_whose_notch_touches_the_void_keeps_the_void() {
+    let hollow = Brep::make_cylinder([0.0; 3], 1.5, 4.0).unwrap().shell(&[], 0.01, -0.18).unwrap();
+    let notch = Brep::make_cylinder([1.4892009792507173, 0.1796675913978502, 2.5], 0.18, 1.5).unwrap();
+    let before = hollow.boolean(&notch, BooleanOp::Subtract).unwrap().unwrap();
+    let rim = [[0.0, -1.5, 4.0], [1.3104968617406312, 0.1581074804301082, 4.0]];
+    let touching = before.chamfer_sides(&rim, 0.01, 0.3, ChamferSecond::Distance(0.15), [0.0, 0.0, 1.0]).unwrap();
+    shot(&touching, "chamfer_hollow_notch_touching_void");
+    let record = touching.to_native().unwrap();
+    solidcore_ops::record_check::validate(&record).unwrap();
+    let record_before = before.to_native().unwrap();
+    assert_eq!((record.regions.len(), record.shells.len()), (record_before.regions.len(), record_before.shells.len()));
+    // The notched body: the hollow less the notch's lens (Ø0.36 about a point on the Ø3 rim)
+    // over its 1.5 mm.
+    let (big, small, d) = (1.5f64, 0.18f64, 1.5f64);
+    let kite = ((-d + small + big) * (d + small - big) * (d - small + big) * (d + small + big)).sqrt() / 2.0;
+    let lens = small * small * ((d * d + small * small - big * big) / (2.0 * d * small)).acos()
+        + big * big * ((d * d + big * big - small * small) / (2.0 * d * big)).acos()
+        - kite;
+    let solid = std::f64::consts::PI * (big * big * 4.0 - 1.32 * 1.32 * 3.64);
+    assert_close(volume(&before), solid - 1.5 * lens, 1e-9, "notched hollow");
+    // The chamfer takes a 0.3 × 0.15 triangle round the rim: round a plain Ø3 rim that is
+    // 2π · 1.4 · 0.0225 (its centroid a third of 0.3 in); the notch swaps 0.36 mm of the rim
+    // for its own longer arc, within a few percent of that.
+    let ring = 2.0 * std::f64::consts::PI * 1.4 * 0.3 * 0.15 / 2.0;
+    let taken = volume(&before) - volume(&touching);
+    assert!((taken - ring).abs() < 0.05 * ring, "the chamfer took {taken}, a plain rim's {ring}");
+}
+
 #[test]
 fn imprint_cuts_faces_where_a_tool_meets_them() {
     // A box half sunk into the cube cuts the four side faces it crosses and the top it lies in.
@@ -382,7 +495,8 @@ fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
     let out = c.draft(&side, 0.1, [0.0; 3], up, up, -5.0 * deg).unwrap();
     assert!((out.volume(ACC).unwrap() - (8000.0 + wedge)).abs() < 1e-6);
     // The top isn't parallel to the pull.
-    assert_eq!(c.draft(&[[10.0, 10.0, 20.0]], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), Error::Unsupported);
+    let across = Error::Refused(solidcore_ops::Error::Unsupported("a drafted plane is not parallel to the pull"));
+    assert_eq!(c.draft(&[[10.0, 10.0, 20.0]], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), across);
     assert_eq!(c.draft(&side, 0.1, [0.0; 3], up, up, 0.0).unwrap_err(), Error::Argument);
     assert_eq!(c.draft(&[], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), Error::Argument);
     assert_untouched(&c, 8000.0, [6, 12, 8]);

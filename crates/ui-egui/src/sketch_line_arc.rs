@@ -93,7 +93,7 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
 /// A drawing snap has no point id until the command materializes it. Keep its picked position
 /// while its source curves remain, including when Undo returns to the start of the chain.
 /// Model-vertex snaps are resolved by the drawing command, not by the sketch's point lookup.
-fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
+pub(crate) fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
     if let Some(point) = sketch.resolve_point(id).and_then(|p| sketch.point(p)) {
         return Some(point);
     }
@@ -179,7 +179,7 @@ fn switch(app: &mut SolveApp) {
     next.chain = LineChain { curve: old.chain.curve.clone(), back_to_lines: !to_arc, back: old.chain.back.clone(), ..LineChain::default() };
     app.tool = Some(next);
     let hint = if to_arc { app.tr("ui.line_arc_hint").to_string() } else { crate::tools::hint(LINE) };
-    app.set_status(hint, false);
+    app.set_tool_hint(hint);
 }
 
 /// Right-click or Esc while drawing tangent arcs: the chain ends as a line chain does, and the Line
@@ -189,7 +189,7 @@ pub fn finish(app: &mut SolveApp) -> bool {
         return false;
     }
     app.tool = Tool::for_command(LINE);
-    app.set_status(crate::tools::hint(LINE), false);
+    app.set_tool_hint(crate::tools::hint(LINE));
     true
 }
 
@@ -235,7 +235,7 @@ fn shown_mode(t: &Tool) -> Option<(&'static str, &'static str)> {
 
 /// The words next to the cursor, in the interface language.
 pub(crate) fn shown_label(t: &Tool) -> Option<&'static str> {
-    shown_mode(t).map(|(command, _)| solidcraft_ui_text::tr_label(crate::command_label(command)))
+    shown_mode(t).map(|(command, _)| solidcraft_ui_text::tr_command(command, crate::command_label(command)))
 }
 
 /// The label next to the cursor (below the point's coordinates).

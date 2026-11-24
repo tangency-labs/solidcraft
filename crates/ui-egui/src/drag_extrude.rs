@@ -2,8 +2,8 @@
 //! has moved far enough upward, or along the surface's normal on screen, Extrude starts on the
 //! pick; the distance follows the pointer along the normal in steps. Moving the pointer sideways
 //! while pulling sets the step: to the right it grows, to the left it shrinks. The step
-//! follows the design's units (0.01 mm or 0.001 in at the fine end), regardless of camera
-//! zoom. The step and the distance show beside the pointer. Letting go
+//! follows the design's units (0.01 mm or 0.001 in at the fine end). The initial
+//! ladder position still follows camera zoom. The step and distance show beside the pointer. Letting go
 //! leaves the Extrude window open to adjust and confirm with OK. A press that goes any other
 //! way stays a box selection.
 
@@ -110,7 +110,7 @@ pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
         normal,
         grab,
         started: false,
-        step0: 0, // minimum increment follows the design unit, not zoom
+        step0: nearest_step(crate::canvas::snap_step(app.cam.half_height()) / step_scale(&app.session.doc)),
         x0: at.x,
         step: 0.0,
         at,
@@ -229,11 +229,23 @@ mod tests {
         let mut session = solidcraft_engine::Session::default();
         assert_eq!(crate::length_input::unit(&session.doc), "mm");
         assert!((STEPS[0] * step_scale(&session.doc) - 0.01).abs() < 1e-12);
+        // The first rung still follows the viewport's zoom-dependent snap step.
+        // Unit conversion affects which rung that world-space step corresponds to.
+        let near = nearest_step(crate::canvas::snap_step(40.0) / step_scale(&session.doc));
+        let far = nearest_step(crate::canvas::snap_step(100.0) / step_scale(&session.doc));
+        assert_ne!(near, far, "zoom changes the initial ladder rung");
+
         assert_eq!(crate::length_input::shown(&session.doc, STEPS[0] * step_scale(&session.doc)), "0.01 mm");
 
         session.doc_mut().units = "in".to_string();
         let scale = step_scale(&session.doc);
         assert!((STEPS[0] * scale - 0.0254).abs() < 1e-12);
+        assert_ne!(
+            nearest_step(crate::canvas::snap_step(40.0) / scale),
+            nearest_step(crate::canvas::snap_step(100.0) / scale),
+            "inch-unit starts still change with zoom"
+        );
+
         assert_eq!(crate::length_input::shown(&session.doc, STEPS[0] * scale), "0.001 in");
         assert!((STEPS[nearest_step(0.1)] * scale - 0.254).abs() < 1e-12);
         session.doc_mut().units = "inch".to_string();

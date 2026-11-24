@@ -47,9 +47,13 @@ inside it. The distance is a dimension like any other.
 
 <video src="../media/sketching/offset.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Offsetting the rectangle's outline 4 mm inward with one click on its bottom side"></video>
 
-**Trim** (T) removes the piece of a curve between the curves that cross it. With a circle drawn
-on the top side, click the piece of the side inside the circle, then the half of the circle
-outside the rectangle: what's left is a notch.
+**Trim** (T) removes the piece you click. **Break** splits off the same piece and keeps it.
+On a line, arc, circle or spline, each tool looks along the curve for the nearest crossing
+or constrained sketch point on either side. To mark a cut yourself, place a point on the
+curve with the point-on-curve snap.
+
+To trim a notch, draw a circle across the rectangle's top side. Click the piece of the side
+inside the circle, then click the half of the circle outside the rectangle.
 
 <video src="../media/sketching/trim.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Trimming a notch: removing the piece of the top side inside a circle, then the circle's upper half"></video>
 
@@ -127,10 +131,18 @@ click in the sketch to place a point. Existing toolbar customizations are kept; 
 Lines and polylines (L), rectangles (two-point R, three-point, centre), circles (centre C,
 two-point, three-point, tangent), arcs (three-point, centre, tangent), polygons, slots, ellipses,
 fit-point and control-point splines, conics, points and text. **Construction** (X) turns curves
-into reference geometry that doesn't form profiles. Modify tools include trim (T), extend, break,
+into reference geometry that doesn't form profiles. It switches selected points too: a
+construction point is drawn as an open square and a Hole from the whole sketch leaves it out.
+A Hole already made keeps its sites. Preferences › Sketch › *X switches selected points to construction* (on by default) controls this: off, points are left out and X with only points selected switches the drawing mode, as it always has. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
-and all go when you let go, in one undo step (`sketch.trim.path`). Fillet and chamfer take
+and all go when you let go, in one undo step (`sketch.trim.path`). Fillet also rounds a corner
+where a conic or a non-periodic control-point spline meets a line, an arc, a conic or another
+such spline: the curve is cut back exactly to the
+tangent point and keeps its id. A spline keeps its degree and its knots past the cut. Such a
+corner cannot stay as a virtual sharp corner, so a corner that a dimension measures to is refused
+there, and so is a constraint that holds something on the cut curve. Fit-point splines are not
+supported yet. Chamfer stays on lines. Fillet and chamfer take
 several corners at once: pick the corners, set the size once, and every corner is rounded or
 cut alike in one undo step.
 
@@ -273,9 +285,10 @@ retain their source sketch, even when the active sketch uses the same point or c
 
 A projection kept by the name of a face or edge that no longer has that name (a change before
 the sketch removed it or made it again) fails the sketch, and the features built on it fail too.
-The sketch's message names each such projection by its source and its curves: `Outline:
-projected face of Block (curves l5, l6, l7, l8) is lost; delete the projection or project it
-again`. When several are lost it gives their number and lists the first three. In its editor
+The sketch's message names each such projection by its source, its curves and the features
+that made what it projected: `Outline: projected face of Block (curves l5, l6, l7, l8; made by
+Extrude1) is lost; delete the projection or project it again`. Look at those features for the
+change that removed it. When several are lost it gives their number and lists the first three. In its editor
 the sketch shows its last geometry, the lost projections in the lost colour; deleting a lost
 projection's curves there removes it. **Redefine Sketch Plane** still moves the sketch to
 another plane, where it fails for the same projections, and so it does when the sketch's own
@@ -336,6 +349,15 @@ While drawing a fit spline, click its starting point after three distinct sample
 it smoothly. Right-click finishes an ordinary natural fit. Offset accepts both ellipse
 handles and dense fitted curves; the second click sets the side and distance from the curve.
 
+**Fit Spline Within Tolerance** turns a contour of many points into one smooth spline: give
+the points (2 to 10000, plain coordinates, in order along the contour) and a tolerance
+(default 0.01 mm), and it fits the spline through as few of the points as keep every point
+within it, reporting the deviation it reached (`sketch.spline.fit_tolerance` from scripts and
+agents). Use it for a contour that comes from a computation — a traced outline, a scanned
+section or a generated shape — which is past the 500 points a fit point spline takes. When
+even 500 spline points cannot reach the tolerance it refuses, naming the deviation reached:
+the points may be too rough for a smooth spline, or the tolerance too tight.
+
 **Equation Curve** draws a curve from formulas instead of clicks: x(t) and y(t) over a range of
 t, or y = f(x) over a range of x, using the design's parameters. [Equation curves](equation-curves.md)
 walks through it step by step, with pictures and examples (a line, a parabola, a wave, a circle,
@@ -393,14 +415,15 @@ fresh link once the source is available; their stored point values are preserved
 
 **Horizontal/Vertical** accepts a click on a line or clicks on two distinct sketch points,
 including the origin, endpoints and circle centres. For two points, it chooses horizontal
-or vertical alignment from their current positions. Hold **Shift** near a line's midpoint to
-highlight and select it as either point. The midpoint follows both endpoints as the line moves,
-resizes or rotates. Two line midpoints can also be aligned. Hovering and the first pick are
-only previews; Esc cancels them without changing the sketch. Accepting the second pick reuses
-or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V constraint
-in one undo step. Both constraints can be selected and deleted independently; deleting either
-keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original full
-side, retained as construction geometry, just like a manually constrained midpoint.
+or vertical alignment from their current positions. With a point already picked, a click on a
+line's midpoint takes that midpoint, the way the line's ends are taken. Hold **Shift** near a
+line's midpoint to highlight and select it as either point. The midpoint follows both endpoints
+as the line moves, resizes or rotates. Two line midpoints can also be aligned. Hovering and the
+first pick are only previews; Esc cancels them without changing the sketch. Accepting the second
+pick reuses or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V
+constraint in one undo step. Both constraints can be selected and deleted independently; deleting
+either keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original
+full side, retained as construction geometry, just like a manually constrained midpoint.
 
 Scripts use the same command, with a midpoint reference in the `points` array:
 
@@ -575,6 +598,12 @@ shared tool window. Click an input to change it; click a selected object again o
 it to remove it. Each input has its own Clear button. Source inputs show a count, and single
 references identify the chosen mirror line, direction, or centre. Box selection also works
 while the window is open. Sketch modify tools take geometry from the sketch being edited.
+
+A click inside a closed profile adds the curves of its outline to the entities. A shape drawn
+inside that profile is a profile of its own: click inside it to add it too. So a click between
+two nested rectangles picks the outer rectangle alone. To have the click also pick the shapes
+inside the profile, as earlier versions did, turn on **Preferences > Sketch > A click inside a
+profile also picks the shapes inside it**.
 
 If your preselection includes exactly one straight construction line of the active sketch,
 opening Mirror uses it as **Mirror line**, keeping your selected entities. Other construction

@@ -16,6 +16,7 @@ pub mod p6;
 pub mod p7;
 pub mod p8;
 pub mod p9;
+pub mod witness;
 
 pub use p1::{
     apply_point_solution, compute_face_point_class, cull_or_refine_cci_in_3d, get_cci_geometry_in,
@@ -30,7 +31,7 @@ pub use p1::{
 pub use p2::{refine_cci_to_surfaces, RefineCci, ResetOptions};
 pub use p3::{
     change_edge_point_class_to_near_vertex, curve_is_degenerate, fix_problems_by_squeezing,
-    FoundInterval, NO_INTERVAL,
+    EdgeToleranceRaise, FoundInterval, NO_INTERVAL,
 };
 pub use p4::{squeeze_out_smallest_interval, ClassificationInit, LoopCrossings};
 pub use p7::{

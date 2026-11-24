@@ -1,16 +1,19 @@
-//! How often SMLib's full check runs while a model is evaluated. Every sweep, boolean and blend
-//! checks its result in SMLib before it is decoded ([`Validation::EachStep`]); an evaluation can
-//! instead leave those checks to one check of the bodies each feature keeps
-//! ([`Validation::EachFeature`]), or skip them ([`Validation::Off`]). A body kept straight from
-//! a step is checked at the end as that step would have checked it, on the step's own result
-//! (kept with the body until then): the record a result is decoded to can pass SMLib's check
-//! where the result itself fails it (a surface of revolution's polar curve, rebuilt on import).
+//! How often SMLib's full check runs while a model is evaluated. An evaluation leaves the checks
+//! of the sweeps, booleans and blends a feature runs to one check of each body the feature keeps
+//! ([`Validation::EachFeature`], the default), can check every step's result as it is made
+//! ([`Validation::EachStep`]), or skips them ([`Validation::Off`]). A body kept straight from a
+//! step is checked at the end as that step would have checked it, on the step's own result (kept
+//! with the body until then): the record a result is decoded to can pass SMLib's check where the
+//! result itself fails it (a surface of revolution's polar curve, rebuilt on import).
 //!
 //! The evaluation installs its mode around a feature with [`validating`], as [`crate::watch`]
 //! installs a watch: the operations a feature runs are reached through hundreds of public kernel
 //! functions, and the mode is the evaluation's, not each operation's. Outside [`validating`]
-//! (the kernel called directly, a preview, a test) every step is checked, as it always was. The
-//! worker threads the kernel starts for a step run under the same mode ([`crate::par`]).
+//! (the kernel called directly, a preview, a test) a step does not check its result: the check is
+//! a test of the bodies an evaluation keeps, not part of each operation. A caller that wants every
+//! step checked asks for it with `validating(Validation::EachStep, ..)`, and [`check_kept`] and
+//! [`failing_check`] check a body on request. The worker threads the kernel starts for a step run
+//! under the same mode ([`crate::par`]).
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -102,12 +105,12 @@ pub(crate) fn within<R>(scope: Option<Arc<Scope>>, f: impl FnOnce() -> R) -> R {
 /// What a step does with SMLib's check of its result ([`step`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
-    /// Check it now (outside [`validating`], and under [`Validation::EachStep`]).
+    /// Check it now (under [`Validation::EachStep`]).
     Check,
     /// Leave it to the end of the feature (under [`Validation::EachFeature`]): the body decoded
     /// from the result keeps it ([`Body::left_unchecked`]) for [`check_kept`].
     Defer,
-    /// Never check it (under [`Validation::Off`]).
+    /// Don't check it (outside [`validating`], and under [`Validation::Off`]).
     Skip,
 }
 
@@ -115,12 +118,12 @@ pub(crate) enum Step {
 /// was left for its end.
 pub(crate) fn step() -> Step {
     CURRENT.with(|c| match c.borrow().as_deref() {
-        None | Some(Scope { mode: Validation::EachStep, .. }) => Step::Check,
+        Some(Scope { mode: Validation::EachStep, .. }) => Step::Check,
         Some(s @ Scope { mode: Validation::EachFeature, .. }) => {
             s.deferred.store(true, Ordering::Relaxed);
             Step::Defer
         }
-        Some(Scope { mode: Validation::Off, .. }) => Step::Skip,
+        None | Some(Scope { mode: Validation::Off, .. }) => Step::Skip,
     })
 }
 
@@ -220,6 +223,96 @@ fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport,
     }
 }
 
+/// SMLib's check of a body as an operation on it takes it ([`Body::smlib`], at every test): what
+/// it fails, or `None` when it passes or is not SMLib's to make (a mesh body, one SMLib refuses
+/// outright: [`Body::smlib_refusal`] says why). A check that cannot run is the error why.
+///
+/// The check runs on a copy of the body's SMLib form, which it owns, so the token over this
+/// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]), as it stops a feature's
+/// detached check ([`KeptCheck`]): an import stopped part way stops in the check too.
+pub fn failing_check(body: &Body) -> Result<Option<CheckFailure>> {
+    if body.is_mesh() || body.smlib_refusal().is_some() {
+        return Ok(None);
+    }
+    let copy = body.smlib()?.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e))?;
+    let check = copy.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| KernelError::smlib("SMLib's check", e))?;
+    Ok(CheckFailure::of(&check))
+}
+
+/// What SMLib's check failed in a body: how many tests failed, and each test that failed, where
+/// the check reports it (its site: the test's number and name, and the kind of entity it failed
+/// on), with how many times. Shown in a line ([`std::fmt::Display`]): `3 failed tests: SmEdge::Test
+/// #7 Bad Edge Length: less than edge tolerance (×2); SmLoop::Test #2 Bad Loop Orient`, in the
+/// order the check first reported them. Each failure's own values stay in the check's text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckFailure {
+    /// Failed tests, as the check counts them.
+    pub failures: usize,
+    /// The tests that failed, each once, in the order the check first reported them.
+    pub tests: Vec<FailedTest>,
+}
+
+/// One test SMLib's check failed: its site in the check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailedTest {
+    /// The test as the check names it (`SmEdge::Test #7 Bad Edge Length: less than edge
+    /// tolerance`), without the values of each failure.
+    pub name: String,
+    /// The test's number (`7`), when the check gives one.
+    pub number: Option<u32>,
+    /// The kinds of entity it failed on (`SmVertex`), each once, when the check names them.
+    pub owners: Vec<String>,
+    /// How many times it failed.
+    pub times: usize,
+}
+
+impl CheckFailure {
+    /// The failure `check` reports, `None` when it passes.
+    pub fn of(check: &solidcraft_smlib::CheckReport) -> Option<CheckFailure> {
+        if check.is_valid() {
+            return None;
+        }
+        let mut tests: Vec<FailedTest> = Vec::new();
+        // "AssertValid skipped" says why the second half of the check did not run: not a test failed.
+        for line in check.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")) {
+            // The test's name ends where its values or its owner start.
+            let name =
+                [line.find(" ("), line.find(" [owner")].into_iter().flatten().min().map_or(line, |end| line.get(..end).unwrap_or(line)).trim_end();
+            let owner = line.rsplit_once("[owner ").and_then(|(_, rest)| rest.strip_suffix(']')).map(str::trim).filter(|o| !o.is_empty());
+            let i = match tests.iter().position(|t| t.name == name) {
+                Some(i) => i,
+                None => {
+                    let number = name.split_once("Test #").and_then(|(_, rest)| {
+                        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                        digits.parse().ok()
+                    });
+                    tests.push(FailedTest { name: name.to_string(), number, owners: Vec::new(), times: 0 });
+                    tests.len() - 1
+                }
+            };
+            if let Some(t) = tests.get_mut(i) {
+                t.times += 1;
+                if let Some(owner) = owner.filter(|o| !t.owners.iter().any(|known| known == o)) {
+                    t.owners.push(owner.to_string());
+                }
+            }
+        }
+        Some(CheckFailure { failures: check.failures, tests })
+    }
+}
+
+impl std::fmt::Display for CheckFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = if self.failures == 1 { "" } else { "s" };
+        write!(f, "{} failed test{s}: ", self.failures)?;
+        for (i, t) in self.tests.iter().enumerate() {
+            let sep = if i == 0 { "" } else { "; " };
+            if t.times > 1 { write!(f, "{sep}{} (×{})", t.name, t.times)? } else { write!(f, "{sep}{}", t.name)? }
+        }
+        Ok(())
+    }
+}
+
 /// [`check_result`] of a step's result nobody else reads, which it takes: the token over this
 /// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]).
 fn check_result_owned(r: solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
@@ -284,15 +377,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_step_is_checked_outside_an_evaluation_and_under_each_step() {
-        assert_eq!(step(), Step::Check);
+    fn a_step_is_checked_only_under_each_step() {
+        assert_eq!(step(), Step::Skip, "outside an evaluation a step does not check its result");
         assert_eq!(validating(Validation::EachStep, step), (Step::Check, false));
         assert_eq!(validating(Validation::EachFeature, step), (Step::Defer, true));
         assert_eq!(validating(Validation::Off, step), (Step::Skip, false));
         // The thread's own mode comes back, also after a nested scope.
         let ((inner, outer), deferred) = validating(Validation::Off, || (validating(Validation::EachStep, step).0, step()));
         assert!(inner == Step::Check && outer == Step::Skip && !deferred);
-        assert_eq!(step(), Step::Check);
+        assert_eq!(step(), Step::Skip);
     }
 
     /// A check detached under a token runs under it on whatever thread runs it (the feature
@@ -308,6 +401,37 @@ mod tests {
         let free = solidcraft_smlib::stop::Stop::new();
         let detached = free.within(|| detach_kept(&body));
         assert!(detached.run().is_ok(), "a token never stopped changes nothing");
+    }
+
+    /// #17689: [`failing_check`] checks a copy it owns, so a stopped token stops it (an import
+    /// stopped part way), and it names each test the check failed, at its site, once.
+    #[test]
+    fn a_failing_check_stops_with_the_work_and_names_each_failed_test() {
+        use solidcore_record::Vec3;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.5;
+        let bad = Body::from_record(record).unwrap();
+        let stop = solidcraft_smlib::stop::Stop::new();
+        stop.stop();
+        let r = stop.within(|| failing_check(&bad));
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("cancelled")), "{r:?}");
+        // Run again with no token: the body's own SMLib form was not touched by the stopped check.
+        let failure = failing_check(&bad).unwrap().expect("the moved corner fails the check");
+        let report = bad.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert_eq!(failure.failures, report.failures);
+        let lines: Vec<&str> = report.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")).collect();
+        assert_eq!(failure.tests.iter().map(|t| t.times).sum::<usize>(), lines.len(), "{}", report.text);
+        for t in &failure.tests {
+            assert_eq!(lines.iter().filter(|l| l.starts_with(&t.name)).count(), t.times, "{t:?}");
+            assert_eq!(
+                t.number.map(|n| n.to_string()),
+                t.name.split_once("Test #").map(|(_, r)| r.chars().take_while(char::is_ascii_digit).collect())
+            );
+            assert!(t.owners.iter().all(|o| lines.iter().any(|l| l.starts_with(&t.name) && l.ends_with(&format!("[owner {o}]")))), "{t:?}");
+        }
+        assert!(failure.to_string().starts_with(&format!("{} failed test", report.failures)), "{failure}");
+        assert_eq!(failing_check(&good).unwrap(), None, "the box passes");
     }
 
     #[test]
@@ -360,6 +484,43 @@ mod tests {
         assert!(deferred && e.contains("SMLib fillet: SMLib's check refuses the result (the input already fails it)"), "{e}");
         let (off, deferred) = validating(Validation::Off, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
         assert!(off.is_ok_and(|b| b.is_some()) && !deferred);
+    }
+
+    /// The SMLib steps of shell, offset faces, draft and thicken (`crate::offset_backend::run`)
+    /// follow the mode as a boolean does (#17601). Offset Faces first heals the body through it:
+    /// on a body SMLib's check already refuses, that step is refused there under each_step,
+    /// saying the body failed it before; left to the end under each_feature, where the kept
+    /// body's check refuses it; and built under off.
+    #[test]
+    fn the_offset_steps_on_a_body_the_check_refuses_follow_the_mode() {
+        use solidcore_record::Vec3;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.05;
+        // The side across the box from the moved corner, which stays flat.
+        let far_x = if record.vertices[0].point[0] < 5.0 { 10.0 } else { 0.0 };
+        let bad = Body::from_record(record).unwrap();
+        assert!(check_kept(&bad).is_err());
+        let heal = |b: &Body| crate::heal::heal(b, &[]);
+        let (step, deferred) = validating(Validation::EachStep, || heal(&bad));
+        let e = step.unwrap_err().to_string();
+        assert!(e.contains("SMLib healing: SMLib's check refuses the result (the body already fails it)") && !deferred, "{e}");
+        let (healed, deferred) = validating(Validation::EachFeature, || heal(&bad));
+        assert!(deferred);
+        let e = check_kept(&healed.unwrap()).unwrap_err().to_string();
+        assert!(e.contains("SMLib healing: SMLib's check refuses the result"), "{e}");
+        let (healed, deferred) = validating(Validation::Off, || heal(&bad));
+        assert!(healed.is_ok() && !deferred, "{healed:?}");
+        // Offset Faces under off is no longer refused by the check (SMLib's own operation may
+        // still refuse a body this far off).
+        let side = [Vec3::new(far_x, 5.0, 5.0)];
+        let (off, _) = validating(Validation::Off, || crate::offset_faces(&bad, &side, 1.0));
+        assert!(off.as_ref().err().is_none_or(|e| !e.to_string().contains("SMLib's check refuses")), "{off:?}");
+        // A body the check accepts is moved under every mode, and passes the check kept.
+        for mode in Validation::ALL {
+            let (moved, _) = validating(mode, || crate::offset_faces(&good, &side, 1.0));
+            assert!(moved.as_ref().is_ok_and(|m| check_kept(m).is_ok()), "{mode:?}: {moved:?}");
+        }
     }
 
     #[test]

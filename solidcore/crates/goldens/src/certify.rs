@@ -13,6 +13,7 @@
 
 pub(crate) mod tube;
 
+use solidcore::blend::fillet_section::interval::round_up;
 use solidcore::blend::fillet_section::station::as_b_spline;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::kernel::Kernel;
@@ -90,6 +91,56 @@ pub(crate) fn evaluation_slack(k: &Kernel, surface: &Surface) -> f64 {
     gamma(8 * (p + q + 2)) * m * 3.0_f64.sqrt()
 }
 
+/// [`evaluation_slack`] at the parameters `uv`, which may lie past the net's knots (the
+/// evaluation extrapolates the end spans' polynomials): inside the knots the slack itself;
+/// past them each direction's de Boor steps take affine rather than convex combinations,
+/// with factors at most `1 + 2 d / span` for `d` the distance past the end knot and `span`
+/// the end span's length, so the rounding grows by at most that factor to the degree per
+/// direction (the growth factor `solidcore`'s own `point_rounding` charges; that bound
+/// also has a rational weight term, which this slack does not need: inside the knots
+/// `sum N_i w_i |x_i| <= m w(uv)` for `m` the largest Euclidean coordinate, so the
+/// slack above bounds a rational net's point too). `None` for a rational net
+/// past its knots, whose weight sum is not bounded away from zero there, and for
+/// parameters that are not finite: no enclosure is claimed.
+pub(crate) fn evaluation_slack_at(k: &Kernel, surface: &Surface, uv: Point2) -> Option<f64> {
+    let measured = measured(surface);
+    let form = as_b_spline(k, measured).ok()??;
+    let nurb = form.gw_nurb()?;
+    let grow = extrapolation(nurb.u_knots(), nurb.p(), uv.x)?
+        * extrapolation(nurb.v_knots(), nurb.q(), uv.y)?;
+    let rational = nurb.rows().flatten().any(|c| c.w != NOW);
+    if rational && grow > 1.0 {
+        return None;
+    }
+    let slack = evaluation_slack(k, surface) * grow;
+    slack.is_finite().then_some(slack)
+}
+
+/// The growth of a degree-`p` B-spline evaluation's rounding at `t` past `knots`' ends
+/// ([`evaluation_slack_at`]): 1 inside, `((1 + 2 d / span)(1 + u_4))^p (1 + gamma(p + 1))`
+/// past an end. `None` for `t` not finite or an end span that is empty.
+fn extrapolation(knots: &[f64], p: usize, t: f64) -> Option<f64> {
+    let lo = *knots.get(p)?;
+    let hi = *knots.get(knots.len().checked_sub(p + 1)?)?;
+    if !t.is_finite() {
+        return None;
+    }
+    if t >= lo && t <= hi {
+        return Some(1.0);
+    }
+    let (d, span) = if t < lo {
+        (lo - t, knots.iter().copied().find(|&x| x > lo)? - lo)
+    } else {
+        (t - hi, hi - knots.iter().rev().copied().find(|&x| x < hi)?)
+    };
+    if span <= 0.0 || span.is_nan() {
+        return None;
+    }
+    let ratio = (1.0 + 2.0 * d / span) * (1.0 + gamma(4));
+    let grow = ratio.powi(i32::try_from(p).ok()?) * (1.0 + gamma(p + 1));
+    grow.is_finite().then_some(grow)
+}
+
 /// The enclosure of the distance from `p` to `surface` over `uv_box` (its NURB parameters;
 /// `None` for the whole surface) around the drop answer `foot`.
 ///
@@ -103,17 +154,35 @@ pub(crate) fn nearest(
     p: Point3,
     foot: Point2,
 ) -> Enclosure {
+    nearest_with_rounding(k, surface, uv_box, p, foot).0
+}
+
+/// [`nearest`], with the rounding its upper end adds to the computed distance from `p` to
+/// the foot's surface point: the evaluation's slack at the foot and `γ_8` of the distance's
+/// coordinates, the two terms counted below (infinite where the evaluation is not bounded).
+///
+/// # Panics
+///
+/// As [`nearest`].
+pub(crate) fn nearest_with_rounding(
+    k: &Kernel,
+    surface: &Surface,
+    uv_box: Option<&Extent2d>,
+    p: Point3,
+    foot: Point2,
+) -> (Enclosure, f64) {
     let surface = measured(surface);
     let q = surface.evaluate_point(k, foot).expect("the foot");
     // the evaluation's rounding, and the distance's own (a difference per coordinate, three
     // squares, two sums and a root, on coordinates at most the larger point's size)
-    let hi = p.distance(q)
-        + evaluation_slack(k, surface)
-        + gamma(8) * p.max_dimension().max(q.max_dimension()) * 3.0_f64.sqrt();
+    // (past a rational net's knots the evaluation is not bounded: no upper end)
+    let slack = evaluation_slack_at(k, surface, foot).unwrap_or(f64::INFINITY);
+    let distance = gamma(8) * p.max_dimension().max(q.max_dimension()) * 3.0_f64.sqrt();
+    let hi = p.distance(q) + slack + distance;
     // ask for the foot's distance: the subdivision stops once the nearest piece is that far
     let lo = surface_distance_lower_bound(k, surface, uv_box, p, p.distance(q))
         .expect("the lower bound");
-    Enclosure { lo, hi }
+    (Enclosure { lo, hi }, round_up(slack + distance))
 }
 
 /// The enclosure of a sampled maximum gap from a curve to `surface`: the largest of the true
@@ -155,6 +224,110 @@ pub(crate) fn sampled_max(
     max
 }
 
+/// The alignment `A = w / |w| . dir` of the derivative `w` across the singular direction
+/// (the `u` derivative where `singular_u`, else the `v` one) at `uv` with the direction,
+/// and a bound on its rounding (WR-57, #17856): `w` and its error `e` come from the
+/// certified partials of the surface's NURBS form
+/// ([`solidcore::eval::collapse::certified_partials`]); the unit vector moves by at most
+/// `2 e / |w|` (`|a / |a| - b / |b|| <= 2 |a - b| / |a|`), and its own computation and the
+/// dot product round by at most `2 gamma(16)`. `None` where `2 e >= |w|` (the tangent is
+/// not enclosed away from zero), or the surface has no NURBS form or its partials no bound.
+pub(crate) fn alignment(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    dir: solidcore::math::Vec3,
+    singular_u: bool,
+) -> Option<(f64, f64)> {
+    use solidcore::eval::collapse::certified_partials;
+    use solidcore::eval::spline::EvalSurface;
+    use solidcore::nurbs::math::NOZ;
+    let net = as_b_spline(k, measured(surface)).ok()??;
+    let nurb = net.gw_nurb()?;
+    let cp = nurb.cpts();
+    let (nu, nv) = (cp.len(), cp.first()?.len());
+    let mut ctrl = Vec::new();
+    for j in 0..nv {
+        for row in &cp {
+            let c = *row.get(j)?;
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            let z = if c.z == NOZ { 0.0 } else { c.z };
+            ctrl.push([c.x, c.y, z, w]);
+        }
+    }
+    let eval = EvalSurface::nurbs_closed(
+        [nurb.p(), nurb.q()],
+        [nurb.u_knots().to_vec(), nurb.v_knots().to_vec()],
+        [nu, nv],
+        ctrl,
+        [false; 2],
+    );
+    let (d, e) = certified_partials(&eval, [uv.x, uv.y]).ok()?;
+    let (w, ew) = if singular_u {
+        (d[0][1], e[0][1])
+    } else {
+        (d[1][0], e[1][0])
+    };
+    let len = w.length();
+    if 2.0 * ew >= len || !len.is_finite() {
+        return None;
+    }
+    let a = (w / len).dot(dir);
+    Some((a, 2.0 * ew / len + 2.0 * gamma(16)))
+}
+
+/// The certified distance from `p` to `surface`'s point at `uv`: `[lo, hi]`, the
+/// evaluation's rounding ([`evaluation_slack_at`], grown past the knots) and the distance's
+/// own ([`solidcore::geom::certified::distance`]) charged; `None` where the evaluation fails
+/// or is not bounded (a rational net past its knots).
+pub(crate) fn distance(k: &Kernel, surface: &Surface, p: Point3, uv: Point2) -> Option<(f64, f64)> {
+    let q = surface.evaluate_point(k, uv).ok()?;
+    let d = solidcore::geom::certified::distance(q, p);
+    let slack = evaluation_slack_at(k, surface, uv)?;
+    let lo = d.value - d.bound - slack;
+    let hi = d.value + d.bound + slack;
+    (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+}
+
+/// A lower bound on the distance from `p` to `surface` over its natural domain, as the
+/// least of [`surface_distance_lower_bound`] over a grid of boxes covering it, each
+/// subdivided on its own (asked for `want`): 4, 16 and then 64 boxes a side, stopping once
+/// the bound is within `1e-6` relative of `want`. `None` where the domain or a box's bound
+/// is not available.
+pub(crate) fn split_lower_bound(
+    k: &Kernel,
+    surface: &Surface,
+    p: Point3,
+    want: f64,
+) -> Option<f64> {
+    let nat = surface.natural_uv_domain_with_nurb(k).ok()?;
+    let (u0, v0, u1, v1) = (nat.min().x, nat.min().y, nat.max().x, nat.max().y);
+    let mut lo = 0.0;
+    for n in [4_u32, 16, 64] {
+        let at = |a: f64, b: f64, i: u32| {
+            if i == n {
+                b
+            } else {
+                a + (b - a) * f64::from(i) / f64::from(n)
+            }
+        };
+        lo = f64::INFINITY;
+        for iu in 0..n {
+            for iv in 0..n {
+                let b = Extent2d::from_points(
+                    Point2::new(at(u0, u1, iu), at(v0, v1, iv)),
+                    Point2::new(at(u0, u1, iu + 1), at(v0, v1, iv + 1)),
+                );
+                lo = lo.min(surface_distance_lower_bound(k, surface, Some(&b), p, want).ok()?);
+            }
+        }
+        if want - lo <= 1e-6 * want {
+            break;
+        }
+    }
+    Some(lo)
+}
+
 thread_local! {
     static KEPT: std::cell::RefCell<Option<solidcore::topology::Brep>> =
         const { std::cell::RefCell::new(None) };
@@ -174,6 +347,43 @@ pub(crate) fn keep(b: &solidcore::topology::Brep) {
 pub(crate) fn take_kept() -> Option<solidcore::topology::Brep> {
     KEPT.with(|k| k.borrow_mut().take())
 }
+
+#[cfg(test)]
+thread_local! {
+    static WRITTEN: std::cell::RefCell<Option<Vec<solidcore::topology::Brep>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Starts keeping a copy of every B-rep a runner hands to [`written`] on this thread, for
+/// [`take_written`] ([`trim_tolerance`]).
+#[cfg(test)]
+pub(crate) fn watch_written() {
+    WRITTEN.with(|w| *w.borrow_mut() = Some(Vec::new()));
+}
+
+/// A runner's B-rep whose tolerances it is writing into its output: copied while
+/// [`watch_written`] is on, ignored otherwise.
+///
+/// # Panics
+///
+/// When the B-rep cannot be copied.
+#[cfg(test)]
+pub(crate) fn written(b: &solidcore::topology::Brep) {
+    WRITTEN.with(|w| {
+        if let Some(kept) = w.borrow_mut().as_mut() {
+            kept.push(b.clone_standing_for_self().expect("a copy of the B-rep"));
+        }
+    });
+}
+
+/// Stops [`watch_written`] and returns the copies kept since.
+#[cfg(test)]
+pub(crate) fn take_written() -> Vec<solidcore::topology::Brep> {
+    WRITTEN.with(|w| w.borrow_mut().take().unwrap_or_default())
+}
+
+#[cfg(test)]
+pub(crate) mod trim_tolerance;
 
 /// One edge's tolerance and what it must cover: the largest certified upper end of its
 /// uses' sampled edge-face gaps ([`sampled_max`] over `CalcMaxEdgeFaceGap`'s 20-sample gap

@@ -11,6 +11,10 @@ pub(crate) struct State {
     /// Per-window Render view state; neither preferences nor document data.
     pub render_focus: bool,
     pub cards: Vec<Rect>,
+    /// Pop-out ribbon pixels shield input but never take space from the views or controls.
+    pub ribbon_overlay: Option<Rect>,
+    /// The pop-out bar, grip and caption controls also shield input independently of layout.
+    pub top_bar_overlays: [Option<Rect>; 3],
     /// Actual workspace overlays above the panel host.
     pub workspace_panels: std::collections::BTreeMap<&'static str, Rect>,
     pub browser: Option<Rect>,
@@ -50,6 +54,14 @@ pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
 /// Actual persistent workspace footprints for the shared host. Transient menus
 /// remain input shields, without becoming targets for framing or control placement.
 pub(crate) fn host_usable(app: &SolveApp) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
+    host_usable_in(app, None)
+}
+
+/// Use the shared window obstacles, with controls constrained to one tiled view.
+pub(crate) fn host_usable_in(
+    app: &SolveApp,
+    viewport: Option<Rect>,
+) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
     use crate::panel_runtime::{MAX_USABLE_OBSTACLES, egui_rect, logical_rect, resolve_usable_region};
     use solidcraft_engine::panels::{Rule, error};
     let frame = app.universal_panel_frame().ok_or_else(|| error(Rule::Lifecycle, "universal host geometry is unavailable"))?;
@@ -68,7 +80,8 @@ pub(crate) fn host_usable(app: &SolveApp) -> solidcraft_engine::panels::PanelRes
             obstacles.push(bounds);
         }
     }
-    resolve_usable_region(frame.layout.render_domain, &obstacles)
+    let domain = viewport.map_or(frame.layout.render_domain, |rect| logical_rect(rect.intersect(egui_rect(frame.layout.render_domain))));
+    resolve_usable_region(domain, &obstacles)
 }
 
 fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: bool) -> Vec<Rect> {
@@ -82,7 +95,12 @@ fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: 
         }
     }
     rects.extend(app.shell.workspace_panels.iter().filter(|(id, _)| !fitting || **id != "render:selection").map(|(_, rect)| *rect));
+    rects.extend(crate::drawing_workspace::covered_rects(app));
     rects.extend(app.shell.cards.iter().copied());
+    if !fitting {
+        rects.extend(app.shell.ribbon_overlay);
+        rects.extend(app.shell.top_bar_overlays.into_iter().flatten());
+    }
     rects.extend(app.viewport.palette_rect);
     // Persistent feature windows come from the host's window ledger. This cache also
     // receives transient warnings, so include it only when checking input shields.
@@ -112,9 +130,20 @@ pub(crate) fn content_rect(app: &SolveApp, viewport: Rect) -> Rect {
 
 /// The shared host supplies the free workspace bounds when a layout is available.
 pub(crate) fn workspace_content(app: &SolveApp, content: Rect) -> Rect {
-    app.universal_panel_frame()
+    let mut content = app
+        .universal_panel_frame()
         .and_then(|frame| frame.layout.viewport)
-        .map_or(content, |rect| crate::panel_runtime::egui_rect(rect).intersect(content))
+        .map_or(content, |rect| crate::panel_runtime::egui_rect(rect).intersect(content));
+    // The drawing's properties panel takes its side of the sheet's room.
+    if let Some(settings) = crate::drawing_workspace::settings_rect(app) {
+        let gap = Container::for_layout(app.ui.layout, Surface::Panel).gap();
+        if app.preferences.drawing_panel_side == "left" {
+            content.min.x = (settings.right() + gap).clamp(content.left(), content.right());
+        } else {
+            content.max.x = (settings.left() - gap).clamp(content.left(), content.right());
+        }
+    }
+    content
 }
 
 /// Keep bottom readouts above the current shared-host bottom panels.

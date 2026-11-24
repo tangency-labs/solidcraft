@@ -66,6 +66,14 @@
 //! distinctions between cases). [`SolidError::is_port_failure`] tells a solidcore defect
 //! or missing port from a failure of the operation on its input (#1452).
 //!
+//! **Converting a site.** Every failure ends up a named cause, a refusal, or the
+//! area's `Defect { why }`: a failure reviewed at its site as the kernel's fault, of class
+//! [`ErrorKind::StageFailed`] (127), whose `why` names the step that failed and why that is
+//! the kernel's fault. The sites not there yet (phrase causes, bare statuses, and the
+//! unreviewed `StageFailed`) are counted per file by test-only scans, and the counts only
+//! fall. The conversion guide, with the rules a conversion keeps (first: the site's status
+//! stays), is `docs/failure-codes-and-reproduction.md` §6.
+//!
 //! **Comparison with the pinned C++.** difftest compares each failure with the status
 //! the pinned C++ reports for the same input. A failure records that status privately,
 //! where it is made (the status depends on the call path, not only on the reason), and
@@ -95,14 +103,18 @@ pub mod offset;
 mod phrase_sites;
 pub mod primitive;
 pub mod query;
+#[cfg(test)]
+mod site_scan;
+#[cfg(test)]
+mod stage_sites;
 pub mod surface;
 pub mod sweep;
 pub mod topology;
 
 use crate::math::Point3;
 use crate::topology::{
-    BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
-    VertexuseId,
+    Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId,
+    VertexId, VertexuseId,
 };
 
 /// Shorthand for `core::result::Result<T, SolidError>`.
@@ -169,23 +181,6 @@ pub(crate) fn passed_on<T>(r: Result<T>, pass_on: bool) -> Result<Result<T>> {
 /// `pass_on` its error is returned, without it the status is ignored as upstream.
 pub(crate) fn ignore_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<()> {
     ignore_status(passed_on(r, pass_on)?)
-}
-
-/// [`ignored`] of a call whose status SMLib drops and the fork passes on: with
-/// `pass_on` its error is returned, without it the value is `None` as upstream.
-pub(crate) fn ignored_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<Option<T>> {
-    ignored(passed_on(r, pass_on)?)
-}
-
-/// A status a port helper hands back in its value (`None` for `SM_SUCCESS`) where SMLib
-/// drops it and the fork passes it on (`SER(...)`): returned as the error with
-/// `pass_on`, dropped without (except [`SolidError::Unported`] and
-/// [`SolidError::Cancelled`], which always propagate).
-pub(crate) fn status_passed_on(status: Option<SolidError>, pass_on: bool) -> Result<()> {
-    match status {
-        Some(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
-        _ => Ok(()),
-    }
 }
 
 /// A reference to one topological entity, used as error context.
@@ -568,7 +563,8 @@ fn fmt_entity(entity: Option<EntityRef>) -> String {
 /// An edge of the caller's body (the target an operation edits), as a failure's [`Site`]
 /// names it. Built only by the mapping from an operation's own objects to the caller's
 /// body (for the blend, [`TargetEdge::of_fillet_object`], the mapping the fillet session's
-/// `fit_size` uses), so an id of an intermediate body cannot be named.
+/// `fit_size` uses; for offsets, [`TargetEdge::of_offset_edgeuse`], the executive's
+/// provenance), so an id of an intermediate body cannot be named.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TargetEdge(EdgeId);
 
@@ -594,6 +590,22 @@ fn target_entity(
 }
 
 impl TargetEdge {
+    /// The caller's edge the executive made an offset edge use from, also consulting
+    /// its mate's provenance. Missing or ambiguous provenance names no caller edge.
+    #[must_use]
+    pub(crate) fn of_offset_edgeuse(
+        executive: &crate::offset::offset_executive::p1::OffsetExecutive,
+        original: &Brep,
+        offset: &Brep,
+        edgeuse: EdgeuseId,
+    ) -> Option<Self> {
+        executive
+            .original_edge(original, offset, edgeuse)
+            .ok()
+            .flatten()
+            .map(Self)
+    }
+
     /// The edge of the caller's body a blend object is: `Some` only for an edge of the fillet
     /// session's target body.
     #[must_use]
@@ -606,6 +618,13 @@ impl TargetEdge {
         }
     }
 
+    /// The edge `edge` of the caller's body, named by an operation that works on that body
+    /// itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(edge: EdgeId) -> Self {
+        Self(edge)
+    }
+
     /// The edge's id in the caller's body.
     #[must_use]
     pub const fn id(self) -> EdgeId {
@@ -614,6 +633,17 @@ impl TargetEdge {
 }
 
 impl TargetFace {
+    /// The caller's face the executive made an offset face from. Missing or
+    /// ambiguous provenance names no caller face.
+    #[must_use]
+    pub(crate) fn of_offset_face(
+        executive: &crate::offset::offset_executive::p1::OffsetExecutive,
+        original: &Brep,
+        face: FaceId,
+    ) -> Option<Self> {
+        executive.original_face(original, face).map(Self)
+    }
+
     /// The face of the caller's body a blend object is: `Some` only for a face of the fillet
     /// session's target body.
     #[must_use]
@@ -631,6 +661,13 @@ impl TargetFace {
     pub const fn id(self) -> FaceId {
         self.0
     }
+
+    /// The face `face` of the caller's body, named by an operation that works on that body
+    /// itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(face: FaceId) -> Self {
+        Self(face)
+    }
 }
 
 impl TargetVertex {
@@ -644,6 +681,13 @@ impl TargetVertex {
             EntityRef::Vertex(v) => Some(Self(v)),
             _ => None,
         }
+    }
+
+    /// The vertex `vertex` of the caller's body, named by an operation that works on that
+    /// body itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(vertex: VertexId) -> Self {
+        Self(vertex)
     }
 
     /// The vertex's id in the caller's body.
@@ -765,6 +809,10 @@ pub enum FitMeasure {
     Wall,
     /// A distance (an extension's, a chamfer's).
     Distance,
+    /// A weld bead's leg (#15129): from the joint line to the toe, straight.
+    Leg,
+    /// A weld bead's sagitta (#15129): how far the arc's middle may stand off the chord.
+    Sagitta,
 }
 
 impl FitMeasure {
@@ -778,6 +826,8 @@ impl FitMeasure {
             Self::Setback => "setback",
             Self::Wall => "wall",
             Self::Distance => "distance",
+            Self::Leg => "leg",
+            Self::Sagitta => "sagitta",
         }
     }
 }
@@ -870,7 +920,7 @@ impl core::fmt::Debug for Origin {
 #[non_exhaustive]
 pub struct Failure {
     /// The solidcore path of the failing stage (e.g.
-    /// `"offset::offset_executive::p2::refuse_folding_offset"`).
+    /// `"offset::offset_executive::p2::refuse_singular_or_folding_offset"`).
     pub operation: &'static str,
     /// What failed: the cause, typed, with the numbers the check computed.
     pub reason: Reason,
@@ -1074,6 +1124,17 @@ pub enum Reason {
         /// The support net's domain.
         domain: [[f64; 2]; 2],
     },
+    /// An intersection edge whose end is continued to its vertex would leave its faces: the
+    /// continued span, `gap` long at its end, lies up to `bound` (certified) off them,
+    /// past the `tolerance` it must stay within (not upstream, #3062).
+    EdgeOffItsFaces {
+        /// How far the edge's end lay from its vertex.
+        gap: f64,
+        /// The certified bound of the continued span's distance from its faces.
+        bound: f64,
+        /// The tolerance it must stay within.
+        tolerance: f64,
+    },
 }
 
 impl Reason {
@@ -1094,8 +1155,9 @@ impl Reason {
             | Self::Query(_)
             | Self::Topology(_)
             | Self::Surface(_)
-            | Self::Blend(_)
-            | Self::FootPastDomainEnd { .. } => None,
+            | Self::FootPastDomainEnd { .. }
+            | Self::EdgeOffItsFaces { .. } => None,
+            Self::Blend(b) => b.entity(),
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -1105,7 +1167,9 @@ impl Reason {
     /// comparison detail).
     pub(crate) fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::FootPastDomainEnd { .. } => SM_ERR,
+            Self::Failed(_) | Self::FootPastDomainEnd { .. } | Self::EdgeOffItsFaces { .. } => {
+                SM_ERR
+            }
             Self::Offset(o) => o.comparison_status(),
             Self::Nurbs(n) => n.comparison_status(),
             Self::Boolean(b) => b.comparison_status(),
@@ -1130,6 +1194,7 @@ impl Reason {
         match self {
             Self::Failed(_) => ErrorKind::of_status(status),
             Self::FootPastDomainEnd { .. } => ErrorKind::OutsideDomain,
+            Self::EdgeOffItsFaces { .. } => ErrorKind::NotWithinTolerance,
             Self::Offset(o) => o.kind(),
             Self::Nurbs(n) => n.kind(),
             Self::Boolean(b) => b.kind(),
@@ -1153,6 +1218,14 @@ impl core::fmt::Display for Reason {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Failed(what) => f.write_str(what),
+            Self::EdgeOffItsFaces {
+                gap,
+                bound,
+                tolerance,
+            } => write!(
+                f,
+                "an intersection edge continued {gap:e} to its vertex would lie up to {bound:e} off its faces, past their tolerance {tolerance:e}"
+            ),
             Self::Offset(o) => o.fmt(f),
             Self::Nurbs(n) => n.fmt(f),
             Self::Boolean(b) => b.fmt(f),
@@ -1318,7 +1391,7 @@ pub enum ErrorKind {
     /// A fillet or chamfer is too large to build; the error names the largest size
     /// that builds.
     FilletTooLarge = 100,
-    // The blend's classes, 101 to 131 (the classes of the typed blend failure record,
+    // The blend's classes, 101 to 133 (the classes of the typed blend failure record,
     // `error::blend`), in their order: the record's numbers less 200, then the classes added
     // after them.
     /// The rolling ball does not fit a face it rolls on.
@@ -1398,6 +1471,17 @@ pub enum ErrorKind {
     /// faces across them or their surfaces are not those of a fillet between two faces. Not a
     /// matter of size ([`crate::error::blend::RemovalRefusal`]).
     NotARemovableFillet = 131,
+    /// A side edge of the body has a degenerate parametrization where a blend's end meets it:
+    /// its curve's derivative there has no length, so the end has no direction to leave the
+    /// edge along. Not a matter of size: the way out is a side edge whose curve is not
+    /// degenerate there ([`crate::error::blend::BlendFailure::SideEdgeTangentVanishes`]).
+    SideEdgeDegenerate = 132,
+    /// A four-face bevel's split end lies on a support face that is not planar: the split
+    /// end is cut by the plane through the corner, its side edge and the remaining rail's
+    /// end, which stays on the support only where the support is that plane. Not a matter
+    /// of size: no radius makes a curved support planar, so the way out is a planar support
+    /// at the split end ([`crate::error::blend::BlendFailure::SplitEndSupportNotPlanar`]).
+    SplitEndNotPlanar = 133,
     /// An offset face's offset folds: the wall is thicker than a radius of curvature.
     OffsetFolds = 200,
     /// Loops of an offset face touch without crossing: the offset walls would meet.
@@ -1485,6 +1569,8 @@ impl ErrorKind {
                 | Self::OverflowKeepsNothing
                 | Self::RemovalNotExact
                 | Self::NotARemovableFillet
+                | Self::SideEdgeDegenerate
+                | Self::SplitEndNotPlanar
                 | Self::OffsetFolds
                 | Self::OffsetWallsTouch
                 | Self::OffsetLoopsCross
@@ -1506,6 +1592,8 @@ impl ErrorKind {
                     | Self::TangentContinuationEnd
                     | Self::RemovalNotExact
                     | Self::NotARemovableFillet
+                    | Self::SideEdgeDegenerate
+                    | Self::SplitEndNotPlanar
                     | Self::OffsetWallsTouch
                     | Self::OffsetLoopsCross
                     | Self::OffsetEdgeVanishes
@@ -1562,6 +1650,8 @@ impl ErrorKind {
             Self::OverflowKeepsNothing => "overflow_keeps_nothing",
             Self::RemovalNotExact => "removal_not_exact",
             Self::NotARemovableFillet => "not_a_removable_fillet",
+            Self::SideEdgeDegenerate => "side_edge_degenerate",
+            Self::SplitEndNotPlanar => "split_end_not_planar",
             Self::OffsetFolds => "offset_folds",
             Self::OffsetWallsTouch => "offset_walls_touch",
             Self::OffsetLoopsCross => "offset_loops_cross",
@@ -1626,9 +1716,10 @@ impl SolidError {
 
     /// Maps the error of a failed NLib call inside an `Sm*` method to `SM_ERR` (upstream
     /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] and
-    /// [`SolidError::Cancelled`] through. Being replaced by
-    /// [`SolidError::nurbs_routine`], which keeps the error as the cause.
-    /// Pass `nl_ser(OP)` to `map_err`.
+    /// [`SolidError::Cancelled`] through. Replaced by [`SolidError::nurbs_routine`], which
+    /// keeps the error as the cause: no library code calls it any more (#19848), and it stays
+    /// for the tests that compare the old form with the new.
+    #[cfg(test)]
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
@@ -1747,7 +1838,7 @@ impl SolidError {
     /// ([`crate::error::blend::BlendFailure::NotCertified`]): like a cancellation, work given
     /// up never becomes a different geometric result.
     #[must_use]
-    pub(crate) fn is_unported_or_cancelled(&self) -> bool {
+    pub fn is_unported_or_cancelled(&self) -> bool {
         matches!(
             self,
             Self::Unported { .. } | Self::Cancelled { .. } | Self::FaceTrimsUnavailable { .. }
@@ -1958,6 +2049,10 @@ impl SolidError {
 
     /// [`SolidError::Failed`] for a stage that failed, as the phrase says, with status
     /// [`SM_ERR`] (upstream `return SE(SM_ERR)`).
+    ///
+    /// No library site builds it any more (the last ones went in #19856); the tests
+    /// keep it to check the phrase causes still on the wire.
+    #[cfg(test)]
     pub(crate) fn stage_failed(operation: &'static str, what: &'static str) -> Self {
         Failure::new(operation, Reason::Failed(what)).into_error()
     }
@@ -1965,6 +2060,10 @@ impl SolidError {
     /// [`SolidError::Failed`] for an entity a stage needs that is not there, as the phrase
     /// says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL`
     /// pointer); its kind is [`ErrorKind::Missing`].
+    ///
+    /// No library site builds it any more (the last ones went in #19856); the tests
+    /// keep it to check the phrase causes still on the wire.
+    #[cfg(test)]
     pub(crate) fn entity_missing(operation: &'static str, what: &'static str) -> Self {
         Failure::new(operation, Reason::Failed(what))
             .with_status(SM_ERR_NULL_POINTER)
@@ -2066,8 +2165,8 @@ mod tests {
             passed_on::<()>(Err(e.clone()), false).map(|_| ()),
             Err(e.clone())
         );
-        assert_eq!(status_passed_on(Some(e.clone()), false), Err(e.clone()));
         assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
+        assert_eq!(SolidError::nurbs_routine("op")(e.clone()), e);
         assert!(!SolidError::sm_err("t").is_not_certified());
     }
 
@@ -2083,6 +2182,31 @@ mod tests {
         assert!(e.is_status_answer(), "{e:?}");
         assert!(!e.is_port_failure(), "{e:?}");
         assert_eq!(e.to_string(), format!("{operation}: stage_failed"));
+    }
+
+    /// `defect` is a failure of `operation` reviewed as the kernel's fault (an area's
+    /// `Defect { why }`): class [`ErrorKind::StageFailed`] (127), a defect, neither a
+    /// refusal nor sized, with `status` for the goldens, read by the decisions that read a
+    /// status as `twin` (the area's unreviewed failure of the same status) is, and worded
+    /// `text`.
+    pub(in crate::error) fn assert_defect(
+        defect: &SolidError,
+        twin: &SolidError,
+        operation: &str,
+        status: i32,
+        text: &str,
+    ) {
+        let e = defect;
+        assert_eq!(e.kind(), ErrorKind::StageFailed, "{e:?}");
+        assert_eq!(e.kind().code(), 127, "{e:?}");
+        assert!(e.is_defect() && !e.is_refusal() && !e.sized(), "{e:?}");
+        assert_eq!(e.operation(), operation, "{e:?}");
+        assert_eq!(e.sm_status(), Some(status), "{e:?}");
+        assert_eq!(twin.sm_status(), Some(status), "{twin:?}");
+        assert_eq!(e.upstream_status(), twin.upstream_status(), "{e:?}");
+        assert_eq!(e.is_status_answer(), twin.is_status_answer(), "{e:?}");
+        assert!(!e.is_port_failure(), "{e:?}");
+        assert_eq!(e.to_string(), text);
     }
 
     #[test]
@@ -2359,8 +2483,8 @@ mod tests {
                     BooleanFailure::SolidLeaks { face },
                 )
                 .into_error(),
-                "boolean::merge::p4::manifold_boolean: the union would delete face 7 and merge \
-                 the solid it bounds into the outside",
+                "boolean::merge::p4::manifold_boolean: the union deleted face 7 and the solid \
+                 it bounded merged into the outside",
                 ErrorKind::Failed,
                 SM_ERR,
             ),
@@ -2525,6 +2649,8 @@ mod tests {
                 131,
                 "not_a_removable_fillet",
             ),
+            (ErrorKind::SideEdgeDegenerate, 132, "side_edge_degenerate"),
+            (ErrorKind::SplitEndNotPlanar, 133, "split_end_not_planar"),
             (ErrorKind::OffsetFolds, 200, "offset_folds"),
             (ErrorKind::OffsetWallsTouch, 201, "offset_walls_touch"),
             (ErrorKind::OffsetLoopsCross, 202, "offset_loops_cross"),
@@ -2579,11 +2705,13 @@ mod tests {
                 ErrorKind::OverflowKeepsNothing => 43,
                 ErrorKind::RemovalNotExact => 44,
                 ErrorKind::NotARemovableFillet => 45,
-                ErrorKind::OffsetFolds => 46,
-                ErrorKind::OffsetWallsTouch => 47,
-                ErrorKind::OffsetLoopsCross => 48,
-                ErrorKind::OffsetEdgeVanishes => 49,
-                ErrorKind::OffsetCollapses => 50,
+                ErrorKind::SideEdgeDegenerate => 46,
+                ErrorKind::SplitEndNotPlanar => 47,
+                ErrorKind::OffsetFolds => 48,
+                ErrorKind::OffsetWallsTouch => 49,
+                ErrorKind::OffsetLoopsCross => 50,
+                ErrorKind::OffsetEdgeVanishes => 51,
+                ErrorKind::OffsetCollapses => 52,
             }
         };
         for (i, &(kind, code, name)) in PINNED.iter().enumerate() {
@@ -2597,17 +2725,17 @@ mod tests {
             "codes are unique and ascending"
         );
         // the blend's classes: 101 to 127 are the record's numbers less 200, with no gap; 128
-        // to 131 follow them
+        // to 133 follow them
         let blend: Vec<u16> = PINNED
             .iter()
             .map(|r| r.1)
             .filter(|c| (101..200).contains(c))
             .collect();
-        assert_eq!(blend, (101..=131).collect::<Vec<u16>>());
+        assert_eq!(blend, (101..=133).collect::<Vec<u16>>());
         // defects, refusals and the sized ones
         let defects = [115, 125, 126, 127];
-        let unsized_refusals = [102, 128, 130, 131];
-        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=131).contains(&r.1)) {
+        let unsized_refusals = [102, 128, 130, 131, 132, 133];
+        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=133).contains(&r.1)) {
             assert_eq!(kind.is_defect(), defects.contains(&code), "{kind:?}");
             assert_eq!(kind.is_refusal(), !defects.contains(&code), "{kind:?}");
             assert_eq!(
@@ -3171,8 +3299,8 @@ mod tests {
     }
 
     /// The B-spline methods describe their failures ([`nurbs::BSplineFailure`]): their
-    /// library code builds no bare `Upstream` status, and no source file but the one
-    /// held back collapses an NLib failure without keeping it (`nl_ser`).
+    /// library code builds no bare `Upstream` status, and no source file collapses an NLib
+    /// failure without keeping it (`nl_ser`).
     #[test]
     fn the_b_spline_methods_build_no_bare_statuses() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -3189,6 +3317,7 @@ mod tests {
             "nurbs/b_spline_surface_n_lib/approx.rs",
             "nurbs/b_spline_surface/p1.rs",
             "nurbs/b_spline_surface/p2.rs",
+            "nurbs/b_spline_curve/p1.rs",
             "nurbs/b_spline_curve/p2.rs",
             "nurbs/nurbs_crv.rs",
         ] {
@@ -3382,5 +3511,30 @@ pub(crate) mod replaced_upstream_samples {
             assert_eq!(e.upstream_status(), None, "{e:?}");
         }
         natives
+    }
+
+    /// The sites that build a generic phrase cause, a [`Reason::Failed`] (directly, or
+    /// through `SolidError::stage_failed`, `entity_missing` or `failed_after`), only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_generic_phrase_cause_sites_only_shrink() {
+        use super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("Reason", "Failed"),
+                Builder::Method("stage_failed", Some(1)),
+                Builder::Method("entity_missing", Some(1)),
+                Builder::Method("failed_after", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/offset/offset_executive/p2.rs", 1),
+        ];
+        assert_pinned("generic phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

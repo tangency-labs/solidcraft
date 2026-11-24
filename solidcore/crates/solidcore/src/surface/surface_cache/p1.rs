@@ -33,7 +33,7 @@
 //! | [`SurfaceCache::has_cached_curves`]               | `SmSurfaceCache::HasCachedCurves`                |
 //! | [`SurfaceCache::find_unmarked_leaf_node`]         | `SmSurfaceCache::FindUnmarkedLeafNode`           |
 //! | [`SurfaceCache::first_bezier_patch`]              | `SmTreeNode::GetFirstBezierPatch` (unit `geom.tree`) on the cache's data |
-//! | [`SurfaceCache::surface_continuity`], [`SurfaceCache::surface_continuity_opt_in`], [`SurfaceCache::surface_continuity_with_kernel`] | `SmSurfaceCache::GetSurfaceContinuity` |
+//! | [`SurfaceCache::surface_continuity`]              | `SmSurfaceCache::GetSurfaceContinuity` (see deviations) |
 //! | [`SurfaceCache::connected_region`], [`ConnectedRegion`] | `SmSurfaceCache::GetConnectedRegion`       |
 //! | [`SurfaceCache::mark_face_containment`]           | `SmSurfaceCache::MarkFaceContainment`            |
 //! | [`SurfaceCache::mark_face_containment_with`], [`FaceContainmentClassifier`] | `MarkFaceContainment` with the virtual `PointClassify` of a derived cache |
@@ -133,11 +133,10 @@
 //!   the singular sides and pole points). The values are the ones the lazy call would
 //!   compute; when that call fails with [`SolidError::Unported`] the memo is not used.
 //!   Upstream also copies no surface per split (`subdivide_node_split` borrows it).
-//! - **V continuity loop bound (WR-42 opt-in).** `GetSurfaceContinuity` uses
+//! - **V continuity loop bound (WR-42).** `GetSurfaceContinuity` uses
 //!   `iv + 1 < rVConts.GetSize() - 1` in V, skipping the last internal V knot.
-//!   `surface_continuity` keeps that for pinned parity; `surface_continuity_opt_in` /
-//!   `surface_continuity_with_kernel` with `surface_continuity_checks_last_v_knot`
-//!   checks all internal V knots (`iv + 1 < rVConts.GetSize()`).
+//!   `surface_continuity` checks every internal V knot (`iv + 1 < rVConts.GetSize()`),
+//!   as the U loop does.
 //! - **Not ported here.** `GetNthBoundingPlane`, `AddCurvesToCache`, the destructor
 //!   (`surface.surface_cache_p2`, [`crate::surface::surface_cache::p2`]), the tree construction
 //!   (`surface.surface_cache_p3`, [`crate::surface::surface_cache::p3`]),
@@ -145,7 +144,8 @@
 //!   `Draw` functions (other units or debug output).
 
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -258,7 +258,7 @@ pub fn copy_as_bspline(curve: &Curve) -> Result<Curve> {
     }
     bspline_curve_of(curve)
         .map(|b| Curve::from(b.clone()))
-        .ok_or_else(|| SolidError::surface_missing(OP_COPY, "the curve's B-spline"))
+        .ok_or_else(|| SolidError::surface(OP_COPY, SurfaceFailure::CurveNotBSplineKind))
 }
 
 /// `SM_CAST_PTR(SmBSplineCurve, curve)`: the B-spline (base) of the B-spline kinds.
@@ -311,9 +311,12 @@ fn create_iso_parametric_curve(
         | SurfaceKind::SrfInVolume(_)
             if !matches!(r.curve.kind(), CurveKind::BSpline(_)) =>
         {
-            Err(SolidError::surface_failed(
+            Err(SolidError::surface(
                 "surface::surface_cache::p1::create_iso_parametric_curve",
-                "the iso curve is not a B-spline",
+                SurfaceFailure::Defect {
+                    why: "the B-spline body of CreateIsoParametricCurve, which these kinds run, \
+                          makes a B-spline iso curve, so a curve of another kind is the kernel's",
+                },
             ))
         }
         _ => Ok(r.curve),
@@ -601,9 +604,9 @@ pub fn compute_plane_from_3_points(
 
     // Check for safety (should be OK):
     if p123.dot(p231) < 0.0 || p231.dot(p312) < 0.0 || p312.dot(p123) < 0.0 {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_PLANE3,
-            "the three points do not turn one way",
+            SurfaceFailure::PointsDoNotTurnOneWay,
         ));
     }
 
@@ -634,9 +637,12 @@ pub fn check_bounding_plane_separating_halfspace(
     let control_points = canonical.control_points;
 
     if num_control_points != control_points.len() {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_HALFSPACE,
-            "the control net's size does not match its point count",
+            SurfaceFailure::Defect {
+                why: "the canonical form of a B-spline surface holds one point per control \
+                      net entry, so a count that differs from the net's size is the kernel's",
+            },
         ));
     }
 
@@ -774,8 +780,9 @@ impl PatchBoundaryBoundingPlanes {
     ) -> Result<Curve> {
         let (spt, param) = self.iso_of(index);
         // SM_CAST_PTR(SmBSplineSurface, ..) and NER: the B-spline kinds
-        bspline_of(surface)
-            .ok_or_else(|| SolidError::surface_missing(OP_BOUNDARY, "the B-spline kind surface"))?;
+        bspline_of(surface).ok_or_else(|| {
+            SolidError::surface(OP_BOUNDARY, SurfaceFailure::SurfaceNotBSplineKind)
+        })?;
         // make the curve through the virtual (the SmPlane and SmSurfOfRevolution
         // overrides; 3D Tol SM_BIG_DOUBLE: not used by any of them)
         create_iso_parametric_curve(k, surface, spt, param, 0.0, None)
@@ -811,25 +818,32 @@ impl PatchBoundaryBoundingPlanes {
         let tolerance = 0.0001;
 
         // local
-        bspline_of(surface)
-            .ok_or_else(|| SolidError::surface_missing(OP_PLANES, "the B-spline kind surface"))?;
+        let checked = bspline_of(surface)
+            .ok_or_else(|| SolidError::surface(OP_PLANES, SurfaceFailure::SurfaceNotBSplineKind))?;
         // (the control point count and the canonical form read the NURB, made through
         // the virtual GetOrCreateGwNurbPointer when missing: a plane's, a cone's,
         // sphere's, torus's or surface of revolution's or extrusion's)
-        let bs =
-            match surface.kind_with_nurb(k)? {
-                SurfaceKind::Plane(p) => p.base_for_query(),
-                SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
-                    Ok(base) => base,
-                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => std::borrow::Cow::Borrowed(bspline_of(surface).ok_or_else(|| {
-                        SolidError::surface_missing(OP_PLANES, "the B-spline kind surface")
-                    })?),
-                },
-                made => std::borrow::Cow::Borrowed(bspline_of_kind(made).ok_or_else(|| {
-                    SolidError::surface_missing(OP_PLANES, "the surface's B-spline")
-                })?),
-            };
+        let bs = match surface.kind_with_nurb(k)? {
+            SurfaceKind::Plane(p) => p.base_for_query(),
+            SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
+                Ok(base) => base,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                // the kind check above already gave the extrusion's B-spline
+                Err(_) => std::borrow::Cow::Borrowed(checked),
+            },
+            made => std::borrow::Cow::Borrowed(bspline_of_kind(made).ok_or_else(|| {
+                Failure::new(
+                    OP_PLANES,
+                    SurfaceFailure::Defect {
+                        why: "the surface passed the B-spline kind check above and making \
+                                  its NURB keeps its kind, so a made kind without a B-spline \
+                                  is the kernel's",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?),
+        };
 
         // for every boundary
         for ii in 0..4 {
@@ -1210,9 +1224,9 @@ impl<O> FaceContainmentClassifier<O> for BaseClassifier {
         _uv_point: Point2,
         _src_zone_tol_3d: f64,
     ) -> Result<(i32, Option<O>)> {
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_CLASSIFY,
-            "only a trimmed surface cache classifies points",
+            SurfaceFailure::UnsupportedCacheKind,
         ))
     }
 }
@@ -1492,7 +1506,10 @@ impl AltSrfCache {
             let Some(cached) = cached else {
                 return (
                     out,
-                    Err(SolidError::surface_missing(OP_COPY, "the cached curves")),
+                    Err(SolidError::surface(
+                        OP_COPY,
+                        SurfaceFailure::CurvesNotCached,
+                    )),
                 );
             };
             let mut list = Vec::with_capacity(cached.len());
@@ -1500,9 +1517,9 @@ impl AltSrfCache {
                 let Some(bsc) = bspline_curve_of(c) else {
                     return (
                         out,
-                        Err(SolidError::surface_missing(
+                        Err(SolidError::surface(
                             OP_COPY,
-                            "the cached curve's B-spline",
+                            SurfaceFailure::CurveNotBSplineKind,
                         )),
                     );
                 };
@@ -1624,6 +1641,33 @@ pub struct IsoBoundaryCurves {
     pub curves: [Curve; 4],
 }
 
+/// The two modes a solve on a surface cache runs in. A solve starts from the values
+/// the cache was built with ([`SurfaceCache::solve_modes`]); a caller that needs other
+/// values for its own solve gives them to that solve instead of writing them into the
+/// cache, so the cache keeps its built values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SolveModes {
+    /// `m_bPointTestEnabled`: keep only solutions inside the trim boundaries.
+    pub point_test_enabled: bool,
+    /// `m_bProcessBoundaryCurves`: local solvers also look on the boundary curves.
+    pub process_boundary_curves: bool,
+}
+
+impl SolveModes {
+    /// The modes of a solve on `cache`: `chosen` when the caller chose them for its
+    /// solve, else the cache's built values.
+    #[must_use]
+    pub const fn of<O>(cache: &SurfaceCache<O>, chosen: Option<Self>) -> Self {
+        match chosen {
+            Some(modes) => modes,
+            None => Self {
+                point_test_enabled: cache.point_test_enabled,
+                process_boundary_curves: cache.process_boundary_curves,
+            },
+        }
+    }
+}
+
 /// The Bezier decomposition of a surface (`SmSurfaceCache`). `O` is the caller's
 /// object handle type of the decomposition [`Tree`].
 #[derive(Debug)]
@@ -1682,7 +1726,13 @@ pub struct SurfaceCache<O> {
     pub face_was_modified: bool,
     /// `m_bProcessBoundaryCurves`: local solvers also look on the boundary curves.
     pub process_boundary_curves: bool,
-    /// `m_bPointTestEnabled`: keep only solutions inside the trim boundaries.
+    /// `m_bPointTestEnabled`: keep only solutions inside the trim boundaries, unless a
+    /// caller switched point testing off for a scope (a tree build, a trace, a
+    /// solver's copy of the cache). On a trimmed cache it is on outside such scopes,
+    /// and no build writes it: whether a trimmed cache tests a point also needs its
+    /// face to have loop uses, which the readers ask of the face each time (not
+    /// upstream, where the build stores that answer, so it depended on when and in
+    /// which mode the cache was built). A plain cache has it off.
     pub point_test_enabled: bool,
     /// `m_bFaceContainmentDone`.
     pub face_containment_done: FaceContainment,
@@ -1690,6 +1740,71 @@ pub struct SurfaceCache<O> {
     /// [`SurfaceCache::subdivide_to_tolerances_with`] (performance only; `None`
     /// outside it).
     pole_memo: Option<PoleMemo>,
+}
+
+/// The state bits of a [`SurfaceCache`] that `GlobalPointSolve`'s fast-drop face test
+/// reads (whether the cache is trimmed, point testing, the modified-face bit, and the
+/// face the cache is bound to), read from the cache without copying it:
+/// [`SurfaceCache::state`] for the cache itself, [`SurfaceCache::mapped_state`] for the
+/// copy [`SurfaceCache::map_handles`] would hand out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceCacheState<O> {
+    /// [`SurfaceCache::is_trimmed`].
+    trimmed: bool,
+    /// [`SurfaceCache::point_test_enabled`].
+    pub point_test_enabled: bool,
+    /// [`SurfaceCache::face_was_modified`].
+    pub face_was_modified: bool,
+    /// The face the cache's surface reaches (`Surface::face`).
+    surface_face: Option<object::ObjectRef>,
+    /// The owner key the cache's face handle was bound under.
+    face_key: Option<object::ObjectRef>,
+    /// The cache's face handle.
+    face: Option<O>,
+}
+
+impl<O: Copy> SurfaceCacheState<O> {
+    /// [`SurfaceCache::is_trimmed`] of the cache read.
+    #[must_use]
+    pub const fn is_trimmed(&self) -> bool {
+        self.trimmed
+    }
+
+    /// [`SurfaceCache::face`] of the cache read.
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceCache::face`].
+    pub fn face(&self) -> Result<Option<O>> {
+        bound_face(self.surface_face, self.face_key, self.face)
+    }
+}
+
+/// The face a cache answers (`GetFace`) from the face its surface reaches
+/// (`surface_face`) and its face binding (`face_key`, `face`).
+fn bound_face<O>(
+    surface_face: Option<object::ObjectRef>,
+    face_key: Option<object::ObjectRef>,
+    face: Option<O>,
+) -> Result<Option<O>> {
+    match surface_face {
+        None if face_key.is_none() => Ok(None),
+        Some(key) if face_key == Some(key) => face.map(Some).ok_or_else(|| {
+            SolidError::unported("mapped face of trimmed cache", "topology.face_p2")
+        }),
+        // An object key is not a typed arena index or a caller handle.
+        // UNPORTED(topology.face_p2): SmSurface::GetFace (the SmFace handle of a
+        // face-owned surface whose cache was made without its face). Reachable: a
+        // solve on a B-rep face's surface without face context lands here (seen in
+        // blend.fillet_geom_p6 on own-reader targets, which now pass the face's
+        // B-rep through BrepFaceServices). Callers thread it with the
+        // `*_with_context` variants or `get_surface_cache_with_face`.
+        Some(_) if face_key.is_none() => Err(SolidError::unported(
+            "SmFace handle of a surface's face",
+            "topology.face_p2",
+        )),
+        None | Some(_) => Err(invalid(OP_CLASSIFY, "surface cache face binding is stale")),
+    }
 }
 
 impl<O: Clone> Clone for SurfaceCache<O> {
@@ -1967,6 +2082,111 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         })
     }
 
+    /// The fast-drop state bits of this cache, read in place.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::face`].
+    pub fn state(&self) -> Result<SurfaceCacheState<O>> {
+        Ok(SurfaceCacheState {
+            trimmed: self.trimmed_dispatch,
+            point_test_enabled: self.point_test_enabled,
+            face_was_modified: self.face_was_modified,
+            surface_face: self.surface.face()?,
+            face_key: self.trimmed_face_key,
+            face: self.trimmed_face,
+        })
+    }
+
+    /// The state bits `self.map_handles(|o| Ok(map(o)))` would answer
+    /// ([`SurfaceCache::state`] of that copy), read without making the copy: the copy
+    /// keeps the bits, and its surface (an evaluation copy, which keeps the owner) reaches
+    /// the same face, so only a face binding that is not current is dropped, as the copy
+    /// drops it. The copy's errors are kept: its evaluation copies' nesting bound
+    /// ([`SurfaceCache::check_evaluation_copy_depth`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfaceCache::map_handles`] with an infallible map.
+    pub fn mapped_state<P: Copy + PartialEq>(
+        &self,
+        map: impl Fn(O) -> P,
+    ) -> Result<SurfaceCacheState<P>> {
+        self.check_evaluation_copy_depth()?;
+        let surface_face = self.surface.face()?;
+        let binding_current = self.trimmed_face_key == surface_face;
+        Ok(SurfaceCacheState {
+            trimmed: self.trimmed_dispatch,
+            point_test_enabled: self.point_test_enabled,
+            face_was_modified: self.face_was_modified,
+            surface_face,
+            face_key: self.trimmed_face_key.filter(|_| binding_current),
+            face: self.trimmed_face.filter(|_| binding_current).map(map),
+        })
+    }
+
+    /// The nesting bound the evaluation copies of [`SurfaceCache::map_handles`] check
+    /// (its subdivision surfaces, then its surface), without copying: each
+    /// [`Surface::clone_for_evaluation`] first walks its whole geometry against the
+    /// bound, and fails only there.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::clone_for_evaluation`].
+    pub(crate) fn check_evaluation_copy_depth(&self) -> Result<()> {
+        for (_, s) in &self.subdivision_surfaces {
+            s.check_evaluation_copy_depth(0)?;
+        }
+        self.surface.check_evaluation_copy_depth(0)
+    }
+
+    /// Whether reading this cache leaves it as it was, so that one copy of it can be
+    /// handed to every reader in turn ([`LentSurfaceCache::Shared`]) instead of a copy
+    /// each: none of its geometry (its surface, subdivision surfaces, iso boundary
+    /// curves and alternate curve caches, with all they own) keeps state a read
+    /// changes that a later read sees. Those kinds are an offset surface (the
+    /// extension its evaluators make, which sets the domain the next evaluation uses)
+    /// and a curve on a surface, alone or as a tangent field's base (the breaks and
+    /// approximation it makes on first use). What other geometry writes through `&self` is a memo whose hit
+    /// answers what a fresh build answers, or a flag a solve sets and restores.
+    ///
+    /// # Errors
+    ///
+    /// The geometry nesting bound ([`Surface::check_evaluation_copy_depth`]).
+    pub(crate) fn reads_leave_unchanged(&self) -> Result<bool> {
+        use crate::curve::curve::CurveKind as Kind;
+        use crate::surface::surface::p2::{any_nested_geometry, NestedGeometry};
+        const OP: &str = "surface::surface_cache::p1::reads_leave_unchanged";
+        let keeps_read_state = |g: NestedGeometry<'_>| match g {
+            NestedGeometry::Surface(s) => matches!(s.kind(), SurfaceKind::OffsetSurface(_)),
+            NestedGeometry::Curve(c) => {
+                matches!(c.kind(), Kind::CrvOnSurf(_) | Kind::TangentField(_))
+            }
+            NestedGeometry::Volume(_) => false,
+        };
+        let surfaces = core::iter::once(&self.surface)
+            .chain(self.subdivision_surfaces.iter().map(|(_, s)| s))
+            .map(NestedGeometry::Surface);
+        let alt_curves = self.alt_caches.iter().flat_map(|a| {
+            a.cached_3d_curves
+                .iter()
+                .chain(a.cached_uv_curves.iter())
+                .flatten()
+        });
+        let curves = self
+            .iso_boundary_curves
+            .iter()
+            .flatten()
+            .chain(alt_curves)
+            .map(NestedGeometry::Curve);
+        for root in surfaces.chain(curves) {
+            if any_nested_geometry(root, 0, OP, keeps_read_state)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// `SmSurfaceCache_TYPE` (`GetType`).
     #[must_use]
     pub const fn type_code(&self) -> i64 {
@@ -2156,6 +2376,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.process_boundary_curves
     }
 
+    /// The modes a solve on this cache starts from: the values it was built with.
+    #[must_use]
+    pub const fn solve_modes(&self) -> SolveModes {
+        SolveModes::of(self, None)
+    }
+
     /// The number of patches (`GetPatchCount`).
     #[must_use]
     pub fn patch_count(&self) -> usize {
@@ -2195,43 +2421,40 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// Those of [`Surface::face`]; [`SolidError::Unported`] when a face-owned surface
     /// has no validated caller-handle binding, or the binding's owner became stale.
     pub fn face(&self) -> Result<Option<O>> {
-        match self.surface.face()? {
-            None if self.trimmed_face_key.is_none() => Ok(None),
-            Some(key) if self.trimmed_face_key == Some(key) => {
-                self.trimmed_face.map(Some).ok_or_else(|| {
-                    SolidError::unported("mapped face of trimmed cache", "topology.face_p2")
-                })
-            }
-            // An object key is not a typed arena index or a caller handle.
-            // UNPORTED(topology.face_p2): SmSurface::GetFace (the SmFace handle of a
-            // face-owned surface whose cache was made without its face). Reachable: a
-            // solve on a B-rep face's surface without face context lands here (seen in
-            // blend.fillet_geom_p6 on own-reader targets, which now pass the face's
-            // B-rep through BrepFaceServices). Callers thread it with the
-            // `*_with_context` variants or `get_surface_cache_with_face`.
-            Some(_) if self.trimmed_face_key.is_none() => Err(SolidError::unported(
-                "SmFace handle of a surface's face",
-                "topology.face_p2",
-            )),
-            None | Some(_) => Err(invalid(OP_CLASSIFY, "surface cache face binding is stale")),
-        }
+        bound_face(
+            self.surface.face()?,
+            self.trimmed_face_key,
+            self.trimmed_face,
+        )
     }
 
     /// Whether `uv_point` passes the trim boundary test (`PointTest`): always with
     /// point testing disabled, else when it lies in the cache domain for an
-    /// untrimmed cache. Trimmed classification requires [`Self::point_test_with`].
+    /// untrimmed cache. A trimmed cache whose surface has no face has no trim
+    /// boundaries and keeps every point. Trimmed classification requires
+    /// [`Self::point_test_with`].
     ///
     /// # Errors
     ///
-    /// A trimmed cache with testing enabled cannot fall back to its rectangle:
-    /// it reports a missing face or an unported operation-scoped classifier.
+    /// A trimmed cache of a face with testing enabled cannot fall back to its
+    /// rectangle: it reports an unported operation-scoped classifier.
     pub fn point_test(&self, uv_point: Point2) -> Result<bool> {
-        if !self.point_test_enabled || (self.trimmed_dispatch && self.face_was_modified) {
+        self.point_test_under(self.solve_modes(), uv_point)
+    }
+
+    /// [`Self::point_test`] in a solve running in `modes`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::point_test`].
+    pub fn point_test_under(&self, modes: SolveModes, uv_point: Point2) -> Result<bool> {
+        if !modes.point_test_enabled || (self.trimmed_dispatch && self.face_was_modified) {
             return Ok(true);
         }
         if self.trimmed_dispatch {
-            self.face()?
-                .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
+            if self.face()?.is_none() {
+                return Ok(true);
+            }
             return Err(SolidError::unported(
                 "prepared face classifier for bound trim",
                 "query.face_p2",
@@ -2240,8 +2463,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         Ok(self.uv_domain.contains_point(uv_point, 0.0))
     }
 
-    /// Point test with trimmed-cache dispatch. Bound trimmed caches fail closed when
-    /// the operation-scoped face-query service is absent.
+    /// Point test with trimmed-cache dispatch. A trimmed cache tests only when its
+    /// surface has a face with loop uses (asked of the face through `queries`); a
+    /// face without loop uses, or no face, keeps every point. Bound trimmed caches
+    /// fail closed when the operation-scoped face-query service is absent.
     pub fn point_test_with(
         &self,
         k: &Kernel,
@@ -2249,18 +2474,37 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         opt_tol: Option<f64>,
         queries: Option<&dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
     ) -> Result<(bool, Option<O>)> {
+        self.point_test_with_under(k, self.solve_modes(), uv_point, opt_tol, queries)
+    }
+
+    /// [`Self::point_test_with`] in a solve running in `modes`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::point_test_with`].
+    pub fn point_test_with_under(
+        &self,
+        k: &Kernel,
+        modes: SolveModes,
+        uv_point: Point2,
+        opt_tol: Option<f64>,
+        queries: Option<&dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
+    ) -> Result<(bool, Option<O>)> {
         if !self.trimmed_dispatch {
-            return Ok((self.point_test(uv_point)?, None));
+            return Ok((self.point_test_under(modes, uv_point)?, None));
         }
-        if !self.point_test_enabled || self.face_was_modified {
+        if !modes.point_test_enabled || self.face_was_modified {
             return Ok((true, None));
         }
-        let face = self
-            .face()?
-            .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
+        let Some(face) = self.face()? else {
+            return Ok((true, None));
+        };
         let service = queries.ok_or_else(|| {
             SolidError::unported("prepared face classifier for bound trim", "query.face_p2")
         })?;
+        if !service.face_has_loopuses(face)? {
+            return Ok((true, None));
+        }
         let tol = match opt_tol {
             Some(t) => t,
             None => service.face_zone_tol_3d(face)?,
@@ -2281,9 +2525,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         if !self.trimmed_dispatch {
             return self.point_classify(uv_point, src_zone_tol_3d);
         }
-        let face = self
-            .face()?
-            .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
+        let face = self.face()?.ok_or_else(|| {
+            SolidError::surface(OP_CLASSIFY, SurfaceFailure::TrimmedCacheHasNoFace)
+        })?;
         let (class, object) = queries.face_point_classify(k, face, uv_point, src_zone_tol_3d)?;
         Ok((class, if class == 100 { None } else { object }))
     }
@@ -2298,9 +2542,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         _uv_point: Point2,
         _src_zone_tol_3d: f64,
     ) -> Result<(i32, Option<O>)> {
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_CLASSIFY,
-            "only a trimmed surface cache classifies points",
+            SurfaceFailure::UnsupportedCacheKind,
         ))
     }
 
@@ -2310,9 +2554,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// Always `SM_ERR`.
     pub fn implant_edgeuse(&mut self, _edgeuse: O, _do_subdivision: bool) -> Result<()> {
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_IMPLANT_EU,
-            "only a trimmed surface cache implants edge uses",
+            SurfaceFailure::UnsupportedCacheKind,
         ))
     }
 
@@ -2322,9 +2566,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// Always `SM_ERR`.
     pub fn implant_poly_edge(&mut self, _poly_edge: O, _node: NodeId) -> Result<()> {
-        Err(SolidError::surface_failed(
+        Err(SolidError::surface(
             OP_IMPLANT_PE,
-            "only a trimmed surface cache implants poly edges",
+            SurfaceFailure::UnsupportedCacheKind,
         ))
     }
 
@@ -2738,18 +2982,14 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     }
 
     /// The lowest continuity at an internal knot of the surface inside `uv_domain`
-    /// (`GetSurfaceContinuity`), optionally checking the last internal V knot when
-    /// `check_last_v` is true (WR-42).
+    /// (`GetSurfaceContinuity`); `SM_CT_CINFINITY` without internal knots. Every internal
+    /// knot is checked in both directions; upstream's V loop skips the last one (WR-42).
     ///
     /// # Errors
     ///
     /// `InvalidInput` when a continuity array is longer than the knot list (upstream
     /// reads past it); [`SolidError::Unported`] from `GetKnots`.
-    pub fn surface_continuity_opt_in(
-        &self,
-        uv_domain: &Extent2d,
-        check_last_v: bool,
-    ) -> Result<ContinuityType> {
+    pub fn surface_continuity(&self, uv_domain: &Extent2d) -> Result<ContinuityType> {
         // init return
         let mut ret = ContinuityType::CInfinity;
 
@@ -2787,12 +3027,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // remember lowest internal V continuity value
         if !v_conts.is_empty() {
             let mut iv = 1;
-            let v_bound = if check_last_v {
-                v_conts.len()
-            } else {
-                v_conts.len().saturating_sub(1)
-            };
-            while iv + 1 < v_bound {
+            while iv + 1 < v_conts.len() {
                 let c = *v_conts.get(iv).ok_or_else(|| invalid(OP_CONT, "index"))?;
                 let knot = *knots
                     .get(iv)
@@ -2805,32 +3040,6 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         }
 
         Ok(ret)
-    }
-
-    /// The lowest continuity at an internal knot of the surface inside `uv_domain`
-    /// (`GetSurfaceContinuity`) with kernel opt-in fixes applied (WR-42).
-    ///
-    /// # Errors
-    ///
-    /// As [`Self::surface_continuity_opt_in`].
-    pub fn surface_continuity_with_kernel(
-        &self,
-        k: &Kernel,
-        uv_domain: &Extent2d,
-    ) -> Result<ContinuityType> {
-        self.surface_continuity_opt_in(uv_domain, k.fixes.surface_continuity_checks_last_v_knot)
-    }
-
-    /// The lowest continuity at an internal knot of the surface inside `uv_domain`
-    /// (`GetSurfaceContinuity`); `SM_CT_CINFINITY` without internal knots. Keeps
-    /// upstream's v loop bound, which skips the last internal v knot.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` when a continuity array is longer than the knot list (upstream
-    /// reads past it); [`SolidError::Unported`] from `GetKnots`.
-    pub fn surface_continuity(&self, uv_domain: &Extent2d) -> Result<ContinuityType> {
-        self.surface_continuity_opt_in(uv_domain, false)
     }
 
     /// The unmarked leaves connected to the leaf `start` through shared sides that
@@ -3665,6 +3874,40 @@ mod tests {
         assert!(c.patch_at(2, 0, 2, 2).is_err());
     }
 
+    /// A solve's modes override the cache's for its point test without changing the
+    /// cache's stored flags; `None` is the cache's own.
+    #[test]
+    fn solve_modes_override_the_point_test_and_leave_the_flags() {
+        let mut c = bilinear_cache();
+        c.point_test_enabled = true;
+        let built = c.solve_modes();
+        assert_eq!(
+            built,
+            SolveModes {
+                point_test_enabled: true,
+                process_boundary_curves: c.process_boundary_curves(),
+            }
+        );
+        let off = SolveModes {
+            point_test_enabled: false,
+            ..built
+        };
+        let outside = Point2::new(5.0, 5.0);
+        assert!(!c.point_test(outside).unwrap());
+        assert!(c.point_test_under(off, outside).unwrap());
+        let k = Kernel::default();
+        assert!(
+            c.point_test_with_under(&k, off, outside, None, None)
+                .unwrap()
+                .0
+        );
+        assert!(!c.point_test_with(&k, outside, None, None).unwrap().0);
+        assert_eq!(SolveModes::of(&c, Some(off)), off);
+        assert_eq!(SolveModes::of(&c, None), built);
+        assert_eq!(c.solve_modes(), built);
+        assert!(c.point_test_enabled);
+    }
+
     #[test]
     fn base_class_queries() {
         let mut c = bilinear_cache();
@@ -3879,95 +4122,63 @@ mod tests {
     }
 
     #[test]
-    fn wr42_surface_continuity_last_v_knot_skipped_by_default() {
+    fn wr42_surface_continuity_checks_the_last_v_knot() {
         let cache = make_wr42_cache();
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 4.0);
 
-        // Default behavior (pinned C++ parity) terminates early: iv + 1 < v_conts.len() - 1,
-        // skipping knot 3.0 (C0) and returning C1.
-        let default_continuity = cache.surface_continuity(&domain).unwrap();
-        assert_eq!(default_continuity, ContinuityType::C1);
-
-        // Opt-in checks all internal knots: iv + 1 < v_conts.len(), detecting knot 3.0 (C0).
-        let opt_in_continuity = cache.surface_continuity_opt_in(&domain, true).unwrap();
-        assert_eq!(opt_in_continuity, ContinuityType::C0);
-    }
-
-    #[test]
-    fn wr42_surface_continuity_with_kernel() {
-        let cache = make_wr42_cache();
-        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 4.0);
-
-        // Kernel default has fix disabled.
-        let k_default = Kernel::default();
-        assert!(!k_default.fixes.surface_continuity_checks_last_v_knot);
-        let c_default = cache
-            .surface_continuity_with_kernel(&k_default, &domain)
-            .unwrap();
-        assert_eq!(c_default, ContinuityType::C1);
-
-        // Kernel with opt-in enabled.
-        let mut k_opt_in = Kernel::default();
-        k_opt_in.fixes.surface_continuity_checks_last_v_knot = true;
-        let c_opt_in = cache
-            .surface_continuity_with_kernel(&k_opt_in, &domain)
-            .unwrap();
-        assert_eq!(c_opt_in, ContinuityType::C0);
+        // Every internal knot is checked, the last V one (3.0, C0) included.
+        assert_eq!(
+            cache.surface_continuity(&domain).unwrap(),
+            ContinuityType::C0
+        );
     }
 
     #[test]
     fn wr42_surface_continuity_subdomain_filtering() {
         let cache = make_wr42_cache();
 
-        // Subdomain [0.0, 1.0] x [0.0, 2.5] excludes knot 3.0.
-        // Both default and opt-in see only knots 1.0 and 2.0 (C1).
+        // Subdomain [0.0, 1.0] x [0.0, 2.5] excludes knot 3.0: only knots 1.0 and 2.0 (C1).
         let sub_early = Extent2d::from_bounds(0.0, 0.0, 1.0, 2.5);
         assert_eq!(
             cache.surface_continuity(&sub_early).unwrap(),
             ContinuityType::C1
         );
-        assert_eq!(
-            cache.surface_continuity_opt_in(&sub_early, true).unwrap(),
-            ContinuityType::C1
-        );
 
         // Subdomain [0.0, 1.0] x [2.5, 4.0] includes only knot 3.0 (C0).
-        // Default skips knot 3.0 and sees no internal knots in domain -> CInfinity.
-        // Opt-in checks knot 3.0 -> C0.
         let sub_late = Extent2d::from_bounds(0.0, 2.5, 1.0, 4.0);
         assert_eq!(
             cache.surface_continuity(&sub_late).unwrap(),
-            ContinuityType::CInfinity
-        );
-        assert_eq!(
-            cache.surface_continuity_opt_in(&sub_late, true).unwrap(),
             ContinuityType::C0
         );
     }
 
-    /// The surface cache's failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// The surface cache's failures keep the operation, status and entity of the bare
+    /// `Upstream` statuses they replace, with the class of their named cause (a sample).
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 3] = [
             (
                 OP_CLASSIFY,
-                SurfaceFailure::Failed("only a trimmed surface cache classifies points"),
+                SurfaceFailure::UnsupportedCacheKind,
                 crate::error::SM_ERR,
+                ErrorKind::Unsupported,
             ),
             (
                 OP_PLANES,
-                SurfaceFailure::Missing("the B-spline kind surface"),
-                crate::error::SM_ERR_NULL_POINTER,
+                SurfaceFailure::SurfaceNotBSplineKind,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::Unsupported,
             ),
             (
                 OP_IMPLANT_EU,
-                SurfaceFailure::Failed("only a trimmed surface cache implants edge uses"),
+                SurfaceFailure::UnsupportedCacheKind,
                 crate::error::SM_ERR,
+                ErrorKind::Unsupported,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -3976,12 +4187,81 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
+    }
+
+    /// The nesting check [`SurfaceCache::mapped_state`] makes in place of the copy
+    /// fails exactly when the copy ([`SurfaceCache::map_handles`]) fails, with the same
+    /// error, on an offset surface holding a pending extension (one a `&self` evaluation
+    /// made), which the copy takes and the check does not walk: the extension is a leaf
+    /// at the depth of the offset's base, which both walk. Each nesting level is a
+    /// plane whose corner definition owns the next surface.
+    #[test]
+    fn mapped_state_depth_check_fails_as_the_copy_with_a_pending_extension() {
+        use crate::surface::cone::Cone;
+        use crate::surface::offset_surface::OffsetSurface;
+        use crate::surface::plane::Plane;
+        use crate::surface::procedural_blend::corner::{CornerDefinition, EndDefinition};
+        use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
+
+        let k = Kernel::default();
+        let mut half = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            5.0,
+            0.0,
+            180.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        half.make_nurb(&k).unwrap();
+        let half = Surface::from(half);
+        let d = half.natural_uv_domain_with_nurb(&k).unwrap();
+        let beyond = Point2::new(
+            d.max().x + 0.1 * (d.max().x - d.min().x),
+            0.5 * (d.min().y + d.max().y),
+        );
+        // the offset at nesting depth `depth`, its base (and extension) one deeper
+        let nested = |depth: usize| {
+            let mut offset =
+                OffsetSurface::new(&k, 4.0, half.clone(), true, crate::geom::extent2d::SS_NONE)
+                    .unwrap();
+            offset.set_allow_extension(true);
+            offset.evaluate_point(&k, beyond).unwrap();
+            assert!(offset.extended_base_surface().is_none());
+            assert!(offset.with_extended_base_surface(|e| e.is_some()));
+            let mut surface = Surface::from(offset);
+            for _ in 0..depth {
+                let mut outer = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+                outer.set_corner_definition(CornerDefinition::End(EndDefinition {
+                    support: Box::new(surface),
+                    boundary: Vec::new(),
+                }));
+                surface = outer;
+            }
+            SurfaceCache::<u32>::new(surface, d, SurfaceCacheOptions::default())
+        };
+        // the depths on both sides of the bound (where the offset's base crosses it)
+        let mut answered = [false; 2];
+        for depth in MAX_GEOMETRY_NESTING - 4..=MAX_GEOMETRY_NESTING {
+            let cache = nested(depth);
+            let read = cache.mapped_state(|o| o);
+            let copy = cache.map_handles(Ok).and_then(|c| c.state());
+            assert_eq!(format!("{read:?}"), format!("{copy:?}"), "depth {depth}");
+            if let Err(e) = &read {
+                assert!(matches!(e, SolidError::InvalidInput { .. }), "{e:?}");
+            }
+            answered[usize::from(read.is_ok())] = true;
+        }
+        assert_eq!(answered, [true, true]);
     }
 }
