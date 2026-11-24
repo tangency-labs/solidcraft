@@ -46,6 +46,13 @@
 //!   knot at 0).
 //!   Upstream removes every trim curve and projects the edges again, and keeps a
 //!   sliver span past a knot.
+//! - **The combined seam walk builds the V extent the V walk would.** When both seams
+//!   are moved, `move_seam`'s U walk also fills the V extent. Here it starts that extent
+//!   at the first sample and measures each V span against the V period from the V
+//!   minimum. Upstream starts it as the point at the V seam (so a span that does not
+//!   touch it is disjoint and dropped) and uses the U period and U minimum (right only
+//!   when both directions share them); either leaves a V extent smaller or shifted, and
+//!   the new V seam can land on the face (WR-21697).
 //! - **Object model.** A face is a record in the [`Brep`]'s arenas; the methods are free
 //!   functions taking the B-rep and the face's id. Out-parameters are return values,
 //!   with an additional UV-domain `_into` entry point for partial outputs on error.
@@ -2357,6 +2364,13 @@ pub fn move_seam_notified<O: LoopObject>(
                 let s = comp(uv_prev, ii) - ivl.min();
                 periodic.set_min_max(s, s, None, true)?;
             }
+            // not upstream: the combined walk starts the V extent at the first sample too
+            // (upstream leaves it the point at the V seam, so every span that does not
+            // touch it is disjoint and dropped)
+            if fix_seam_both && ii == 0 {
+                let s = uv_prev.y - ivl_v.min();
+                periodic_v.set_min_max(s, s, None, true)?;
+            }
 
             'loops: for (j0, &lu) in loopuses.iter().enumerate() {
                 if periodic_full(&periodic_u, &periodic_v, ii) {
@@ -2407,11 +2421,16 @@ pub fn move_seam_notified<O: LoopObject>(
                         if fix_seam_both && ii == 0 {
                             let (lo, hi) = order(uv_prev.y, uv1.y);
                             let no_seam = hi - lo;
-                            // (upstream reads the U period and U minimum here)
-                            let with_seam = periodic_u.period() - no_seam;
+                            // not upstream: a V span is measured in V, against the V period
+                            // and from the V minimum (upstream reads the U ones, right only
+                            // when both directions share period and minimum)
+                            let with_seam = periodic_v.period() - no_seam;
                             let forward = no_seam < with_seam;
-                            let _ =
-                                periodic_v.add_interval(lo - ivl.min(), hi - ivl.min(), forward);
+                            let _ = periodic_v.add_interval(
+                                lo - ivl_v.min(),
+                                hi - ivl_v.min(),
+                                forward,
+                            );
                         }
 
                         uv_prev = uv1;
