@@ -48,38 +48,48 @@ fn parameter_columns_fit_controls_and_headers_share_cell_left_edges() {
         h.frames(4);
         let output = painted_frame(&mut h);
         for label in ["Name", "Unit", "Expression", "Value", "Comment"] {
-            let header = scenario::rect_of(&format!("dialog:column:user:{label}")).unwrap();
-            let cell = scenario::rect_of(&format!("dialog:table:user:width:cell:{label}")).unwrap();
+            let header = scenario::rect_of(&format!("dialog:column:parameters:{label}")).unwrap();
+            let cell = scenario::rect_of(&format!("dialog:table:parameters:user:width:cell:{label}")).unwrap();
             assert_eq!(header.left(), cell.left(), "{label}: {layout:?}");
             assert_eq!(header.width(), cell.width());
             let text = painted_text(&output, label, header);
             assert!((text.pos.x - cell.left()).abs() <= 0.5, "{label}: painted header starts at {:?}, cell {cell:?}", text.pos);
             assert!(!text.galley.elided);
         }
-        let unit = scenario::rect_of("dialog:table:user:width:cell:Unit").unwrap();
+        let unit = scenario::rect_of("dialog:table:parameters:user:width:cell:Unit").unwrap();
         let mm = painted_text(&output, "mm", unit);
         assert!(!mm.galley.elided, "mm must be painted without an ellipsis");
         let spacing = egui::style::Spacing::default();
         assert!(unit.width() >= mm.galley.size().x + 2.0 * Tokens::get().space_8 + spacing.icon_width + spacing.icon_spacing);
         assert!(mm.pos.x + mm.galley.size().x + Tokens::get().space_8 + spacing.icon_width + spacing.icon_spacing <= unit.right());
-        let actions = scenario::rect_of("dialog:table:user:width:cell:Actions").unwrap();
+        let actions = scenario::rect_of("dialog:table:parameters:user:width:cell:Actions").unwrap();
         assert!(actions.contains_rect(scenario::rect_of("dialog:button:Actions:Delete").unwrap()));
         // More content widens the scroll area, never the card.
         h.call("ui.resize", json!({"width":640,"height":1000}));
         h.frames(4);
         assert!(h.ctx.content_rect().contains_rect(scenario::rect_of("dialog:header").unwrap()));
-        assert_eq!(scenario::rect_of("dialog:column:user:Unit").unwrap().width(), unit.width());
+        assert_eq!(scenario::rect_of("dialog:column:parameters:Unit").unwrap().width(), unit.width());
     }
 }
 
 #[test]
 fn configuration_columns_align_values_status_and_remove_actions() {
+    fn rounded_selection(shape: &egui::Shape, row: egui::Rect) -> bool {
+        match shape {
+            egui::Shape::Rect(shape) => shape.rect == row && shape.fill == Tokens::get().selected_bg && shape.corner_radius.nw > 0,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| rounded_selection(shape, row)),
+            _ => false,
+        }
+    }
+
     let mut h = fixture();
     h.app.run("parameters.change", json!({"name":"width","expression":"80 mm"})).unwrap();
     h.app.run("config.configure", json!({"params":["width"]})).unwrap();
     h.app.start("config.table");
     h.frames(4);
     let output = painted_frame(&mut h);
+    let selected = scenario::rect_of("dialog:table:configuration_table:Default").unwrap();
+    assert!(output.shapes.iter().any(|shape| rounded_selection(&shape.shape, selected)), "the active configuration uses the rounded table selection");
     for label in ["Configuration", "width"] {
         let header = scenario::rect_of(&format!("dialog:column:configuration_table:{label}")).unwrap();
         let cell = scenario::rect_of(&format!("dialog:table:configuration_table:Default:cell:{label}")).unwrap();
@@ -92,6 +102,9 @@ fn configuration_columns_align_values_status_and_remove_actions() {
     let active = painted_text(&output, "Active", name);
     assert!(!active.galley.elided);
     assert!(active.pos.x + active.galley.size().x <= name.right());
+    let pill = scenario::rect_of("dialog:inline:Active").unwrap();
+    assert!(name.contains_rect(pill), "the Active pill stays within the configuration cell");
+    assert!((pill.center().y - name.center().y).abs() <= 0.5, "the Active pill is centred in the selected row");
     let value = scenario::rect_of("dialog:table:configuration_table:Default:cell:width").unwrap();
     assert!(!painted_text(&output, "80 mm", value).galley.elided);
     let remove_cell = scenario::rect_of("dialog:column:configuration_table:width").unwrap();
@@ -321,7 +334,7 @@ fn parameters_are_dense_and_keep_inline_edits_order_and_undo() {
     h.frames(4);
     chrome(&h);
     for label in ["Name", "Unit", "Expression", "Value", "Comment", "Actions"] {
-        assert!(scenario::rect_of(&format!("dialog:column:user:{label}")).is_some());
+        assert!(scenario::rect_of(&format!("dialog:column:parameters:{label}")).is_some());
     }
     h.step(&json!({"click":{"handle":"param:height"}})).unwrap();
     h.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -391,11 +404,11 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.app.preferences.language = "en".into();
     h.app.start("parameters.change");
     h.frames(4);
-    for label in ["Filter", "Import…", "Export CSV…", "Export JSON…", "User Parameters", "Model Parameters"] {
+    for label in ["Filter", "Import…", "Export CSV…", "Export JSON…", "User Parameters"] {
         assert!(h.widget(label).is_some(), "missing inventory control {label}");
     }
-    h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
-    assert_eq!(scenario::rect_of("dialog:table:user:new").unwrap().height(), crate::ui_kit::table_row_height());
+    h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+    assert_eq!(scenario::rect_of("dialog:table:parameters:new").unwrap().height(), crate::ui_kit::table_row_height());
     for label in ["name", "unit", "expression", "comment"] {
         assert!(scenario::handle_at(&format!("param:new:{label}")).is_some());
     }
@@ -407,7 +420,7 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param("pitch").unwrap().expr, "10 mm");
     assert!(h.app.params.is_some());
-    h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
     h.step(&json!({"click":{"handle":"param:new:unit"}})).unwrap();
     for unit in ["mm", "cm", "m", "in", "ft", "deg", "rad", "none", "um"] {
         assert!(scenario::handle_at(&format!("dialog:Unit:{unit}")).is_some(), "unit {unit}");
@@ -610,7 +623,7 @@ fn draft_bins_do_not_delete_saved_rows_named_new() {
         }
         h.app.start(command);
         h.frames(4);
-        let add = if command == "config.table" { "dialog:table:configuration_table:add" } else { "dialog:table:user:add" };
+        let add = if command == "config.table" { "dialog:table:configuration_table:add" } else { "dialog:table:parameters:add" };
         h.step(&json!({"click":{"handle":add}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:button:Actions:Delete"}})).unwrap();
         assert!(h.app.session.doc.param("new").is_some());
@@ -627,7 +640,7 @@ fn invalid_named_parameter_draft_stays_pending_until_the_expression_is_valid() {
     let mut h = fixture();
     h.app.start("parameters.change");
     h.frames(4);
-    h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
     h.step(&json!({"click":{"handle":"param:new:expression"}})).unwrap();
     h.step(&json!({"key":"A","cmd":true})).unwrap();
     h.step(&json!({"text":"missing_parameter"})).unwrap();
@@ -676,7 +689,7 @@ fn parameters_open_at_top_retain_user_scroll_and_reveal_only_requested_drafts() 
         assert_card_top();
         let viewport = scenario::rect_of("dialog:body:viewport").unwrap();
         assert!(viewport.contains_rect(scenario::rect_of("dialog:row:Filter").unwrap()));
-        assert!(viewport.contains_rect(scenario::rect_of("dialog:section:Favorites").unwrap()));
+        assert!(viewport.contains_rect(scenario::rect_of("dialog:table:parameters:group:fav").unwrap()));
         assert!(!h.app.params.as_ref().unwrap().adding);
         assert!(h.ctx.memory(|m| m.focused().is_none()));
         scroll_card(&mut h, -400.0);
@@ -690,10 +703,10 @@ fn parameters_open_at_top_retain_user_scroll_and_reveal_only_requested_drafts() 
         assert_card_top();
         // Put the add prompt at the bottom edge. The taller draft must be revealed only
         // after clicking it, with focus on Name even inside the horizontal table scroller.
-        let prompt = scenario::rect_of("dialog:table:user:add").unwrap();
+        let prompt = scenario::rect_of("dialog:table:parameters:add").unwrap();
         scroll_card(&mut h, viewport.bottom() - prompt.bottom() - 1.0);
         let before = scenario::count_of("dialog:body:scroll_y").unwrap();
-        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
         h.frames(40);
         assert!(h.app.params.as_ref().unwrap().adding);
         let name = scenario::handle_at("param:new:name").unwrap();

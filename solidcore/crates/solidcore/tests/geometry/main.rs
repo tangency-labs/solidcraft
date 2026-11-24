@@ -33,6 +33,8 @@ mod curve_assert_valid;
 mod curve_length_bound;
 #[path = "../curve_length_holds_its_accuracy.rs"]
 mod curve_length_holds_its_accuracy;
+#[path = "../drop_clamped_sliver.rs"]
+mod drop_clamped_sliver;
 #[path = "../extend_short_arc_long_rulings.rs"]
 mod extend_short_arc_long_rulings;
 #[path = "../face_closest_point_live_box.rs"]
