@@ -5,8 +5,9 @@
 //! A face's cylinder is given by a point on its axis, the axis direction, the radius, and which
 //! way the face's material lies: toward the axis (the outside of a tube or a boss) or away from
 //! it (a bore, the inside of a tube). Two cylinders face each other across material when they
-//! share one axis (parallel within the kernel's angular tolerance, and no farther apart than its
-//! zone tolerance), the outer one has its material toward the axis and the inner one away from it,
+//! share one axis (parallel within the kernel's angular tolerance, and the second axis passing
+//! within its zone tolerance of the first axis's point, where the shared axis is reported), the
+//! outer one has its material toward the axis and the inner one away from it,
 //! so that the material lies between them, and their radii differ by more than the zone
 //! tolerance. A pair whose material lies the same way on both (two outsides, two bores) bounds a
 //! solid or air, not a wall.
@@ -82,11 +83,12 @@ pub fn facing_cylinders(
     }
     let (ua, ub) = (a.axis.unitize()?, b.axis.unitize()?);
     let tol = kernel.tolerances;
-    // One axis: parallel within the angular tolerance, and the second axis's point on the first.
+    // One axis: parallel within the angular tolerance, and the second axis line through the first
+    // axis's point (the shared axis reported), whichever point represents the second axis.
     if ua.cross(ub).length() > tol.ang_tol_rad().sin() {
         return Ok(None);
     }
-    if (b.axis_point - a.axis_point).cross(ua).length() > tol.zone_tol_3d {
+    if (a.axis_point - b.axis_point).cross(ub).length() > tol.zone_tol_3d {
         return Ok(None);
     }
     // The material lies between them when the outer has it toward the axis and the inner away.
@@ -265,6 +267,20 @@ mod tests {
         // The same radius: no wall.
         let same = cylinder([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 10.0, false);
         assert_eq!(facing_cylinders(&k, &outer, &same).unwrap(), None);
+    }
+
+    #[test]
+    fn a_tilted_second_axis_pairs_whichever_of_its_points_represents_it() {
+        // b's axis runs along (0.004, 0, 1) (0.23 degrees, within the tolerance) through the
+        // origin, a's axis point: it pairs as a wall 2 thick. (4, 0, 1000) = 1000 (0.004, 0, 1) is
+        // on the same line and must give the same answer.
+        let k = kernel();
+        let outer = cylinder([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 10.0, true);
+        for p in [[0.0, 0.0, 0.0], [4.0, 0.0, 1000.0]] {
+            let bore = cylinder(p, [0.004, 0.0, 1.0], 8.0, false);
+            let pair = facing_cylinders(&k, &outer, &bore).unwrap().unwrap();
+            assert!((pair.thickness - 2.0).abs() < 1e-12, "{p:?}: {pair:?}");
+        }
     }
 
     #[test]
