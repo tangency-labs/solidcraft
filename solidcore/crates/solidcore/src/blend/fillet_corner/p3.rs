@@ -1245,16 +1245,17 @@ impl FilletCorner {
                             // neither the Mixed one nor the 3x2 one below: no corner
                             // (MSG: Corner Case Not Implemented), as before #19829, when
                             // the classification's convexity test failed on it.
-                            if opposite
-                                && (!crate::blend::fillet_solver::p5::edge_bounds_material(
-                                    b,
-                                    edge_of(b, eu0)?,
-                                )? || !crate::blend::fillet_solver::p5::edge_bounds_material(
-                                    b,
-                                    edge_of(b, eu1_)?,
-                                )?)
-                            {
-                                return Ok(None);
+                            // A loop use without a shell or region is refused, as the
+                            // convexity test refused it.
+                            if opposite {
+                                use crate::blend::fillet_solver::p5::edge_bounds_material_linked;
+                                let bounds = [
+                                    edge_bounds_material_linked(b, edge_of(b, eu0)?)?,
+                                    edge_bounds_material_linked(b, edge_of(b, eu1_)?)?,
+                                ];
+                                if !bounds[0] || !bounds[1] {
+                                    return Ok(None);
+                                }
                             }
                             let mixed = if opposite || total_eus == 4 {
                                 let lookup = |eu: EdgeuseId| solver_of(eu).ok();

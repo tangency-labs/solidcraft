@@ -53,7 +53,7 @@ use crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex;
 use crate::blend::fillet_geom::p1::{FilStatus, FilletBrep, FilletGeomId, FilletSolverId};
 use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
-use crate::blend::fillet_solver::p5::{edge_bounds_material, is_concave_edge};
+use crate::blend::fillet_solver::p5::{edge_bounds_material_linked, is_concave_edge};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::{
     BlendFailure, CornerInput, CornerStep, FilletSetUp, MixedStep, SolverFailure,
@@ -368,8 +368,14 @@ pub(crate) fn mixed_ring<S: Copy>(
     let e0 = eu1::edge(b, eu0)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu0))?;
     let e1 = eu1::edge(b, eu1_)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu1_))?;
     // a sheet's edge bounds no material and is neither convex nor concave: no Mixed ring
-    // (`is_concave_edge` refuses it; #19829)
-    if !edge_bounds_material(b, e0)? || !edge_bounds_material(b, e1)? {
+    // (`is_concave_edge` refuses it; #19829). A loop use without a shell or region is
+    // refused as `is_concave_edge` refused it; both edges are asked first, so a sheet
+    // answer at one never hides a broken link at the other.
+    let bounds = [
+        edge_bounds_material_linked(b, e0)?,
+        edge_bounds_material_linked(b, e1)?,
+    ];
+    if !bounds[0] || !bounds[1] {
         return Ok(None);
     }
     let concave = [is_concave_edge(k, b, e0)?, is_concave_edge(k, b, e1)?];

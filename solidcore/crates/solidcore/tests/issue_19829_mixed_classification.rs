@@ -21,7 +21,7 @@ use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::fillet_corner::p3::{FilletCorner, MIXED_CORNER_OF_FOUR_EDGES};
 use solidcore::blend::fillet_solver::p1::FilletSolver;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator;
-use solidcore::error::blend::BlendFailure;
+use solidcore::error::blend::{BlendFailure, SolverFailure};
 use solidcore::error::{ErrorKind, SM_ERR_NULL_POINTER};
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::{Kernel, UpstreamFixes};
@@ -356,4 +356,31 @@ fn create_passes_a_classification_failure_on() {
     let created = create(&k, &mut c).unwrap_err();
     assert_eq!(format!("{created:?}"), format!("{classified:?}"));
     assert_eq!(created.kind(), ErrorKind::InvalidInput, "{created}");
+}
+
+/// A blended edge whose loop uses lie in a shell without a region is a broken body, not a
+/// sheet: the classification refuses it with `EdgeBoundsNoMaterial` at that edge, as the
+/// convexity test did before #19829, and `FilletCorner::create` passes that on. Only a
+/// sheet (`a_sheet_is_not_mixed_and_keeps_its_corner`) is "not mixed".
+#[test]
+fn a_shell_without_a_region_is_a_failure_not_a_sheet() {
+    let mut k = kernel();
+    let mut c = tangent_peg(&mut k);
+    let e = eu1::edge(&c.b, c.solver_eus[0]).unwrap().unwrap();
+    for s in edge::shells(&c.b, e, None).unwrap().into_iter().flatten() {
+        c.b.shell_mut(s).unwrap().region = None;
+    }
+    for found in [
+        classify(&k, &mut c, true).map(|_| ()),
+        create(&k, &mut c).map(|_| ()),
+    ] {
+        let err = found.unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::Solver(SolverFailure::EdgeBoundsNoMaterial {
+                edge: e
+            })),
+            "{err}"
+        );
+    }
 }
