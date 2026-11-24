@@ -390,12 +390,7 @@ fn dump_kernel() -> Kernel {
     all_fixes()
 }
 
-fn dump_blend(
-    dims: [f64; 3],
-    at: &[[f64; 3]],
-    radii: &[f64],
-    ask: Option<&SetbackAsk>,
-) -> String {
+fn dump_blend(dims: [f64; 3], at: &[[f64; 3]], radii: &[f64], ask: Option<&SetbackAsk>) -> String {
     let mut k = dump_kernel();
     let r = blend_box(&mut k, dims, at, radii, ask);
     dump_blended(k, r)
@@ -430,12 +425,7 @@ fn dump_blends() {
 fn dump_blend_matrix() {
     print!(
         "{}",
-        dump_blend(
-            [40.0, 30.0, 20.0],
-            &UNEQUAL_AT,
-            &[2.0, 3.0, 4.0],
-            None
-        )
+        dump_blend([40.0, 30.0, 20.0], &UNEQUAL_AT, &[2.0, 3.0, 4.0], None)
     );
     for (sb, ease) in [(8.0, 0.0), (20.0, 0.0), (0.0, 0.0), (5.0, 0.0), (8.0, 2.0)] {
         println!("== setback {sb} ease {ease}");
@@ -453,23 +443,13 @@ fn dump_blend_matrix() {
         println!("== short {sb}");
         print!(
             "{}",
-            dump_blend(
-                [20.0; 3],
-                &SHORT_AT,
-                &[2.0, 3.0, 4.0],
-                Some(&short(sb))
-            )
+            dump_blend([20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], Some(&short(sb)))
         );
     }
     println!("== shrink");
     print!(
         "{}",
-        dump_blend(
-            [20.0, 20.0, 5.5],
-            &SHRINK_AT,
-            &[2.0, 3.0, 4.0],
-            None
-        )
+        dump_blend([20.0, 20.0, 5.5], &SHRINK_AT, &[2.0, 3.0, 4.0], None)
     );
     println!("== concave");
     let mut k = dump_kernel();

@@ -1741,32 +1741,40 @@ mod ball_fit_tests {
 
     /// A fillet body whose building failed at a stage is not built, as before (the same
     /// failure, status and error info), keeping the executive's failure as its cause, which
-    /// keeps the stage's error (#13790): the closed corner of a disc's rim round past its
-    /// wall, without the trace reaching its rails (WR-610), whose vertex geometry fails.
+    /// keeps the stage's error (#13790): a vertex of a 10 cube whose three edges are rounded
+    /// 3, 3 and 9.9. The 9.9 round leaves 0.1 of each face it rolls on, so the 3 rounds
+    /// beside it cross it before the setback corner and its fill fails, a blend larger than
+    /// its faces allow (#18913: the disc's rim round past its wall this test used builds
+    /// since its trace reaches its rails, WR-610).
     #[test]
     fn a_fillet_body_not_built_keeps_the_executives_failure() {
         let mut k = Kernel::default();
         let mut body =
-            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 13.0, 2.0)
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0)
                 .unwrap();
-        let rim = p1::edges(&body, None)
-            .unwrap()
-            .into_iter()
-            .find(|&e| {
-                let interval = edge::interval(&body, e).unwrap();
-                let curve = edge::curve(&body, e).unwrap().unwrap();
-                (0..=8).all(|i| {
-                    let p = curve
-                        .evaluate_point(&k, interval.evaluate(f64::from(i) / 8.0))
-                        .unwrap();
-                    (p.z - 2.0).abs() < 1e-9
+        // the edge through the vertex (10, 10, 10) along `axis`, by its midpoint
+        let along = |k: &Kernel, body: &Brep, axis: usize| {
+            p1::edges(body, None)
+                .unwrap()
+                .into_iter()
+                .find(|&e| {
+                    let interval = edge::interval(body, e).unwrap();
+                    let curve = edge::curve(body, e).unwrap().unwrap();
+                    let p = curve.evaluate_point(k, interval.evaluate(0.5)).unwrap();
+                    [p.x, p.y, p.z].iter().enumerate().all(|(i, v)| {
+                        let want = if i == axis { 5.0 } else { 10.0 };
+                        (v - want).abs() < 1e-9
+                    })
                 })
-            })
-            .unwrap();
+                .unwrap()
+        };
+        let rounds = [(0, 3.0), (1, 3.0), (2, 9.9)].map(|(axis, r)| (along(&k, &body, axis), r));
         let mut session = FilletSession::new(&mut k, &mut body).unwrap();
-        session
-            .prepare_constant_radius_edges(&mut k, &[rim], 2.5, 1, 1, 1.0)
-            .unwrap();
+        for (e, r) in rounds {
+            session
+                .prepare_constant_radius_edges(&mut k, &[e], r, 1, 1, 1.0)
+                .unwrap();
+        }
         let e = session.do_fillet(&mut k).unwrap_err();
         let info = session.error_info().clone();
         // as before: the session's failure, its status and the corner's note
@@ -1775,10 +1783,11 @@ mod ball_fit_tests {
         assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
         assert_eq!(e.sm_status(), Some(1001), "{e:?}");
         assert_eq!(refusable(&e), refusable(&bare), "{e:?}");
-        assert_eq!(info.code, 3);
+        assert_eq!(info.code, 8);
         assert_eq!(
             info.comment,
-            "Fillet Corner Error: Unable to Compute Geometry"
+            "Fillet Error: the rounds beside an edge at a setback corner cross past the room on \
+             that edge: the blends are larger than their faces allow"
         );
         // now keeping the executive's failure, which keeps the corner's error
         let executive = e.cause().expect("the executive's failure is kept");
@@ -1794,6 +1803,11 @@ mod ball_fit_tests {
         assert_eq!(executive.sm_status(), Some(1001));
         let stage = executive.cause().expect("the stage's error is kept");
         assert!(!stage.is_unported_or_cancelled(), "{stage:?}");
+        assert_eq!(
+            stage.operation(),
+            "SmBlendCorner::BuildSetBackFill",
+            "{stage:?}"
+        );
         assert_eq!(
             e.to_string(),
             format!("{bare}; caused by {executive}"),
