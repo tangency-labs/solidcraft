@@ -2146,8 +2146,7 @@ mod tests {
     /// shell, the cavity the inner shell's other side.
     #[test]
     fn stitch_faces_leaves_a_closed_cavity_void() {
-        for (inward, cavity_first) in [(true, false), (false, false), (true, true), (false, true)]
-        {
+        for (inward, cavity_first) in [(true, false), (false, false), (true, true), (false, true)] {
             let case = format!("inward {inward}, cavity first {cavity_first}");
             let mut k = Kernel::default();
             let mut b = crate::topology::brep::p3::new_brep(
