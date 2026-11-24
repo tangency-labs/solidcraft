@@ -963,6 +963,8 @@ fn auto_mark_candidate_scan_rejects_invalid_paths_and_view_basis() {
     assert!(circular_edges(&body, &[0], &Plane::XZ).is_err());
     let invalid = Plane { x: Vec3::ZERO, ..Plane::XZ };
     assert!(circular_edges(&body, &[], &invalid).is_err());
+    let skewed = Plane { y: Plane::XZ.x, ..Plane::XZ };
+    assert!(circular_edges(&body, &[], &skewed).is_err());
 }
 
 #[test]

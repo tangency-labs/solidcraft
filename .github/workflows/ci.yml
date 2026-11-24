@@ -201,13 +201,15 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui and kernel, their scripts, the control server (its refusals,
-          # #10967), or a lockfile change that moves the graphics stack (wgpu, naga, egui, winit,
-          # windows). Pull requests and merge groups share it.
+          # glue, the vendored egui, winit (its Windows event loop builds only there) and kernel,
+          # the title bar's hit test (the window chrome and the app bar's title-bar module, which
+          # the app's Windows-only window procedure answers from), their scripts, the control
+          # server (its refusals, #10967), or a lockfile change that moves the graphics stack
+          # (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
+                crates/gpu/*|crates/ui-kit/src/window_chrome*|crates/ui-egui/src/titlebar.rs|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -449,6 +451,10 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 75 || 25 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Two commits: `cargo xtask app-geometry` (and its workspace test) judges what HEAD adds to
+        # HEAD~1, the code a pull request or merge-queue group lands on.
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt
@@ -483,6 +489,10 @@ jobs:
         run: |
           cargo xtask mesh-decisions
           cargo test -p xtask mesh_decisions --locked
+      - name: Apps compute no geometry
+        run: |
+          cargo xtask app-geometry
+          cargo test -p xtask app_geometry --locked
       - name: Agent router and skills cite real files
         run: |
           cargo xtask skills
@@ -556,6 +566,27 @@ jobs:
           scope=(--workspace)
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           cargo clippy "${scope[@]}" --all-targets --profile ci --locked -- -D warnings
+
+  shared-crates:
+    name: Shared crates build on their own
+    needs: changes
+    # The shared crates must build on their own, without the rest of the workspace: that is
+    # what makes them movable to their own repository (#12935). The check builds them in a
+    # scratch workspace, so it compiles the kernel and the UI stack again: it is a build, not
+    # a static check, and it belongs in the heavy lane.
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@1.99.1
+      # Main saves the cache; every other run restores it, read-only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: native-shared
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Shared crates build on their own
+        run: cargo xtask shared
 
   build-tests:
     name: Build tests
@@ -649,6 +680,10 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Two commits: `cargo xtask app-geometry` (and its workspace test) judges what HEAD adds to
+        # HEAD~1, the code a pull request or merge-queue group lands on.
+        with:
+          fetch-depth: 2
       - name: Install a software Vulkan driver (lavapipe)
         run: |
           sudo apt-get update
@@ -690,6 +725,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
+          GPU_SHARDS: ${{ needs.changes.outputs.gpu }}
         run: |
           # Pull requests skip the heavy tests (default-filter in .config/nextest.toml); `default()`
           # below is that filter, so a pull request still runs only what it ran before.
@@ -711,13 +747,19 @@ jobs:
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
+          excluded='package(=solidcraft-gpu) & test(/^path::/)'
+          # Preserve render-only shard activation. When those shards do not run, native tests
+          # still cover the UI renderer; its gpu-path group keeps pipeline creation serial.
+          if [ "$GPU_SHARDS" = true ]; then
+            excluded="($excluded) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))"
+          fi
           # A failed test does not fail the step by itself: the tests known to fail today
           # (tests/KNOWN_FAILING_TESTS) may fail, any other fails it, and so does a listed test
           # that passes. nextest's exit code 100 is "tests failed"; any other is its own error
           # (a build error, a bad filter) and fails the step at once.
           status=0
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=$?
+            --ignore-default-filter -E "($base) & not ($excluded)" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       # Every command label needs an English catalog entry (#8542). The label table is the CLI's
@@ -850,6 +892,8 @@ jobs:
       - name: Run one shard of the GPU path tests
         env:
           SHARD: ${{ matrix.shard }}
+          FULL: ${{ needs.changes.outputs.full }}
+          PACKAGES: ${{ needs.changes.outputs.packages }}
         run: |
           # None of these is in the default filter (the heavy tests), so pull requests, the merge
           # queue, main and nightly all run every one of them, as before. `count` deals the tests
@@ -857,9 +901,17 @@ jobs:
           # Graded against tests/KNOWN_FAILING_TESTS, as in Native Linux tests.
           junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
           rm -f "$junit"
+          # A UI-only change needs its progressive renderer, not the unrelated GPU crate tests.
+          scope=(-p solidcraft-gpu -p solidcraft-ui-egui)
+          if [ "$FULL" != true ]; then
+            scope=()
+            for p in $PACKAGES; do
+              case "$p" in solidcraft-gpu|solidcraft-ui-egui) scope+=(-p "$p") ;; esac
+            done
+          fi
           status=0
-          cargo nextest run -p solidcraft-gpu --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4" || status=$?
+          cargo nextest run "${scope[@]}" --lib --cargo-profile ci --locked --profile ci --no-tests=pass \
+            --ignore-default-filter -E '(package(=solidcraft-gpu) & test(/^path::/)) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))' --partition "count:$SHARD/4" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
@@ -1188,12 +1240,44 @@ jobs:
     permissions:
       contents: read
 
+  # A build without the `usage-stats` feature (distribution packagers, universities; see
+  # docs/privacy.md) compiles usage statistics out: the app and the web app build, and the app's
+  # binary holds no trace of the endpoint.
+  no-usage-stats:
+    name: Build without usage statistics
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 40 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: no-usage-stats
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Build the app and the web app without the feature
+        run: |
+          cargo build -p solidcraft --no-default-features --profile ci --locked
+          cargo check -p solidcraft-web --target wasm32-unknown-unknown --no-default-features --locked
+      - name: The binary has no usage statistics endpoint
+        run: |
+          endpoint=$(sed -n 's/^pub const ENDPOINT: &str = "\(.*\)";$/\1/p' crates/ui-egui/src/usage_stats.rs)
+          test -n "$endpoint" || { echo "::error::ENDPOINT not found in crates/ui-egui/src/usage_stats.rs"; exit 1; }
+          path=${endpoint#https://*/}
+          if grep -a -c -F -e "$endpoint" -e "/$path" target/ci/solidcraft; then
+            echo "::error::the build without usage-stats still holds the endpoint ($endpoint)"; exit 1
+          fi
+          echo "no trace of $endpoint"
+
   ci:
     # On a run another label starts (every other job skipped), this job reports the result of the
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-tests, solidcore-standalone, kernel-rig]
+    needs: [changes, checks, quick-compile, clippy, shared-crates, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-tests, solidcore-standalone, kernel-rig, no-usage-stats]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
@@ -1262,6 +1346,8 @@ jobs:
           ORACLE_RUN: ${{ needs.changes.outputs.oracle }}
           DOCTESTS: ${{ needs.changes.outputs.doctests }}
           CLIPPY: ${{ needs.clippy.result }}
+          # The shared crates build on their own: that job runs with the native flag, like Clippy.
+          SHARED: ${{ needs.shared-crates.result }}
           BUILD: ${{ needs.build-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           TESTS: ${{ needs.tests.result }}
@@ -1286,6 +1372,7 @@ jobs:
             ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' &&
             contains(github.event.pull_request.labels.*.name, 'approved-for-ci') && needs.changes.outputs.carried == '') }}
           RIG: ${{ needs.kernel-rig.result }}
+          NO_USAGE_STATS: ${{ needs.no-usage-stats.result }}
         run: |
           test "$CHANGES" = success
           test "$CHECKS" = success
@@ -1295,11 +1382,13 @@ jobs:
           fi
           if [ "$NATIVE" = true ]; then
             test "$CLIPPY" = success
+            test "$SHARED" = success
             # The archive for the action matrix and property tests exists nightly and by hand only.
             if [ "$EVENT_NAME" = schedule ] || [ "$EVENT_NAME" = workflow_dispatch ]; then
               test "$BUILD" = success
             fi
             test "$TESTS" = success
+            test "$NO_USAGE_STATS" = success
           fi
           # The same output decides whether the GPU path tests run (their job's `if`).
           if [ "$GPU_RUN" = true ]; then

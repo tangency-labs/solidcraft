@@ -2,9 +2,7 @@
 //! the view first; both the radius and overshoot given here are paper millimetres. Styling,
 //! reference resolution and gaps against other annotations belong to the scene builder.
 
-use crate::EPS;
 use crate::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM};
-use crate::prelude::*;
 use solidcore_record::{Seg2, Vec2};
 
 /// A centre mark that cannot be represented on the paper scene.
@@ -26,13 +24,9 @@ pub fn strokes(centre_mm: Vec2, radius_mm: f64, overshoot_mm: f64) -> Result<[Se
     if !overshoot_mm.is_finite() || !(0.0..=MAX_SIDE_MM).contains(&overshoot_mm) {
         return Err(Invalid("the paper overshoot must be finite and between zero and the maximum sheet side"));
     }
-    let half = radius_mm + overshoot_mm;
-    if !half.is_finite() || half <= EPS || centre_mm.x.abs() + half > MAX_COORDINATE_MM || centre_mm.y.abs() + half > MAX_COORDINATE_MM {
-        return Err(Invalid("the mark must have length and fit within the paper scene's coordinate limit"));
-    }
-    let x = Vec2::X * half;
-    let y = Vec2::Y * half;
-    Ok([Seg2::Line { a: centre_mm - x, b: centre_mm + x }, Seg2::Line { a: centre_mm - y, b: centre_mm + y }])
+    solidcore_ops::paper_gaps::centre_cross([centre_mm.x, centre_mm.y], radius_mm, overshoot_mm)
+        .map(|strokes| strokes.map(|[a, b]| Seg2::Line { a: Vec2::new(a[0], a[1]), b: Vec2::new(b[0], b[1]) }))
+        .ok_or(Invalid("the mark must have length and fit within the paper scene's coordinate limit"))
 }
 
 /// A centre line between two already projected paper points, extended by `overshoot_mm` at each
@@ -45,9 +39,9 @@ pub fn centre_line(a: Vec2, b: Vec2, overshoot_mm: f64) -> Result<Seg2, Invalid>
     if !overshoot_mm.is_finite() || !(0.0..=MAX_SIDE_MM).contains(&overshoot_mm) {
         return Err(Invalid("the paper overshoot must be finite and between zero and the maximum sheet side"));
     }
-    let along = (b - a).normalized().ok_or(Invalid("the endpoints must be distinct"))?;
-    let start = a - along * overshoot_mm;
-    let end = b + along * overshoot_mm;
+    let (start, end) =
+        solidcore_ops::paper_gaps::extend([a.x, a.y], [b.x, b.y], overshoot_mm).map_err(|_| Invalid("the endpoints must be distinct"))?;
+    let (start, end) = (Vec2::new(start[0], start[1]), Vec2::new(end[0], end[1]));
     if !start.is_finite() || !end.is_finite() || [start.x, start.y, end.x, end.y].iter().any(|v| v.abs() > MAX_COORDINATE_MM) {
         return Err(Invalid("the line must fit within the paper scene's coordinate limit"));
     }

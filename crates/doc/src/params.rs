@@ -386,7 +386,9 @@ impl Document {
         }
         // A feature that reads a parameter itself (a sketch point at `a`) is one of its users
         // too, named as `parameters.graph` names it (#12293).
-        let reads: Vec<(String, BTreeSet<String>)> = self.features.iter().map(|f| (format!("Feature:{}", f.name), self.feature_reads(f))).collect();
+        let rules = self.rule_reads();
+        let reads: Vec<(String, BTreeSet<String>)> =
+            self.features.iter().map(|f| (format!("Feature:{}", f.name), Self::feature_reads(f, &rules))).collect();
         for (feature, names) in &reads {
             for n in names {
                 users.entry(n.as_str()).or_default().push(feature.clone());
@@ -399,14 +401,33 @@ impl Document {
         // `value` is mm / degrees in every row (#10747); the parameter's own unit goes to
         // `display_value`. Both carry the number a person would read, not the float noise.
         let unified = |n: &str| vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)));
+        // A user parameter's own unit is that of the first parameter of its name, as
+        // `param_display_value` finds it, looked up here without a search of the list per row.
+        let mut units: BTreeMap<&str, &str> = BTreeMap::new();
+        for p in &self.params {
+            units.entry(p.name.as_str()).or_insert(p.unit.as_str());
+        }
+        // The sketches whose texts' words read each name, in timeline order, found in one pass
+        // over the features. Asking for each text parameter's readers in turn walked every
+        // feature once per text parameter.
+        let mut text_readers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for f in &self.features {
+            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                let names: BTreeSet<String> = sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)).collect();
+                for n in names {
+                    text_readers.entry(n).or_default().push(format!("Feature:{}", f.name));
+                }
+            }
+        }
         let mut rows = Vec::new();
         for p in &self.params {
+            let unit = units.get(p.name.as_str()).copied().unwrap_or(p.unit.as_str());
             rows.push(ParamRow {
                 name: p.name.clone(),
                 expression: p.expr.clone(),
                 unit: p.unit.clone(),
                 value: unified(&p.name),
-                display_value: self.param_display_value(&vals, &p.name).map(expr::round_reported),
+                display_value: vals.get(&p.name).map(|v| expr::round_reported(expr::value_in_unit(*v, unit))),
                 error: errs.get(&p.name).cloned(),
                 comment: p.comment.clone(),
                 source: if p.model { "sketch" } else { "user" },
@@ -443,7 +464,6 @@ impl Document {
             }
         }
         for p in &self.text_params {
-            let readers = self.features_reading_texts(&BTreeSet::from([p.name.clone()]));
             rows.push(ParamRow {
                 name: p.name.clone(),
                 expression: p.text.clone(),
@@ -457,7 +477,7 @@ impl Document {
                 input: None,
                 favorite: self.favorites.contains(&p.name),
                 uses: Vec::new(),
-                used_by: readers.iter().filter_map(|id| self.feature(*id)).map(|f| format!("Feature:{}", f.name)).collect(),
+                used_by: text_readers.get(&p.name).cloned().unwrap_or_default(),
                 text: Some(p.text.clone()),
             });
         }
@@ -737,6 +757,14 @@ fn doc_len(units: &str) -> f64 {
     }
 }
 
+/// The parameters the design's sheet metal rules and its plastic rules read. Every sheet metal
+/// or plastic feature reads all the rules of its kind, so they are read once for a whole list of
+/// features ([`Document::feature_reads`]), not again for each feature.
+struct RuleReads {
+    sheet: BTreeSet<String>,
+    plastic: BTreeSet<String>,
+}
+
 impl Document {
     /// Every parameter with its unit, for evaluation: stored parameters and named feature
     /// inputs (mm / deg / none by their kind).
@@ -831,8 +859,18 @@ impl Document {
                     }
                 }
             }
-            if f.kind.placement_exprs().iter().any(|e| expr::references(e).iter().any(|r| r == name)) {
-                out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Position".into() });
+            // A placement expression is a point that places the feature (a length), or a
+            // primitive's axis (unitless, #18822).
+            let (mut position, mut axis) = (false, false);
+            f.kind.walk_exprs(&mut |(_, e, kind, role)| {
+                if role == ExprRole::Placement && expr::references(e).iter().any(|r| r == name) {
+                    if kind == Kind::Unitless { axis = true } else { position = true }
+                }
+            });
+            for (used, input) in [(position, "Position"), (axis, "Axis")] {
+                if used {
+                    out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: input.into() });
+                }
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 for (id, param) in sketch.dimension_param_ids() {
@@ -1124,12 +1162,13 @@ impl Document {
     /// `Feature:<name>` for a feature whose inputs or dimensions use the parameter.
     pub fn param_graph(&self) -> Vec<(String, String)> {
         let mut out = expr::param_edges(&self.param_defs());
+        let rules = self.rule_reads();
         for f in &self.features {
             let mut names: BTreeSet<String> = f.param_names.iter().filter(|n| !n.is_empty()).cloned().collect();
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 names.extend(sketch.dimension_params().into_iter().cloned());
             }
-            names.extend(self.feature_reads(f));
+            names.extend(Self::feature_reads(f, &rules));
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
         }
         out
@@ -1137,8 +1176,9 @@ impl Document {
 
     /// The parameters a feature reads through expressions it holds itself, not through a named
     /// input or dimension of its own: a sketch's point coordinates, texts, equations and pattern
-    /// expressions, and the rules a sheet metal or plastic feature is built with.
-    fn feature_reads(&self, f: &crate::Feature) -> BTreeSet<String> {
+    /// expressions, and the rules a sheet metal or plastic feature is built with. What the rules
+    /// read comes from [`Document::rule_reads`], worked out once for all the features.
+    fn feature_reads(f: &crate::Feature, rules: &RuleReads) -> BTreeSet<String> {
         let mut names = BTreeSet::new();
         if let FeatureKind::Sketch { sketch, .. } = &f.kind {
             names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
@@ -1148,12 +1188,20 @@ impl Document {
         }
         // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
         if f.kind.is_sheet() {
-            names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
+            names.extend(rules.sheet.iter().cloned());
         }
         if f.kind.is_plastic() {
-            names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
+            names.extend(rules.plastic.iter().cloned());
         }
         names
+    }
+
+    /// The parameters the design's sheet metal rules and its plastic rules read, each rule read
+    /// once.
+    fn rule_reads(&self) -> RuleReads {
+        let sheet = self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)).collect();
+        let plastic = self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)).collect();
+        RuleReads { sheet, plastic }
     }
 
     /// Features whose result depends on a parameter (directly or through other parameters).
@@ -1452,5 +1500,412 @@ mod name_words_tests {
         for (name, query) in [("", "a"), ("\u{0}", "\u{0}"), ("İ", "i"), ("ß", "ss"), ("🙂_x", "x"), ("x", "🙂")] {
             let _ = name_words_match(name, query);
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod param_rows_tests {
+    //! The parameters table against the rows as they were built before the readers of text
+    //! parameters and of rules were found in one pass, and what building it costs.
+
+    use std::cell::Cell;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use serde_json::json;
+    use solidcore_record::Vec3;
+    use solidcraft_sketch::{Link, Sketch};
+
+    use super::{ParamRow, unit_of};
+    use crate::expr::{self, Expr, Kind};
+    use crate::plastic::PlasticRule;
+    use crate::sheet::{SheetRule, rule_references};
+    use crate::text_params::TextParam;
+    use crate::{Document, FacePick, Feature, FeatureKind, Operation, Param, PlaneRef, ProfileSel, SketchId};
+
+    thread_local! {
+        static PARAM_SEARCHES: Cell<usize> = const { Cell::new(0) };
+        static RULES_READ: Cell<usize> = const { Cell::new(0) };
+        static WORDS_READ: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// A search of the parameter list by name on this thread ([`Document::param`]).
+    pub(crate) fn count_param_search() {
+        PARAM_SEARCHES.set(PARAM_SEARCHES.get() + 1);
+    }
+
+    /// A rule's expression read for the names it uses on this thread
+    /// ([`crate::sheet::rule_references`]).
+    pub(crate) fn count_rule_read() {
+        RULES_READ.set(RULES_READ.get() + 1);
+    }
+
+    /// A words expression read for the names it uses on this thread
+    /// ([`crate::text_params::references`]).
+    pub(crate) fn count_words_read() {
+        WORDS_READ.set(WORDS_READ.get() + 1);
+    }
+
+    /// `feature_reads` as it was before this change. It read every rule again for each sheet
+    /// metal or plastic feature.
+    fn old_feature_reads(doc: &Document, f: &Feature) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+            names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
+            names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
+            names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
+            names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
+        }
+        if f.kind.is_sheet() {
+            names.extend(doc.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
+        }
+        if f.kind.is_plastic() {
+            names.extend(doc.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
+        }
+        names
+    }
+
+    /// `param_rows` as it was before this change, to compare with. It walked every feature for
+    /// each text parameter's readers, searched the features for each reader, searched the
+    /// parameters for each user or sketch row's unit and read every rule again for each sheet
+    /// metal or plastic feature.
+    fn old_param_rows(doc: &Document) -> Vec<ParamRow> {
+        let (vals, errs) = doc.param_values();
+        let all = doc.all_param_exprs();
+        let refs: BTreeMap<String, Vec<String>> = all.iter().map(|(n, e, _)| (n.clone(), expr::references(e))).collect();
+        let mut users: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+        for (k, r) in &refs {
+            for x in r {
+                users.entry(x.as_str()).or_default().push(k.clone());
+            }
+        }
+        let reads: Vec<(String, BTreeSet<String>)> =
+            doc.features.iter().map(|f| (format!("Feature:{}", f.name), old_feature_reads(doc, f))).collect();
+        for (feature, names) in &reads {
+            for n in names {
+                users.entry(n.as_str()).or_default().push(feature.clone());
+            }
+        }
+        let used_by = |n: &str| -> Vec<String> { users.get(n).cloned().unwrap_or_default() };
+        let value = |n: &str, k: Kind| {
+            vals.get(n).and_then(|v| v.to_kind(k).ok()).map(|x| if k == Kind::Angle { x.to_degrees() } else { x }).map(expr::round_reported)
+        };
+        let unified = |n: &str| vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)));
+        let mut rows = Vec::new();
+        for p in &doc.params {
+            rows.push(ParamRow {
+                name: p.name.clone(),
+                expression: p.expr.clone(),
+                unit: p.unit.clone(),
+                value: unified(&p.name),
+                display_value: doc.param_display_value(&vals, &p.name).map(expr::round_reported),
+                error: errs.get(&p.name).cloned(),
+                comment: p.comment.clone(),
+                source: if p.model { "sketch" } else { "user" },
+                feature: None,
+                input: None,
+                favorite: doc.favorites.contains(&p.name),
+                uses: refs.get(&p.name).cloned().unwrap_or_default(),
+                used_by: used_by(&p.name),
+                text: None,
+            });
+        }
+        for f in &doc.features {
+            for (name, (label, e, k)) in f.param_names.iter().zip(f.kind.inputs()) {
+                if name.is_empty() {
+                    continue;
+                }
+                rows.push(ParamRow {
+                    name: name.clone(),
+                    expression: e,
+                    unit: unit_of(k).into(),
+                    value: value(name, k),
+                    display_value: value(name, k),
+                    error: errs.get(name).cloned(),
+                    comment: doc.param_comments.get(name).cloned().unwrap_or_default(),
+                    source: "feature",
+                    feature: Some(f.name.clone()),
+                    input: Some(label),
+                    favorite: doc.favorites.contains(name),
+                    uses: refs.get(name).cloned().unwrap_or_default(),
+                    used_by: used_by(name),
+                    text: None,
+                });
+            }
+        }
+        for p in &doc.text_params {
+            // What `features_reading_texts` gave for this one name, a walk over every feature.
+            let names = BTreeSet::from([p.name.clone()]);
+            let readers: Vec<u64> = doc
+                .features
+                .iter()
+                .filter(|f| match &f.kind {
+                    FeatureKind::Sketch { sketch, .. } => {
+                        sketch.text_word_exprs().iter().any(|e| crate::text_params::references(e).iter().any(|r| names.contains(r)))
+                    }
+                    _ => false,
+                })
+                .map(|f| f.id)
+                .collect();
+            rows.push(ParamRow {
+                name: p.name.clone(),
+                expression: p.text.clone(),
+                unit: crate::text_params::TEXT_UNIT.into(),
+                value: None,
+                display_value: None,
+                error: None,
+                comment: p.comment.clone(),
+                source: "user",
+                feature: None,
+                input: None,
+                favorite: doc.favorites.contains(&p.name),
+                uses: Vec::new(),
+                used_by: readers.iter().filter_map(|id| doc.feature(*id)).map(|f| format!("Feature:{}", f.name)).collect(),
+                text: Some(p.text.clone()),
+            });
+        }
+        rows
+    }
+
+    /// Numbers picked the same way on every run (a linear congruential generator).
+    struct Pick(u64);
+
+    impl Pick {
+        fn of(&mut self, n: usize) -> usize {
+            self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            (self.0 >> 33) as usize % n.max(1)
+        }
+
+        fn from<'a>(&mut self, list: &[&'a str]) -> &'a str {
+            list[self.of(list.len())]
+        }
+    }
+
+    fn cube(sizes: [&str; 3]) -> FeatureKind {
+        let [length, width, height] = sizes.map(Expr::new);
+        FeatureKind::Box { corner: crate::point_expr(Vec3::ZERO), length, width, height, operation: Operation::NewBody, centred: false }
+    }
+
+    /// A feature as `add_feature` makes one, to give another id, name, kind and input names.
+    fn template() -> Feature {
+        let mut doc = Document::new("template");
+        let id = doc.add_feature(cube(["1", "1", "1"]), None).unwrap();
+        doc.feature(id).unwrap().clone()
+    }
+
+    fn feature(template: &Feature, id: u64, name: &str, kind: FeatureKind, param_names: Vec<String>) -> Feature {
+        Feature { id, name: name.into(), kind, param_names, ..template.clone() }
+    }
+
+    /// A sketch text whose words are `words` and whose height is `height`.
+    fn text_link(k: usize, words: &str, height: &str) -> Link {
+        let source = json!({"type": "text", "text": "", "at": [0.0, 0.0], "height": 5.0, "exprs": {"text": words, "height": height}});
+        serde_json::from_value(json!({"id": format!("j{k}"), "kind": "text", "source": source})).unwrap()
+    }
+
+    fn sketch(links: Vec<Link>) -> FeatureKind {
+        let mut sketch = Sketch::new();
+        sketch.links = links;
+        FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }
+    }
+
+    /// A sheet metal base flange (its sketch is never built here).
+    fn sheet_base() -> FeatureKind {
+        FeatureKind::SheetBase { sketch: SketchId(1), profiles: ProfileSel::All, rule: None, flip: false }
+    }
+
+    /// A plastic lip whose width and height are `sizes`.
+    fn lip(sizes: [&str; 2]) -> FeatureKind {
+        let [width, height] = sizes.map(Expr::new);
+        FeatureKind::Lip { face: FacePick(Vec3::ZERO), width, height, groove: false, gap: None, outside: false, body: None }
+    }
+
+    /// Names that parameters, text parameters and feature inputs share, so names repeat.
+    /// Expressions, words and rules read `nobody` too, which only some designs give to a row, so
+    /// the others read a name nothing has.
+    const SHARED: [&str; 6] = ["a", "w", "d1", "t0", "t1", "nobody"];
+
+    fn name(pick: &mut Pick, prefix: &str, i: usize) -> String {
+        if pick.of(3) == 0 { pick.from(&SHARED).to_string() } else { format!("{prefix}{i}") }
+    }
+
+    /// Names for the inputs of feature `i`, more or fewer than it has. Some are empty, some
+    /// shared with other rows and some its own.
+    fn input_names(pick: &mut Pick, i: usize) -> Vec<String> {
+        (0..pick.of(5))
+            .map(|k| match pick.of(3) {
+                0 => String::new(),
+                1 => pick.from(&SHARED).into(),
+                _ => format!("x{i}_{k}"),
+            })
+            .collect()
+    }
+
+    /// A design picked by `seed` with about `n` of each thing the rows are built from. It holds
+    /// user and sketch parameters, feature inputs named, unnamed and repeated, text parameters,
+    /// sketches whose texts' words and heights read them, and sheet metal and plastic features
+    /// with the rules they are built with. Names repeat, and some name nothing.
+    fn mixed(seed: u64, n: usize) -> Document {
+        let mut pick = Pick(seed);
+        let mut doc = Document::new("rows");
+        doc.units = pick.from(&["mm", "in"]).into();
+        let exprs = ["10 mm", "a + 2 mm", "w * 2", "a + w", "nobody + 1", "2", "30 deg", "t0", "d1 / 2", "p1 + 1", "x0_0"];
+        for i in 0..n {
+            let (expr, unit) = (pick.from(&exprs).into(), pick.from(&["mm", "in", "", "deg"]).into());
+            doc.params.push(Param { name: name(&mut pick, "p", i), expr, unit, comment: format!("c{i}"), model: pick.of(4) == 0 });
+            doc.text_params.push(TextParam { name: name(&mut pick, "t", i), text: format!("T{i}"), comment: String::new() });
+        }
+        let template = template();
+        let words = ["t0", "t1 + '-' + t0", "'A' + t2", "nobody", "'x'", "t0 + number(a)", "t3 + t3", "'open"];
+        for i in 0..n {
+            let (id, fname) = (i as u64 + 1, format!("F{}", pick.of(n)));
+            match pick.of(6) {
+                0 | 1 => {
+                    let links = (0..pick.of(3)).map(|k| text_link(k, pick.from(&words), pick.from(&["5", "a", "w + 1", "t1"]))).collect();
+                    doc.features.push(feature(&template, id, &fname, sketch(links), Vec::new()));
+                }
+                2 | 3 => {
+                    let sizes = [pick.from(&exprs), pick.from(&exprs), pick.from(&exprs)];
+                    let names = input_names(&mut pick, i);
+                    doc.features.push(feature(&template, id, &fname, cube(sizes), names));
+                }
+                4 => doc.features.push(feature(&template, id, &fname, sheet_base(), Vec::new())),
+                _ => {
+                    let sizes = [pick.from(&exprs), pick.from(&exprs)];
+                    let names = input_names(&mut pick, i);
+                    doc.features.push(feature(&template, id, &fname, lip(sizes), names));
+                }
+            }
+            if pick.of(3) == 0 {
+                doc.favorites.insert(pick.from(&SHARED).into());
+            }
+            if pick.of(3) == 0 {
+                doc.param_comments.insert(format!("x{i}_0"), format!("input {i}"));
+            }
+        }
+        // Outside a rule's own `thickness`, `Thickness` is that rule's thickness, not a name.
+        let rule_exprs = ["1 mm", "a", "Thickness", "Thickness * 2", "w + Thickness", "nobody", "d1 / 2"];
+        let plastic = PlasticRule::library().swap_remove(0);
+        for i in 0..pick.of(n + 1) {
+            let mut e = || pick.from(&rule_exprs).to_string();
+            let (thickness, bend_radius, gap) = (e(), e(), e());
+            doc.sheet.rules.push(SheetRule { thickness, bend_radius, gap, ..SheetRule::named(&format!("R{i}")) });
+            let (thickness, clearance, draft) = (e(), e(), e());
+            doc.plastic.rules.push(PlasticRule { name: format!("P{i}"), thickness, clearance, draft, ..plastic.clone() });
+        }
+        doc
+    }
+
+    /// The rows are the ones `param_rows` gave before, field for field and in the same order, in
+    /// designs mixing every kind of row with repeated, unused and unknown names.
+    #[test]
+    fn the_rows_are_the_ones_built_one_text_parameter_at_a_time() {
+        let (mut read, mut unread, mut repeated, mut unknown, mut sheet, mut plastic) = (0, 0, 0, 0, 0, 0);
+        for seed in 0..60 {
+            for n in [0, 1, 4, 16] {
+                let doc = mixed(seed, n);
+                let (rows, old) = (doc.param_rows(), old_param_rows(&doc));
+                assert_eq!(rows.len(), old.len(), "seed {seed}, n {n}");
+                for (row, old) in rows.iter().zip(&old) {
+                    assert_eq!(format!("{row:?}"), format!("{old:?}"), "seed {seed}, n {n}");
+                }
+                assert_eq!(serde_json::to_value(&rows).unwrap(), serde_json::to_value(&old).unwrap(), "seed {seed}, n {n}");
+                read += rows.iter().filter(|r| r.text.is_some() && !r.used_by.is_empty()).count();
+                unread += rows.iter().filter(|r| r.text.is_some() && r.used_by.is_empty()).count();
+                let names: BTreeSet<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+                repeated += rows.len() - names.len();
+                unknown += rows.iter().flat_map(|r| &r.uses).filter(|u| !names.contains(u.as_str())).count();
+                let read_by = |is: fn(&FeatureKind) -> bool, rules_read: bool| usize::from(rules_read && doc.features.iter().any(|f| is(&f.kind)));
+                sheet += read_by(
+                    FeatureKind::is_sheet,
+                    doc.sheet.rules.iter().flat_map(|r| r.fields()).any(|(f, e, _)| !rule_references(f, e).is_empty()),
+                );
+                plastic += read_by(
+                    FeatureKind::is_plastic,
+                    doc.plastic.rules.iter().flat_map(|r| r.fields()).any(|(f, e, _)| !rule_references(f, e).is_empty()),
+                );
+            }
+        }
+        // The designs hold text parameters that sketches read and ones none reads, names given
+        // to more than one row, names read that no row has, and sheet metal and plastic features
+        // whose rules read a name.
+        assert!(
+            read > 0 && unread > 0 && repeated > 0 && unknown > 0 && sheet > 0 && plastic > 0,
+            "{read} {unread} {repeated} {unknown} {sheet} {plastic}"
+        );
+    }
+
+    /// `params` user parameters, `texts` text parameters and `sketches` sketches whose one text
+    /// reads `t0`, as a design file can hold them.
+    fn texts_read_by_sketches(params: usize, texts: usize, sketches: usize) -> Document {
+        let mut doc = Document::new("texts");
+        doc.params = (0..params)
+            .map(|i| Param { name: format!("p{i}"), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: false })
+            .collect();
+        doc.text_params = (0..texts).map(|i| TextParam { name: format!("t{i}"), text: String::new(), comment: String::new() }).collect();
+        let template = template();
+        doc.features =
+            (0..sketches).map(|i| feature(&template, i as u64 + 1, &format!("S{i}"), sketch(vec![text_link(0, "t0", "5")]), Vec::new())).collect();
+        doc
+    }
+
+    /// Building the rows reads each sketch text's words twice, however many text parameters
+    /// there are, and searches the features or the parameters for no row. Asking for each text
+    /// parameter's readers in turn read every sketch's words once per text parameter, then
+    /// searched the features for each reader and the parameters for each user row's unit, so a
+    /// design with many text parameters and sketches took far longer to list than to read.
+    #[test]
+    fn the_rows_read_each_sketch_text_twice_whatever_the_number_of_text_parameters() {
+        let (params, texts, sketches) = (300, 300, 200);
+        let doc = texts_read_by_sketches(params, texts, sketches);
+        WORDS_READ.set(0);
+        PARAM_SEARCHES.set(0);
+        let mut rows = Vec::new();
+        let work = crate::eval::cost_tests::counted(|| rows = doc.param_rows());
+        // Each sketch has one text, read once for what the sketch itself reads (#12293) and once
+        // for the readers of the text parameters. Asking per text parameter read it once more for
+        // each one, 200 × (1 + 300) = 60,200 reads.
+        assert!(WORDS_READ.get() <= 2 * sketches, "{}", WORDS_READ.get());
+        // Every feature and parameter is met walking the lists in order. The old way searched
+        // the features once per reader of `t0` (200) and the parameters once per user row (300).
+        assert_eq!((work.feature_searches, PARAM_SEARCHES.get()), (0, 0));
+        // `t0` lists every sketch in timeline order, and no other text parameter has a reader.
+        let texts: Vec<&ParamRow> = rows.iter().filter(|r| r.text.is_some()).collect();
+        assert_eq!(texts.len(), 300);
+        let all: Vec<String> = (0..sketches).map(|i| format!("Feature:S{i}")).collect();
+        assert_eq!(texts[0].used_by, all);
+        assert!(texts[1..].iter().all(|r| r.used_by.is_empty()));
+    }
+
+    /// User parameter `p0`, `rules` sheet metal rules and `rules` plastic rules, and `features`
+    /// features, sheet metal and plastic in turn, as a design file can hold them. The first rule
+    /// of each kind reads `p0`, the others hold numbers and `Thickness` only.
+    fn rules_read_by_features(rules: usize, features: usize) -> Document {
+        let mut doc = texts_read_by_sketches(1, 0, 0);
+        let thickness = |i: usize| String::from(if i == 0 { "p0" } else { "1 mm" });
+        doc.sheet.rules = (0..rules).map(|i| SheetRule { thickness: thickness(i), ..SheetRule::named(&format!("R{i}")) }).collect();
+        let plastic = PlasticRule::library().swap_remove(0);
+        doc.plastic.rules = (0..rules).map(|i| PlasticRule { name: format!("P{i}"), thickness: thickness(i), ..plastic.clone() }).collect();
+        let template = template();
+        let kind = |i: usize| if i.is_multiple_of(2) { sheet_base() } else { lip(["1", "1"]) };
+        doc.features = (0..features).map(|i| feature(&template, i as u64 + 1, &format!("F{i}"), kind(i), Vec::new())).collect();
+        doc
+    }
+
+    /// Building the rows reads each sheet metal and plastic rule once, however many features are
+    /// built with them. Reading every rule again for each such feature made the work grow with
+    /// rules times features, even when the rules read no parameter.
+    #[test]
+    fn the_rows_read_each_rule_once_whatever_the_number_of_sheet_metal_and_plastic_features() {
+        let (rules, features) = (40, 60);
+        let doc = rules_read_by_features(rules, features);
+        RULES_READ.set(0);
+        let rows = doc.param_rows();
+        // A sheet metal rule holds 8 expressions and a plastic rule 10, each read once. Reading
+        // the rules again for each of the 30 sheet metal and 30 plastic features read
+        // 30 × 40 × 8 + 30 × 40 × 10 = 21,600.
+        assert!(RULES_READ.get() <= rules * (8 + 10), "{}", RULES_READ.get());
+        // `p0` lists every feature, in timeline order.
+        let all: Vec<String> = (0..features).map(|i| format!("Feature:F{i}")).collect();
+        assert_eq!(rows[0].used_by, all);
     }
 }

@@ -163,6 +163,7 @@ fn copying_a_view_copies_its_mark_and_deleting_the_sheet_removes_it() {
     );
     assert_ne!(copy_id, original_id);
     let copied_mark = run(&mut s, INSPECT, json!({"mark": copy_id}));
+    assert!(original["record"]["edge"].is_object());
     assert_eq!(copied_mark["record"]["edge"], original["record"]["edge"]);
     assert!(s.execute("drawing.sheet.delete", &json!({"sheet": sheet})).is_err());
     run(&mut s, "drawing.sheet.delete", json!({"sheet": sheet, "contents": "delete"}));
@@ -199,6 +200,21 @@ fn centre_line_commands_reject_coincident_points_and_support_undo() {
 }
 
 #[test]
+fn centre_line_add_and_inspect_refresh_a_stale_model() {
+    let (mut s, view, _) = fixture();
+    s.model.results[0].stale = true;
+    let added = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(view), "a": [0, 0, 0], "b": [80, 0, 0], "overshoot_mm": 2.0}));
+    assert!(!s.model.is_stale());
+    assert_eq!(added["status"], "ok");
+
+    s.model.results[0].stale = true;
+    let inspected = run(&mut s, "drawing.center_line.inspect", json!({"line": added["line"]}));
+    assert!(!s.model.is_stale());
+    assert_eq!(inspected["status"], "ok");
+    assert_eq!(inspected["points"], added["points"]);
+}
+
+#[test]
 fn copied_centre_lines_keep_references_and_are_removed_with_their_sheet() {
     let (mut s, view, _) = fixture();
     let original = run(
@@ -215,8 +231,10 @@ fn copied_centre_lines_keep_references_and_are_removed_with_their_sheet() {
     let copied_line = copied_view["centre_lines"][0].clone();
     assert_ne!(line, copied_line);
     let copied = run(&mut s, "drawing.center_line.inspect", json!({"line": copied_line}));
-    assert_eq!(copied["record"]["a"], original["record"]["a"]);
-    assert_eq!(copied["record"]["b"], original["record"]["b"]);
+    for endpoint in ["a", "b"] {
+        assert!(original["record"][endpoint].is_object());
+        assert_eq!(copied["record"][endpoint], original["record"][endpoint]);
+    }
     assert!(s.execute("drawing.sheet.delete", &json!({"sheet": sheet})).is_err());
     run(&mut s, "drawing.sheet.delete", json!({"sheet": sheet, "contents": "delete"}));
     assert!(s.execute("drawing.center_line.inspect", &json!({"line": copied_line})).is_err());

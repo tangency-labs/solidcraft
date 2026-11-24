@@ -218,6 +218,7 @@ pub(super) fn box_select(
 }
 
 pub(super) struct Canvas<'a> {
+    pub interactive: bool,
     pub at: OnScreen,
     pub painter: &'a egui::Painter,
     pub response: &'a egui::Response,
@@ -229,6 +230,10 @@ pub(super) struct Canvas<'a> {
 
 impl Canvas<'_> {
     pub(super) fn show(self, app: &mut SolveApp, ui: &mut egui::Ui, placing: bool) {
+        if !self.interactive {
+            app.drawing_workspace.page.view_tools.drag = None;
+            return;
+        }
         let mut state = std::mem::take(&mut app.drawing_workspace.page.view_tools);
         let mods = ui.input(|input| input.modifiers);
         let (add, toggle) =
@@ -390,7 +395,7 @@ impl Canvas<'_> {
         let t = Tokens::get();
         let line = Stroke::new(1.0, t.accent);
         // Each moving view's own lines where it goes, in the accent colour, as a sketch shows what a
-        // drag moves: no box round it.
+        // drag moves: no box round it. A detail's callout on its parent stays where the parent is.
         let page = &app.drawing_workspace.page;
         let ppp = self.painter.ctx().pixels_per_point();
         for object in self.objects.iter().filter(|object| object.kind == ObjectKind::View && moved.contains(&object.object)) {
@@ -398,7 +403,15 @@ impl Canvas<'_> {
             let offset = after - before;
             let shifted = OnScreen { target: self.at.target - offset, ..self.at };
             if let Some(marks) = &page.marks {
-                marks.paint_lit(self.painter, &shifted, shifted.visible(self.painter.clip_rect()), ppp, &page.pictures, &[object.object], t.accent);
+                marks.paint_moving(
+                    self.painter,
+                    &shifted,
+                    shifted.visible(self.painter.clip_rect()),
+                    ppp,
+                    &page.pictures,
+                    &[object.object],
+                    t.accent,
+                );
             }
         }
         let Ok(after) = draft.view_centre(drag.view) else { return };

@@ -7,6 +7,7 @@ use solidcraft_geom::cell::{Content, Format, Part, Source};
 use solidcraft_geom::title_block::{CellKind, default_block};
 
 use super::*;
+use crate::drawing_scene::tests::{reopened, with_the_model};
 use crate::schema::tests::conforms;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -69,9 +70,14 @@ fn plate() -> (Session, Value) {
 /// in every other cell, with nothing typed over any (a new sheet's template types its tolerances
 /// note over one); and a front view at 1:1. The sheet and the view.
 fn drawn(s: &mut Session) -> (u64, u64) {
+    drawn_with(s, ["name", "part_number"])
+}
+
+/// [`drawn`], the block's first two text cells reading the component's fields `keys`.
+fn drawn_with(s: &mut Session, keys: [&str; 2]) -> (u64, u64) {
     let sheet = id(&run(s, "drawing.create", json!({}))["sheets"][0]["id"]);
     let mut block = default_block();
-    let mut fields = [(Source::Component, "name"), (Source::Component, "part_number")].into_iter();
+    let mut fields = keys.map(|key| (Source::Component, key)).into_iter();
     for cell in &mut block.cells {
         if let CellKind::Text(text) = &mut cell.kind {
             text.content = Content(vec![match fields.next() {
@@ -99,14 +105,6 @@ fn length(s: &mut Session, view: u64, point: [f64; 3]) -> Value {
     run(s, "drawing.dimension.add", json!({"view": ids::encode(view), "kind": {"length": {"edge": point}}}))["dimension"].clone()
 }
 
-/// `change` run on the model with the drawing closed, then the drawing opened again.
-fn with_model_changed(s: &mut Session, change: impl FnOnce(&mut Session)) {
-    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
-    run(s, "drawing.close", json!({}));
-    change(s);
-    run(s, "drawing.open", drawing);
-}
-
 /// The issue's case: a drawing with one lost dimension and an empty part number field lists both,
 /// and nothing else. Before the chamfer is deleted only the field is listed: a part drawing with
 /// no parts list lists no row without a balloon.
@@ -123,7 +121,7 @@ fn a_lost_dimension_and_an_empty_part_number_are_listed_and_nothing_else() {
     let [_, part_number] = field_cells(&s);
     let expected = (json!(part_number), json!("component.part_number"), json!(ids::encode(sheet)));
     assert_eq!((field["cell"].clone(), field["field"].clone(), field["sheet"].clone()), expected, "{reply}");
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.delete", json!({"feature": chamfer}));
     });
     let reply = checked(&mut s, json!({}));
@@ -140,6 +138,34 @@ fn a_lost_dimension_and_an_empty_part_number_are_listed_and_nothing_else() {
     assert_eq!(reply["coverage_counts"], json!([{"state": "covered", "count": 1}]), "{reply}");
 }
 
+/// A title block's sheet metal fields on a part that isn't sheet metal are listed as empty, each by
+/// its key; on a sheet metal part they read the sheet and nothing is listed.
+#[test]
+fn sheet_metal_fields_are_empty_on_a_part_that_isnt_sheet_metal() {
+    let (mut s, _) = plate();
+    let (sheet, _) = drawn_with(&mut s, ["thickness", "sheet_rule"]);
+    let reply = checked(&mut s, json!({}));
+    let on = json!(ids::encode(sheet));
+    let mut empty: Vec<String> = reply["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "empty_field" && f["sheet"] == on)
+        .map(|f| f["field"].as_str().unwrap().to_string())
+        .collect();
+    empty.sort();
+    assert_eq!(empty, ["component.sheet_rule", "component.thickness"], "{reply}");
+    // A 100 x 60 base flange of the default rule: both read, so neither is listed.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    drawn_with(&mut s, ["thickness", "sheet_rule"]);
+    let reply = checked(&mut s, json!({}));
+    assert!(of_kind(&reply, "empty_field").is_empty(), "{reply}");
+}
+
 /// Typed text over a value hides it; typed into an empty field, it fills it and is no finding. A
 /// dimension whose text is typed over hides its value too, and one on a suppressed feature is
 /// listed so.
@@ -153,7 +179,7 @@ fn overrides_and_suppressed_references_are_listed() {
     let typed = json!({name.clone(): "Typed name", part_number: "PN-7"});
     run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block_overrides": typed}));
     run(&mut s, "drawing.dimension.edit", json!({"dimension": width, "set": {"override_text": "SEE NOTE"}}));
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.suppress", json!({"feature": chamfer, "suppressed": true}));
     });
     let reply = checked(&mut s, json!({}));
@@ -173,7 +199,7 @@ fn a_held_view_and_its_dimension_are_out_of_date() {
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
     });
     let reply = checked(&mut s, json!({}));
@@ -198,7 +224,7 @@ fn a_held_sheets_sketch_and_fill_are_out_of_date_by_their_kinds() {
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
     });
     let reply = checked(&mut s, json!({}));
@@ -220,7 +246,7 @@ fn a_held_views_note_is_out_of_date_as_a_note() {
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
     });
     let reply = checked(&mut s, json!({}));
@@ -237,7 +263,7 @@ fn a_held_sheet_is_checked_as_it_shows_the_model() {
     let (_, view) = drawn(&mut s);
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "solid.box", json!({"length": 900, "width": 10, "height": 10, "corner": [0, 80, 0], "body_name": "Bar", "operation": "new"}));
     });
     let bar = s.doc.features.last().unwrap().id;
@@ -260,7 +286,7 @@ fn a_view_with_nothing_to_measure_is_listed() {
     let block = run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}))["feature"].clone();
     let sheet = run(&mut s, "drawing.create", json!({}))["sheets"][0]["id"].clone();
     let view = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "scale": "1:1"}))["view"].clone();
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.suppress", json!({"feature": block, "suppressed": true}));
     });
     let reply = checked(&mut s, json!({}));
@@ -273,7 +299,7 @@ fn a_view_with_nothing_to_measure_is_listed() {
 fn a_view_of_a_deleted_configuration_row_is_listed() {
     let (mut s, _, [front, top], _) = crate::drawing_scene::tests::configured_front_and_top();
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "config.row", json!({"name": "Long", "delete": true}));
     });
     let reply = checked(&mut s, json!({}));
@@ -322,7 +348,7 @@ fn a_lost_note_is_listed() {
     let note = run(&mut s, "drawing.note.add", json!({"anchor": edge, "at": [60, 40], "content": "Break"}))["note"].clone();
     run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 20], "content": "General"}));
     assert!(of_kind(&checked(&mut s, json!({})), "lost").is_empty());
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.delete", json!({"feature": chamfer}));
     });
     assert_eq!(of_kind(&checked(&mut s, json!({})), "lost"), [named("note", &note)]);
@@ -391,7 +417,7 @@ fn a_held_views_balloon_is_out_of_date_as_a_balloon() {
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
     });
     let reply = checked(&mut s, json!({}));
@@ -418,7 +444,7 @@ fn a_held_views_balloon_and_note_are_out_of_date_not_lost() {
     run(&mut s, "drawing.update", json!({}));
     let before = checked(&mut s, json!({}));
     assert_eq!((of_kind(&before, "out_of_date"), of_kind(&before, "lost")), (vec![], vec![]), "{before}");
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "component.activate", json!({"component": "Bolt"}));
         run(s, "solid.fillet", json!({"edges": [[5, 0, 0]], "radius": 2, "body": "Shank"}));
         run(s, "component.activate", json!({"component": "root"}));
@@ -450,7 +476,7 @@ fn what_leaves_the_sheet_is_listed_one_sheet_at_a_time() {
     let file = folder("outside").join("logo.png");
     std::fs::write(&file, crate::drawing_pictures::tests::png(4, 2)).unwrap();
     let image = run(&mut s, "drawing.image.add", json!({"sheet": other, "file": file, "rect_mm": [-60, -40, -20, -10]}))["image"].clone();
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.delete", json!({"feature": chamfer}));
     });
     let all = checked(&mut s, json!({}));
@@ -498,7 +524,7 @@ fn the_check_changes_nothing_and_answers_the_same() {
     length(&mut s, view, [50.0, 0.0, 8.0]);
     let [name, _] = field_cells(&s);
     run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block_overrides": {name: "\u{0f40}\u{0f41}"}}));
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.delete", json!({"feature": chamfer}));
     });
     let (doc, undo) = (s.doc.clone(), s.undo.len());
@@ -507,11 +533,8 @@ fn the_check_changes_nothing_and_answers_the_same() {
     assert_eq!(found(&first).len(), 3, "lost, overridden, empty: {first}");
     assert_eq!(checked(&mut s, json!({})), first);
     // Saved under the design's own name: Save As names an untitled design after its file.
-    let path = folder("cold").join(format!("{}.solidcraft", s.doc.name));
-    run(&mut s, "file.save_as", json!({"path": path}));
-    let mut cold = Session::default();
-    run(&mut cold, "doc.open", json!({"path": path}));
-    run(&mut cold, "drawing.open", json!({"drawing": ids::encode(s.open_drawing.unwrap())}));
+    let (drawing, file) = (s.open_drawing.unwrap(), format!("{}.solidcraft", s.doc.name));
+    let mut cold = reopened(&mut s, drawing, &file);
     assert_eq!(checked(&mut cold, json!({})), first, "a cold session answers the same");
 }
 
@@ -596,7 +619,7 @@ fn each_feature_is_covered_by_what_points_at_a_face_it_made() {
     let counts = json!([{"state": "covered", "count": 3}, {"state": "not_covered", "count": 1}, {"state": "not_applicable", "count": 1}]);
     assert_eq!(reply["coverage_counts"], counts, "{reply}");
     assert!(reply.get("sheet").is_none(), "{reply}");
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "solid.chamfer", json!({"edges": [[50, 0, 0]], "distance": 1, "body": "Plate"}));
     });
     let reply = checked(&mut s, json!({}));
@@ -640,7 +663,7 @@ fn a_hidden_part_and_a_reference_part_are_not_applicable() {
     let (mut s, view, _, at) = assembly();
     let shank = s.doc.features.last().unwrap().id;
     // A plate at the root stays in the view: a view that would draw nothing can't be made.
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "solid.box", json!({"length": 30, "width": 30, "height": 5, "corner": [40, 0, 0], "body_name": "Base", "operation": "new"}));
     });
     let entry = |s: &mut Session| {
@@ -651,7 +674,7 @@ fn a_hidden_part_and_a_reference_part_are_not_applicable() {
     run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"hide": [[at]]}}));
     assert_eq!(entry(&mut s), (json!("not_applicable"), json!("no view draws a face it made")));
     run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"hide": null}}));
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "component.metadata.set", json!({"component": "Bolt", "bom_type": "reference"}));
     });
     assert_eq!(entry(&mut s), (json!("not_applicable"), json!("only reference parts draw it")));
@@ -666,11 +689,11 @@ fn suppressed_and_rolled_back_features_are_not_applicable() {
         let entry = coverage_of(reply, feature);
         (entry["state"].clone(), entry["why"].clone())
     };
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.suppress", json!({"feature": holes, "suppressed": true}));
     });
     assert_eq!(why(&checked(&mut s, json!({})), holes), (json!("not_applicable"), json!("it is suppressed")));
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.suppress", json!({"feature": holes, "suppressed": false}));
         run(s, "timeline.rollback", json!({"position": 3}));
     });
@@ -680,12 +703,11 @@ fn suppressed_and_rolled_back_features_are_not_applicable() {
     }
 }
 
-/// A block lifted by an operation that reports no history has no face named from exact history:
-/// the block's coverage is unknown, with why, and no feature is not covered. A body imported from
-/// STEP is the other way: the import names the faces it made from its own history
-/// (`F<import>:face:<k>`), so they are exact, and an import nothing points at is not covered.
+/// A body imported from STEP names the faces it made from its own history (`F<import>:face:<k>`),
+/// so they are exact, and an import nothing points at is not covered. A block lifted by Align keeps
+/// its faces' exact names too (#20288), so it is not covered either, rather than unknown.
 #[test]
-fn faces_not_named_from_exact_history_give_unknown() {
+fn imported_and_aligned_faces_are_named_from_exact_history() {
     let mut source = Session::default();
     run(&mut source, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
     let step = solidcraft_io::export(&source.model.state(), &[], solidcraft_io::Format::Step, "Plate").unwrap();
@@ -703,17 +725,14 @@ fn faces_not_named_from_exact_history_give_unknown() {
     let block = s.doc.features[0].id;
     drawn(&mut s);
     let reply = checked(&mut s, json!({}));
-    let entry = coverage_of(&reply, block);
-    assert_eq!(entry["state"], json!("unknown"), "{reply}");
-    assert!(!entry["why"].as_str().unwrap().is_empty(), "{reply}");
-    assert!(coverage(&reply).iter().all(|(_, state, _)| state != "not_covered"), "{reply}");
+    assert_eq!(coverage_of(&reply, block)["state"], json!("not_covered"), "{reply}");
 }
 
-/// A feature one body draws from exact history and another, moved since, from geometry: its exact
-/// faces can be dimensioned, so it is not covered, not unknown. The plate is split across X and one
-/// piece lifted.
+/// A feature drawn by two bodies, one of them moved since by Align: both keep the feature's exact
+/// face names (#20288), so its faces can be dimensioned and it is not covered. The plate is split
+/// across X and one piece lifted.
 #[test]
-fn a_feature_drawn_both_exactly_and_from_geometry_is_not_covered() {
+fn a_feature_drawn_by_a_split_and_aligned_plate_is_not_covered() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
     run(&mut s, "solid.split_body", json!({"body": "Plate", "plane": {"origin": [50, 0, 0], "normal": [1, 0, 0]}}));
@@ -726,10 +745,37 @@ fn a_feature_drawn_both_exactly_and_from_geometry_is_not_covered() {
             naming::face_names(b).iter().enumerate().any(|(i, name)| made_by_block(name) && naming::face_name_exact(b, i) == exact)
         })
     };
-    assert!(drawn_so(true) && drawn_so(false), "the block is drawn both ways");
+    assert!(drawn_so(true) && !drawn_so(false), "both pieces keep the block's exact names");
     drawn(&mut s);
     let reply = checked(&mut s, json!({}));
     assert_eq!(coverage_of(&reply, block)["state"], json!("not_covered"), "{reply}");
+}
+
+/// A flat strip extended by Surface Extend is rebuilt without face history (the feature that made
+/// it stays its face's maker, but its name is found by geometry): the strip's coverage is unknown,
+/// with why, and no feature is not covered. A 10 x 20 mm sheet whose top edge is extended 5 mm.
+#[test]
+fn faces_named_from_geometry_give_unknown() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Line"}));
+    let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    let line = line["created"]["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let strip = run(&mut s, "surface.extrude", json!({"sketch": "Line", "curves": [line], "distance": 20, "body_name": "Strip"}));
+    let block = strip["feature"].as_u64().unwrap();
+    run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [[5, 0, 20]], "distance": "5 mm"}));
+    let state = s.model.state();
+    let from_geometry = state
+        .bodies
+        .iter()
+        .any(|b| naming::face_names(b).iter().enumerate().any(|(i, name)| coverage::made_by(name) == Some(block) && !naming::face_name_exact(b, i)));
+    assert!(from_geometry, "the extended strip's faces are named from geometry");
+    drawn(&mut s);
+    let reply = checked(&mut s, json!({}));
+    let entry = coverage_of(&reply, block);
+    assert_eq!(entry["state"], json!("unknown"), "{reply}");
+    assert!(!entry["why"].as_str().unwrap().is_empty(), "{reply}");
+    assert!(coverage(&reply).iter().all(|(_, state, _)| state != "not_covered"), "{reply}");
 }
 
 /// A saved dimension whose edge name is hostile covers nothing and never panics; the note on the
@@ -880,7 +926,7 @@ fn a_notes_lost_branch_is_listed_by_its_number() {
         json!({"anchor": {"view": ids::encode(view)}, "at": [60, 40], "content": "Break", "branches": [{"edge": [50, 0, 0]}, {"edge": [50, 0, 8]}]});
     let note = run(&mut s, "drawing.note.add", add)["note"].clone();
     assert!(of_kind(&checked(&mut s, json!({})), "lost").is_empty());
-    with_model_changed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "timeline.delete", json!({"feature": chamfer}));
     });
     let reply = checked(&mut s, json!({}));
@@ -954,4 +1000,24 @@ fn automatic_mark_findings_name_the_view_and_check_accepted_geometry() {
     assert_eq!(count(FindingKind::Failed, CheckedKind::View, view), 1);
     assert_eq!(count(FindingKind::Failed, CheckedKind::CentreMark, manual), 1);
     assert_eq!(count(FindingKind::Failed, CheckedKind::CentreMark, view), 0);
+}
+
+/// A note is held to the paper by the extent its alignment gives it: one at 15 mm from the sheet's
+/// edge is on it when it starts there, and half off it when it is centred there or ends there; starting
+/// 34 mm from the right edge of the A2 sheet (594 mm) it runs off that side.
+#[test]
+fn a_note_is_checked_where_its_alignment_puts_it() {
+    let (mut s, _, _, _) = assembly();
+    let params = json!({"anchor": {"sheet": "Sheet 1"}, "at": [15, 60], "content": "2 x 8.5mm Holes - Smooth Bore"});
+    let note = run(&mut s, "drawing.note.add", params)["note"].clone();
+    let reply = checked(&mut s, json!({}));
+    assert!(of_kind(&reply, "outside_sheet").is_empty(), "{reply}");
+    for align in ["centre", "right"] {
+        run(&mut s, "drawing.note.edit", json!({"note": note, "set": {"align": align}}));
+        let reply = checked(&mut s, json!({}));
+        assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &note)], "{align}: {reply}");
+    }
+    run(&mut s, "drawing.note.edit", json!({"note": note, "set": {"align": "left", "at": [560, 60]}}));
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &note)], "{reply}");
 }

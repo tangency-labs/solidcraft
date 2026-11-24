@@ -101,6 +101,49 @@ pub enum Source<'a> {
     Element(&'a [f32]),
 }
 
+/// Pre-resolved filters for point-level visibility checks (`PointCloud::point_filter`).
+#[derive(Clone, Debug)]
+pub struct PointFilter<'a> {
+    entries: Vec<(Source<'a>, &'a Keep)>,
+}
+
+impl PointFilter<'_> {
+    /// Whether this cloud has no point-level filters active.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Whether point `index` at design-space position `world` passes every active point filter.
+    pub fn keeps(&self, index: usize, world: Vec3) -> bool {
+        for (source, keep) in &self.entries {
+            let val = match *source {
+                Source::Coordinate(0) => world.x,
+                Source::Coordinate(1) => world.y,
+                Source::Coordinate(2) => world.z,
+                Source::Coordinate(_) => continue,
+                Source::Corners(v) | Source::Element(v) => match v.get(index) {
+                    Some(x) => f64::from(*x),
+                    None => return false,
+                },
+            };
+            if !val.is_finite() {
+                return false;
+            }
+            let ok = match keep {
+                Keep::Range { range: [lo, hi] } => (*lo..=*hi).contains(&val),
+                Keep::Values { values } => {
+                    let rounded = val.round();
+                    (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&rounded) && values.contains(&(rounded as i32))
+                }
+            };
+            if !ok {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 /// How a cloud's points are coloured.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -212,6 +255,25 @@ impl PointCloud {
         let p = self.points.get(i)?;
         let local = self.origin + Vec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
         Some(crate::apply_point(&self.transform, local))
+    }
+    /// Transform a world-space ray `(o, d)` into the raw `points` frame (before `origin` and
+    /// `transform`). Because `transform` is rigid, distances along and perpendicular to the ray
+    /// are preserved exactly.
+    pub fn local_ray(&self, o: Vec3, d: Vec3) -> Option<(Vec3, Vec3)> {
+        let dir = d.normalized()?;
+        if crate::is_identity(&self.transform) {
+            return Some((o - self.origin, dir));
+        }
+        let inv = crate::mat_inverse(&self.transform)?;
+        let lo = crate::apply_point(&inv, o) - self.origin;
+        let ld = (crate::apply_point(&inv, o + dir) - crate::apply_point(&inv, o)).normalized()?;
+        Some((lo, ld))
+    }
+    /// Pre-resolved filter test for points of this cloud: matches the GPU shader and histogram
+    /// filter semantics on `On::Point` properties and design coordinates (`x`, `y`, `z`).
+    pub fn point_filter(&self) -> PointFilter<'_> {
+        let entries = self.filters.iter().filter_map(|f| self.source(&f.property, On::Point).map(|source| (source, &f.keep))).collect();
+        PointFilter { entries }
     }
     /// The corners of the box around the points, in the cloud's placement (mm), or `None` for
     /// an empty cloud.
