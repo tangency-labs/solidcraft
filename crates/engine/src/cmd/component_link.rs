@@ -394,13 +394,27 @@ pub(super) fn read_left_out_bodies(
                 "{name}: its linked design changed since this design was saved; its bodies are the new ones, and Update Links takes in its materials and properties"
             ));
         }
+        let mut realigned = None;
         if let Some(f) = doc.feature_mut(link.feature) {
             // Bodies keep their names where the design still has as many.
             if f.body_names.len() != feature.body_names.len() {
-                f.body_names = feature.body_names;
+                if f.body_names.is_empty() {
+                    f.body_names = feature.body_names;
+                } else {
+                    let (next_names, next_inherited, removed) =
+                        realign_changed_body_count("", "", solidcraft_io::StepNames::default(), &f.body_names, &link.inherited, &feature.body_names);
+                    f.body_names = next_names;
+                    realigned = Some((next_inherited, removed));
+                }
             }
             f.kind = feature.kind;
             f.link_faces = faces;
+        }
+        if let Some((next_inherited, removed)) = realigned {
+            if let Some(kept) = doc.links.get_mut(&comp) {
+                kept.inherited = next_inherited;
+            }
+            remove_stale_body_properties(doc, link.feature, &removed);
         }
     }
     warnings
@@ -648,6 +662,15 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
         digests.push((file, stamp, digest.clone()));
     }
     Some(digest)
+}
+
+/// Drop any cached digest for `file` after SolidCraft writes it, so a same-size save within the
+/// same filesystem timestamp tick still reports `changed: true`.
+pub(super) fn forget_file_digest(file: &Path) {
+    let file = absolute(file);
+    if let Ok(mut digests) = DIGESTS.lock() {
+        digests.retain(|(f, _, _)| *f != file);
+    }
 }
 
 /// Only STEP has a source link; other formats accepted by Insert STEP keep their old behaviour.
@@ -1128,15 +1151,19 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     for (name, slot) in names.iter().zip(slots) {
         let Some(source) = sources.get(slot) else { continue };
         let old = link.inherited.get(slot);
+        let old_material = old.filter(|old| !old.material.is_empty());
         let current_definition = material_fingerprint(&s.doc, &s.doc.body_material(name))?;
-        let may_change_material = match old {
-            Some(old) => s.doc.materials.get(name) == Some(&old.material) && current_definition == old.material_fingerprint,
+        let may_change_material = match old_material {
+            Some(old) => {
+                s.doc.materials.get(name).map_or(solidcraft_doc::DEFAULT_MATERIAL, String::as_str) == old.material
+                    && current_definition == old.material_fingerprint
+            }
             None => !s.doc.materials.contains_key(name),
         };
         let mut next = old.cloned().unwrap_or_default();
         if may_change_material {
-            let material = inherit_material(s.doc_mut(), source, old.map(|old| old.material.as_str()))?;
-            changed |= s.doc.materials.get(name) != Some(&material);
+            let material = inherit_material(s.doc_mut(), source, old_material.map(|old| old.material.as_str()))?;
+            changed |= s.doc.materials.get(name).map_or(solidcraft_doc::DEFAULT_MATERIAL, String::as_str) != material;
             s.doc_mut().materials.insert(name.clone(), material.clone());
             next.material_fingerprint = material_fingerprint(&s.doc, &material)?;
             next.material = material;
@@ -1573,6 +1600,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         let mut moved = None;
+        let mut realigned = None;
         // The old names are read as the new ones were: a STEP link's own naming (source_bodies).
         let naming = link.step_names.as_deref().and_then(solidcraft_io::StepNames::parse).unwrap_or_default();
         let before = s.model.result(link.feature).map(|r| r.state.clone());
@@ -1581,7 +1609,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 // Bodies keep their names where the design still has as many, also when it lists
                 // them in another order (#21371).
                 if f.body_names.len() != sf.body_names.len() {
-                    f.body_names = sf.body_names;
+                    if f.body_names.is_empty() {
+                        f.body_names = sf.body_names;
+                    } else {
+                        let (next_names, next_inherited, removed) =
+                            realign_changed_body_count(&old.0, &file.display().to_string(), naming, &f.body_names, &link.inherited, &sf.body_names);
+                        f.body_names = next_names;
+                        realigned = Some((next_inherited, removed));
+                    }
                 } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), naming, &sf.body_names) {
                     f.body_names = reordered(&f.body_names, &order);
                     moved = Some(order);
@@ -1592,7 +1627,12 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             f.link_faces = faces;
         }
         // What the link last took from each body moves with it, so a body's own override stays one.
-        if let Some(order) = moved
+        if let Some((next_inherited, removed)) = realigned {
+            if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+                kept.inherited = next_inherited;
+            }
+            remove_stale_body_properties(s.doc_mut(), link.feature, &removed);
+        } else if let Some(order) = moved
             && let Some(kept) = s.doc_mut().links.get_mut(&comp)
             && kept.inherited.len() == order.len()
         {
@@ -1742,6 +1782,95 @@ fn reordered<T: Clone + Default>(items: &[T], order: &[usize]) -> Vec<T> {
     order.iter().map(|k| items.get(*k).cloned().unwrap_or_default()).collect()
 }
 
+/// Map each non-empty name that appears exactly once in `names` to its slot index.
+fn unique_name_slots(names: &[String]) -> std::collections::HashMap<&str, usize> {
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for name in names {
+        if !name.is_empty() {
+            *counts.entry(name.as_str()).or_insert(0) += 1;
+        }
+    }
+    names.iter().enumerate().filter(|(_, name)| counts.get(name.as_str()) == Some(&1)).map(|(k, name)| (name.as_str(), k)).collect()
+}
+
+/// Match each body of a linked design whose body count changed to its prior slot, if any.
+/// Surviving bodies keep their assembly name and inherited baseline (preserving local overrides);
+/// new bodies get a fresh baseline (`LinkedBodyProperties::default()`) so [`inherit_properties`]
+/// takes the source's material and appearance instead of mistaking them for local overrides.
+/// Returns `(next_body_names, next_inherited, removed_body_names)`.
+fn realign_changed_body_count(
+    old_step: &str,
+    file: &str,
+    naming: solidcraft_io::StepNames,
+    old_names: &[String],
+    old_inherited: &[LinkedBodyProperties],
+    new_names: &[String],
+) -> (Vec<String>, Vec<LinkedBodyProperties>, Vec<String>) {
+    let old_source: Option<Vec<String>> = (!old_step.is_empty())
+        .then(|| solidcraft_io::step_import_feature_named(old_step.as_bytes(), file, naming).ok().map(|f| f.body_names))
+        .flatten()
+        .filter(|was| was.len() == old_names.len());
+    let places = old_source.as_deref().map_or_else(|| unique_name_slots(old_names), unique_name_slots);
+    let mut new_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for name in new_names {
+        *new_counts.entry(name.as_str()).or_insert(0) += 1;
+    }
+
+    let mut claimed = std::collections::HashSet::new();
+    let mut claimed_names = std::collections::HashSet::new();
+    let mut next_names = Vec::with_capacity(new_names.len());
+    let mut next_inherited = Vec::with_capacity(new_names.len());
+
+    for name in new_names {
+        let matched =
+            (new_counts.get(name.as_str()) == Some(&1)).then(|| places.get(name.as_str()).copied()).flatten().filter(|k| claimed.insert(*k));
+        if let Some(k) = matched {
+            let kept_name = old_names.get(k).filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| name.clone());
+            claimed_names.insert(kept_name.clone());
+            next_names.push(kept_name);
+            next_inherited.push(old_inherited.get(k).cloned().unwrap_or_default());
+        } else {
+            next_names.push(name.clone());
+            next_inherited.push(LinkedBodyProperties::default());
+        }
+    }
+
+    let removed = old_names
+        .iter()
+        .enumerate()
+        .filter(|(k, name)| !claimed.contains(k) && !name.is_empty() && !claimed_names.contains(name.as_str()))
+        .map(|(_, name)| name.clone())
+        .collect();
+    (next_names, next_inherited, removed)
+}
+
+/// Remove per-body material, appearance and metadata entries for bodies that a linked feature no
+/// longer builds, leaving any name still owned by another feature or `body_components` alone.
+fn remove_stale_body_properties(doc: &mut Document, feature: u64, removed: &[String]) {
+    if removed.is_empty() {
+        return;
+    }
+    let stale: std::collections::HashSet<&str> = {
+        let still_used: std::collections::HashSet<&str> = doc
+            .features
+            .iter()
+            .filter(|f| f.id != feature)
+            .flat_map(|f| f.body_names.iter().map(String::as_str))
+            .chain(doc.body_components.keys().map(String::as_str))
+            .collect();
+        removed.iter().map(String::as_str).filter(|name| !still_used.contains(name)).collect()
+    };
+    if stale.is_empty() {
+        return;
+    }
+    doc.materials.retain(|name, _| !stale.contains(name.as_str()));
+    doc.appearances.bodies.retain(|name, _| !stale.contains(name.as_str()));
+    doc.appearances.faces.retain(|face| !stale.contains(face.body.as_str()));
+    doc.collision_shapes.retain(|name, _| !stale.contains(name.as_str()));
+    doc.print_faces.retain(|name, _| !stale.contains(name.as_str()));
+    doc.plastic.assigned.retain(|name, _| !stale.contains(name.as_str()));
+}
+
 /// `component.relink`: a linked component shows the design at `path` instead, in all its
 /// placements, or with `occurrence` in that placement only.
 fn relink(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1796,9 +1925,28 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         warnings.push("the linked geometry changed; check this component's joints, even when the solver reports no error".to_string());
     }
     let mut inherited = link.inherited.clone();
+    let mut removed = Vec::new();
     if let Some(f) = s.doc_mut().feature_mut(link.feature) {
         if f.body_names.len() != sf.body_names.len() {
-            f.body_names = sf.body_names;
+            if f.body_names.is_empty() {
+                f.body_names = sf.body_names;
+            } else {
+                let old_step = match &f.kind {
+                    FeatureKind::Import { step, .. } => step.as_ref(),
+                    _ => "",
+                };
+                let (next_names, next_inherited, gone) = realign_changed_body_count(
+                    old_step,
+                    &file.display().to_string(),
+                    solidcraft_io::StepNames::default(),
+                    &f.body_names,
+                    &inherited,
+                    &sf.body_names,
+                );
+                f.body_names = next_names;
+                inherited = next_inherited;
+                removed = gone;
+            }
         } else if let FeatureKind::Import { step, .. } = &f.kind
             && !same_import_source(&f.kind, &sf.kind)
             && let Some(order) = moved_bodies(step, &file.display().to_string(), solidcraft_io::StepNames::default(), &sf.body_names)
@@ -1812,6 +1960,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         f.kind = sf.kind;
         f.link_faces = faces;
     }
+    remove_stale_body_properties(s.doc_mut(), link.feature, &removed);
     let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
     set_link_meshes(s, comp, link.feature, &cname, &file.display().to_string(), meshes)?;
     s.doc_mut().links.insert(
@@ -2908,6 +3057,212 @@ mod tests {
         assert!(meshes(&a).is_empty());
         assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["board"]));
         assert_eq!(meshes(&a), chip);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn save_material_boxes(path: &Path, items: &[(&str, f64, &str)]) {
+        let mut part = Session::default();
+        for &(name, x, material) in items {
+            run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "body_name": name}));
+            if material != solidcraft_doc::DEFAULT_MATERIAL {
+                run(&mut part, "material.assign", json!({"bodies": [name], "material": material}));
+            }
+        }
+        run(&mut part, "file.save", json!({"path": path}));
+    }
+
+    fn component_materials(s: &Session, component: u64) -> std::collections::BTreeMap<String, String> {
+        let state = s.model.state();
+        state.bodies.iter().filter(|b| b.component == component).map(|b| (b.name.clone(), s.doc.body_material(&b.name))).collect()
+    }
+
+    #[test]
+    fn update_links_and_relink_inherit_materials_after_body_count_and_name_rewrite() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-rewrite-mat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("part.sc");
+
+        // Update Links: grow from 3 bodies to 5 with new names at early slots while keeping local overrides.
+        save_material_boxes(&part, &[("Plate", 0.0, "Aluminum"), ("Block", 30.0, "Steel"), ("Pin", 60.0, "Brass")]);
+        let mut s = Session::default();
+        let comp = run(&mut s, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+        run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Copper"}));
+        run(&mut s, "material.assign", json!({"bodies": ["Pin"], "material": "Default"}));
+
+        save_material_boxes(
+            &part,
+            &[
+                ("Bracket", 0.0, "Titanium"),
+                ("Block", 30.0, "Oak"),
+                ("Spacer", 60.0, "Glass"),
+                ("Pin", 90.0, "Aluminum"),
+                ("Sleeve", 120.0, "ABS Plastic"),
+            ],
+        );
+        let updated = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        assert_eq!(
+            component_materials(&s, comp),
+            std::collections::BTreeMap::from([
+                ("Block".into(), "Copper".into()),
+                ("Bracket".into(), "Titanium".into()),
+                ("Pin".into(), "Default".into()),
+                ("Sleeve".into(), "ABS Plastic".into()),
+                ("Spacer".into(), "Glass".into()),
+            ])
+        );
+        assert!(!s.doc.materials.contains_key("Plate"), "removed body material entry must be cleaned up");
+
+        // Shrink to 2 brand-new bodies: both inherit their materials instead of staying Default.
+        save_material_boxes(&part, &[("Flange", 0.0, "Steel"), ("Collar", 30.0, "Brass")]);
+        let updated = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        assert_eq!(
+            component_materials(&s, comp),
+            std::collections::BTreeMap::from([("Collar".into(), "Brass".into()), ("Flange".into(), "Steel".into())])
+        );
+
+        // Relink to the rewritten file with different body count and new names.
+        save_material_boxes(&part, &[("Plate", 0.0, "Aluminum"), ("Block", 30.0, "Steel"), ("Pin", 60.0, "Brass")]);
+        let mut relinked = Session::default();
+        let comp = run(&mut relinked, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+        run(&mut relinked, "material.assign", json!({"bodies": ["Block"], "material": "Copper"}));
+        save_material_boxes(&part, &[("Bracket", 0.0, "Titanium"), ("Block", 30.0, "Oak"), ("Spacer", 60.0, "Glass"), ("Sleeve", 90.0, "Steel")]);
+        run(&mut relinked, "component.relink", json!({"component": comp, "path": part}));
+        assert_eq!(
+            component_materials(&relinked, comp),
+            std::collections::BTreeMap::from([
+                ("Block".into(), "Copper".into()),
+                ("Bracket".into(), "Titanium".into()),
+                ("Sleeve".into(), "Steel".into()),
+                ("Spacer".into(), "Glass".into()),
+            ])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_without_linked_bodies_then_update_links_inherits_new_body_materials() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-leftout-mat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (part, assembly) = (dir.join("part.sc"), dir.join("assembly.sc"));
+
+        save_material_boxes(&part, &[("Plate", 0.0, "Aluminum"), ("Block", 30.0, "Steel")]);
+        let mut s = Session::default();
+        let comp = run(&mut s, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+        run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Copper"}));
+        run(&mut s, "file.save", json!({"path": assembly, "linked_bodies": false}));
+
+        save_material_boxes(&part, &[("Bracket", 0.0, "Titanium"), ("Block", 30.0, "Oak"), ("Spacer", 60.0, "Brass")]);
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": assembly}));
+        assert_eq!(run(&mut opened, "component.links", json!({}))["links"][0]["changed"], json!(true));
+
+        let updated = run(&mut opened, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        assert_eq!(
+            component_materials(&opened, comp),
+            std::collections::BTreeMap::from([
+                ("Block".into(), "Copper".into()),
+                ("Bracket".into(), "Titanium".into()),
+                ("Spacer".into(), "Brass".into()),
+            ])
+        );
+        assert_eq!(run(&mut opened, "component.links", json!({}))["links"][0]["changed"], json!(false));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn material_only_change_from_default_to_custom_material_updates_linked_component() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-mat-only-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("part.sc");
+
+        for assign_default_locally in [false, true] {
+            save_material_boxes(&part, &[("Block", 0.0, "Default")]);
+            let mut s = Session::default();
+            let comp = run(&mut s, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+            if assign_default_locally {
+                // `material.assign` with Default removes the map key; it is still Default, not a divergence.
+                run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Default"}));
+                assert!(!s.doc.materials.contains_key("Block"));
+            }
+            assert_eq!(s.doc.body_material("Block"), "Default");
+            assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], json!(false));
+
+            let mut edited = Session::default();
+            run(&mut edited, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+            edited.doc_mut().user_materials.push(UserMaterial { name: "CustomMat".into(), density: 3.4, appearance: None, physical_card: None });
+            run(&mut edited, "material.assign", json!({"bodies": ["Block"], "material": "CustomMat"}));
+            run(&mut edited, "file.save", json!({"path": part}));
+
+            assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], json!(true));
+            let updated = run(&mut s, "component.update_links", json!({}));
+            assert_eq!(updated["updated"], json!(["part"]), "assign_default_locally={assign_default_locally}: {updated}");
+            assert_eq!(s.doc.body_material("Block"), "CustomMat");
+            let props = run(&mut s, "component.properties", json!({"component": comp}));
+            assert_eq!(props["bodies"][0]["material"], "CustomMat", "{props}");
+            assert!((props["total"]["mass_g"].as_f64().unwrap() - 3.4).abs() < 1e-6, "{props}");
+            assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], json!(false));
+            assert_eq!(run(&mut s, "component.update_links", json!({}))["unchanged"], json!(["part"]));
+        }
+
+        // Same-length built-in material swap immediately after `component.links` must invalidate DIGESTS.
+        save_material_boxes(&part, &[("Block", 0.0, "Steel")]);
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": part}));
+        assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], json!(false));
+        save_material_boxes(&part, &[("Block", 0.0, "Brass")]);
+        assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], json!(true));
+        let updated = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        assert_eq!(s.doc.body_material("Block"), "Brass");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn component_delete_clears_body_materials_so_reinsert_inherits_updated_material() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-delete-reinsert-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("part.sc");
+
+        save_material_boxes(&part, &[("Block", 0.0, "Default")]);
+        let mut s = Session::default();
+        let first = run(&mut s, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+        assert_eq!(s.doc.materials.get("Block").map(String::as_str), Some("Default"));
+        s.doc_mut().appearances.bodies.insert("Block".into(), solidcraft_doc::appearance::Look::custom([10, 20, 30], 1.0));
+
+        // Rewrite the child with a custom material and a new appearance.
+        let mut updated = Session::default();
+        run(&mut updated, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        updated.doc_mut().user_materials.push(UserMaterial { name: "CustomMat".into(), density: 3.4, appearance: None, physical_card: None });
+        run(&mut updated, "material.assign", json!({"bodies": ["Block"], "material": "CustomMat"}));
+        updated.doc_mut().appearances.bodies.insert("Block".into(), solidcraft_doc::appearance::Look::custom([20, 40, 60], 1.0));
+        run(&mut updated, "file.save", json!({"path": part}));
+
+        // Delete the linked component, verify cleanup and undo/redo, then re-insert in the same session.
+        run(&mut s, "component.delete", json!({"component": first}));
+        assert!(!s.doc.materials.contains_key("Block"));
+        assert!(!s.doc.appearances.bodies.contains_key("Block"));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.materials.get("Block").map(String::as_str), Some("Default"));
+        assert!(s.doc.appearances.bodies.contains_key("Block"));
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.doc.materials.contains_key("Block"));
+        assert!(!s.doc.appearances.bodies.contains_key("Block"));
+
+        let second = run(&mut s, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+        assert_eq!(s.doc.body_material("Block"), "CustomMat");
+        let props = run(&mut s, "component.properties", json!({"component": second}));
+        assert_eq!(props["bodies"][0]["material"], "CustomMat", "{props}");
+        assert!((props["total"]["mass_g"].as_f64().unwrap() - 3.4).abs() < 1e-6, "{props}");
+        let state = s.model.state();
+        let body = state.bodies.iter().find(|b| b.component == second).unwrap();
+        assert_eq!(s.doc.model_body_look(body).unwrap().color, [20, 40, 60]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
