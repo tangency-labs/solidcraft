@@ -4,11 +4,11 @@
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::size_of;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use solidcore_record::Vec3;
-use solidcraft_doc::{IDENTITY, Mat, ModelBody, ModelState, mat_inverse, mat_mul};
+use solidcraft_doc::{IDENTITY, Mat, ModelBody, ModelState, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_kernel::{KernelError, map_with_local_pools};
 
@@ -80,11 +80,10 @@ pub(crate) struct Placed<'a> {
     pub transform: Mat,
 }
 struct Prepared {
-    mesh: Option<Arc<Mesh>>,
     visibility: Vec<bool>,
     tangent: Vec<bool>,
     joins: Vec<[u32; 2]>,
-    triangles: usize,
+    triangle_count: usize,
 }
 
 pub(super) fn claim(counter: &AtomicUsize, amount: usize, limit: usize) -> bool {
@@ -103,13 +102,71 @@ pub(super) fn buffer_bytes(m: &Mesh) -> usize {
         + m.normals.capacity() * size_of::<Vec3>()
         + m.triangles.capacity() * size_of::<[u32; 3]>()
         + m.tri_face.capacity() * size_of::<u32>()
-        + m.edges.capacity() * size_of::<Vec<Vec3>>()
-        + m.edges.iter().map(|e| e.capacity() * size_of::<Vec3>()).sum::<usize>()
+        + polyline_bytes(&m.edges)
         + m.seams.capacity()
         + m.smooth_edges.capacity()
         + m.sharp_edges.capacity()
-        + m.edge_faces.capacity() * size_of::<Vec<u32>>()
-        + m.edge_faces.iter().map(|e| e.capacity() * size_of::<u32>()).sum::<usize>()
+        + adjacency_bytes(&m.edge_faces)
+}
+
+fn polyline_bytes(edges: &Vec<Vec<Vec3>>) -> usize {
+    edges.capacity() * size_of::<Vec<Vec3>>() + edges.iter().map(|line| line.capacity() * size_of::<Vec3>()).sum::<usize>()
+}
+
+fn adjacency_bytes(adjacency: &Vec<Vec<u32>>) -> usize {
+    adjacency.capacity() * size_of::<Vec<u32>>() + adjacency.iter().map(|faces| faces.capacity() * size_of::<u32>()).sum::<usize>()
+}
+
+struct SharedEdges {
+    adjacency: Vec<Vec<u32>>,
+    workspace: usize,
+}
+
+// The mesh buffers required by projection take precedence over optional edge reuse.
+struct MeshBudget {
+    limit: usize,
+    geometry: usize,
+    adjacency: usize,
+    shared: BTreeMap<usize, SharedEdges>,
+}
+
+impl MeshBudget {
+    fn new(limit: usize) -> Self {
+        Self { limit, geometry: 0, adjacency: 0, shared: BTreeMap::new() }
+    }
+
+    fn retain(&mut self, bytes: usize, group: usize, shared: Option<(usize, SharedEdges)>) -> bool {
+        let Some(geometry) = self.geometry.checked_add(bytes).filter(|&n| n <= self.limit) else { return false };
+        self.geometry = geometry;
+        if self.adjacency > self.limit - geometry {
+            self.shared.clear();
+            self.adjacency = 0;
+        }
+        if let Some((bytes, edges)) = shared
+            && bytes <= self.remaining()
+        {
+            self.shared.insert(group, edges);
+            self.adjacency += bytes;
+        }
+        true
+    }
+
+    fn remaining(&self) -> usize {
+        self.limit - self.geometry - self.adjacency
+    }
+}
+
+fn trim_mesh(mesh: &mut Mesh, share: bool) -> Option<(usize, SharedEdges)> {
+    mesh.seams = Vec::new();
+    mesh.smooth_edges = Vec::new();
+    mesh.sharp_edges = Vec::new();
+    let adjacency = std::mem::take(&mut mesh.edge_faces);
+    (share && adjacency.len() == mesh.edges.len()).then(|| {
+        let bytes = adjacency_bytes(&adjacency);
+        // A worker moves the edge polylines, copies their adjacency and flags each edge.
+        let workspace = polyline_bytes(&mesh.edges) + bytes + 3 * mesh.edges.len();
+        (bytes, SharedEdges { adjacency, workspace })
+    })
 }
 
 fn rigid(m: &Mat) -> bool {
@@ -127,74 +184,140 @@ fn rigid(m: &Mat) -> bool {
         && (x.cross(y).dot(z) - 1.).abs() < 1e-9
 }
 
-/// The export meshes of the bodies `shown` keeps, at the chord `tolerance`, with what `ask` asks
-/// for. Errors name the command `cmd`; a refusal says what `says` makes of it, and a body the
-/// kernel can't mesh comes back as the kernel's error.
+/// The export meshes of the bodies of `world` that `shown` keeps, at the chord `tolerance`, with
+/// what `ask` asks for. Errors name the command `cmd`; a refusal says what `says` makes of it, and
+/// a body the kernel can't mesh comes back as the kernel's error.
 pub(crate) fn prepare(
     s: &Session,
+    world: &ModelState,
     cmd: &str,
     tolerance: f64,
     ask: Ask,
     shown: impl Fn(&ModelBody) -> bool,
     says: fn(Refused) -> String,
 ) -> Result<Scene> {
-    let world = s.world_state()?;
-    let items = placed(s, &world, shown, cmd)?;
+    let items = placed(s, world, shown, cmd)?;
+    prepare_placed(&items, cmd, tolerance, ask, says, MESH_BYTES, tessellate)
+}
+
+fn prepare_placed(
+    items: &[Placed<'_>],
+    cmd: &str,
+    tolerance: f64,
+    ask: Ask,
+    says: fn(Refused) -> String,
+    limit: usize,
+    mesh_body: impl Fn(&Placed<'_>, &solidcraft_kernel::MeshTolerance) -> solidcraft_kernel::Result<Mesh> + Sync,
+) -> Result<Scene> {
     let progress = Stage::new("dxf_meshes", items.len());
+    let mut firsts = Vec::new();
+    let mut followers = Vec::new();
+    let mut mesh_jobs = Vec::new();
+    let mut keeps_adjacency = vec![false; items.len()];
+    for (index, item) in items.iter().enumerate() {
+        if item.first {
+            firsts.push(index);
+        } else if let Some(&first) = firsts.get(item.group)
+            && let Some(source) = items.get(first)
+            && shares_edge_order(source.body, item.body)
+        {
+            keeps_adjacency[first] = true;
+            followers.push(index);
+            continue;
+        }
+        mesh_jobs.push(index);
+    }
+
     let bytes = AtomicUsize::new(0);
-    // Each worker answers the kernel's error, or its body's mesh or why it was refused.
-    let results = map_with_local_pools(&items, WORKERS, |item| {
+    // Scenes with no eligible copies only need the atomic geometry reservation.
+    let budget = (!followers.is_empty()).then(|| Mutex::new(MeshBudget::new(limit)));
+    let tolerance = solidcraft_kernel::MeshTolerance { chord: tolerance, angle: Some(solidcraft_kernel::DISPLAY_ANGLE) };
+    let mut prepared: Vec<Option<Prepared>> = (0..items.len()).map(|_| None).collect();
+    let mut meshes: Vec<Option<Mesh>> = (0..firsts.len()).map(|_| None).collect();
+    for (index, result) in mesh_jobs.iter().copied().zip(map_with_local_pools(&mesh_jobs, WORKERS, |&index| {
         if let Err(refused) = progress.check() {
             return Ok(Err(refused));
         }
-        let mut mesh = item.body.body.mesh(&solidcraft_kernel::MeshTolerance { chord: tolerance, angle: Some(solidcraft_kernel::DISPLAY_ANGLE) })?;
-        if mesh.triangles.is_empty() {
-            return Err(KernelError::Invalid(format!("{} has no surface to mesh", item.body.name)));
-        }
-        let (visibility, tangent) = drawn_edges(&mesh, ask);
-        let joins = drawn_joins(&mesh, &visibility);
-        let triangles = mesh.triangles.len();
-        let mesh = if item.first {
-            // These are owned export buffers, not the document's cached mesh. Picking and
-            // shading data are unused by vector occlusion; edge choices were captured above.
-            // The faces stay (4 bytes a triangle, counted below): they name a silhouette's face,
-            // and tell a silhouette along a drawn edge from one across a face. So do the normals
-            // (a position's size again): they tell a surface seen edge on from a facet's lean.
-            mesh.seams = Vec::new();
-            mesh.smooth_edges = Vec::new();
-            mesh.sharp_edges = Vec::new();
-            mesh.edge_faces = Vec::new();
-            if !claim(&bytes, buffer_bytes(&mesh), MESH_BYTES) {
+        let Some(item) = items.get(index) else { return Ok(Err(Refused::Invalid("missing export body"))) };
+        let mut mesh = mesh_body(item, &tolerance)?;
+        let edges = prepared_edges(&mesh, mesh.triangle_count(), ask);
+        let geometry = if item.first {
+            let shared = trim_mesh(&mut mesh, keeps_adjacency.get(index) == Some(&true));
+            let geometry = buffer_bytes(&mesh);
+            let retained = if let Some(budget) = &budget {
+                let Ok(mut budget) = budget.lock() else { return Ok(Err(Refused::Invalid("mesh budget unavailable"))) };
+                budget.retain(geometry, item.group, shared)
+            } else {
+                claim(&bytes, geometry, limit)
+            };
+            if !retained {
                 return Ok(Err(Refused::Memory));
             }
-            Some(Arc::new(mesh))
+            Some(mesh)
         } else {
             None
         };
         if let Err(refused) = progress.advance(1) {
             return Ok(Err(refused));
         }
-        Ok(Ok(Prepared { mesh, visibility, tangent, joins, triangles }))
-    });
-    let answered = results.into_iter().collect::<solidcraft_kernel::Result<Vec<_>>>()?;
-    let mut prepared = answered.into_iter().collect::<std::result::Result<Vec<_>, Refused>>().map_err(|e| bad(cmd, says(e)))?;
-    let groups = items.iter().map(|item| item.group + 1).max().unwrap_or(0);
-    let mut meshes: Vec<Option<Arc<Mesh>>> = vec![None; groups];
-    for (item, p) in items.iter().zip(&mut prepared) {
-        if let Some(mesh) = p.mesh.take()
+        Ok(Ok((edges, geometry)))
+    })) {
+        let (edges, geometry) = result?.map_err(|e| bad(cmd, says(e)))?;
+        if let Some(mesh) = geometry
+            && let Some(item) = items.get(index)
             && let Some(slot) = meshes.get_mut(item.group)
         {
             *slot = Some(mesh);
         }
+        if let Some(slot) = prepared.get_mut(index) {
+            *slot = Some(edges);
+        }
     }
-    let meshes = meshes.into_iter().map(|m| m.ok_or_else(|| bad(cmd, "missing export geometry"))).collect::<Result<Vec<_>>>()?;
+    let budget = budget.map(Mutex::into_inner).transpose().map_err(|_| bad(cmd, "mesh budget unavailable"))?;
+    let workers = WORKERS.min(followers.len()).max(1);
+    let workspace_per_worker = budget.as_ref().map_or(0, |b| b.remaining() / workers);
+    for (index, result) in followers.iter().copied().zip(map_with_local_pools(&followers, workers, |&index| {
+        if let Err(refused) = progress.check() {
+            return Ok(Err(refused));
+        }
+        let Some(item) = items.get(index) else { return Ok(Err(Refused::Invalid("missing export body"))) };
+        let Some(source) = meshes.get(item.group).and_then(Option::as_ref) else {
+            return Ok(Err(Refused::Invalid("missing export geometry")));
+        };
+        let reuse = budget.as_ref().and_then(|b| b.shared.get(&item.group)).filter(|edges| edges.workspace <= workspace_per_worker);
+        let edges = if let Some(reuse) = reuse {
+            // The group's triangles already represent this placement in the projection.
+            // Reclassify only its edges: seams and authored splits are evaluated in place.
+            let mut mesh = Mesh {
+                edges: source.edges.iter().map(|line| line.iter().map(|point| apply_point(&item.transform, *point)).collect()).collect(),
+                edge_faces: reuse.adjacency.clone(),
+                ..Mesh::default()
+            };
+            item.body.body.flag_mesh_edges(&mut mesh);
+            prepared_edges(&mesh, source.triangle_count(), ask)
+        } else {
+            let mesh = mesh_body(item, &tolerance)?;
+            prepared_edges(&mesh, mesh.triangle_count(), ask)
+        };
+        if let Err(refused) = progress.advance(1) {
+            return Ok(Err(refused));
+        }
+        Ok(Ok(edges))
+    })) {
+        let edges = result?.map_err(|e| bad(cmd, says(e)))?;
+        if let Some(slot) = prepared.get_mut(index) {
+            *slot = Some(edges);
+        }
+    }
+    let meshes = meshes.into_iter().map(|m| m.map(Arc::new).ok_or_else(|| bad(cmd, "missing export geometry"))).collect::<Result<Vec<_>>>()?;
     let mut placements = Vec::with_capacity(items.len());
     let mut triangles = 0usize;
     for (item, p) in items.iter().zip(prepared) {
+        let p = p.ok_or_else(|| bad(cmd, "missing export edge flags"))?;
         if meshes.get(item.group).is_none_or(|m| m.edges.len() != p.visibility.len()) {
             return Err(bad(cmd, "placed edge identity changed"));
         }
-        triangles = triangles.saturating_add(p.triangles);
+        triangles = triangles.saturating_add(p.triangle_count);
         placements.push(Placement {
             mesh: item.group,
             transform: item.transform,
@@ -204,7 +327,35 @@ pub(crate) fn prepare(
             reference: false,
         });
     }
-    Ok(Scene { meshes, placements, triangles, bytes: bytes.load(Ordering::Relaxed), sources: ask.sources, reference_hides_model: true })
+    let bytes = budget.map_or_else(|| bytes.load(Ordering::Relaxed), |b| b.geometry);
+    Ok(Scene { meshes, placements, triangles, bytes, sources: ask.sources, reference_hides_model: true })
+}
+
+fn tessellate(item: &Placed<'_>, tolerance: &solidcraft_kernel::MeshTolerance) -> solidcraft_kernel::Result<Mesh> {
+    let mesh = item.body.body.mesh(tolerance)?;
+    if mesh.triangle_count() == 0 {
+        return Err(KernelError::Invalid(format!("{} has no surface to mesh", item.body.name)));
+    }
+    Ok(mesh)
+}
+
+/// An occurrence's display cells are its definition's. Do not infer edge order from
+/// matching names or equal-looking solids; the two bodies must share that definition.
+fn shares_edge_order(source: &ModelBody, follower: &ModelBody) -> bool {
+    let definition = |body: &ModelBody| body.placed_definition().unwrap_or_else(|| Arc::as_ptr(&body.display_identity()) as *const () as usize);
+    source.source_key() != 0
+        && source.source_key() == follower.source_key()
+        && definition(source) == definition(follower)
+        && !source.body.is_mesh()
+        && !follower.body.is_mesh()
+        && source.body.display_share().is_none()
+        && follower.body.display_share().is_none()
+}
+
+fn prepared_edges(mesh: &Mesh, triangle_count: usize, ask: Ask) -> Prepared {
+    let (visibility, tangent) = drawn_edges(mesh, ask);
+    let joins = drawn_joins(mesh, &visibility);
+    Prepared { visibility, tangent, joins, triangle_count }
 }
 
 /// The bodies of `world` that `shown` keeps, in its order, each placed in a group that shares one
@@ -301,6 +452,64 @@ mod tests {
         assert!(!rigid(&m));
         m[0][0] = f64::NAN;
         assert!(!rigid(&m));
+    }
+
+    #[test]
+    fn optional_adjacency_yields_to_required_mesh_buffers() {
+        let mut first = Mesh { edges: vec![vec![Vec3::ZERO, Vec3::X]], edge_faces: vec![vec![0, 1]], ..Mesh::default() };
+        let extra = Mesh { positions: vec![Vec3::ZERO; 4], ..Mesh::default() };
+        let shared = trim_mesh(&mut first, true);
+        let geometry = buffer_bytes(&first) + buffer_bytes(&extra);
+        let mut budget = MeshBudget::new(geometry);
+        assert!(budget.retain(buffer_bytes(&first), 0, shared));
+        assert!(!budget.shared.is_empty());
+        assert!(budget.retain(buffer_bytes(&extra), 1, None));
+        assert!(budget.shared.is_empty());
+        assert_eq!(budget.geometry, geometry);
+        assert_eq!(budget.remaining(), 0);
+    }
+
+    #[test]
+    fn sharing_and_budget_fallback_produce_the_same_placed_edges() {
+        let mut s = Session::default();
+        let run = |s: &mut Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();
+        let first = run(&mut s, "component.create", serde_json::json!({"name": "Part"}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", serde_json::json!({"length": 10, "width": 8, "height": 5, "operation": "new"}));
+        run(&mut s, "occurrence.copy", serde_json::json!({"occurrence": first, "translate": [30, 0, 0]}));
+        run(&mut s, "component.activate", serde_json::json!({"component": 0}));
+        let world = s.world_state().unwrap();
+        let items = placed(&s, &world, |_| true, "test").unwrap();
+        let ask = Ask { tangent_edges: true, sources: true };
+        let calls = AtomicUsize::new(0);
+        let counted = |item: &Placed<'_>, tolerance: &solidcraft_kernel::MeshTolerance| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            tessellate(item, tolerance)
+        };
+        let run_at_limit = |limit| prepare_placed(&items, "test", 0.02, ask, |why| format!("{why:?}"), limit, counted);
+        let reuse = run_at_limit(MESH_BYTES).unwrap();
+        assert_eq!(calls.swap(0, Ordering::Relaxed), 1);
+        assert_eq!(reuse.placements.len(), 2);
+        assert_eq!(reuse.meshes.len(), 1);
+
+        let first = tessellate(&items[0], &solidcraft_kernel::MeshTolerance { chord: 0.02, angle: Some(solidcraft_kernel::DISPLAY_ANGLE) }).unwrap();
+        let with_cache = reuse.bytes + adjacency_bytes(&first.edge_faces);
+        for limit in [reuse.bytes, with_cache] {
+            // The first limit excludes even the adjacency. The second leaves zero worker space.
+            let fallback = run_at_limit(limit).unwrap();
+            assert_eq!(calls.swap(0, Ordering::Relaxed), 2);
+            assert_eq!(fallback.bytes, reuse.bytes);
+            assert_eq!(fallback.triangles, reuse.triangles);
+            assert_eq!(fallback.meshes.len(), 1);
+            assert_eq!(fallback.placements.len(), 2);
+            for (a, b) in fallback.placements.iter().zip(&reuse.placements) {
+                assert_eq!(a.mesh, b.mesh);
+                assert_eq!(a.transform, b.transform);
+                assert_eq!(a.visibility, b.visibility);
+                assert_eq!(a.tangent, b.tangent);
+                assert_eq!(a.joins, b.joins);
+            }
+        }
+        assert!(run_at_limit(reuse.bytes - 1).is_err());
     }
 
     /// Two placements of one part share its first placement's geometry, the second at the move

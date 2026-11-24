@@ -40,11 +40,13 @@ pub const DOCUMENTED: &[&str] = &[
     "construct.plane.midplane",
     "construct.plane.offset",
     "construct.plane.perpendicular",
+    "construct.plane.square_to_line",
     "construct.plane.tangent",
     "construct.plane.three_points",
     "construct.plane.two_edges",
     "construct.point",
     "construct.point.along_path",
+    "construct.point.average",
     "construct.point.center",
     "construct.point.edge_plane",
     "construct.point.three_planes",
@@ -59,7 +61,11 @@ pub const DOCUMENTED: &[&str] = &[
     "contact.list",
     "document.inspect",
     "document.units",
+    "drawing.export",
+    "drawing.print",
+    "drawing.sketch.create",
     "drawing.table.edit",
+    "drawing.view.detail",
     "edit.checkpoint",
     "edit.restore_checkpoint",
     "explode.create",
@@ -71,6 +77,8 @@ pub const DOCUMENTED: &[&str] = &[
     "file.send_to_slicer",
     "frame.end_cap",
     "frame.member",
+    "frame.plate",
+    "frame.rotate_member",
     "inspect.accessibility",
     "inspect.center_of_mass",
     "inspect.colored_components",
@@ -99,6 +107,7 @@ pub const DOCUMENTED: &[&str] = &[
     "joint.rigid_group",
     "joint.screw",
     "layout.apply",
+    "layout.delete",
     "layout.get",
     "layout.reset",
     "layout.save",
@@ -109,6 +118,7 @@ pub const DOCUMENTED: &[&str] = &[
     "material.assign",
     "material.properties.validate",
     "mesh.convert",
+    "mesh.reduce",
     "motion.study",
     "motion.trace",
     "occurrence.ground",
@@ -156,6 +166,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sheet.perforate",
     "sheet.recognize",
     "sheet.refold",
+    "sheet.tab",
     "sheet.unfold",
     "sketch.arc.center_point",
     "sketch.arc.tangent",
@@ -240,6 +251,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.project",
     "sketch.project_to_surface",
     "sketch.rectangle.center",
+    "sketch.rectangle.edge_center",
     "sketch.rectangle.rounded",
     "sketch.rectangle.three_point",
     "sketch.rectangle.two_point",
@@ -249,9 +261,11 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.slot.center_point",
     "sketch.slot.center_to_center",
     "sketch.slot.overall",
+    "sketch.spline.control_knots",
     "sketch.spline.control_point",
     "sketch.spline.control_point_5",
     "sketch.spline.fit_point",
+    "sketch.spline.fit_tolerance",
     "sketch.spline3d",
     "sketch.spun_profile",
     "sketch.text",
@@ -316,6 +330,7 @@ pub const DOCUMENTED: &[&str] = &[
     "timeline.dependents",
     "timeline.play",
     "view.apply",
+    "view.browser",
     "view.delete",
     "view.fit",
     "view.grid",
@@ -333,7 +348,10 @@ pub const DOCUMENTED: &[&str] = &[
 ];
 
 /// The help for `command` in the current language, when it has any.
+/// A ribbon button kept as its planned entry for its artwork (`drawing.view.detail.planned`) shows
+/// the help of the working command it opens (`drawing.view.detail`).
 pub fn help(command: &str) -> Option<String> {
+    let command = command.strip_suffix(".planned").filter(|working| DOCUMENTED.contains(working)).unwrap_or(command);
     if !DOCUMENTED.contains(&command) {
         return None;
     }
@@ -403,6 +421,14 @@ mod tests {
             "toolbar commands without help: {missing:?}. Add `help.<id>` (two short sentences: what the tool does, \
              then when to use it) to a file in assets/locales/pending/ and the id to DOCUMENTED."
         );
+    }
+
+    /// The ribbon's Detail View, kept as its planned entry for its artwork, shows the tool's help.
+    #[test]
+    fn a_planned_ribbon_entry_shows_its_working_commands_help() {
+        crate::i18n::install();
+        assert_eq!(help("drawing.view.detail.planned"), help("drawing.view.detail"));
+        assert!(help("drawing.view.detail").is_some());
     }
 
     #[test]

@@ -71,7 +71,7 @@ fn extruded(dx: f64) -> Body {
 #[test]
 fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
     // the fillets of both bodies are cones, not surfaces of extrusion
-    use_the_two_fixes();
+    use_the_arc_cylinder_fix();
     for dx in [1e-4, 1e-3, 1e-2] {
         for reversed in [false, true] {
             let (a, b) = (rounded_box(), extruded(dx));
@@ -147,7 +147,7 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
 /// `is_cylinder`), the kind `faces_coincide` gates: a cylinder has no kind of its own.
 #[test]
 fn issue_3012_the_fillets_are_cylinders_of_the_cone_kind() {
-    use_the_two_fixes();
+    use_the_arc_cylinder_fix();
     for body in [rounded_box(), extruded(1e-4)] {
         let (_, brep) = kernel_copy(&body);
         let round: Vec<_> = brep
@@ -167,6 +167,6 @@ fn issue_3012_the_fillets_are_cylinders_of_the_cone_kind() {
 
 /// `session::set_fixes` sets the process kernel's fixes, shared by every test of this binary
 /// (they run on parallel threads): every test here takes this one set, so none can race another.
-fn use_the_two_fixes() {
-    session::set_fixes(["linear_sweep_arc_is_cylinder", "classify_edge_interval"]).unwrap();
+fn use_the_arc_cylinder_fix() {
+    session::set_fixes(["linear_sweep_arc_is_cylinder"]).unwrap();
 }

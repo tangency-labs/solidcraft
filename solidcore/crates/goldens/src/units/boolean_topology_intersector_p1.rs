@@ -3088,7 +3088,7 @@ impl NormalOrZero for Surface {
 // ---- the script, C++ side ---------------------------------------------------------------
 
 /// The imported B-reps, their counts and the resolved script of a case.
-struct Prepared {
+pub(super) struct Prepared {
     two: Two,
     ops: Vec<ROp>,
     /// The first unrunnable op (index, name), when the script was cut there.
@@ -3166,7 +3166,7 @@ pub(super) type BrepPair = (Brep, Option<Brep>);
 /// Builds the case's B-reps with the Rust kernel ([`own_breps`]) and resolves the
 /// script; `Err(Ok(output))` is the output reported when the B-reps cannot be built or an
 /// op cannot be resolved.
-fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
+pub(super) fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
     let (mut brep_a, mut brep_b) = match own_breps(&i.brep_a, i.brep_b.as_ref()) {
         Ok(Ok(x)) => x,
         Ok(Err(o)) => return Err(Box::new(Ok(o))),
@@ -3208,7 +3208,7 @@ fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Output, Harnes
 // ---- the script, Rust side --------------------------------------------------------------
 
 /// A failure of the Rust side: an error to report or an unported callee.
-enum Fail {
+pub(super) enum Fail {
     Solid(SolidError),
     Harness(HarnessError),
 }
@@ -3292,8 +3292,17 @@ fn reason_code(r: Reason) -> f64 {
 
 /// The Rust side's record and, per op run, where its output starts in the record (its
 /// code; for the ops that report one, the status follows).
-#[allow(clippy::too_many_lines)]
 fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fail> {
+    run_rust_script_counted(i, p).map(|(o, marks, _)| (o, marks))
+}
+
+/// [`run_rust_script`], with the script's kernel's count of curved intersection pieces
+/// certified to run along a face edge (`WorkCounters::curved_edge_runs`, WR-305).
+#[allow(clippy::too_many_lines)]
+pub(super) fn run_rust_script_counted(
+    i: &Inputs,
+    p: Prepared,
+) -> Result<(Vec<f64>, Vec<usize>, u64), Fail> {
     let Prepared { mut two, ops, cut } = p;
     let mut k = Kernel::default();
     let hb = two.breps[1].as_ref().map(|_| brep_h(1));
@@ -3804,7 +3813,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
     }
     let _ = registered;
     put_cut(&mut o, cut.as_ref());
-    Ok((o, marks))
+    Ok((o, marks, k.work_counters.curved_edge_runs()))
 }
 
 // ---- part 2's ops (unit boolean.topology_intersector_p2), Rust side -----------------------

@@ -183,3 +183,21 @@ fn a_sketch_on_a_plane_with_an_origin_given_as_expressions_follows_its_parameter
         assert_eq!(s.doc, before);
     }
 }
+
+#[test]
+fn an_expression_in_a_plane_direction_is_named_not_reported_as_missing() {
+    // #19965: `x_dir` was there, so "plane needs x_dir" misled; only `origin` takes expressions.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "30 deg", "unit": "deg"}));
+    let refused = |s: &mut Session, plane: Value| {
+        s.execute("sketch.create", &json!({"plane": plane, "name": "S"})).err().map(|e| e.to_string()).unwrap_or_default()
+    };
+    let e = refused(&mut s, json!({"origin": [0, 0, 0], "x_dir": ["cos(a)", "sin(a)", 0], "y_dir": [0, 0, 1]}));
+    assert!(e.contains("`x_dir` must be three numbers") && !e.contains("needs x_dir"), "{e}");
+    let e = refused(&mut s, json!({"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": ["0", "0", "1"]}));
+    assert!(e.contains("`y_dir` must be three numbers"), "{e}");
+    // Absent stays "needs", and numbers still make the plane.
+    let e = refused(&mut s, json!({"origin": [0, 0, 0], "x_dir": [1, 0, 0]}));
+    assert!(e.contains("plane needs y_dir"), "{e}");
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "S"}));
+}

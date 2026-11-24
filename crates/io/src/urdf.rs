@@ -191,11 +191,38 @@ fn steps(kind: JointKind) -> Option<Vec<(Step, Vec3, usize)>> {
     })
 }
 
-/// `raw` with every character but `[A-Za-z0-9_]` (and `-` in file names) replaced by `_`, so it
-/// is a valid name in URDF, SDFormat and XML.
+/// `raw` with every character but `[A-Za-z0-9_]` replaced by `_`, so it is a valid name in URDF,
+/// SDFormat and XML. A file name is taken in Unicode NFC and also keeps `-`, any Unicode letter or
+/// digit and combining marks, so parts named in another script keep distinct, readable mesh files
+/// (#20409).
 fn sanitise(raw: &str, file: bool) -> String {
-    let s: String = raw.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || (file && c == '-') { c } else { '_' }).collect();
-    if s.is_empty() { "part".into() } else { s }
+    use unicode_normalization::{UnicodeNormalization as _, char::is_combining_mark};
+    let keep = |c: char| c.is_ascii_alphanumeric() || c == '_' || (file && (c == '-' || c.is_alphanumeric() || is_combining_mark(c)));
+    let s: String =
+        if file { raw.nfc().map(|c| if keep(c) { c } else { '_' }).collect() } else { raw.chars().map(|c| if keep(c) { c } else { '_' }).collect() };
+    if s.is_empty() {
+        return "part".into();
+    }
+    if !file {
+        return s;
+    }
+    // File systems allow 255 bytes a name, and a CJK character takes three in UTF-8: keep the stem
+    // to a length that leaves room for a `_N` suffix and the extension, cut on a character.
+    let mut end = s.len().min(MAX_FILE_STEM);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
+}
+
+/// Bytes kept of a sanitised file name's stem, well under the common 255-byte limit.
+const MAX_FILE_STEM: usize = 200;
+
+/// A file name as file systems compare it: lower case, then NFC, as macOS treats a name in its
+/// composed and decomposed Unicode forms as one file.
+fn file_key(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization as _;
+    name.to_lowercase().nfc().collect()
 }
 
 /// Unique names over links, joints and files (SDFormat refuses a joint named like a link).
@@ -223,7 +250,7 @@ impl Names {
         let base = sanitise(raw, true);
         let mut name = format!("{base}.{ext}");
         let mut k = 2;
-        while !self.taken.insert(name.to_ascii_lowercase()) {
+        while !self.taken.insert(file_key(&name)) {
             name = format!("{base}_{k}.{ext}");
             k += 1;
         }
@@ -236,7 +263,7 @@ impl Names {
     /// `fold`). Names are never given back, so every suffix below the one kept for `base` is
     /// taken, and the search starts there.
     fn free(&mut self, base: String, fold: bool) -> String {
-        let key = |n: &str| if fold { n.to_ascii_lowercase() } else { n.to_string() };
+        let key = |n: &str| if fold { file_key(n) } else { n.to_string() };
         if self.taken.insert(key(&base)) {
             return base;
         }
@@ -353,7 +380,7 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, decals: &[UrdfDecal], name
 
 /// The placement `occurrence_world` resolves for an occurrence: through the first occurrence of
 /// each parent component.
-fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
+pub(crate) fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
     let mut path = Vec::new();
     let mut cur = doc.occurrences.iter().find(|o| o.id == occ);
     for _ in 0..1000 {
@@ -1205,6 +1232,20 @@ mod tests {
         // File systems that ignore case would make these one file.
         assert_eq!(n.file("t-base"), "t-base.stl");
         assert_eq!(n.file("t-Base"), "t-Base_2.stl");
+        // Parts named in another script keep distinct mesh files (#20409); link names stay ASCII.
+        assert_eq!(n.file("demo-红块"), "demo-红块.stl");
+        assert_eq!(n.file("demo-蓝块"), "demo-蓝块.stl");
+        assert_eq!(n.file("Ärm"), "Ärm.stl");
+        assert_eq!(n.file("ärm"), "ärm_2.stl", "case is folded beyond ASCII too");
+        assert_eq!(n.take("红块"), "__");
+        // One name in its composed and decomposed forms is one file; a combining accent is kept.
+        assert_eq!(n.file("café"), "café.stl");
+        assert_eq!(n.file("cafe\u{301}"), "café_2.stl");
+        assert_eq!(n.file("\u{1100}\u{1161}"), "\u{ac00}.stl");
+        assert_eq!(n.file("\u{ac00}"), "\u{ac00}_2.stl");
+        // A long name is cut on a character, leaving room for the suffix and extension.
+        let long = n.file(&"块".repeat(100));
+        assert!(long.len() <= 255 && long.ends_with(".stl") && long.starts_with("块"), "{long}");
     }
 
     #[test]

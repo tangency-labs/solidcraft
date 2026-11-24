@@ -848,9 +848,16 @@ fn read_openpgp_record(bytes: &[u8]) -> std::result::Result<(ProvenanceRecord, M
 /// The embedded key's self-signatures and a signing subkey's binding (and back-signature) are
 /// checked; whether the primary key belongs to the person it names is the reader's trust
 /// decision.
+///
+/// The key's own state is checked too (#15722): a key that has expired, or that has been
+/// revoked, is not a signer to trust, and its signature used to be reported as valid.
 fn verify_openpgp(key: &[u8], signature: &[u8], message: &[u8]) -> std::result::Result<(String, Option<String>), String> {
     let (key, _) = SignedPublicKey::from_reader_single(Cursor::new(key)).map_err(|error| format!("public key: {error}"))?;
     let (signature, _) = DetachedSignature::from_reader_single(Cursor::new(signature)).map_err(|error| format!("signature: {error}"))?;
+    // The key's own paperwork: how long it is good for, and whether it was revoked. Read
+    // BEFORE the bindings: a key that was revoked does not get to be valid because its
+    // bindings verify.
+    check_key_state(&key)?;
     // The embedded key must be internally coherent: its self-signatures, and a signing subkey's
     // binding to the primary key (and back-signature), have to verify. A signature is reported
     // under the primary key's fingerprint, so trusting the primary covers its bound subkeys.
@@ -871,6 +878,70 @@ fn verify_openpgp(key: &[u8], signature: &[u8], message: &[u8]) -> std::result::
     let fingerprint = format!("{:X}", key.fingerprint());
     let user_id = key.details.users.first().and_then(|user| user.id.as_str()).map(str::to_owned);
     Ok((fingerprint, user_id))
+}
+
+/// Whether the key that signed is good for: not expired, not revoked (#15722).
+///
+/// The key's self-signature says how long the key is good for (the expiry is the day it
+/// was signed plus the time it carries), and a revocation signature says the key is not
+/// good any more. Neither was read before: a signature made by a key that had expired, or
+/// that had been revoked, was still reported as valid.
+fn check_key_state(key: &SignedPublicKey) -> std::result::Result<(), String> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs()).unwrap_or_default();
+    // The primary key's revocation: the parser puts the revocation signatures (the 0x20
+    // ones) there and nothing else.
+    if !key.details.revocation_signatures.is_empty() {
+        return Err("the signing key was revoked".into());
+    }
+    // The primary key's expiry: the self-signature says when the key stops being good.
+    // A renewed key keeps the old self-signature next to the new one, so the newest
+    // self-signature of each user ID is the one that counts (#15722).
+    let expiry = key.details.users.iter().filter_map(|user| expiry_at(user.signatures.iter())).min();
+    if let Some(expiry) = expiry
+        && expiry <= now
+    {
+        return Err(format!("the signing key expired on {}", day(expiry)));
+    }
+    // The signing subkey: its own revocation and its own expiry. A subkey that is bound to
+    // a live primary key can still be revoked on its own.
+    for subkey in &key.public_subkeys {
+        if subkey.signatures.iter().any(|signature| signature.typ() == Some(pgp::packet::SignatureType::SubkeyRevocation)) {
+            return Err("the signing key's subkey was revoked".into());
+        }
+        let bindings = subkey.signatures.iter().filter(|signature| signature.typ() == Some(pgp::packet::SignatureType::SubkeyBinding));
+        if let Some(expiry) = expiry_at(bindings)
+            && expiry <= now
+        {
+            return Err(format!("the signing key's subkey expired on {}", day(expiry)));
+        }
+    }
+    Ok(())
+}
+
+/// The day the key stops being good for, in seconds since the epoch.
+///
+/// The expiry is the day the self-signature was made plus the time it carries. A key
+/// that was renewed keeps the older self-signature next to the newer one, and it is
+/// the newer one that says how long the key is good for, so the self-signature with
+/// the latest creation time is the one that counts (#15722).
+fn expiry_at<'a>(signatures: impl Iterator<Item = &'a pgp::packet::Signature>) -> Option<u64> {
+    let newest = signatures
+        .filter_map(|signature| signature.created().map(|created| (created.as_secs(), signature)))
+        .max_by_key(|(created, _)| *created)
+        .map(|(_, signature)| signature);
+    newest.and_then(|signature| expiry_of(signature.created().map(|created| created.as_secs()), signature.key_expiration_time()))
+}
+
+/// The day a key stops being good for: the day its self-signature was made plus the
+/// time that self-signature carries.
+fn expiry_of(created: Option<u32>, expiry: Option<pgp::types::Duration>) -> Option<u64> {
+    Some(u64::from(created?) + u64::from(expiry?.as_secs()))
+}
+
+/// The day a time is, as `YYYY-MM-DD`.
+fn day(secs: u64) -> String {
+    let (year, month, day, _, _, _) = crate::civil(secs);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 #[cfg(test)]
@@ -959,6 +1030,75 @@ mod tests {
             }
             PgpSerialize::to_bytes(&public_key).unwrap()
         }
+
+        /// The same key with its expiry extended: an older self-signature with a short
+        /// expiry and a newer one with a longer expiry, the way GnuPG leaves a renewed
+        /// key (#15722).
+        fn renewed_public(&self) -> Vec<u8> {
+            let mut public_key = self.key.to_public_key();
+            let id = public_key.details.users[0].id.clone();
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs() as u32).unwrap_or_default();
+            let older = self.self_certification(&id, now - 30 * 86_400, 86_400);
+            let newer = self.self_certification(&id, now, 3_650 * 86_400);
+            public_key.details.users[0].signatures = vec![older, newer];
+            PgpSerialize::to_bytes(&public_key).unwrap()
+        }
+
+        /// The same key with a self-signature that has already run out: the key stops
+        /// being good for on the day the self-signature was made plus the time it
+        /// carries, and that day is in the past.
+        fn expired_public(&self) -> Vec<u8> {
+            let mut public_key = self.key.to_public_key();
+            let id = public_key.details.users[0].id.clone();
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs() as u32).unwrap_or_default();
+            public_key.details.users[0].signatures = vec![self.self_certification(&id, now - 30 * 86_400, 86_400)];
+            PgpSerialize::to_bytes(&public_key).unwrap()
+        }
+
+        /// A self-signature over the key's user ID, made on a given day and carrying a
+        /// given expiry.
+        fn self_certification(&self, id: &pgp::packet::UserId, created: u32, expiry: u32) -> pgp::packet::Signature {
+            let mut config = pgp::packet::SignatureConfig::v4(
+                pgp::packet::SignatureType::CertPositive,
+                pgp::crypto::public_key::PublicKeyAlgorithm::EdDSALegacy,
+                HashAlgorithm::Sha256,
+            );
+            config.hashed_subpackets = vec![
+                pgp::packet::Subpacket::regular(pgp::packet::SubpacketData::SignatureCreationTime(pgp::types::Timestamp::from_secs(created)))
+                    .unwrap(),
+                pgp::packet::Subpacket::regular(pgp::packet::SubpacketData::KeyExpirationTime(pgp::types::Duration::from_secs(expiry))).unwrap(),
+                pgp::packet::Subpacket::regular(pgp::packet::SubpacketData::IssuerFingerprint(self.key.primary_key.fingerprint())).unwrap(),
+            ];
+            config.unhashed_subpackets =
+                vec![pgp::packet::Subpacket::regular(pgp::packet::SubpacketData::IssuerKeyId(self.key.primary_key.legacy_key_id())).unwrap()];
+            config
+                .sign_certification(
+                    &self.key.primary_key,
+                    self.key.primary_key.public_key(),
+                    &pgp::types::Password::empty(),
+                    pgp::types::Tag::UserId,
+                    id,
+                )
+                .unwrap()
+        }
+
+        /// The same key with a revocation on it: the parser puts the revocation
+        /// signatures there and nothing else, so one is enough to say the key was
+        /// revoked (#15722).
+        fn revoked_public(&self) -> Vec<u8> {
+            let mut public_key = self.key.to_public_key();
+            let config = pgp::packet::SignatureConfig::v4(
+                pgp::packet::SignatureType::KeyRevocation,
+                pgp::crypto::public_key::PublicKeyAlgorithm::EdDSALegacy,
+                HashAlgorithm::Sha256,
+            );
+            let revocation = config
+                .sign_key(&self.key.primary_key, &pgp::types::Password::empty(), &self.key.primary_key)
+                .map_err(|error| format!("test revocation: {error}"))
+                .unwrap();
+            public_key.details.revocation_signatures.push(revocation);
+            PgpSerialize::to_bytes(&public_key).unwrap()
+        }
     }
 
     impl OpenPgpSigner for TestPgpSigner {
@@ -1011,6 +1151,36 @@ mod tests {
 
     fn unsigned_save(doc: &Document, chain: &ProvenanceChain) -> Vec<u8> {
         crate::write_design_container_with_provenance(doc, crate::DesignCompression::Fast, None, None, None, &save(None, chain, None, None)).unwrap()
+    }
+
+    /// A save over the open limit keeps the history it wrote: the bytes just written are read back
+    /// without that limit, while opening such a file still needs it raised (#18686). A 1 MB limit for
+    /// this thread stands in for the real one.
+    #[test]
+    fn a_chain_written_over_the_open_limit_is_read_back_from_the_save() {
+        let first = signed(&Document::new("Plate"), &TestSigner::new(7), &ProvenanceChain::default());
+        let chain = crate::read_design_provenance_chain(&first).expect("the signed file has a chain");
+        let mut doc = Document::new("Noisy import");
+        doc.add_feature(
+            solidcraft_doc::FeatureKind::Import {
+                file: "noisy.step".into(),
+                step: crate::design::tests::noise(2_600_000).into(),
+                components: Vec::new(),
+                skip: Vec::new(),
+                records: None,
+            },
+            None,
+        )
+        .unwrap();
+        crate::limits::test_cap::set(Some(1 << 20));
+        let big = unsigned_save(&doc, &chain);
+        let over = big.len() > crate::limits::max_design_bytes();
+        let opened = crate::read_design_provenance_chain(&big);
+        let kept = crate::written_design_provenance_chain(&big);
+        crate::limits::test_cap::set(None);
+        assert!(over, "{} bytes is not past the limit", big.len());
+        assert!(opened.is_none(), "opening still keeps to the limit");
+        assert_eq!(kept.expect("the save's own chain is read back").records.len(), chain.records.len());
     }
 
     fn report(bytes: &[u8]) -> Option<ProvenanceReport> {
@@ -1174,6 +1344,45 @@ mod tests {
         assert!(reader.provenance_chain().is_none(), "a chain that cannot validate must not be appended to");
     }
 
+    /// A design read from memory with its model gives no model when the container is signed (the
+    /// signature does not cover the cache), and the model when it is not.
+    #[test]
+    fn a_signed_container_read_from_memory_gives_no_model() {
+        let mut doc = Document::new("Plate");
+        doc.add_feature(
+            solidcraft_doc::FeatureKind::Box {
+                corner: solidcraft_doc::point_expr(solidcore_record::Vec3::ZERO),
+                length: "10".into(),
+                width: "20".into(),
+                height: "5".into(),
+                operation: solidcraft_doc::Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let saved = model.saved(&doc).unwrap();
+        let unsigned = crate::write_design_container_with_cache(&doc, crate::DesignCompression::Fast, None, Some(&saved)).unwrap();
+        assert!(crate::read_design_with_model(&unsigned).unwrap().1.is_some(), "an unsigned design keeps its model");
+        let signer = TestSigner::new(7);
+        let chain = ProvenanceChain::default();
+        let signed = crate::write_design_container_with_provenance(
+            &doc,
+            crate::DesignCompression::Fast,
+            None,
+            Some(&saved),
+            None,
+            &save(Some(SignatureSource::Cose(&signer)), &chain, None, None),
+        )
+        .unwrap();
+        assert!(crate::DesignContainerReader::new(Cursor::new(&signed[..])).unwrap().has_model_cache(), "the signed file keeps the cache");
+        let (read, model) = crate::read_design_with_model(&signed).unwrap();
+        assert!(model.is_none(), "a signed design is evaluated from its timeline");
+        assert_eq!(read.name, "Plate");
+    }
+
     #[test]
     fn a_signed_container_reports_its_provenance_entry_without_reading_it() {
         let path = std::env::temp_dir().join(format!("solidcraft-signed-entry-{}.sc", std::process::id()));
@@ -1183,6 +1392,31 @@ mod tests {
         let unsigned = std::env::temp_dir().join(format!("solidcraft-unsigned-entry-{}.sc", std::process::id()));
         std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
         assert!(!crate::has_design_provenance(&unsigned.to_string_lossy()));
+        let _ = std::fs::remove_file(&unsigned);
+    }
+
+    /// Reading a design for opening gives its document, model, signature presence, provenance
+    /// records and signature check from one reading: a signed file gives no model, its records and
+    /// (when asked) its check, which matches the check of the file on its own.
+    #[test]
+    fn reading_a_design_once_gives_its_model_signature_records_and_check() {
+        let path = std::env::temp_dir().join(format!("solidcraft-read-once-signed-{}.sc", std::process::id()));
+        let bytes = signed(&Document::new("Plate"), &TestSigner::new(7), &ProvenanceChain::default());
+        std::fs::write(&path, &bytes).unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        let file = crate::read_design_file_once(&shown, None::<fn(crate::DesignPreview)>, true).unwrap();
+        assert!(file.signed && file.model.is_none(), "a signed file is evaluated from its timeline");
+        assert_eq!(file.doc.name, "Plate");
+        assert_eq!(file.chain, crate::read_design_provenance_chain(&bytes));
+        assert_eq!(file.report, report(&bytes), "the check is the check of these bytes");
+        assert!(file.report.is_some());
+        let quiet = crate::read_design_file_once(&shown, None::<fn(crate::DesignPreview)>, false).unwrap();
+        assert!(quiet.signed && quiet.report.is_none(), "no check unless asked");
+        let _ = std::fs::remove_file(&path);
+        let unsigned = std::env::temp_dir().join(format!("solidcraft-read-once-unsigned-{}.sc", std::process::id()));
+        std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
+        let file = crate::read_design_file_once(&unsigned.to_string_lossy(), None::<fn(crate::DesignPreview)>, true).unwrap();
+        assert!(!file.signed && file.chain.is_none() && file.report.is_none());
         let _ = std::fs::remove_file(&unsigned);
     }
 
@@ -1250,6 +1484,81 @@ mod tests {
         assert_eq!(read_design(&tampered).unwrap().name, "Plate");
     }
 
+    /// #15722: a signature made by a key that was revoked is not a valid signature. The
+    /// revocation used to be ignored, and the record was reported as valid.
+    #[test]
+    fn a_revoked_signing_key_is_not_valid() {
+        let signer = TestPgpSigner::new(31);
+        let bytes = signed_pgp(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let entries = read_entries(&bytes);
+        let mut envelope = envelope(entries.get(ENTRY).unwrap());
+        let mut wire: OpenPgpWire = decode(&envelope.records[0]).unwrap();
+        wire.key = signer.revoked_public().into();
+        let mut encoded = Vec::new();
+        ciborium::ser::into_writer(&wire, &mut encoded).unwrap();
+        *envelope.records.last_mut().unwrap() = serde_bytes::ByteBuf::from(encoded);
+        let revoked = replace_entry(&bytes, ENTRY, &encode(&envelope));
+        let report = self::report(&revoked).unwrap();
+        assert!(matches!(&report.status, ProvenanceStatus::Invalid(reason) if reason.contains("revoked")), "{:?}", report.status);
+        assert_eq!(read_design(&revoked).unwrap().name, "Plate");
+    }
+
+    /// #15722: extending the expiry of a key adds a newer self-signature and leaves the
+    /// older, shorter one in the key. The most recent self-signature is the one that says
+    /// how long the key is good for, so a renewed key is not reported as expired.
+    #[test]
+    fn a_renewed_key_is_not_expired() {
+        let signer = TestPgpSigner::new(32);
+        let bytes = signed_pgp(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let entries = read_entries(&bytes);
+        let mut envelope = envelope(entries.get(ENTRY).unwrap());
+        let mut wire: OpenPgpWire = decode(&envelope.records[0]).unwrap();
+        wire.key = signer.renewed_public().into();
+        let mut encoded = Vec::new();
+        ciborium::ser::into_writer(&wire, &mut encoded).unwrap();
+        *envelope.records.last_mut().unwrap() = serde_bytes::ByteBuf::from(encoded);
+        let renewed = replace_entry(&bytes, ENTRY, &encode(&envelope));
+        let report = self::report(&renewed).unwrap();
+        assert!(matches!(report.status, ProvenanceStatus::Valid), "{:?}", report.status);
+        assert_eq!(read_design(&renewed).unwrap().name, "Plate");
+    }
+
+    /// #15722: a key whose only self-signature has already run out is still reported
+    /// as expired: the newest self-signature counts, and here it says the key is past
+    /// its expiry.
+    #[test]
+    fn an_expired_key_is_still_expired() {
+        let signer = TestPgpSigner::new(33);
+        let bytes = signed_pgp(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let entries = read_entries(&bytes);
+        let mut envelope = envelope(entries.get(ENTRY).unwrap());
+        let mut wire: OpenPgpWire = decode(&envelope.records[0]).unwrap();
+        wire.key = signer.expired_public().into();
+        let mut encoded = Vec::new();
+        ciborium::ser::into_writer(&wire, &mut encoded).unwrap();
+        *envelope.records.last_mut().unwrap() = serde_bytes::ByteBuf::from(encoded);
+        let expired = replace_entry(&bytes, ENTRY, &encode(&envelope));
+        let report = self::report(&expired).unwrap();
+        assert!(matches!(&report.status, ProvenanceStatus::Invalid(reason) if reason.contains("expired")), "{:?}", report.status);
+        assert_eq!(read_design(&expired).unwrap().name, "Plate");
+    }
+
+    /// #15722: a key stops being good for on the day its self-signature was made plus the
+    /// time that self-signature carries.
+    #[test]
+    fn a_key_expires_on_the_day_it_was_signed_plus_its_time() {
+        assert_eq!(expiry_of(Some(1_000), Some(pgp::types::Duration::from_secs(86_400))), Some(87_400));
+        assert_eq!(expiry_of(Some(1_000), None), None, "a key with no expiry never expires");
+        assert_eq!(expiry_of(None, Some(pgp::types::Duration::from_secs(1))), None, "a key with no creation day has no expiry");
+    }
+
+    /// The day a time is, the way the message about an expired key says it.
+    #[test]
+    fn a_day_is_written_as_year_month_day() {
+        let (year, month, day, _, _, _) = crate::civil(0);
+        assert_eq!(format!("{year:04}-{month:02}-{day:02}"), "1970-01-01");
+    }
+
     #[test]
     fn a_tampered_openpgp_manifest_is_invalid() {
         let bytes = signed_pgp(&Document::new("Plate"), &TestPgpSigner::new(11), &ProvenanceChain::default());
@@ -1289,7 +1598,7 @@ mod tests {
         let id = drawing.allocate_id(&mut ids).unwrap();
         drawing.sources.push(Source { id, path: None });
         doc.drawings.push(std::sync::Arc::new(drawing));
-        doc.plugin_data.insert("demo/state.bin".into(), solidcraft_doc::canvas::base64_encode(b"state").into());
+        doc.plugin_data.insert("demo/state.bin".into(), b"state".into());
         let bytes = signed(&doc, &TestSigner::new(7), &ProvenanceChain::default());
         assert_eq!(report(&bytes).unwrap().status, ProvenanceStatus::Valid);
         let entries = read_entries(&bytes);

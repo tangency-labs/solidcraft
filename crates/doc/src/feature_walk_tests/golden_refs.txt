@@ -1,6 +1,8 @@
 newer_file_feature
 frame_end_cap
   remap_refs: ends[0].member.feature, ends[0].plane.base.base.feature
+frame_member_turn
+  remap_refs: member.feature
 body_transfer
   remap_bodies: bodies[0]
 sketch
@@ -84,6 +86,7 @@ draft
   remap_bodies: body
 construction_plane
   remap_refs: plane.base.base.feature
+construction_plane_square_to_line
 split
   remap_refs: plane.base.base.feature
   remap_bodies: body, tool.body
@@ -114,10 +117,12 @@ pipe
   remap_bodies: targets[0]
 frame_member
   sketches: [1]
-  remap_refs: path_sketch
+  remap_refs: pairs[0].a.name, path_sketch
 frame_member_sketch
   sketches: [1, 2]
   remap_refs: path_sketch, profile.sketch
+frame_plate
+  remap_refs: member.feature, plane.base.base.feature
 emboss
   sketches: [1]
   remap_refs: sketch
@@ -158,6 +163,10 @@ sheet_fold
   remap_refs: sketch
   remap_bodies: body
 sheet_path
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: body
+sheet_tab
   sketches: [1]
   remap_refs: sketch
   remap_bodies: body
@@ -250,6 +259,8 @@ move
   remap_bodies: bodies[0]
 import
 mesh_convert
+  remap_bodies: body
+mesh_reduce
   remap_bodies: body
 mesh_import
 repair

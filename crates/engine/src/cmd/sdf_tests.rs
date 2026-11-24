@@ -57,11 +57,11 @@ fn a_model_folder_holds_the_body_the_decal_and_the_files_naming_them() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]}));
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
-    let data = solidcraft_doc::canvas::base64_encode(&png);
-    run(&mut s, "canvas.decal", json!({"data": data, "face": [20, 15, 10], "width": 8, "name": "Aruco"}));
+    let data = crate::tests::image_file(&png);
+    run(&mut s, "canvas.decal", json!({"path": data, "face": [20, 15, 10], "width": 8, "name": "Aruco"}));
     // An image placed as a canvas is a texture of the model too; a hidden one is not.
-    run(&mut s, "canvas.insert", json!({"data": data, "plane": "XY", "width": 8, "opacity": 1, "name": "Tag"}));
-    run(&mut s, "canvas.insert", json!({"data": data, "plane": "XY", "width": 8, "name": "Hidden"}));
+    run(&mut s, "canvas.insert", json!({"path": data, "plane": "XY", "width": 8, "opacity": 1, "name": "Tag"}));
+    run(&mut s, "canvas.insert", json!({"path": data, "plane": "XY", "width": 8, "name": "Hidden"}));
     run(&mut s, "canvas.edit", json!({"canvas": "Hidden", "visible": false}));
     let body = s.model.state().bodies[0].name.clone();
     let d = temp("box");

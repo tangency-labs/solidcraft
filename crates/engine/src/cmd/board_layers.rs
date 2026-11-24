@@ -393,14 +393,13 @@ pub(super) fn decals(
         let (z, y_dir) = if top { (thickness, [0.0, 1.0, 0.0]) } else { (0.0, [0.0, -1.0, 0.0]) };
         let c = Vec2::new(look.centre.x + offset.x, look.centre.y + offset.y);
         let p = json!({
-            "data": solidcraft_doc::canvas::base64_encode(&look.png),
             "plane": {"origin": [0.0, 0.0, z], "x_dir": [1.0, 0.0, 0.0], "y_dir": y_dir},
             "at": [c.x, c.y, z],
             "width": look.width,
             "opacity": 1.0,
             "name": name,
         });
-        match run(s, "canvas.insert", &p) {
+        match super::sketch_canvas::place(s, &p, "canvas.insert", false, look.png) {
             Ok(_) => names.push(name.to_string()),
             Err(e) => warnings.push(format!("The board's {} look could not be laid on it: {e}", if top { "top" } else { "bottom" })),
         }

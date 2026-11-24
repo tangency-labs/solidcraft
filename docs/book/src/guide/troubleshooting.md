@@ -165,6 +165,9 @@ which API it was and skips it on this computer, going on in the same order. Safe
 software rendering leave it out too, so that driver is not loaded again (unless every API has
 crashed, when all are tried again). A new SolidCraft version tries it once more. Choosing the API in **Preferences > Graphics > Graphics
 API**, or setting `WGPU_BACKEND`, still starts it. This works the same on every system.
+Only a crash after SolidCraft started loading a graphics API counts, and only against an API
+the platform supports (never Metal or Direct3D 12 on Linux). A start that stops earlier, such as one
+missing a system library the window needs, blames no API.
 
 If the graphics driver stops responding while SolidCraft is open (the window stays white or
 black and every click takes a second), SolidCraft notices after a few seconds, closes, and

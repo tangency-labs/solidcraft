@@ -167,6 +167,22 @@ impl Lineage {
             })
             .collect()
     }
+
+    /// [`Lineage::lumps`] for pieces that become bodies of their own rather than one body's lumps: each piece is
+    /// named through a stage of its own, so [`order_lumps`] never trades their body names (a frame tube split where
+    /// another overlaps it keeps its pieces in order along its line, #4003).
+    pub(crate) fn pieces(whole: &Body, lineage: Option<&Lineage>, pieces: &[Body]) -> Vec<Option<Lineage>> {
+        let Some(lineage) = lineage else { return vec![None; pieces.len()] };
+        pieces
+            .iter()
+            .map(|piece| {
+                let history = piece.history()?.clone();
+                let body = crate::ModelBody::new(String::new(), whole.clone(), 0);
+                let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: lineage.clone(), names: OnceLock::new() })));
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage] })
+            })
+            .collect()
+    }
 }
 
 /// A body made during a feature, with its lineage (`None`: not known; it is then named from
@@ -963,12 +979,16 @@ impl crate::ModelBody {
         crate::ModelBody::new(name, made.body, feature).with_lineage(made.lineage)
     }
 
-    /// This body as the feature changed it: under its name, from the feature that made it and with
-    /// its `component`, so a later step of the same feature still counts it among that
-    /// component's bodies (the copies of a pattern's second cut, #14305).
+    /// This body as the feature changed it: under its name, from the feature that made it, with
+    /// its `component` and the frame a transfer gave it, so a later step of the same feature still
+    /// counts it among that component's bodies (the copies of a pattern's second cut, #14305) and
+    /// meets it where it is placed (a mirror's round after its join, #19451).
     pub(crate) fn remade(&self, made: Traced) -> Self {
         let mut remade = Self::traced_new(self.name.clone(), made, self.feature);
         remade.component = self.component;
+        remade.transferred = self.transferred;
+        remade.source_name = self.source_name.clone();
+        remade.source_transform = self.source_transform;
         remade
     }
 

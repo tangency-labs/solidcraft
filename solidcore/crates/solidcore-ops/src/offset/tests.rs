@@ -4,10 +4,12 @@
 use std::f64::consts::PI;
 
 use solidcore::geom::extent3d::Extent3d;
+use solidcore::geom::vector3d::Point3;
 use solidcore::kernel::Kernel;
-use solidcore::query::api_queries::face_bounding_box;
+use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 
 use super::{offset_faces, offset_sheet, shell, thicken};
+use crate::blend::{blend, Blend, Corners};
 use crate::session::{self, run};
 use crate::{make_box, make_cylinder, make_sphere, Body, Error, Order};
 
@@ -70,6 +72,70 @@ fn a_block_shells_to_its_closed_forms() {
     let o = order(&b);
     shell(&b, &o, &[top(&b, &o)], 1.0).unwrap();
     assert!(rel(volume(&b), 32.0 * 22.0 * 11.0 - ABC) < 1e-9);
+}
+
+/// A shell keeps its rounds by their definitions. The shell's working copy is the body
+/// itself, definitions included, so a round's offset is the round of the moved radius on the
+/// offset supports (`Surface::create_offset_surface`, solidcore #2487), not a generic offset of
+/// its net. A cylinder r 20, z -20..20 with its bottom rim rounded r 10.3, shelled 2 in and
+/// open at the top: both round faces stay blends, the outer one r 10.3 and the cavity's r 8.3.
+#[test]
+fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
+    all_fixes();
+    let body = make_cylinder([0.0, 0.0, -20.0], 20.0, 40.0).unwrap();
+    // the bottom rim, away from the cylinder's seam at x = 20, y = 0
+    let rim = edge_at(&body, [0.0, 20.0, -20.0]);
+    blend(&body, Blend::Round, &[rim], &[10.3], &[], Corners::Filled).unwrap();
+    let o = order(&body);
+    let open = face(&body, &o, |bx| {
+        (bx.min().z - 20.0).abs() < 1e-9 && (bx.max().z - 20.0).abs() < 1e-9
+    });
+    shell(&body, &o, &[open], -2.0).unwrap();
+    let (record, _) = body.to_record().unwrap();
+    let kinds: Vec<&str> = record
+        .faces
+        .iter()
+        .map(|f| match &f.surface {
+            solidcore_record::brep::Surface::Plane { .. } => "plane",
+            solidcore_record::brep::Surface::Cylinder { .. } => "cylinder",
+            solidcore_record::brep::Surface::Torus { .. } => "torus",
+            solidcore_record::brep::Surface::Spline { .. } => "spline",
+            solidcore_record::brep::Surface::RationalSpline { .. } => "rational_spline",
+            solidcore_record::brep::Surface::Blend { .. } => "blend",
+            _ => "other",
+        })
+        .collect();
+    let mut radii = Vec::new();
+    for f in &record.faces {
+        let solidcore_record::brep::Surface::Blend { definition } = &f.surface else {
+            continue;
+        };
+        radii.push(match definition.as_ref() {
+            solidcore_record::brep::blend::BlendDefinition::Procedural(d) => match &d.radius {
+                solidcore_record::brep::blend::RadiusRecord::Constant { offsets } => {
+                    offsets[0].abs()
+                }
+                solidcore_record::brep::blend::RadiusRecord::Law(_) => continue,
+            },
+            solidcore_record::brep::blend::BlendDefinition::ExactRound(d) => d.radius,
+        });
+    }
+    radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(
+        radii.len(),
+        2,
+        "round faces kept as blends, radii {radii:?}; face kinds {kinds:?}"
+    );
+    assert!(
+        (radii[0] - 8.3).abs() < 1e-9,
+        "cavity round radius {} for 8.3",
+        radii[0]
+    );
+    assert!(
+        (radii[1] - 10.3).abs() < 1e-9,
+        "outer round radius {} for 10.3",
+        radii[1]
+    );
 }
 
 #[test]
@@ -176,6 +242,55 @@ fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
     assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
 }
 
+/// A 30 x 30 x 20 block with a conical recess from its bottom (radius 7.2 at z = 0, falling
+/// 0.4 per mm), in which a 12 x 12 post stands from z = 1 up: the post's sides poke into the
+/// recess between z = 1 and z = 3, each through a lens whose hyperbola has its apex on the
+/// cone's seam.
+fn block_with_a_post_in_a_conical_recess() -> Body {
+    let block = make_box([-15.0, -15.0, 0.0], [30.0, 30.0, 20.0]).unwrap();
+    let cone = crate::make_cone([0.0; 3], 7.2, 3.2, 10.0).unwrap();
+    let post = make_box([-6.0, -6.0, 1.0], [12.0, 12.0, 20.0]).unwrap();
+    let recess = crate::boolean::boolean(cone, post, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    crate::boolean::boolean(block, recess, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// #19714: shelled open at the post's bottom, the cone's seam still ends on each lens's
+/// hyperbola. The piece of the hyperbola beyond the open face, down to the recess's rim, is
+/// not the edge's image, so the seam is kept and the body is hollow.
+///
+/// The hollow is the body less its core. With no change of topology the core is the same
+/// solid with every face's surface moved t into the material and the open face left in
+/// place: the block inset by t, less the cone r(z) = 7.2 + t sqrt(1.16) - 0.4 z outside the
+/// post of half side 6 - t from z = 1. Its volume is a frustum plus the integral, from z = 1
+/// to where r(z) = 6 - t, of the disc's area outside the square,
+/// 4 (r^2 acos(s / r) - s sqrt(r^2 - s^2)); the values are in the finding
+/// `offset.offset_geometry_creation--periodic-end-leaves-far-support-19714.md`.
+#[test]
+fn a_post_in_a_conical_recess_shells_open_at_its_bottom() {
+    crate::test_corpus::rig_fixes();
+    let whole = 17_835.098_082_931_83;
+    for (t, hollow) in [(0.4, 1_631.138_823_196_25), (0.2, 822.872_121_654_74)] {
+        let body = block_with_a_post_in_a_conical_recess();
+        assert!(rel(volume(&body), whole) < 1e-9, "body {}", volume(&body));
+        let o = order(&body);
+        let bottom = face(&body, &o, |bx| {
+            (bx.min().z - 1.0).abs() < 1e-9 && (bx.max().z - 1.0).abs() < 1e-9
+        });
+        shell(&body, &o, &[bottom], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = body.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let actual = volume(&body);
+        assert!(
+            rel(actual, hollow) < 1e-9,
+            "t {t}: shell volume {actual:.17}"
+        );
+    }
+}
+
 /// The Dutchman stress corpus's Shell family (S0003, S0012, S0061): a feature no wider than
 /// twice the wall holds no cavity. A cylinder r 1.5, h 4 with a
 /// pin r 0.15, 1.2 high on its top, and a 30 x 20 x 10 block with a 2 x 2 x 3 boss on its
@@ -209,6 +324,59 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
     assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
     assert!(b.is_manifold_solid().unwrap());
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
+/// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
+/// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
+/// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its
+/// radius, 70, and collapses: the shell is refused for it, naming that radius. The retry
+/// with the boss taken off caps its footprint, a circle split where it touches the rim and at
+/// the boss's seam. The footprint's two arcs run between the cap and the top, on one plane,
+/// and at both vertices their offsets take the vertex's image as an end. Their extended UV
+/// curves, each wound round the circle many times, coincide: their thousands of crossings
+/// within the tolerance had some five thousand stretches certified for moving to a curve end
+/// (over 90 s). The base's shell is still refused, so the first refusal stands, unchanged.
+#[test]
+#[allow(clippy::disallowed_methods)] // the seams' turn places the test body, not ops geometry
+fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint() {
+    all_fixes();
+    // each circle's seam turned 0.6131 rad about its axis, as SolidCraft's cylinders have it
+    let (s, c) = 0.6131_f64.sin_cos();
+    let turned = |x: f64, z: f64| {
+        [
+            [c, s, 0.0, 0.0],
+            [-s, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [x, 0.0, z, 1.0],
+        ]
+    };
+    let base = make_cylinder([0.0; 3], 600.0, 2400.0).unwrap();
+    base.transform(&turned(0.0, 0.0)).unwrap();
+    let boss = make_cylinder([0.0; 3], 70.0, 140.0).unwrap();
+    boss.transform(&turned(530.0, 2400.0)).unwrap();
+    let b = crate::boolean::boolean(base, boss, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let o = order(&b);
+    let before = volume(&b);
+    let (r, certified) = session::counted(
+        solidcore::kernel::WorkCounters::contact_stretch_certifications,
+        || shell(&b, &o, &[], -72.0),
+    );
+    match r {
+        Err(Error::OffsetRefused {
+            why: crate::OffsetRefusal::Collapses { distance, radius },
+            ..
+        }) => {
+            assert!((distance.abs() - 72.0).abs() < 1e-9, "{distance}");
+            assert!((radius - 70.0).abs() < 1e-9, "{radius}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), before) < 1e-12);
+    // the shells' own intersections certify under a hundred stretches; the footprint's wound
+    // extensions certified thousands
+    assert!(certified < 1_000, "{certified} stretches certified");
 }
 
 /// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
@@ -440,6 +608,33 @@ fn half_a_cylinders_side_moves_out_over_a_step() {
     );
     let v = PI * 2500.0 * 100.0 + PI * (54.0 * 54.0 - 2500.0) * 50.0;
     moved_to(&b, &[[50.0, 0.0, 75.0]], 4.0, v, [5, 7, 4]);
+}
+
+/// [`half_a_cylinders_side_moves_out_over_a_step`] with only the upper band split along its
+/// rulings by the plane x = 0 and the whole lower band moved out 4: where such a ruling
+/// meets the circle at z = 50, the two kept upper pieces are one surface sharing a straight
+/// edge, and the third surface at the vertex is the move's own cylinder (a quadric, not a
+/// plane). Every two of the three coaxial cylinders are parallel, so they meet in no one
+/// point and the annulus at z = 50 closes the step, as the hinge's knuckle (a barrel piece
+/// beside the coaxial piece it was split from, plus a straight kept edge) needs.
+/// V = 2500 pi 50 + 2916 pi 50 = 850743.291, with the split's 9 faces, 17 edges and 10
+/// vertices (the same split body as `three_cylinder_faces_at_a_corner_move_out_over_a_step`,
+/// the whole lower band moved instead of the three upper pieces).
+#[test]
+fn a_cylinders_whole_band_moves_out_beside_its_split_kept_halves() {
+    all_fixes();
+    let halves = split_at_height(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [50.0, 0.0, 25.0],
+        50.0,
+    );
+    let b = split_by_plane(
+        &halves,
+        [-50.0, 0.0, 75.0],
+        ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let v = PI * 2500.0 * 50.0 + PI * 2916.0 * 50.0;
+    moved_to(&b, &[[50.0, 0.0, 25.0]], 4.0, v, [9, 17, 10]);
 }
 
 /// Both halves of that side moved out 4 together: one cylinder r 54, V = 2916 pi 100, with
@@ -999,8 +1194,8 @@ fn a_ball_offsets_as_a_sheet() {
 }
 
 /// A Y of three walls meeting along one edge (a sheet, not manifold there): thickened, its
-/// result is no closed solid. Refused as `NotSolid` (with the input's contract it passed, the
-/// input being a sheet), the sheet as it came in.
+/// result is no closed solid. Refused as `NotSolidBecause(NotManifold)` (with the input's
+/// contract it passed, the input being a sheet), the sheet as it came in.
 #[test]
 fn a_thickened_sheet_that_is_no_solid_is_refused() {
     all_fixes();
@@ -1030,7 +1225,10 @@ fn a_thickened_sheet_that_is_no_solid_is_refused() {
     .map(Body::new)
     .unwrap();
     let before = y.to_smb(false).unwrap();
-    assert_eq!(thicken(&y, 1.0, false), Err(Error::NotSolid));
+    assert_eq!(
+        thicken(&y, 1.0, false),
+        Err(Error::NotSolidBecause(crate::SolidTest::NotManifold))
+    );
     assert_eq!(y.to_smb(false).unwrap(), before);
 }
 
@@ -1459,6 +1657,7 @@ fn an_unsound_body_names_its_entity_by_record_index() {
     // record face 1 is kernel face 0, record edges 1 and 2 kernel edge 4, record vertex 2 kernel
     // vertex 3
     let order = Order {
+        split_edges: 0,
         faces: vec![FaceId::from_index(2), FaceId::from_index(0)],
         edges: vec![
             EdgeId::from_index(9),
@@ -2282,6 +2481,161 @@ mod drafts {
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "{}", report.text);
     }
+
+    /// #20767 (stress corpus S8188): a cone r 2 at z = 0 to r 1 at z = 3 shelled 0.12 in to a
+    /// closed cavity, its side drafted 3 degrees about its base, leaning in going up. The side's
+    /// wall is 0.12 / cos(atan(1/3)) = 0.04 sqrt(10) across, horizontally, so the cavity's rim at
+    /// z = 2.88 has radius 2 - 0.04 sqrt(10) - 0.96. Drafted by theta the side is
+    /// r = 2 - z tan(atan(1/3) + theta), which reaches the rim at
+    /// theta = atan((2 - rim) / 2.88) - atan(1/3), 2.234 degrees: 3 degrees would carry the side
+    /// through the cavity. Refused naming that angle, the body as it came in (the cone's
+    /// 7 pi less the cavity, pi 0.92 (R^2 + R rim + rim^2), R = rim + 0.92 the radius at
+    /// z = 0.12). With a 0.5 wall the rim is reached only at 10.118 degrees, and 3 degrees builds
+    /// the drafted cone, top radius 2 - 3 tan(atan(1/3) + 3 degrees), less the cavity.
+    #[test]
+    fn a_shelled_cones_side_drafted_into_its_cavity_is_refused_naming_the_largest_angle() {
+        // atan((2 - rim) / 2.88) - atan(1/3), rim = 2 - 0.04 sqrt(10) - 0.96
+        const LARGEST: f64 = 0.038_994_633_885_685_75;
+        // 7 pi less the cavity, rim and R = rim + 0.92 as above
+        const SHELLED: f64 = 5.021_880_973_325_445;
+        // the 0.5 wall's: the drafted cone less the cavity z 0.5 to 2.5,
+        // rim 2 - sqrt(10) / 6 - 2.5 / 3
+        const DRAFTED: f64 = 13.675_559_992_581_547;
+        all_fixes();
+        for (wall, drafts) in [(0.12, false), (0.5, true)] {
+            let c = make_cone([0.0; 3], 2.0, 1.0, 3.0).unwrap();
+            crate::offset::shell(&c, &order(&c), &[], -wall).unwrap();
+            let o = order(&c);
+            let side = face(&c, &o, |bx| bx.max().x > 1.99 && bx.max().z > 2.99);
+            let got = draft(&c, &o, &[side], [0.0; 3], Z, Z, THREE);
+            if drafts {
+                assert_eq!(got, Ok(()));
+                assert!(rel(volume(&c), DRAFTED) < 1e-9, "{}", volume(&c));
+                assert!(c.is_manifold_solid().unwrap());
+                continue;
+            }
+            match got {
+                Err(Error::OffsetRefused {
+                    face,
+                    why: crate::OffsetRefusal::DraftClosesWall { largest },
+                }) => {
+                    assert_eq!(face, Some(side));
+                    assert!((largest - LARGEST).abs() < 1e-12, "{largest}");
+                }
+                other => panic!("{other:?}"),
+            }
+            assert!(rel(volume(&c), SHELLED) < 1e-9, "{}", volume(&c));
+            // the cavity's side drafted with it: the cavity's undrafted vertices no longer say
+            // where the walls meet, so no bound is named (the local operation's check judges it)
+            let cavity = face(&c, &o, |bx| {
+                bx.min().z > 0.11 && bx.max().z - bx.min().z > 1.0
+            });
+            let k = solidcore::Kernel::default();
+            let brep = c.lock();
+            let check = |faces: &[usize]| {
+                let faces: Vec<_> = faces.iter().map(|&i| o.faces[i]).collect();
+                crate::offset::refuse_draft_closing_wall(&k, &brep, &faces, [0.0; 3], Z, Z, THREE)
+            };
+            assert!(check(&[side]).is_err());
+            assert!(check(&[side, cavity]).is_ok());
+        }
+    }
+
+    /// A finite radial removal leaves an overhang above the fixed top plane and
+    /// removes a shallow blind hole wholly outside the new conical wall.
+    #[test]
+    fn a_drafted_cylinder_keeps_its_boss_and_loses_a_hole_beyond_the_new_wall() {
+        all_fixes();
+        let cylinder = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let boss = make_box([1.02, -0.36, 4.0], [0.36, 0.72, 0.36]).unwrap();
+        let b = crate::boolean::boolean(cylinder, boss, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let hole = make_cylinder([-1.4, 0.0, 3.8], 0.05, 0.2).unwrap();
+        let b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let o = order(&b);
+        let outer = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[outer], [0.0; 3], Z, Z, THREE).unwrap();
+        // The hole's nearest radius is 1.35, beyond r(3.8) < 1.301. None
+        // survives. Above z = 4 the entire boss stays, including its overhang.
+        let small = 1.5 - 4.0 * TAN_THREE;
+        let expected =
+            PI * 4.0 * (1.5 * 1.5 + 1.5 * small + small * small) / 3.0 + 0.36 * 0.72 * 0.36;
+        assert!(rel(volume(&b), expected) < 1e-9);
+        assert_eq!(b.counts().unwrap()[0], 9);
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
+
+    /// S1767 of the public stress corpus: two touching pads, the second 0.00002
+    /// taller, stay above the cylinder's top while its side drafts under their feet.
+    #[test]
+    #[ignore = "S1767: the joined input fails draft's solid precondition (#18805)"]
+    fn a_cylinder_with_touching_stepped_bosses_drafts_under_both() {
+        all_fixes();
+        let cylinder = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let first = make_box([1.02, -0.18, 4.0], [0.36, 0.36, 0.36]).unwrap();
+        let second = make_box([1.02, 0.18, 4.0], [0.36, 0.36, 0.36002]).unwrap();
+        let b = crate::boolean::boolean(cylinder, first, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let b = crate::boolean::boolean(b, second, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let o = order(&b);
+        draft(&b, &o, &[curved(&b, &o)], [0.0; 3], Z, Z, THREE).unwrap();
+        // The entire pads stay unchanged above z = 4. Their shared face has no volume.
+        let small = 1.5 - 4.0 * TAN_THREE;
+        let expected = PI * 4.0 * (1.5 * 1.5 + 1.5 * small + small * small) / 3.0
+            + 0.36 * 0.36 * (0.36 + 0.36002);
+        assert!(rel(volume(&b), expected) < 1e-9);
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
+
+    /// S8075 of the public stress corpus: drafting the outer wall opens the three
+    /// blind holes through the side. Their walls must be trimmed against the cone.
+    #[test]
+    fn a_cylinder_with_three_blind_holes_drafts_through_the_hole_walls() {
+        all_fixes();
+        let mut b = make_cylinder([0.0; 3], 600.0, 2400.0).unwrap();
+        for y in [-180.0, 0.0, 180.0] {
+            let hole = make_cylinder([-480.0, y, 1920.0], 60.0, 480.0).unwrap();
+            b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+                .unwrap()
+                .unwrap();
+        }
+        let o = order(&b);
+        let outer = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[outer], [0.0; 3], Z, Z, THREE).unwrap();
+        // r(z) = 600 - z tan(3 degrees). Below the blind floors (-480, 0)
+        // is material; above them each hole remains void on its inward side.
+        // At z = 2000 the cone radius is between 495 and 496, so (500, 0)
+        // is outside although it was inside the original cylinder.
+        for (point, wanted) in [
+            ([-480.0, 0.0, 1900.0], crate::PointClass::Inside),
+            ([500.0, 0.0, 2000.0], crate::PointClass::Outside),
+            ([-410.0, 0.0, 2300.0], crate::PointClass::Inside),
+            ([-430.0, -180.0, 2300.0], crate::PointClass::Outside),
+            ([-430.0, 0.0, 2300.0], crate::PointClass::Outside),
+            ([-430.0, 180.0, 2300.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
+        }
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
 }
 
 /// Kernel diagnostics cross the application seam here; the app receives only ops
@@ -2401,4 +2755,245 @@ fn offset_substages_keep_their_failure_reason() {
             diagnostic.detail
         );
     }
+}
+
+/// The index of the edge of `body` through `p`, in its edge list.
+fn edge_at(body: &Body, p: [f64; 3]) -> usize {
+    let k = Kernel::default();
+    let b = body.lock();
+    let p = Point3::new(p[0], p[1], p[2]);
+    b.edge_list()
+        .iter()
+        .position(|&e| edge_closest_point(&k, &b, e, p).is_ok_and(|c| c.closest.distance < 1e-9))
+        .unwrap()
+}
+
+/// A shell over a 4 mm G2 corner names its largest wall, 0.9674 mm, rather than "not proved
+/// regular" (#17246).
+#[test]
+fn shell_of_g2_corner_names_largest_wall() {
+    all_fixes();
+    let b = make_box([-7.5, -7.5, 0.0], [36.5, 38.5, 10.0]).unwrap();
+    // the three edges meeting at the corner (29, 31, 10)
+    let edges = [
+        edge_at(&b, [10.75, 31.0, 10.0]),
+        edge_at(&b, [29.0, 11.75, 10.0]),
+        edge_at(&b, [29.0, 31.0, 5.0]),
+    ];
+    blend(&b, Blend::Curvature, &edges, &[4.0], &[], Corners::Filled).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    let counts = b.counts().unwrap();
+    let mut top: Option<(usize, f64)> = None;
+    for i in 0..counts[0] {
+        let c = b.face_centroid(&order, i, 1e-8).unwrap();
+        if c.centroid[2] >= 9.999 && top.is_none_or(|(_, a)| c.area > a) {
+            top = Some((i, c.area));
+        }
+    }
+    let (top, _) = top.expect("a top face at z = 10");
+    match shell(&b, &order, &[top], -1.0) {
+        Err(Error::WallFolds { largest: Some(l) }) => {
+            assert!(
+                (l - 0.9674).abs() < 1e-3,
+                "largest wall {l}, expected 0.9674"
+            );
+        }
+        other => panic!("expected WallFolds naming the largest wall, got {other:?}"),
+    }
+}
+
+/// A 40 x 30 x 16 block (z -3 to 13) with a countersunk hole from below about the line
+/// x = y = 0 (#19904): a hole r 2 through it, a well r 4 from its underside up to z = 1.5,
+/// and a cone from r `base` at z = 1.5 to r 2 at z = 3.5 between them. With `base` 3.99 a
+/// flat ring 0.01 wide (0.25 mm²) is left at z = 1.5 between the cone and the well; with 4
+/// the cone meets the well.
+fn countersunk_block(base: f64) -> Body {
+    let cut = |a: Body, tool: Body| {
+        crate::boolean::boolean(a, tool, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    let b = make_box([-20.0, -15.0, -3.0], [40.0, 30.0, 16.0]).unwrap();
+    let b = cut(b, make_cylinder([0.0, 0.0, -5.0], 2.0, 20.0).unwrap());
+    let b = cut(b, make_cylinder([0.0, 0.0, -3.0], 4.0, 4.5).unwrap());
+    cut(
+        b,
+        crate::make_cone([0.0, 0.0, 1.5], base, 2.0, 2.0).unwrap(),
+    )
+}
+
+/// The countersunk block's volume: the block less the hole, the well beside the hole and
+/// the frustum beside the hole, `19200 - 16 pi 4 - 4.5 pi (16 - 4) - (2 pi (R² + 2R + 4) / 3 - 8 pi)`.
+fn countersunk_volume(base: f64) -> f64 {
+    19200.0 - 64.0 * PI - 54.0 * PI - (2.0 * PI * (base * base + 2.0 * base + 4.0) / 3.0 - 8.0 * PI)
+}
+
+/// The countersunk block's cone, by its point at z = 2.5 (off the seam at y = 0).
+fn countersink_cone(b: &Body, o: &Order, base: f64) -> usize {
+    through(b, o, [0.0, base - (base - 2.0) / 2.0, 2.5])
+}
+
+/// Without a ring the countersink's cone (45°) moved 2 into the material deepens the seat:
+/// the cone moves 2 / sin 45° = 2√2 along its axis, the well's wall runs up to meet it and
+/// the hole's wall is trimmed, so the annulus r 2 to 4 loses a slab 2√2 high,
+/// V - 12 pi 2√2.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_countersinks_cone_moves_into_the_material_over_the_well() {
+    all_fixes();
+    let b = countersunk_block(4.0);
+    let o = order(&b);
+    let cone = countersink_cone(&b, &o, 4.0);
+    assert!(rel(volume(&b), countersunk_volume(4.0)) < 1e-12);
+    offset_faces(&b, &o, &[cone], -2.0).unwrap();
+    let expected = countersunk_volume(4.0) - 12.0 * PI * 2.0 * 2.0_f64.sqrt();
+    assert!(
+        rel(volume(&b), expected) < 1e-9,
+        "{} vs {expected}",
+        volume(&b)
+    );
+    b.check_solid().unwrap();
+}
+
+/// Without a ring the countersink's cone (45°) moved δ off the material, toward the axis,
+/// lowers the seat: in the meridian plane the cone `r + z = 5.5` becomes
+/// `r + z = 5.5 - δ√2` and meets the hole r 2 at z = 3.5 - δ√2 and the well r 4 at
+/// z = 1.5 - δ√2, both δ√2 lower, so the cone between them keeps its length 2√2 and closes at
+/// no δ: the hole's wall runs down and the well's is trimmed until the cone reaches the
+/// well's foot, z = -3, at δ = 4.5 / √2 = 3.18. The annulus r 2 to 4 gains a slab δ√2 high,
+/// V + 12 pi δ√2. Past δ = 2 sin 45° = √2 the moved cone's apex, z = 5.5 - δ√2, is below
+/// the hole's old edge at z = 3.5, and the meeting there was sought from the edge on the
+/// cone's other nappe: +1.5 and +2 were refused for a reach with no certified bound (#20935).
+/// Past δ = 2 / cos 45° = 2√2 the moved cone's apex is past the image the cone's own
+/// parameters give the hole's circle, r = 2 - δ cos 45°: the face lost that edge and was
+/// refused as unsound, though the well's wall is still a band 4.5 - δ√2 high, 0.26 at 3 and
+/// 0.0027 at 3.18 (#21188).
+/// Moved 3.5, past the foot, the well's wall between the cone and the block's underside
+/// closes at 4.5 / √2 and is refused, naming it.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_countersinks_cone_moves_off_the_material_past_its_apex_over_the_hole() {
+    all_fixes();
+    for delta in [1.0, 1.4, 1.5, 2.0] {
+        let b = countersunk_block(4.0);
+        let o = order(&b);
+        let cone = countersink_cone(&b, &o, 4.0);
+        offset_faces(&b, &o, &[cone], delta).unwrap();
+        let expected = countersunk_volume(4.0) + 12.0 * PI * delta * 2.0_f64.sqrt();
+        assert!(
+            rel(volume(&b), expected) < 1e-9,
+            "{delta}: {} vs {expected}",
+            volume(&b)
+        );
+        b.check_solid().unwrap();
+    }
+    // past 2√2, up to just short of the foot at 4.5 / √2 = 3.182
+    for delta in [2.9, 3.0, 3.1, 3.18] {
+        let b = countersunk_block(4.0);
+        let o = order(&b);
+        let cone = countersink_cone(&b, &o, 4.0);
+        offset_faces(&b, &o, &[cone], delta).unwrap();
+        let expected = countersunk_volume(4.0) + 12.0 * PI * delta * 2.0_f64.sqrt();
+        assert!(
+            rel(volume(&b), expected) < 1e-9,
+            "{delta}: {} vs {expected}",
+            volume(&b)
+        );
+        b.check_solid().unwrap();
+    }
+    // past the well's foot the well's wall, between the cone and the block's underside,
+    // closes: refused before anything changes, naming the well and 4.5 / √2
+    let b = countersunk_block(4.0);
+    let o = order(&b);
+    let cone = countersink_cone(&b, &o, 4.0);
+    let well = through(&b, &o, [0.0, 4.0, 0.0]);
+    match offset_faces(&b, &o, &[cone], 3.5) {
+        Err(Error::OffsetRefused {
+            face: named,
+            why: crate::OffsetRefusal::FaceCloses { largest },
+        }) => {
+            assert_eq!(named, Some(well));
+            let room = 4.5 / 2.0_f64.sqrt();
+            assert!((largest - room).abs() < 1e-9, "{largest} vs {room}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), countersunk_volume(4.0)) < 1e-12);
+}
+
+/// With the cone's base r 3.99 a ring 0.01 wide lies at z = 1.5 between the cone (semi-angle
+/// θ, tan θ = 1.99 / 2) and the well r 4 (#19904). Moved into the material by δ, the cone meets
+/// the ring's plane at r = 3.99 + δ / cos θ: the ring closes at δ = 0.01 cos θ, and moved 2
+/// the cone meets that plane at r 6.81, past the well, where keeping the ring would turn it
+/// inside out. The move is refused before anything changes, naming the ring and 0.01 cos θ
+/// (it was refused late, as a body that fails its check). Moved the other way the cone meets
+/// the hole r 2 at z = 3.5 - δ / sin θ and the ring's plane at r = 3.99 - δ / cos θ: the cone
+/// itself closes at δ = 2 sin θ, so +2 is refused naming the cone and 2 sin θ (it was refused
+/// for a reach with no certified bound). Moved +4 the same: the cone closes at the same
+/// 2 sin θ, at r 2, though by the end of the move its crossing with the ring's plane,
+/// r = 3.99 - 4 / cos θ = -1.65, has passed the axis.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_ring_beside_a_countersinks_cone_that_the_move_closes_is_refused_naming_it() {
+    all_fixes();
+    let side = (1.99_f64 * 1.99 + 4.0).sqrt();
+    let (sin, cos) = (1.99 / side, 2.0 / side);
+    for (distance, closes, largest) in [
+        (-2.0, "ring", 0.01 * cos),
+        (2.0, "cone", 2.0 * sin),
+        (4.0, "cone", 2.0 * sin),
+    ] {
+        let b = countersunk_block(3.99);
+        let o = order(&b);
+        let cone = countersink_cone(&b, &o, 3.99);
+        let ring = through(&b, &o, [0.0, 3.995, 1.5]);
+        let before = volume(&b);
+        assert!(rel(before, countersunk_volume(3.99)) < 1e-12);
+        let face = if closes == "ring" { ring } else { cone };
+        match offset_faces(&b, &o, &[cone], distance) {
+            Err(Error::OffsetRefused {
+                face: named,
+                why: crate::OffsetRefusal::FaceCloses { largest: room },
+            }) => {
+                assert_eq!(named, Some(face), "{closes}");
+                assert!(
+                    (room - largest).abs() < 1e-9,
+                    "{closes}: {room} vs {largest}"
+                );
+            }
+            other => panic!("{closes}: {other:?}"),
+        }
+        assert!(rel(volume(&b), before) < 1e-12);
+    }
+}
+
+/// The ringed countersink's cone moved 0.005 into the material, within the 0.01 cos θ the
+/// ring allows, moves: the ring narrows to 0.01 - 0.005 / cos θ and the hole's wall is
+/// trimmed. The slab between the cone's two places, δ / sin θ high over r 2 to 3.99, and the
+/// ring's part under the new cone, from r 3.99 to ρ = 3.99 + δ / cos θ where the cone rises
+/// (ρ - r) / tan θ over the ring's plane, go:
+/// `2 pi (δ / sin θ (3.99² - 4) / 2 + (ρ (ρ² - 3.99²) / 2 - (ρ³ - 3.99³) / 3) / tan θ)`.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_ringed_countersinks_cone_moves_within_the_ring() {
+    all_fixes();
+    let side = (1.99_f64 * 1.99 + 4.0).sqrt();
+    let (sin, cos, tan) = (1.99 / side, 2.0 / side, 1.99 / 2.0);
+    let b = countersunk_block(3.99);
+    let o = order(&b);
+    let cone = countersink_cone(&b, &o, 3.99);
+    let delta = 0.005;
+    offset_faces(&b, &o, &[cone], -delta).unwrap();
+    let (r, rho) = (3.99_f64, 3.99 + delta / cos);
+    let removed = 2.0
+        * PI
+        * (delta / sin * (r * r - 4.0) / 2.0
+            + (rho * (rho * rho - r * r) / 2.0 - (rho.powi(3) - r.powi(3)) / 3.0) / tan);
+    let expected = countersunk_volume(3.99) - removed;
+    assert!(
+        rel(volume(&b), expected) < 1e-9,
+        "{} vs {expected}",
+        volume(&b)
+    );
+    b.check_solid().unwrap();
 }

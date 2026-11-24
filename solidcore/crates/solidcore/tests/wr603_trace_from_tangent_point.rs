@@ -94,8 +94,10 @@ fn peg() -> (f64, usize) {
 #[test]
 fn arc_round_from_a_tangent_point_adds_the_concave_material() {
     // the concave round adds 4.29958 (r 1), as without WR-603's start direction; 4.29953
-    // since `brep_volume` closes tolerant edges' gaps (#16735)
+    // since `brep_volume` closes tolerant edges' gaps (#16735); 4.29957 since the round is
+    // fitted as finely as its edge is known, its edges at 4e-5 rather than 1.6e-4, so
+    // that closure moves it less (within the old leak bound checked above)
     let (added, faces) = peg();
     assert_eq!(faces, 10);
-    assert!((added - 4.29953).abs() < 1e-5, "{added}");
+    assert!((added - 4.29957).abs() < 1e-5, "{added}");
 }

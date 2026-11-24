@@ -55,6 +55,12 @@ pub struct CarriedFace {
     /// where the ends' traces close on each other), each end along the trace of the face
     /// that ends the round there. A rectangle between square ends.
     pub outline: [[f64; 2]; 4],
+    /// The edge's length: how far along it the slab's end lies from its start, on the edge's
+    /// line.
+    pub length: f64,
+    /// How far along the edge the slab's start and its end run for each unit across it: the
+    /// traces of the faces that end the round there, 0 for a face square to the edge.
+    pub ends: [f64; 2],
     /// The slab's extent along the outward normal: from `-reach` to the face's plane.
     pub depth: [f64; 2],
     /// How far the slab reaches behind the plane and to either side of the edge, and how
@@ -80,6 +86,22 @@ fn plane_normal(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<Option<V
     Ok(Some(planar.normal * (1.0 / len)))
 }
 
+/// The quadrilateral between a slab's two ends from `from` to `to` across the edge, in
+/// (`along`, `across`) from the edge's start: the start's corner at `from`, the end's, the
+/// end's at `to`, the start's. The start follows the trace `along = start · across` and the
+/// end `along = length + end · across`.
+fn band(length: f64, [start, end]: [f64; 2], from: f64, to: f64) -> [[f64; 2]; 4] {
+    // between square ends (both traces 0) these are exactly 0 and `length`
+    let first = |across: f64| 0.0 + start * across;
+    let last = |across: f64| length + end * across;
+    [
+        [first(from), from],
+        [last(from), from],
+        [last(to), to],
+        [first(to), to],
+    ]
+}
+
 /// The outline of the slab that carries a face on past an edge of length `length`, in the
 /// face's plane: (`along`, `across`) from the edge's start, as
 /// [`CarriedFace::outline`] lists it (the start's side at `-across`, the end's, the end's
@@ -93,21 +115,32 @@ fn plane_normal(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<Option<V
 /// so it is past the blend's contact line and short of the crossing by as much. `None`
 /// where the crossing is no further than `need`: the blend's contact line has no room
 /// between the two faces.
-#[must_use]
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an argument that is not finite.
 pub fn slab_outline(
     length: f64,
     start: f64,
     end: f64,
     need: f64,
     reach: f64,
-) -> Option<[[f64; 2]; 4]> {
+) -> Result<Option<[[f64; 2]; 4]>> {
+    if ![length, start, end, need, reach]
+        .iter()
+        .all(|x| x.is_finite())
+    {
+        return Err(SolidError::invalid_input(
+            "blend::carried_face::slab_outline",
+            "the length, the traces, the need and the reach are finite",
+        ));
+    }
     let closing = end - start;
     // how far the slab reaches at -across and at +across
     let mut sides = [reach, reach];
     if closing != 0.0 {
         let crossing = length / closing.abs();
         if crossing <= need {
-            return None;
+            return Ok(None);
         }
         let side = usize::from(closing < 0.0);
         if let Some(s) = sides.get_mut(side) {
@@ -115,15 +148,56 @@ pub fn slab_outline(
         }
     }
     let [low, high] = sides;
-    // between square ends (both traces 0) these are exactly 0 and `length`
-    let from = |across: f64| 0.0 + start * across;
-    let to = |across: f64| length + end * across;
-    Some([
-        [from(-low), -low],
-        [to(-low), -low],
-        [to(high), high],
-        [from(high), high],
-    ])
+    Ok(Some(band(length, [start, end], -low, high)))
+}
+
+/// The outline of the region past the edge's line on the other face's side of it, for a
+/// slab of outline `outline` ([`slab_outline`]) on an edge of length `length` whose ends run
+/// `ends` along the edge for each unit across it: between the slab's two ends, from the
+/// edge's line out to `room`, or to where the slab stops if that is nearer, on the side
+/// `other_side` (`1.0` or `-1.0` along `across`). In (`along`, `across`) from the edge's
+/// start, as [`band`] lists it. What a blend adds over the other face lies here, not over the
+/// carried face's outline.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a `room` that is not finite and positive, or another
+/// argument that is not finite.
+pub fn past_edge_outline(
+    length: f64,
+    ends: [f64; 2],
+    outline: &[[f64; 2]; 4],
+    other_side: f64,
+    room: f64,
+) -> Result<[[f64; 2]; 4]> {
+    let finite = [length, ends[0], ends[1], other_side]
+        .iter()
+        .chain(outline.iter().flatten())
+        .all(|x| x.is_finite());
+    if !(finite && room.is_finite() && room > 0.0) {
+        return Err(SolidError::invalid_input(
+            "blend::carried_face::past_edge_outline",
+            "the room is finite and positive, and the slab's measures are finite",
+        ));
+    }
+    // the slab reaches from `low` (negative) to `high` across the edge
+    let [[_, low], _, [_, high], _] = *outline;
+    let (from, to) = if other_side > 0.0 {
+        (0.0, room.min(high))
+    } else {
+        (-room.min(-low), 0.0)
+    };
+    Ok(band(length, ends, from, to))
+}
+
+impl CarriedFace {
+    /// The outline of the region past the edge's line on the other face's side of it, out
+    /// to `room` from the line ([`past_edge_outline`]).
+    ///
+    /// # Errors
+    /// As [`past_edge_outline`].
+    pub fn past_edge(&self, room: f64) -> Result<[[f64; 2]; 4]> {
+        past_edge_outline(self.length, self.ends, &self.outline, self.other_side, room)
+    }
 }
 
 /// How far `along` a trace runs for each unit `across`, for the planar face at the vertex
@@ -246,7 +320,7 @@ pub fn carried_faces(k: &Kernel, b: &mut Brep, e: EdgeId, radius: f64) -> Result
         let cos = normal.dot(other).clamp(-1.0, 1.0);
         let half_tan = ((1.0 - cos) / (1.0 + cos).max(f64::MIN_POSITIVE)).sqrt();
         let need = radius * half_tan.max(1.0);
-        let Some(outline) = slab_outline(length, at_start, at_end, need, reach) else {
+        let Some(outline) = slab_outline(length, at_start, at_end, need, reach)? else {
             continue;
         };
         out.push(CarriedFace {
@@ -255,6 +329,8 @@ pub fn carried_faces(k: &Kernel, b: &mut Brep, e: EdgeId, radius: f64) -> Result
             along,
             across,
             outline,
+            length,
+            ends: [at_start, at_end],
             depth: [-reach, 0.0],
             reach,
             other_side,
@@ -362,16 +438,17 @@ mod tests {
     /// that touches the face 6 from the edge has its slab reach (6 + 40) / 2 = 23 there,
     /// where the end's trace has come back 0.25 x 23 = 5.75, and the full reach on the other
     /// side. Leaning the other way the short side is the other one. A blend that touches the
-    /// face as far off as the traces cross, or further, has no slab.
+    /// face as far off as the traces cross, or further, has no slab. An argument that is not
+    /// finite is refused, not carried into the outline.
     #[test]
     fn the_slabs_outline_follows_its_ends_traces() {
         let reach = 500.0;
         assert_eq!(
-            slab_outline(10.0, 0.0, 0.0, 6.0, reach),
+            slab_outline(10.0, 0.0, 0.0, 6.0, reach).unwrap(),
             Some([[0.0, -reach], [10.0, -reach], [10.0, reach], [0.0, reach]])
         );
         assert_eq!(
-            slab_outline(10.0, 0.5, 0.5, 6.0, reach),
+            slab_outline(10.0, 0.5, 0.5, 6.0, reach).unwrap(),
             Some([
                 [-250.0, -reach],
                 [-240.0, -reach],
@@ -380,26 +457,88 @@ mod tests {
             ])
         );
         assert_eq!(
-            slab_outline(10.0, 0.0, 0.25, 6.0, reach),
+            slab_outline(10.0, 0.0, 0.25, 6.0, reach).unwrap(),
             Some([[0.0, -23.0], [4.25, -23.0], [135.0, reach], [0.0, reach]])
         );
         assert_eq!(
-            slab_outline(10.0, 0.0, -0.25, 6.0, reach),
+            slab_outline(10.0, 0.0, -0.25, 6.0, reach).unwrap(),
             Some([[0.0, -reach], [135.0, -reach], [4.25, 23.0], [0.0, 23.0]])
         );
         // the start leaning toward the end closes the same side as the end leaning back
         assert_eq!(
-            slab_outline(10.0, 0.25, 0.0, 6.0, reach),
+            slab_outline(10.0, 0.25, 0.0, 6.0, reach).unwrap(),
             Some([[-125.0, -reach], [10.0, -reach], [10.0, 23.0], [5.75, 23.0]])
         );
         // a reach short of the half-way point is the reach
         assert_eq!(
-            slab_outline(10.0, 0.0, 0.25, 6.0, 20.0),
+            slab_outline(10.0, 0.0, 0.25, 6.0, 20.0).unwrap(),
             Some([[0.0, -20.0], [5.0, -20.0], [15.0, 20.0], [0.0, 20.0]])
         );
-        assert!(slab_outline(10.0, 0.0, 0.25, 39.0, reach).is_some());
-        assert_eq!(slab_outline(10.0, 0.0, 0.25, 40.0, reach), None);
-        assert_eq!(slab_outline(10.0, 0.0, -0.25, 41.0, reach), None);
+        assert!(slab_outline(10.0, 0.0, 0.25, 39.0, reach)
+            .unwrap()
+            .is_some());
+        assert_eq!(slab_outline(10.0, 0.0, 0.25, 40.0, reach).unwrap(), None);
+        assert_eq!(slab_outline(10.0, 0.0, -0.25, 41.0, reach).unwrap(), None);
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for at in 0..5 {
+                let mut args = [10.0, 0.0, 0.25, 6.0, reach];
+                args[at] = bad;
+                let [length, start, end, need, reach] = args;
+                assert!(
+                    matches!(
+                        slab_outline(length, start, end, need, reach),
+                        Err(SolidError::InvalidInput { .. })
+                    ),
+                    "{args:?}"
+                );
+            }
+        }
+    }
+
+    /// Past the edge's line, on the other face's side of it, the region lies between the
+    /// slab's two ends out to the room asked for: a rectangle between square ends, on the
+    /// side the other face is. Where the end leans by 0.25 its far corner follows the trace
+    /// (10 + 0.25 x 8 = 12 at 8 across, 10 - 0.25 x 8 = 8 on the other side), and the region
+    /// stops where the slab does (23 from the line on the side its traces close on). A room
+    /// that is not finite and positive is refused.
+    #[test]
+    fn the_region_past_the_edge_lies_between_the_slabs_ends() {
+        let reach = 500.0;
+        let square = slab_outline(10.0, 0.0, 0.0, 6.0, reach).unwrap().unwrap();
+        assert_eq!(
+            past_edge_outline(10.0, [0.0, 0.0], &square, 1.0, 8.0).unwrap(),
+            [[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]]
+        );
+        assert_eq!(
+            past_edge_outline(10.0, [0.0, 0.0], &square, -1.0, 8.0).unwrap(),
+            [[0.0, -8.0], [10.0, -8.0], [10.0, 0.0], [0.0, 0.0]]
+        );
+        let leaning = slab_outline(10.0, 0.0, 0.25, 6.0, reach).unwrap().unwrap();
+        assert_eq!(
+            past_edge_outline(10.0, [0.0, 0.25], &leaning, 1.0, 8.0).unwrap(),
+            [[0.0, 0.0], [10.0, 0.0], [12.0, 8.0], [0.0, 8.0]]
+        );
+        assert_eq!(
+            past_edge_outline(10.0, [0.0, 0.25], &leaning, -1.0, 8.0).unwrap(),
+            [[0.0, -8.0], [8.0, -8.0], [10.0, 0.0], [0.0, 0.0]]
+        );
+        assert_eq!(
+            past_edge_outline(10.0, [0.0, 0.25], &leaning, -1.0, 30.0).unwrap(),
+            [[0.0, -23.0], [4.25, -23.0], [10.0, 0.0], [0.0, 0.0]]
+        );
+        for room in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                matches!(
+                    past_edge_outline(10.0, [0.0, 0.25], &leaning, 1.0, room),
+                    Err(SolidError::InvalidInput { .. })
+                ),
+                "{room}"
+            );
+        }
+        assert!(matches!(
+            past_edge_outline(f64::NAN, [0.0, 0.25], &leaning, 1.0, 8.0),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     /// A convex edge of the same L has nothing to carry on, and neither has a concave edge

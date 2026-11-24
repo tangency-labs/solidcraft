@@ -20,12 +20,39 @@ mod raster;
 mod scene;
 pub mod surface;
 pub mod vec;
+mod view_spec;
 
-pub use analysis::{AnalysisMode, SceneAnalysis};
-pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ViewAngles, ease_in_out};
-pub use pick::{DrawnPoint, nearest_drawn_point};
-pub use raster::{Canvas, render, render_png, render_transparent, shade, unblend};
-pub use scene::{
-    MAX_SECTION_PLANES, MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH, SECTION_HATCH_ANGLES, SEE_THROUGH, Scene, SceneLine, SceneMesh, png,
-    section_hatch, section_hatch_line, section_hatch_of, section_plane_frame,
-};
+pub use analysis::AnalysisMode;
+pub use analysis::SceneAnalysis;
+pub use camera::Camera;
+pub use camera::CameraAnim;
+pub use camera::Mat4;
+pub use camera::Quat;
+pub use camera::StandardView;
+pub use camera::UpAxis;
+pub use camera::ViewAngles;
+pub use camera::ease_in_out;
+pub use pick::DrawnPoint;
+pub use pick::nearest_drawn_point;
+pub use raster::Canvas;
+pub use raster::render;
+pub use raster::render_png;
+pub use raster::render_transparent;
+pub use raster::shade;
+pub use raster::unblend;
+pub use scene::MAX_SECTION_PLANES;
+pub use scene::MIN_ALPHA;
+pub use scene::Rgb;
+pub use scene::SECTION_CAP;
+pub use scene::SECTION_HATCH;
+pub use scene::SECTION_HATCH_ANGLES;
+pub use scene::SEE_THROUGH;
+pub use scene::Scene;
+pub use scene::SceneLine;
+pub use scene::SceneMesh;
+pub use scene::png;
+pub use scene::section_hatch;
+pub use scene::section_hatch_line;
+pub use scene::section_hatch_of;
+pub use scene::section_plane_frame;
+pub use view_spec::ViewSpec;

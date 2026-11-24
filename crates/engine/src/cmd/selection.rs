@@ -163,6 +163,12 @@ impl<'a> Context<'a> {
                     v.insert("bodies".into(), json!(o.bodies.iter().map(|b| &b.world).collect::<Vec<_>>()));
                 }
             }
+            Sel::PointCloudPoint { cloud, point, .. } => {
+                if let Some(c) = self.s.doc.point_clouds.iter().find(|c| c.id == *cloud) {
+                    v.insert("cloud_name".into(), json!(c.name));
+                }
+                v.entry("position").or_insert_with(|| json!(point));
+            }
             // What these are (origin, direction, position) comes from the measurement above.
             Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } | Sel::Drawing { .. } => {}
         }
@@ -267,8 +273,10 @@ pub(super) fn anchor_from_selection(s: &Session) -> Vec3 {
 /// feature, a constraint, a profile) leaves the anchor to the next selected item.
 fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
     match sel {
-        // A picked face, edge or vertex: the point it was picked at.
-        Sel::Face { point, .. } | Sel::Edge { point, .. } | Sel::Vertex { point, .. } => point.is_finite().then_some(*point),
+        // A picked face, edge, vertex or point-cloud point: the point it was picked at.
+        Sel::Face { point, .. } | Sel::Edge { point, .. } | Sel::Vertex { point, .. } | Sel::PointCloudPoint { point, .. } => {
+            point.is_finite().then_some(*point)
+        }
         // A body: the middle of its box.
         Sel::Body { name } => {
             let st = s.world_state().ok()?;
