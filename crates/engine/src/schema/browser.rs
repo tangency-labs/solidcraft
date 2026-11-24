@@ -128,6 +128,51 @@ pub struct RepairResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Remove a body's history (#18698): the features that built only this body go, and a base
+/// feature holds its B-rep as it is. Features that also build other bodies stay. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct RemoveHistoryParams {
+    /// The body (its name).
+    pub body: String,
+}
+
+/// A feature that worked before Remove History and fails after it, with why.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RemoveHistoryBroken {
+    pub feature: String,
+    pub error: String,
+}
+
+/// What `body.remove_history` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RemoveHistoryResult {
+    /// The base feature's id.
+    pub feature: u64,
+    /// The base feature's name.
+    pub name: String,
+    /// The features that went: those that built only this body, and the sketches only they used.
+    pub removed: Vec<String>,
+    /// Features that built this body and stay, because they also build or change other bodies.
+    pub kept: Vec<String>,
+    /// The Remove feature added before the base when kept features still build the body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remove: Option<String>,
+    /// The body's faces, edges and vertices after (the same as before).
+    pub faces: usize,
+    pub edges: usize,
+    pub vertices: usize,
+    /// The body's volume before and after, in mm³.
+    pub volume_before: f64,
+    pub volume_after: f64,
+    /// Features that worked before and now fail: a reference the base feature's faces do not keep.
+    pub broken: Vec<RemoveHistoryBroken>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// The units a design can show lengths in.
 pub const DESIGN_UNITS: [&str; 5] = ["mm", "cm", "m", "in", "ft"];
 

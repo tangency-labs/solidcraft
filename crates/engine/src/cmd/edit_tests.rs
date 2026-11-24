@@ -2861,3 +2861,168 @@ fn select_mode_takes_each_mode_and_leaves_the_design_alone() {
     }
     assert_eq!((s.doc.to_json(), s.undo.len(), s.selection.clone()), (doc, undo, selection));
 }
+
+/// A body's faces, edges, vertices and volume, as Remove History must keep them.
+fn body_shape(s: &Session, body: &str) -> (usize, usize, usize, f64) {
+    let state = s.model.state();
+    let b = state.body(body).unwrap_or_else(|| panic!("no body {body}"));
+    let volume = solidcraft_kernel::measure(&b.body).unwrap().volume;
+    (b.body.face_count(), b.body.edge_count(), b.body.vertex_count(), volume)
+}
+
+fn same_body_shape(a: (usize, usize, usize, f64), b: (usize, usize, usize, f64)) {
+    assert_eq!((a.0, a.1, a.2), (b.0, b.1, b.2), "faces, edges and vertices");
+    assert!((a.3 - b.3).abs() <= 1e-6 * a.3.abs().max(1.0), "volume {} -> {}", a.3, b.3);
+}
+
+/// Remove History (#18698): a body built by several features becomes one base feature holding the
+/// same B-rep; undo brings the history back and redo takes it away again.
+#[test]
+fn remove_history_freezes_a_body_built_by_several_features_and_undoes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10, "name": "Base Box"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 20, "operation": "join", "name": "Tower"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1, "name": "Round"}));
+    // A 10 mm cube with a 5 x 5 x 10 tower on it, less the fillet's corner along one 10 mm edge.
+    let corner = (1.0 - std::f64::consts::PI / 4.0) * 10.0;
+    let before = body_shape(&s, "Block");
+    assert!((before.3 - (1250.0 - corner)).abs() < 1e-6, "{before:?}");
+    let history = s.doc.features.clone();
+
+    let out = run(&mut s, "body.remove_history", json!({"body": "Block"}));
+    assert_eq!(out["removed"], json!(["Base Box", "Tower", "Round"]), "{out}");
+    assert_eq!(out["kept"], json!([]), "{out}");
+    assert_eq!(out["broken"], json!([]), "{out}");
+    assert!(out.get("remove").is_none(), "nothing kept builds the body: no Remove feature: {out}");
+    assert_eq!(feature_names(&s), ["Block Base"]);
+    assert!(matches!(s.doc.features[0].kind, solidcraft_doc::FeatureKind::Import { .. }));
+    same_body_shape(before, body_shape(&s, "Block"));
+    assert_eq!(out["faces"], before.0);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    // Edited directly afterwards, as an imported body is.
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 5, 0]], "radius": 1, "body": "Block"}));
+    assert!(body_shape(&s, "Block").3 < before.3);
+    run(&mut s, "edit.undo", json!({}));
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features, history, "one undo step brings the history back");
+    same_body_shape(before, body_shape(&s, "Block"));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(feature_names(&s), ["Block Base"]);
+    same_body_shape(before, body_shape(&s, "Block"));
+
+    // Nothing left to remove, and bad bodies, are refused without changing the design.
+    let doc = s.doc.clone();
+    for p in [json!({"body": "Block"}), json!({"body": "Nope"}), json!({"body": ""}), json!({}), json!({"body": 3})] {
+        assert!(s.execute("body.remove_history", &p).is_err(), "{p}");
+        assert_eq!(s.doc, doc, "{p}");
+    }
+}
+
+/// A feature that also builds another body stays, with this body's features before it, and the
+/// other body keeps its history and its shape; the base replaces the body after a Remove.
+#[test]
+fn remove_history_keeps_a_feature_another_body_shares() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "A", "length": 10, "width": 10, "height": 10, "name": "Box A"}));
+    run(&mut s, "solid.box", json!({"body_name": "B", "corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "Box B"}));
+    run(&mut s, "solid.move", json!({"bodies": ["A", "B"], "translate": [0, 0, 5], "name": "Lift"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 15]], "radius": 2, "body": "A", "name": "Round A"}));
+    let (a, b) = (body_shape(&s, "A"), body_shape(&s, "B"));
+
+    let out = run(&mut s, "body.remove_history", json!({"body": "A"}));
+    assert_eq!(out["removed"], json!(["Round A"]), "{out}");
+    assert_eq!(out["kept"], json!(["Box A", "Lift"]), "{out}");
+    assert_eq!(out["broken"], json!([]), "{out}");
+    let remove = out["remove"].as_str().unwrap().to_string();
+    assert_eq!(feature_names(&s), ["Box A", "Box B", "Lift", remove.as_str(), "A Base"]);
+    same_body_shape(a, body_shape(&s, "A"));
+    same_body_shape(b, body_shape(&s, "B"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    // B's history is still B's: editing its box still changes it.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(feature_names(&s), ["Box A", "Box B", "Lift", "Round A"]);
+    run(&mut s, "edit.redo", json!({}));
+
+    // With every feature of B also building A, nothing of B's can go.
+    let mut t = Session::default();
+    run(&mut t, "solid.box", json!({"body_name": "A", "length": 10, "width": 10, "height": 10}));
+    run(&mut t, "solid.box", json!({"body_name": "B", "corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new_body"}));
+    run(&mut t, "solid.move", json!({"bodies": ["A", "B"], "translate": [0, 0, 5]}));
+    run(&mut t, "body.remove_history", json!({"body": "A"}));
+    let err = t.execute("body.remove_history", &json!({"body": "B"})).unwrap_err().to_string();
+    assert!(err.contains("nothing to remove"), "{err}");
+}
+
+/// The base feature's B-rep is saved inside the design as a binary part, not text in its JSON,
+/// and reopens as the same body with references to its faces still found.
+#[test]
+fn remove_history_saves_and_reopens_the_same_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1}));
+    run(&mut s, "solid.box", json!({"body_name": "Other", "corner": [30, 0, 0], "length": 4, "width": 4, "height": 4, "operation": "new_body"}));
+    let before = body_shape(&s, "Block");
+    run(&mut s, "body.remove_history", json!({"body": "Block"}));
+    let bytes = solidcraft_io::write_design_container(&s.doc).unwrap();
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+    let parts: Vec<&str> = archive.file_names().collect();
+    assert!(parts.iter().any(|n| n.starts_with("blobs/") && n.ends_with(".step")), "{parts:?}");
+    let mut reopened = Session::new(solidcraft_io::read_design(&bytes).unwrap());
+    reopened.refresh();
+    same_body_shape(before, body_shape(&reopened, "Block"));
+    assert_eq!(feature_names(&reopened), feature_names(&s));
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+}
+
+/// A design saved in an older format still opens, and Remove History works on it.
+#[test]
+fn remove_history_on_an_older_format_design() {
+    let bytes = include_bytes!("../tests/fixtures/cubeish-chamfer-too-large.sc");
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes[..])).unwrap();
+    let mut saved = String::new();
+    std::io::Read::read_to_string(&mut archive.by_name("document.json").unwrap(), &mut saved).unwrap();
+    assert!(saved.contains("\"format\":\"solidcraft/19\""), "the fixture is a format-19 design");
+    let doc = solidcraft_io::read_design(bytes).unwrap();
+    let mut s = Session::new(doc);
+    s.refresh();
+    let failing_before: Vec<String> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.name.clone()).collect();
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).expect("a body");
+    let before = body_shape(&s, &body);
+    let out = run(&mut s, "body.remove_history", json!({"body": body}));
+    assert_eq!(out["broken"], json!([]), "{out}");
+    same_body_shape(before, body_shape(&s, &body));
+    let failing_after: Vec<String> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.name.clone()).collect();
+    assert!(failing_after.iter().all(|f| failing_before.contains(f)), "{failing_before:?} -> {failing_after:?}");
+}
+
+/// A sketch on the body's face that builds another body stays, and still finds its face on the
+/// base feature; a face's appearance moves to the same face.
+#[test]
+fn remove_history_keeps_references_to_the_body_faces() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 0]], "radius": 1, "name": "Round"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 10]}, "name": "On Top"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [4, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "new_body", "body_name": "Peg", "name": "Peg Pad"}));
+    run(&mut s, "appearance.assign", json!({"faces": [[5, 5, 10]], "color": "#ff0000"}));
+    let (block, peg) = (body_shape(&s, "Block"), body_shape(&s, "Peg"));
+    assert!((peg.3 - 20.0).abs() < 1e-6, "{peg:?}");
+    let sketch_before = serde_json::to_value(s.doc.find_feature("On Top").unwrap()).unwrap();
+
+    let out = run(&mut s, "body.remove_history", json!({"body": "Block"}));
+    assert_eq!(out["broken"], json!([]), "{out}");
+    assert_eq!(out["removed"].as_array().map(Vec::len), Some(2), "the box and the fillet: {out}");
+    assert_eq!(out["removed"][1], "Round", "{out}");
+    assert!(s.doc.find_feature("On Top").is_some() && s.doc.find_feature("Peg Pad").is_some(), "Peg's features stay");
+    assert_ne!(serde_json::to_value(s.doc.find_feature("On Top").unwrap()).unwrap(), sketch_before, "the sketch's face moved to the base");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().filter_map(|r| r.error.clone()).collect::<Vec<_>>());
+    same_body_shape(block, body_shape(&s, "Block"));
+    same_body_shape(peg, body_shape(&s, "Peg"));
+    let state = s.model.state();
+    let names = solidcraft_doc::naming::face_names(state.body("Block").unwrap());
+    let painted = s.doc.appearances.faces.iter().find(|f| f.body == "Block").and_then(|f| f.name.clone()).expect("the face keeps its appearance");
+    assert!(names.contains(&painted), "{painted} is a face of the base: {names:?}");
+}

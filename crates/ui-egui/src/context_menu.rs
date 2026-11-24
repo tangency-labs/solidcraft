@@ -1083,6 +1083,11 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
             v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": b })));
         }
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "body": b })));
+        // Its features give way to one base feature holding the body as it is (#18698).
+        let solid = crate::open_meshing::session_world(&app.session).body(&b).is_some_and(|m| !m.body.is_mesh());
+        if solid {
+            v.push(cmd(app, "body.remove_history", "Remove History").with(json!({ "body": b })).on(!locked));
+        }
         // A part the modelling kernel refuses can be repaired.
         if crate::open_meshing::session_world(&app.session).body(&b).is_some_and(|m| m.body.smlib_refused().is_some()) {
             v.push(Item::sep());
@@ -2521,6 +2526,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         // They recompute the history from the changed feature on: off the frame, as the timeline does.
         "timeline.suppress" | "timeline.roll_to" if item.params.is_some() => drop(app.run_heavy(&item.id, p)),
         "component.move_sketches.to_parts" => sketches_to_parts(app, p),
+        "body.remove_history" => remove_history(app, p),
         id if item.params.is_some() => {
             let _ = app.run(id, p);
         }
@@ -2553,6 +2559,27 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
         )
     };
     app.set_status(message, false);
+}
+
+/// Remove History on a body, saying what went, what stayed and any feature that now fails.
+fn remove_history(app: &mut SolveApp, p: Value) {
+    let out = match app.run("body.remove_history", p) {
+        Ok(out) => out,
+        Err(error) => return app.set_status(crate::friendly_error("body.remove_history", &error), true),
+    };
+    let names = |key: &str| -> Vec<String> {
+        out.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.get("feature").and_then(Value::as_str).or(v.as_str())).map(str::to_string).collect()
+    };
+    let (removed, kept, broken) = (names("removed"), names("kept"), names("broken"));
+    let count = removed.len().to_string();
+    let message = if !broken.is_empty() {
+        solidcraft_ui_text::format("browser.remove_history_broken", &[("removed", &count), ("features", &broken.join(", "))])
+    } else if !kept.is_empty() {
+        solidcraft_ui_text::format("browser.remove_history_kept", &[("removed", &count), ("features", &kept.join(", "))])
+    } else {
+        solidcraft_ui_text::format("browser.remove_history_done", &[("removed", &count)])
+    };
+    app.set_status(message, !broken.is_empty());
 }
 
 /// Section View on a face: the Section Analysis dialog on the face's plane (its outward normal,
