@@ -1789,7 +1789,7 @@ mod tests {
 
     /// #4164: two windows saving at once leave `app.ron` holding one whole save, never a short
     /// save with a longer one's tail behind it, and no temporary files. A window starting
-    /// meanwhile reads one whole save too.
+    /// meanwhile reads one whole save too, reading the way a window does (`eframe::read_settings`).
     #[test]
     fn settings_saved_at_once_from_two_windows_stay_whole() {
         let keys = ["solidcraft.prefs"];
@@ -1809,7 +1809,7 @@ mod tests {
             let reader = s.spawn(|| {
                 let mut damaged = 0;
                 while saving.load(std::sync::atomic::Ordering::Relaxed) {
-                    damaged += usize::from(!std::fs::read_to_string(&path).is_ok_and(|t| whole(&t)));
+                    damaged += usize::from(!eframe::read_settings(&path).is_ok_and(|t| whole(&t)));
                 }
                 damaged
             });
