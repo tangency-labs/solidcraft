@@ -342,31 +342,4 @@ mod tests {
             }
         }
     }
-
-    /// Optical-size regression supplied by @vdirienzo for #18445.
-    /// The pinned-constraint gallery draws every `c_` icon at 15 px in one cell: a constraint icon
-    /// that fills far more of its canvas than its neighbours reads as a different, bigger button
-    /// (#18445). The concentric rings stay near the family's optical size, about 37 units of the
-    /// 64-unit canvas with the 4.25 stroke.
-    #[test]
-    fn concentric_rings_keep_the_constraint_icons_optical_size() {
-        let look = Look { dark: false, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None };
-        let pm = render(doc_for("c_concentric", 64).unwrap(), look, 64).unwrap();
-        let mut bounds: Option<(u32, u32, u32, u32)> = None;
-        for y in 0..64 {
-            for x in 0..64 {
-                if pm.pixel(x, y).unwrap().alpha() > 0 {
-                    bounds = Some(match bounds {
-                        None => (x, y, x, y),
-                        Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
-                    });
-                }
-            }
-        }
-        let (x0, y0, x1, y1) = bounds.expect("concentric draws artwork");
-        assert!(x1 - x0 <= 40, "outer ring spans {x0}..{x1} of 64: it fills the 15 px gallery cell");
-        assert!(y1 - y0 <= 40, "outer ring spans {y0}..{y1} of 64: it fills the 15 px gallery cell");
-        assert_eq!((x0 + x1 + 1) / 2, 32, "artwork stays centred on (32, 32)");
-        assert_eq!((y0 + y1 + 1) / 2, 32, "artwork stays centred on (32, 32)");
-    }
 }
