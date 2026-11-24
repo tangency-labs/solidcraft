@@ -447,6 +447,7 @@ pub struct RelinkParams {
     /// component's own name stays yours. Not used when `occurrence` relinks one of several
     /// placements: that placement then shows a component made from the new source.
     #[serde(default, deserialize_with = "names_mode", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RelinkNames")]
     pub names: Option<RelinkNames>,
 }
 
