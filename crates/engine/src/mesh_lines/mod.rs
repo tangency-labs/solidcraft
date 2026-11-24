@@ -15,9 +15,20 @@ mod projection;
 mod scene;
 
 pub(crate) use coincide::sketch_off_lines;
-pub(crate) use meshes::{Ask, Placed, Scene, WORKERS, drawn_edges, placed, prepare};
+pub(crate) use meshes::Ask;
+pub(crate) use meshes::Placed;
+pub(crate) use meshes::Scene;
+pub(crate) use meshes::WORKERS;
+pub(crate) use meshes::drawn_edges;
+pub(crate) use meshes::placed;
+pub(crate) use meshes::prepare;
 pub(crate) use progress::Stage;
-pub(crate) use projection::{Origin, Owner, Part, Path, View, clip};
+pub(crate) use projection::Origin;
+pub(crate) use projection::Owner;
+pub(crate) use projection::Part;
+pub(crate) use projection::Path;
+pub(crate) use projection::View;
+pub(crate) use projection::clip;
 pub(crate) use scene::drawing;
 
 /// Why a view's lines weren't made, as what happened.

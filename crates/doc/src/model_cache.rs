@@ -1239,25 +1239,38 @@ impl Model {
                     before = r.state.clone();
                     continue;
                 }
-                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
-                    ^ placement_digest(doc, f, Some(&before))
-                    ^ construct_digest(doc, &vals, f, Some(&before))
-                    ^ turns_digest(doc, &vals, f).unwrap_or(0);
-                cache.states.put(
-                    cache_key(f, r.fingerprint, local, ctx, &before),
-                    CachedEval {
-                        error: None,
-                        error_code: None,
-                        warning: crate::eval::without_retained_notes(r.warning.clone()),
-                        import_report: r.import_report.clone(),
-                        repair: r.repair.clone(),
-                        lost_projections: None,
-                        ms: r.ms,
-                        state: r.state.clone(),
-                    },
-                    r.state.retained_bytes(),
-                    r.ms,
-                );
+                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, &before, &model.import_digests, 0);
+                let whole = CachedEval {
+                    error: None,
+                    error_code: None,
+                    warning: crate::eval::without_retained_notes(r.warning.clone()),
+                    import_report: r.import_report.clone(),
+                    repair: r.repair.clone(),
+                    lost_projections: None,
+                    ms: r.ms,
+                    state: r.state.clone(),
+                };
+                // And what it changed, by what it read, as an evaluation keeps it: the first edit
+                // after opening then evaluates only the features that read what the edit changed,
+                // as every later edit does, not every feature after the edit. An import's key also
+                // digests the features before it, so an import is left out (evaluated as before),
+                // as is a feature that names its pieces as later features pick them. So is one
+                // whose bodies were not stamped with this key (saved by a version that keyed them
+                // otherwise, or stamped by the whole model): `stamp` would work their names out
+                // afresh, with no lineage to work them from. It is evaluated again instead.
+                if let Some((k, read)) = &key.reads
+                    && !matches!(f.kind, FeatureKind::Import { .. })
+                    && !f.shell_piece_order
+                    && let Some(change) = r.state.change_from(&before, f.id, read)
+                    && change.bodies.iter().all(|b| match b {
+                        Changed::Made(b) => b.key == made_body_key(*k, &b.name),
+                        Changed::Kept(_) => true,
+                    })
+                {
+                    let bytes = change.retained_bytes();
+                    cache.changes.put(*k, whole.with(change), bytes, r.ms);
+                }
+                cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
                 before = r.state.clone();
             }
         }

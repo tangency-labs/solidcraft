@@ -461,34 +461,58 @@ fn map_geo_ref(m: &Mat, g: &mut crate::construct::GeoRef) {
 /// Map a point given as expressions by `m`: numbers stay numbers; a coordinate that is an
 /// expression stays one (`m · (x, y, z) + t`, written out), so it still follows its parameters.
 pub fn map_point_expr(m: &Mat, p: &mut crate::PointExpr) {
+    map_exprs(m, p, " mm");
+}
+
+/// [`map_point_expr`] for coordinates read with `unit` after a bare number (" mm" for lengths, ""
+/// for the unitless components of a direction).
+///
+/// A length's constant under 1e-12 mm is rounding left by the matrix and is dropped. A
+/// direction has no scale of its own (it is normalized when evaluated), so its constant is
+/// dropped only when it is that small next to the numbers it came from: an axis whose only
+/// number is 1e-20 keeps it (#18822).
+fn map_exprs(m: &Mat, p: &mut crate::PointExpr, unit: &str) {
     let num = |e: &crate::Expr| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
     if let [Some(x), Some(y), Some(z)] = [num(&p[0]), num(&p[1]), num(&p[2])] {
         *p = crate::point_expr(apply_point(m, Vec3::new(x, y, z)));
         return;
     }
+    let direction = unit.is_empty();
+    let scale = if direction { p.iter().filter_map(num).fold(0.0_f64, |a, v| a.max(v.abs())) } else { 1.0 };
     let old = p.clone();
     for (row, out) in p.iter_mut().enumerate() {
         let mut constant = m[3][row];
         let mut terms: Vec<String> = Vec::new();
         for (col, e) in old.iter().enumerate() {
             let c = m[col][row];
-            if c.abs() < 1e-12 {
-                continue;
-            }
             match num(e) {
-                Some(v) => constant += c * v,
+                // A direction's numbers count at any size; a length's below the cutoff are noise.
+                Some(v) if direction || c.abs() >= 1e-12 => constant += c * v,
+                Some(_) => {}
+                None if c.abs() < 1e-12 => {}
                 None if (c - 1.0).abs() < 1e-12 => terms.push(format!("({e})")),
                 None => terms.push(format!("{c} * ({e})")),
             }
         }
+        let kept = constant != 0.0 && constant.abs() >= 1e-12 * scale;
+        // A direction's number is written short (`1e-20`, not 20 zeros), and its rounding
+        // noise is 0 whether or not an expression is left beside it.
+        let text = |v: f64| if direction { short_number(if kept { v } else { 0.0 }) } else { format!("{v}") };
         let mut e = terms.join(" + ");
         if terms.is_empty() {
-            e = format!("{constant} mm");
-        } else if constant.abs() >= 1e-12 {
-            e = format!("{e} {} {} mm", if constant < 0.0 { '-' } else { '+' }, constant.abs());
+            e = format!("{}{unit}", text(constant));
+        } else if kept {
+            e = format!("{e} {} {}{unit}", if constant < 0.0 { '-' } else { '+' }, text(constant.abs()));
         }
         *out = e.into();
     }
+}
+
+/// `v` as an expression reads it back exactly: plainly when that is short, else with an
+/// exponent (`1e-300`).
+fn short_number(v: f64) -> String {
+    let plain = format!("{v}");
+    if plain.len() <= 24 { plain } else { format!("{v:e}") }
 }
 
 /// Map a displacement given as length expressions, retaining its parameter dependencies.
@@ -497,6 +521,14 @@ pub fn map_vector_expr(m: &Mat, v: &mut crate::PointExpr) {
     let mut rotation = *m;
     rotation[3] = [0.0, 0.0, 0.0, 1.0];
     map_point_expr(&rotation, v);
+}
+
+/// Map a direction given as unitless expressions (a primitive's axis) by `m`'s rotation, keeping
+/// its parameter dependencies; the frame's translation doesn't move it.
+pub fn map_dir_expr(m: &Mat, d: &mut crate::DirExpr) {
+    let mut rotation = *m;
+    rotation[3] = [0.0, 0.0, 0.0, 1.0];
+    map_exprs(&rotation, d, "");
 }
 
 impl FeatureKind {
@@ -510,6 +542,7 @@ impl FeatureKind {
             Geo::Plane(p) => map_plane_ref(m, p),
             Geo::Construct(r) => map_geo_ref(m, r),
             Geo::Placement(e) => map_point_expr(m, e),
+            Geo::DirExpr(d) => map_dir_expr(m, d),
             // An Emboss cylinder is picked in its component's frame (`EmbossFace`).
             Geo::Pinned(_) | Geo::Profiles(..) => {}
         });
