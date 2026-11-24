@@ -9,6 +9,10 @@
 //! The rows #17739's vertex step moves as well (19 `blend.fillet_executive_p3` bottle
 //! rows, `corpus.parity`'s `Fillet__bolt.smb`) are replayed from [`super::DATA`], with
 //! the main hashes this list had for them.
+//!
+//! The `blend.fillet_executive_p3` hashes are of those lines without the
+//! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
+//! value is the line's.
 
 /// The moved rows: unit, case, main's row hash.
 pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
@@ -30,42 +34,42 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "source-file-corner_box-edge12",
-        0x8a2128acaedbe455,
+        0x8ed04f14a06fc3a2,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-degenerate-caps_coons-e5-r0.5",
-        0x4ac78ecf10ab2d13,
+        0x3373479adc5a7a08,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0x6e65691addf04e65,
+        0x519f703ce178594e,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0x52deff2ba9ad2924,
+        0x900b3d0679ffb2d3,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0xe3da2d131dd1ffe0,
+        0xc87fb128a0e9c4c7,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        0xe1177d70bd81d1ea,
+        0x2551a1fdc689efef,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-sphere_diff_3cylinders-all-r0.1",
-        0xba147c5f32b51254,
+        0x46b24b2fc2c8dd3f,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep5-sphere_diff_3cylinders-e29-r1.0",
-        0x8d531e5297b35527,
+        0xd6e6eb94f0d8f6e6,
     ),
     (
         "blend.fillet_removal",

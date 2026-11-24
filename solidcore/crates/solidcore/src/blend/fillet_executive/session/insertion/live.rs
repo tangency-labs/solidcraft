@@ -281,9 +281,9 @@ impl LiveGeometryInsertion<'_> {
         managed: EdgeId,
     ) -> Result<()> {
         let binding = curve.ok_or_else(|| {
-            SolidError::blend_missing(
+            built_defect(
                 "SmTopologyIntersector::MergeCurveOnSurfaces",
-                "the curve's binding",
+                "the managed edge and the rail a corner merges are edges of the bodies the fillet built, each with its curve",
             )
         })?;
         let actual = match binding.object {
@@ -420,15 +420,10 @@ impl IntersectionTopologyContext for LiveGeometryInsertion<'_> {
         managed: EdgeId,
         deleted: &mut Vec<EdgeId>,
     ) -> Result<()> {
-        let primary = edgeuse::p1::primary_edgeuse(pseudo.brep(), edge)?.ok_or_else(|| {
-            SolidError::blend_missing(
-                "SmFilletEdge::GetOriginalUVCurve",
-                "the edge's primary edge use",
-            )
-        })?;
-        let mate = edgeuse::p1::mate(pseudo.brep(), primary)?.ok_or_else(|| {
-            SolidError::blend_missing("SmFilletEdge::GetOriginalUVCurve", "the edge use's mate")
-        })?;
+        let primary = edgeuse::p1::primary_edgeuse(pseudo.brep(), edge)?
+            .ok_or_else(|| built_defect("SmFilletEdge::GetOriginalUVCurve", PSEUDO_EDGE_USES))?;
+        let mate = edgeuse::p1::mate(pseudo.brep(), primary)?
+            .ok_or_else(|| built_defect("SmFilletEdge::GetOriginalUVCurve", PSEUDO_EDGE_USES))?;
         let uv = pseudo
             .original_uv_curve(edge)?
             .map(|_| FilletObject::UvCurve(FilletBody::Pseudo, mate));
@@ -697,6 +692,20 @@ impl FilletSession<'_> {
         self.objects.target.set_editing_enabled(editing);
         result
     }
+}
+
+/// Why a pseudo body edge has its primary edge use and its mate: the fillet builds the pseudo
+/// body's edges between two faces, each with both edge uses.
+const PSEUDO_EDGE_USES: &str =
+    "the fillet builds each edge of its pseudo body between two faces, with both edge uses";
+
+/// A reviewed defect: something of the bodies the fillet built (the pseudo and intermediate
+/// bodies) is missing, `why` saying why it is there. Status `SM_ERR_NULL_POINTER`, the
+/// fork's `NER`, as the phrase cause it replaces had.
+fn built_defect(op: &'static str, why: &'static str) -> SolidError {
+    crate::error::Failure::new(op, crate::error::blend::BlendFailure::Defect { why })
+        .with_status(crate::error::SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
 #[cfg(test)]

@@ -9,10 +9,10 @@
 //!
 //! | Rust                           | Status difftest compares |
 //! |--------------------------------|--------------------------|
-//! | [`QueryFailure::Failed`]       | `SM_ERR`                 |
-//! | [`QueryFailure::Missing`]      | `SM_ERR_NULL_POINTER`    |
-//! | [`QueryFailure::InvalidValue`] | `SM_ERR_INVALID_INPUT`   |
 //! | [`QueryFailure::Defect`]       | `SM_ERR` (or the site's, through `with_status`) |
+//! | [`QueryFailure::Failed`]       | `SM_ERR`                 |
+//! | [`QueryFailure::InvalidValue`] | `SM_ERR_INVALID_INPUT`   |
+//! | [`QueryFailure::Missing`]      | `SM_ERR_NULL_POINTER`    |
 //! | the named causes, from [`QueryFailure::BoundOverflows`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
 //!
 //! [`QueryFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -34,17 +34,24 @@ use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NUL
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum QueryFailure {
-    /// The query could not continue, as the phrase says (for example "the loop does not
-    /// close").
-    Failed(&'static str),
-    /// Something the query needs is missing, as the phrase says (for example "the edge's
-    /// curve").
-    Missing(&'static str),
-    /// A value the query computes with has no defined result, as the phrase says (for
-    /// example "a tangent of zero length has no direction"). Upstream returns
-    /// `SM_ERR_INVALID_INPUT` as a status here, so its kind is
-    /// [`ErrorKind::InvalidInput`].
-    InvalidValue(&'static str),
+    /// A bound or size the query computes overflows the floating range, though every number
+    /// given is finite: the inputs' size, or how far apart they are, reaches past it. Class
+    /// `failed`.
+    BoundOverflows,
+    /// A bounding box asked of the edge's curve could not be found (the first box's error is
+    /// the cause). Class `failed`; whether it is a defect or a refusal is its cause's
+    /// ([`crate::SolidError::is_defect`] follows the chain).
+    BoundingBoxNotFound,
+    /// The B-rep has no edges to list. Class `failed`.
+    BrepWithoutEdges,
+    /// The B-rep has no faces to list. Class `failed`.
+    BrepWithoutFaces,
+    /// A closest point the solve found does not evaluate to a finite point (or its distance
+    /// is not a finite number at least zero). Class `failed`.
+    ClosestPointNotEvaluated,
+    /// The curve crosses the face's surface outside the tube of the edge's tolerance, so the
+    /// crossing found is another one, not this edge's. Class `failed`.
+    CrossingOffEdge,
     /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
     /// `why` names the step that failed and why that is the kernel's fault, not the
     /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
@@ -53,37 +60,130 @@ pub enum QueryFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
-    /// A bound or size the query computes overflows the floating range, though every number
-    /// given is finite: the inputs' size, or how far apart they are, reaches past it. Class
-    /// `failed`.
-    BoundOverflows,
-    /// No station of the first curve dropped onto the other curve or the surface, so no
-    /// deviation was measured. Class `failed`.
-    NoStationDropped,
+    /// An edge of the caller's body has no curve. [`ErrorKind::InvalidInput`].
+    EdgeWithoutCurve,
+    /// An edge use of the caller's body is oriented neither the same as its edge nor
+    /// opposite it. [`ErrorKind::InvalidInput`].
+    EdgeuseOrientationUnset,
+    /// An edge use of the caller's body has no edge. [`ErrorKind::InvalidInput`].
+    EdgeuseWithoutEdge,
+    /// The face has no loops: no upward face use, or none with a loop use. Class `failed`.
+    FaceWithoutLoops,
+    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
+    FaceWithoutSurface,
+    /// The query could not continue, as the phrase says (for example "the loop does not
+    /// close").
+    Failed(&'static str),
+    /// The reach given is not finite and at least zero. [`ErrorKind::InvalidInput`].
+    InvalidReach,
+    /// A value the query computes with has no defined result, as the phrase says (for
+    /// example "a tangent of zero length has no direction"). Upstream returns
+    /// `SM_ERR_INVALID_INPUT` as a status here, so its kind is
+    /// [`ErrorKind::InvalidInput`].
+    InvalidValue(&'static str),
+    /// Something the query needs is missing, as the phrase says (for example "the edge's
+    /// curve").
+    Missing(&'static str),
+    /// The closest-point search found no point: the solver returned no solution, or the drop
+    /// onto the curve, surface or edge found no foot. Class `failed`.
+    NoClosestPoint,
+    /// No edge of the B-rep is at the point. Class `failed`.
+    NoEdgeAtPoint,
+    /// No edge was given where the routine needs one. [`ErrorKind::InvalidInput`].
+    NoEdgeGiven,
+    /// No face of the B-rep is at the point. Class `failed`.
+    NoFaceAtPoint,
+    /// A drop of a point onto a curve or a surface found no foot point. Class `failed`.
+    NoFoot,
+    /// The classification curve's touch list holds no entry to start the loop walk from:
+    /// no touch, or in a cyclic walk no exit followed by an entry. Class `failed`.
+    NoLoopTouches,
     /// No patch of the surface overlaps the UV box given: the box is within the rounding of
     /// the patches' knot range, but past every patch. [`ErrorKind::InvalidInput`].
     NoPatchInBox,
-    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
-    FaceWithoutSurface,
+    /// The surface cache has no poly B-rep: phase 1 has not run on its face.
+    /// [`ErrorKind::InvalidInput`].
+    NoPolyBrep,
+    /// No station of the first curve dropped onto the other curve or the surface, so no
+    /// deviation was measured. Class `failed`.
+    NoStationDropped,
+    /// No tessellation driver was given where the test needs one.
+    /// [`ErrorKind::InvalidInput`].
+    NoTessDriver,
+    /// The cache's poly B-rep has no face (the caller's poly B-rep: phase 1 gives it one).
+    /// [`ErrorKind::InvalidInput`].
+    PolyBrepWithoutFace,
+    /// No ray fired from the point found the region it lies in (every ray, both ways, failed
+    /// or found none). Class `failed`.
+    RegionNotFound,
+    /// The region has no shells, so it has no box. Class `failed`.
+    RegionWithoutShells,
+    /// The poly edge's segment meets no node of the cache's subdivision tree. Class `failed`.
+    SegmentOutsideTree,
+    /// The sector classification stepped off a face on its first step, where it has no
+    /// earlier step to fall back to. Class `failed`.
+    SteppedOffOnFirstStep,
     /// The surface the query reads (a B-spline surface, or the B-spline base of an analytic
     /// one) has no NURBS net: none was made for it, or it could not be made (a NURB that
     /// cannot be made stays missing), so the query has no net to read.
     /// [`ErrorKind::Unsupported`].
     SurfaceWithoutNurbs,
+    /// The curve classified against the edge's radial sector runs along the edge there: its
+    /// tangent is parallel to the edge's, so it has no direction across the sector. Class
+    /// `failed`.
+    TangentAlongEdge,
+    /// The solution is on an object of a kind the routine does not take (not a vertex, curve,
+    /// edge, surface or face). [`ErrorKind::Unsupported`].
+    UnsupportedObjectKind,
+    /// The UV line of the classification could not be made (its error is the cause: the
+    /// line's one error is ends that coincide, the caller's points). Status
+    /// `SM_ERR_NULL_POINTER`, [`ErrorKind::InvalidInput`].
+    UvLineNotMade,
+    /// A vector the query unitizes or measures an angle with has zero length, so it has no
+    /// direction. Upstream returns `SM_ERR_INVALID_INPUT` as a status here, so its kind is
+    /// [`ErrorKind::InvalidInput`].
+    ZeroLengthVector,
 }
 
 impl QueryFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
+            Self::BoundOverflows
+            | Self::BoundingBoxNotFound
+            | Self::BrepWithoutEdges
+            | Self::BrepWithoutFaces
+            | Self::ClosestPointNotEvaluated
+            | Self::CrossingOffEdge
             | Self::Defect { .. }
-            | Self::BoundOverflows
-            | Self::NoStationDropped
+            | Self::EdgeuseOrientationUnset
+            | Self::EdgeuseWithoutEdge
+            | Self::FaceWithoutLoops
+            | Self::Failed(_)
+            | Self::InvalidReach
+            | Self::NoClosestPoint
+            | Self::NoEdgeAtPoint
+            | Self::NoFaceAtPoint
+            | Self::NoFoot
+            | Self::NoLoopTouches
             | Self::NoPatchInBox
-            | Self::SurfaceWithoutNurbs => SM_ERR,
-            Self::Missing(_) | Self::FaceWithoutSurface => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            | Self::NoStationDropped
+            | Self::RegionNotFound
+            | Self::RegionWithoutShells
+            | Self::SegmentOutsideTree
+            | Self::SteppedOffOnFirstStep
+            | Self::SurfaceWithoutNurbs
+            | Self::TangentAlongEdge
+            | Self::UnsupportedObjectKind => SM_ERR,
+            Self::EdgeWithoutCurve
+            | Self::FaceWithoutSurface
+            | Self::Missing(_)
+            | Self::NoEdgeGiven
+            | Self::NoPolyBrep
+            | Self::NoTessDriver
+            | Self::PolyBrepWithoutFace
+            | Self::UvLineNotMade => SM_ERR_NULL_POINTER,
+            Self::InvalidValue(_) | Self::ZeroLengthVector => SM_ERR_INVALID_INPUT,
         }
     }
 
@@ -97,8 +197,18 @@ impl QueryFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::SurfaceWithoutNurbs => ErrorKind::Unsupported,
-            Self::NoPatchInBox | Self::FaceWithoutSurface => ErrorKind::InvalidInput,
+            Self::EdgeWithoutCurve
+            | Self::EdgeuseOrientationUnset
+            | Self::EdgeuseWithoutEdge
+            | Self::FaceWithoutSurface
+            | Self::InvalidReach
+            | Self::NoEdgeGiven
+            | Self::NoPatchInBox
+            | Self::NoPolyBrep
+            | Self::NoTessDriver
+            | Self::PolyBrepWithoutFace
+            | Self::UvLineNotMade => ErrorKind::InvalidInput,
+            Self::SurfaceWithoutNurbs | Self::UnsupportedObjectKind => ErrorKind::Unsupported,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -107,14 +217,51 @@ impl QueryFailure {
 impl core::fmt::Display for QueryFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Failed(what) | Self::InvalidValue(what) => f.write_str(what),
-            Self::Missing(what) => write!(f, "{what} is missing"),
-            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
             Self::BoundOverflows => f.write_str("the bound overflows the floating range"),
-            Self::NoStationDropped => f.write_str("no station dropped onto the other"),
-            Self::NoPatchInBox => f.write_str("no patch of the surface overlaps the UV box"),
+            Self::BoundingBoxNotFound => f.write_str("the curve's bounding box could not be found"),
+            Self::BrepWithoutEdges => f.write_str("the B-rep has no edges"),
+            Self::BrepWithoutFaces => f.write_str("the B-rep has no faces"),
+            Self::ClosestPointNotEvaluated => f.write_str("a closest point does not evaluate"),
+            Self::CrossingOffEdge => {
+                f.write_str("the crossing on the face's surface is off the edge")
+            }
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
+            Self::EdgeuseOrientationUnset => {
+                f.write_str("the edge use's orientation is neither same nor opposite")
+            }
+            Self::EdgeuseWithoutEdge => f.write_str("the edge use has no edge"),
+            Self::FaceWithoutLoops => f.write_str("the face has no loops"),
             Self::FaceWithoutSurface => f.write_str("the face has no surface"),
+            Self::Failed(what) | Self::InvalidValue(what) => f.write_str(what),
+            Self::InvalidReach => f.write_str("the reach must be finite and at least zero"),
+            Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::NoClosestPoint => f.write_str("no closest point was found"),
+            Self::NoEdgeAtPoint => f.write_str("no edge is at the point"),
+            Self::NoEdgeGiven => f.write_str("no edge was given"),
+            Self::NoFaceAtPoint => f.write_str("no face is at the point"),
+            Self::NoFoot => f.write_str("the drop found no foot point"),
+            Self::NoLoopTouches => {
+                f.write_str("the touch-direction list is empty or its index is unset")
+            }
+            Self::NoPatchInBox => f.write_str("no patch of the surface overlaps the UV box"),
+            Self::NoPolyBrep => f.write_str("the surface cache has no poly B-rep"),
+            Self::NoStationDropped => f.write_str("no station dropped onto the other"),
+            Self::NoTessDriver => f.write_str("no tessellation driver was given"),
+            Self::PolyBrepWithoutFace => f.write_str("the poly B-rep has no face"),
+            Self::RegionNotFound => f.write_str("no ray fired from the point found its region"),
+            Self::RegionWithoutShells => f.write_str("the region has no shells"),
+            Self::SegmentOutsideTree => f.write_str("the segment meets no subdivision tree node"),
+            Self::SteppedOffOnFirstStep => f.write_str("the first step stepped off the surface"),
             Self::SurfaceWithoutNurbs => f.write_str("the surface has no NURBS net"),
+            Self::TangentAlongEdge => {
+                f.write_str("the curve's tangent is parallel to the edge's tangent")
+            }
+            Self::UnsupportedObjectKind => {
+                f.write_str("the solution's object is not a vertex, curve, edge, surface or face")
+            }
+            Self::UvLineNotMade => f.write_str("the UV line could not be made"),
+            Self::ZeroLengthVector => f.write_str("a vector of zero length has no direction"),
         }
     }
 }
@@ -226,6 +373,33 @@ pub(super) mod tests {
             (F::NoPatchInBox, SM_ERR, K::InvalidInput),
             (F::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::SurfaceWithoutNurbs, SM_ERR, K::Unsupported),
+            (F::NoClosestPoint, SM_ERR, K::Failed),
+            (F::EdgeWithoutCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::UnsupportedObjectKind, SM_ERR, K::Unsupported),
+            (F::BrepWithoutEdges, SM_ERR, K::Failed),
+            (F::BrepWithoutFaces, SM_ERR, K::Failed),
+            (F::FaceWithoutLoops, SM_ERR, K::Failed),
+            (F::EdgeuseWithoutEdge, SM_ERR, K::InvalidInput),
+            (F::EdgeuseOrientationUnset, SM_ERR, K::InvalidInput),
+            (F::NoEdgeAtPoint, SM_ERR, K::Failed),
+            (F::NoFaceAtPoint, SM_ERR, K::Failed),
+            (F::ClosestPointNotEvaluated, SM_ERR, K::Failed),
+            (F::InvalidReach, SM_ERR, K::InvalidInput),
+            (F::CrossingOffEdge, SM_ERR, K::Failed),
+            (F::RegionNotFound, SM_ERR, K::Failed),
+            (F::BoundingBoxNotFound, SM_ERR, K::Failed),
+            (F::ZeroLengthVector, SM_ERR_INVALID_INPUT, K::InvalidInput),
+            (F::NoFoot, SM_ERR, K::Failed),
+            (F::SteppedOffOnFirstStep, SM_ERR, K::Failed),
+            (F::TangentAlongEdge, SM_ERR, K::Failed),
+            (F::RegionWithoutShells, SM_ERR, K::Failed),
+            (F::NoEdgeGiven, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::UvLineNotMade, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::NoLoopTouches, SM_ERR, K::Failed),
+            (F::NoPolyBrep, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::SegmentOutsideTree, SM_ERR, K::Failed),
+            (F::NoTessDriver, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::PolyBrepWithoutFace, SM_ERR_NULL_POINTER, K::InvalidInput),
         ];
         for (failure, code, kind) in cases {
             let e = SolidError::query("query::op", failure);
@@ -304,19 +478,12 @@ pub(super) mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/query/api_queries.rs", 36),
-            ("solidcore/src/query/brep.rs", 2),
             ("solidcore/src/query/brep/ray.rs", 2),
             ("solidcore/src/query/brep/ray/live.rs", 4),
-            ("solidcore/src/query/edge.rs", 10),
-            ("solidcore/src/query/face/p1.rs", 2),
             ("solidcore/src/query/face/p2.rs", 19),
-            ("solidcore/src/query/face/p3.rs", 2),
-            ("solidcore/src/query/face/p4.rs", 2),
             ("solidcore/src/query/poly.rs", 13),
             ("solidcore/src/query/poly/copy.rs", 11),
             ("solidcore/src/query/poly_properties.rs", 2),
-            ("solidcore/src/query/tess.rs", 6),
         ];
         assert_pinned("query phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }

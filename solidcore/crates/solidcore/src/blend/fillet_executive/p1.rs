@@ -1550,7 +1550,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     let crv = edge_curve_mut(OP, target, edge_id)?;
                     // fork 873c7c9 passes this on (SER)
                     crv.edit_parameterization(k, &edge_ivl)?;
-                    target.edge_mut(edge_id)?.interval = edge_ivl;
+                    topo_edge::set_interval(target, edge_id, &edge_ivl)?;
                 }
 
                 let curr_crv = edge_curve(OP, target, edge_id)?;
@@ -1620,15 +1620,7 @@ fn curve_as_bspline(
         CurveKind::Ellipse(e) => return Ok(e.base().clone()),
         CurveKind::Parabola(p) => return Ok(p.base().clone()),
         CurveKind::Hyperbola(h) => return Ok(h.base.clone()),
-        CurveKind::Hermite(_) => "Hermite",
-        CurveKind::Projected(_) => "projected",
-        CurveKind::Iso(_) => "iso-parametric",
-        CurveKind::Offset(_) => "offset",
-        CurveKind::Conic(_) => "conic",
-        CurveKind::CrvInVolume(_) => "curve-in-volume",
-        CurveKind::CrvOnSurf(_) => "curve-on-surface",
-        CurveKind::TangentField(_) => "tangent-field",
-        CurveKind::Composite(_) => "composite",
+        other => other.name(),
     };
     Err(SolidError::blend_at(
         op,

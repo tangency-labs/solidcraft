@@ -21,7 +21,9 @@ use solidcore_step::read::R;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
-pub use checks::{HealedBody, ImportChecks, ImportHeals};
+pub use checks::HealedBody;
+pub use checks::ImportChecks;
+pub use checks::ImportHeals;
 use p21::{Entity, Exchange, Param};
 
 /// The representation the file's unlisted topology is read as, under an id the reader keeps for
@@ -56,6 +58,9 @@ pub struct ImportedBody {
     pub face_origin: Vec<u64>,
     /// Solid name (the brep's label), else the product name.
     pub name: String,
+    /// Original face label shared by every imported face, when meaningful and unambiguous.
+    /// Kept separately so callers can still choose the source solid name.
+    pub common_face_name: Option<String>,
     pub body: Body,
     /// Surface colour (linear-ish RGB 0..1) from the file's presentation styles.
     pub color: Option<[f32; 3]>,
@@ -1141,6 +1146,7 @@ impl Reader {
                     let (closed, file_faces, face_origin) = (part.closed, part.file_faces, part.face_origin.clone());
                     let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
                     let name = if own.is_empty() { product.clone() } else { own };
+                    let common_face_name = ex.common_face_name(&face_origin).map(str::to_owned);
                     // Faces the mesher gives up on (or that the budget cut short) are reported.
                     if self.unmeshed_checked.insert(item) && missing > 0 {
                         self.note(
@@ -1206,6 +1212,7 @@ impl Reader {
                     self.instances.push((item, m));
                     self.bodies.push(ImportedBody {
                         name,
+                        common_face_name,
                         body,
                         color,
                         path: path.clone(),
