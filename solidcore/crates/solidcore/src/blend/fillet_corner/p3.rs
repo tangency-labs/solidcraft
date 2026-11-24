@@ -1241,6 +1241,21 @@ impl FilletCorner {
                             // Four edges (not the fork's, #2953): the seam's line run
                             // on past the vertex as an edge; any other vertex of four
                             // goes on below.
+                            // A blended sheet edge bounds no material, so this corner is
+                            // neither the Mixed one nor the 3x2 one below: no corner
+                            // (MSG: Corner Case Not Implemented), as before #19829, when
+                            // the classification's convexity test failed on it.
+                            if opposite
+                                && (!crate::blend::fillet_solver::p5::edge_bounds_material(
+                                    b,
+                                    edge_of(b, eu0)?,
+                                )? || !crate::blend::fillet_solver::p5::edge_bounds_material(
+                                    b,
+                                    edge_of(b, eu1_)?,
+                                )?)
+                            {
+                                return Ok(None);
+                            }
                             let mixed = if opposite || total_eus == 4 {
                                 let lookup = |eu: EdgeuseId| solver_of(eu).ok();
                                 crate::blend::blend_corner::mixed::classify_mixed(

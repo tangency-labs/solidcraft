@@ -1,7 +1,7 @@
 //! tangency-labs/solidcraft#19829 (TE-B-F3): the Mixed corner's classification
 //! (`classify_mixed`) says "not mixed" as a value, `Ok(false)`, and a failure as an error
 //! with a named cause; its caller, `FilletCorner::create`, passes the error on instead of
-//! taking it for "no corner".
+//! taking it for "no corner", and keeps every corner it chose before.
 //!
 //! The bodies are the two Mixed corners the kernel builds: #2256's tangent peg
 //! (`data/issue_2256_peg_step_reimported.smb`, three edges at V = (40, 0, 10)) and #2368's
@@ -17,7 +17,10 @@
 )] // test helpers
 
 use solidcore::blend::blend_corner::mixed::classify_mixed;
+use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::fillet_corner::p3::{FilletCorner, MIXED_CORNER_OF_FOUR_EDGES};
 use solidcore::blend::fillet_solver::p1::FilletSolver;
+use solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use solidcore::error::blend::BlendFailure;
 use solidcore::error::{ErrorKind, SM_ERR_NULL_POINTER};
 use solidcore::geom::attribute::AttributeStore;
@@ -92,7 +95,7 @@ struct Corner {
     vertex: VertexId,
     solver_eus: [EdgeuseId; 2],
     all_eus: Vec<EdgeuseId>,
-    /// The edge uses around the vertex that are not blended: the seam first.
+    /// The edge uses around the vertex that are not blended.
     others: Vec<EdgeuseId>,
 }
 
@@ -106,10 +109,7 @@ fn corner(k: &mut Kernel, bytes: &[u8], front: [f64; 3], arc: [f64; 3]) -> Corne
             edge::end_vertex(&b, e).unwrap().unwrap(),
         ]
     };
-    let vertex = ends(ef)
-        .into_iter()
-        .find(|v| ends(ea).contains(v))
-        .unwrap();
+    let vertex = ends(ef).into_iter().find(|v| ends(ea).contains(v)).unwrap();
     let solver_eus = [outward(&b, ef, vertex), outward(&b, ea, vertex)];
     // FilletCorner::create's walk: clockwise, then radial, one edge use per edge
     let mut all_eus = vec![solver_eus[0]];
@@ -156,9 +156,49 @@ fn drafted_peg(k: &mut Kernel) -> Corner {
     )
 }
 
+/// A blend's solver: the tolerances the classification reads, and a surface generator
+/// that is neither a chamfer's nor a constant round's.
+fn solver() -> FilletSolver {
+    let mut s = FilletSolver::new(TOL, 1e-3, TAN_TOL_DEG.to_radians());
+    s.fsg = Some(FilletSurfaceGenerator::Base);
+    s
+}
+
+/// Every region of `c` made a void: the body is then its faces only, as a sheet is, and
+/// no edge of it bounds material (`edge_bounds_material`).
+fn as_sheet(c: &mut Corner) {
+    for r in solidcore::topology::brep::p1::regions(&c.b, None).unwrap() {
+        c.b.region_mut(r).unwrap().is_void = 1;
+    }
+}
+
+/// `FilletCorner::create` at `c`'s vertex with a solver for each blend.
+fn create(k: &Kernel, c: &mut Corner) -> solidcore::Result<Option<FilletCorner>> {
+    let s = solver();
+    let blends = c.solver_eus;
+    FilletCorner::create_with_solver_lookup(
+        k,
+        &mut c.b,
+        c.vertex,
+        &c.solver_eus,
+        &[],
+        |_| false,
+        |eu| {
+            if blends.contains(&eu) {
+                Ok(&s)
+            } else {
+                Err(SolidError::Unsupported {
+                    operation: "test::solver_of",
+                    reason: "not a blend",
+                })
+            }
+        },
+    )
+}
+
 /// The classification of `c`, each blend with a solver when `solved`.
 fn classify(k: &Kernel, c: &mut Corner, solved: bool) -> solidcore::Result<bool> {
-    let solver = FilletSolver::new(TOL, 1e-3, TAN_TOL_DEG.to_radians());
+    let solver = solver();
     let blends = c.solver_eus;
     let lookup = |eu: EdgeuseId| (solved && blends.contains(&eu)).then_some(&solver);
     classify_mixed(
@@ -182,81 +222,117 @@ fn assert_edge_use_without_edge(err: &SolidError, eu: EdgeuseId) {
     );
     assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
     assert!(!err.is_defect(), "{err}");
-    assert_eq!(solidcore::error::upstream_status(err), Some(SM_ERR_NULL_POINTER), "{err}");
-    assert!(format!("{err:?}").contains(&format!("{:?}", EntityRef::Edgeuse(eu))), "{err:?}");
+    assert_eq!(
+        solidcore::error::upstream_status(err),
+        Some(SM_ERR_NULL_POINTER),
+        "{err}"
+    );
+    assert!(
+        format!("{err:?}").contains(&format!("{:?}", EntityRef::Edgeuse(eu))),
+        "{err:?}"
+    );
 }
 
-/// Both pegs are Mixed corners, of three and of four edges.
+/// Both pegs are Mixed corners, of three and of four edges, and `FilletCorner::create`
+/// makes each the blend corner's Mixed.
 #[test]
-fn both_pegs_classify_as_mixed() {
+fn both_pegs_are_mixed() {
     let mut k = kernel();
-    let mut c = tangent_peg(&mut k);
-    assert_eq!(c.all_eus.len(), 3);
-    assert!(classify(&k, &mut c, true).unwrap());
-    let mut c = drafted_peg(&mut k);
-    assert_eq!(c.all_eus.len(), 4);
-    assert!(classify(&k, &mut c, true).unwrap());
+    for (mut c, edges) in [(tangent_peg(&mut k), 3), (drafted_peg(&mut k), 4)] {
+        assert_eq!(c.all_eus.len(), edges);
+        assert!(classify(&k, &mut c, true).unwrap());
+        let corner = create(&k, &mut c).unwrap().unwrap();
+        assert_eq!(corner.blend.unwrap().event, BlendCornerEvent::Mixed);
+    }
 }
 
-/// "Not mixed" is `Ok(false)`, not an error: blends without solvers, one blend only, and
-/// tangency held to nothing.
+/// "Not mixed" is `Ok(false)`, not an error: blends without solvers, and one blend only.
 #[test]
 fn not_mixed_is_a_value() {
     let mut k = kernel();
     for mut c in [tangent_peg(&mut k), drafted_peg(&mut k)] {
         assert!(!classify(&k, &mut c, false).unwrap());
-        let solver = FilletSolver::new(TOL, 1e-3, TAN_TOL_DEG.to_radians());
+        let solver = solver();
         let one = [c.solver_eus[0]];
         let lookup = |_| Some(&solver);
-        let found =
-            classify_mixed(&k, &mut c.b, c.vertex, &one, &c.all_eus, &lookup, TAN_TOL_DEG);
+        let found = classify_mixed(
+            &k,
+            &mut c.b,
+            c.vertex,
+            &one,
+            &c.all_eus,
+            &lookup,
+            TAN_TOL_DEG,
+        );
         assert!(!found.unwrap());
     }
 }
 
-/// Four edges whose edge beyond the seam is not a line (here it has no curve) are not
-/// mixed: `Ok(false)`. Before #19829 its leaving tangent was read anyway, and the missing
-/// curve was an error the caller took for "no corner", which at four edges is the same
-/// refusal as "not mixed".
+/// A sheet's edges bound no material, so a convex and a concave blend there are no Mixed
+/// ring: `Ok(false)`. Before #19829 the ring's convexity test failed on them
+/// (`EdgeBoundsNoMaterial`), and `FilletCorner::create` took the failure for "no corner";
+/// it keeps that corner: none at three edges (Corner Case Not Implemented), the refusal of
+/// a convex and a concave round at four.
 #[test]
-fn an_edge_beyond_the_seam_that_is_not_a_line_is_not_mixed() {
+fn a_sheet_is_not_mixed_and_keeps_its_corner() {
+    let mut k = kernel();
+    let mut c = tangent_peg(&mut k);
+    as_sheet(&mut c);
+    assert!(!classify(&k, &mut c, true).unwrap());
+    assert!(create(&k, &mut c).unwrap().is_none());
+
+    let mut c = drafted_peg(&mut k);
+    as_sheet(&mut c);
+    assert!(!classify(&k, &mut c, true).unwrap());
+    match create(&k, &mut c) {
+        Err(SolidError::Unsupported { reason, .. }) => {
+            assert_eq!(reason, MIXED_CORNER_OF_FOUR_EDGES);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Four edges where an edge not blended has no curve are not mixed (that edge is no
+/// tangent line), and `FilletCorner::create` refuses them as a convex and a concave round
+/// that are not the Mixed corner, as before #19829.
+#[test]
+fn an_edge_without_a_curve_beside_the_seam_is_not_mixed() {
     let mut k = kernel();
     let mut c = drafted_peg(&mut k);
-    assert!(classify(&k, &mut c, true).unwrap());
-    // the edge beyond: of the two not blended, the one whose removal keeps a seam
-    for &beyond in &c.others.clone() {
-        let e = eu1::edge(&c.b, beyond).unwrap().unwrap();
+    for &other in &c.others.clone() {
+        let e = eu1::edge(&c.b, other).unwrap().unwrap();
         let curve = c.b.edge_mut(e).unwrap().curve.take();
         let found = classify(&k, &mut c, true);
+        let corner = create(&k, &mut c);
         c.b.edge_mut(e).unwrap().curve = curve;
         assert!(!found.unwrap());
+        match corner {
+            Err(SolidError::Unsupported { reason, .. }) => {
+                assert_eq!(reason, MIXED_CORNER_OF_FOUR_EDGES);
+            }
+            other => panic!("{other:?}"),
+        }
     }
+    assert!(classify(&k, &mut c, true).unwrap());
 }
 
-/// A ring's edge use without an edge (a malformed body) is a failure, never "not mixed":
-/// `EdgeUseWithoutEdge` at that edge use, for the blends' edge uses (the ring's lookup)
-/// and for the seam's and the edge beyond's (the classification's own lookups, the site
-/// #19829 converts).
+/// A blended edge use without an edge (a malformed body handed to the public
+/// classification) is a failure, never "not mixed": `EdgeUseWithoutEdge` at that edge use.
+/// An edge use not blended without an edge is no tangent seam: `Ok(false)`.
 #[test]
-fn a_ring_edge_use_without_an_edge_is_a_failure() {
+fn a_blended_edge_use_without_an_edge_is_a_failure() {
     let mut k = kernel();
     for mut c in [tangent_peg(&mut k), drafted_peg(&mut k)] {
-        let mut detached = 0;
         for eu in c.all_eus.clone() {
             let e = c.b.edgeuse_mut(eu).unwrap().edge.take();
             let found = classify(&k, &mut c, true);
             c.b.edgeuse_mut(eu).unwrap().edge = e;
-            match found {
-                Err(err) => {
-                    assert_edge_use_without_edge(&err, eu);
-                    detached += 1;
-                }
-                // a seam without an edge can leave the ring unresolved: not mixed
-                Ok(mixed) => assert!(!mixed, "{eu:?}"),
+            if c.solver_eus.contains(&eu) {
+                assert_edge_use_without_edge(&found.unwrap_err(), eu);
+            } else {
+                assert!(!found.unwrap(), "{eu:?}");
             }
         }
-        // both blends' edge uses at least
-        assert!(detached >= 2, "{detached}");
         assert!(classify(&k, &mut c, true).unwrap());
     }
 }

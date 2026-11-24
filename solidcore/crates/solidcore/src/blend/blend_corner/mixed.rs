@@ -53,7 +53,7 @@ use crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex;
 use crate::blend::fillet_geom::p1::{FilStatus, FilletBrep, FilletGeomId, FilletSolverId};
 use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
-use crate::blend::fillet_solver::p5::is_concave_edge;
+use crate::blend::fillet_solver::p5::{edge_bounds_material, is_concave_edge};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::{
     BlendFailure, CornerInput, CornerStep, FilletSetUp, MixedStep, SolverFailure,
@@ -278,6 +278,10 @@ pub struct MixedRing {
     pub convex: EdgeuseId,
     /// `pConcave`.
     pub concave: EdgeuseId,
+    /// The convex blend's edge (`pConvex`'s; not the fork's member, #19829).
+    pub convex_edge: EdgeId,
+    /// The concave blend's edge (`pConcave`'s; not the fork's member, #19829).
+    pub concave_edge: EdgeId,
     /// `pSeam`.
     pub seam: EdgeuseId,
     /// Not the fork's (#2953): the fourth edge at V, the seam's line run on past V as an
@@ -343,7 +347,9 @@ impl MixedCorner {
 }
 
 /// `sm_MixedRing`: the ring's parts, `None` where the vertex is not a Mixed one's shape
-/// (not two solver edge uses of opposite convexity among three or four, no common face,
+/// (not two solver edge uses of opposite convexity among three or four, a blended edge
+/// that bounds no material (a sheet's, not the fork's, whose convexity test fails there,
+/// #19829), no common face,
 /// no other face of each blend at the seam, or a blend without a solver). `solver_of` is
 /// `GetFilletSolverOfEdgeuse` (`None`: `NULL`); the blends' solvers are returned with
 /// the ring (B1, B2), each of its edge use or else of its mate. Of four edges (not the
@@ -361,12 +367,18 @@ pub(crate) fn mixed_ring<S: Copy>(
     };
     let e0 = eu1::edge(b, eu0)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu0))?;
     let e1 = eu1::edge(b, eu1_)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu1_))?;
+    // a sheet's edge bounds no material and is neither convex nor concave: no Mixed ring
+    // (`is_concave_edge` refuses it; #19829)
+    if !edge_bounds_material(b, e0)? || !edge_bounds_material(b, e1)? {
+        return Ok(None);
+    }
     let concave = [is_concave_edge(k, b, e0)?, is_concave_edge(k, b, e1)?];
     if concave[0] == concave[1] {
         return Ok(None);
     }
     let convex_eu = if concave[0] { eu1_ } else { eu0 };
     let concave_eu = if concave[0] { eu0 } else { eu1_ };
+    let edges = if concave[0] { [e1, e0] } else { [e0, e1] };
     let rest: Vec<EdgeuseId> = all_eus
         .iter()
         .copied()
@@ -378,7 +390,7 @@ pub(crate) fn mixed_ring<S: Copy>(
         _ => return Ok(None),
     };
     for (seam, beyond) in orders {
-        let found = ring_of(b, [convex_eu, concave_eu], seam, beyond, solver_of)?;
+        let found = ring_of(b, [convex_eu, concave_eu], edges, seam, beyond, solver_of)?;
         if found.is_some() {
             return Ok(found);
         }
@@ -407,6 +419,7 @@ fn other_face(b: &Brep, eu: EdgeuseId, not: FaceId) -> Result<Option<FaceId>> {
 fn ring_of<S: Copy>(
     b: &Brep,
     [convex_eu, concave_eu]: [EdgeuseId; 2],
+    [convex_edge, concave_edge]: [EdgeId; 2],
     seam: EdgeuseId,
     beyond: Option<EdgeuseId>,
     solver_of: &dyn Fn(EdgeuseId) -> Option<S>,
@@ -472,6 +485,8 @@ fn ring_of<S: Copy>(
         MixedRing {
             convex: convex_eu,
             concave: concave_eu,
+            convex_edge,
+            concave_edge,
             seam,
             beyond,
             t,
@@ -489,16 +504,17 @@ fn ring_of<S: Copy>(
 /// edge (not the fork's, #2953) is the seam's line run on past `vertex`, tangent there too.
 ///
 /// "Not mixed" is a value, `Ok(false)`: every test of the shape that does not hold, of
-/// the ring, the continuity, the planarity and the lines. An error is a failure, never
+/// the ring (a blended edge of a sheet, which bounds no material, included), the
+/// continuity, the tangency, the planarity and the lines. An error is a failure, never
 /// "not mixed": the caller passes it on.
 ///
 /// # Errors
 ///
-/// Those of the ring's convexity and face lookups, the continuity tests and the
-/// planarity and line tests, and of the leaving tangents of the seam and the edge beyond
-/// it (read only once both are lines); [`BlendFailure::EdgeUseWithoutEdge`] (status
-/// `SM_ERR_NULL_POINTER`) at an edge use of the ring, from the caller's body, that has no
-/// edge.
+/// Those of the ring ([`BlendFailure::EdgeUseWithoutEdge`], status
+/// `SM_ERR_NULL_POINTER`, at a blended edge use of the caller's body that has no edge;
+/// the convexity and face lookups), of the continuity, planarity and line tests, and of
+/// the leaving tangents of the seam and the edge beyond it (read only once both are
+/// lines).
 pub fn classify_mixed<'s>(
     k: &Kernel,
     b: &mut Brep,
@@ -511,14 +527,12 @@ pub fn classify_mixed<'s>(
     let Some((ring, [fs0, fs1])) = mixed_ring(k, b, solver_eus, all_eus, solver_of)? else {
         return Ok(false);
     };
-    let convex_e = ring_edge(b, ring.convex)?;
-    let concave_e = ring_edge(b, ring.concave)?;
     if !test_g1_continuity(
         k,
         b,
         Some(vertex),
-        Some(convex_e),
-        Some(concave_e),
+        Some(ring.convex_edge),
+        Some(ring.concave_edge),
         tangency_tol_deg,
     )?
     .0 || !check_tangential_edgeuse_at_vertex(k, b, ring.seam, vertex, tangency_tol_deg)?
@@ -533,7 +547,10 @@ pub fn classify_mixed<'s>(
     if !planar {
         return Ok(false);
     }
-    let seam_e = ring_edge(b, ring.seam)?;
+    // the seam's edge, which its tangency test just read: without one, not tangential
+    let Some(seam_e) = eu1::edge(b, ring.seam)? else {
+        return Ok(false);
+    };
     let line = match edge::curve(b, seam_e)? {
         Some(c) => c.is_line(k, 10, tol)?.is_some(),
         None => false,
@@ -547,7 +564,10 @@ pub fn classify_mixed<'s>(
     if !check_tangential_edgeuse_at_vertex(k, b, beyond, vertex, tangency_tol_deg)? {
         return Ok(false);
     }
-    let beyond_e = ring_edge(b, beyond)?;
+    // the same for the edge beyond
+    let Some(beyond_e) = eu1::edge(b, beyond)? else {
+        return Ok(false);
+    };
     let straight = match edge::curve(b, beyond_e)? {
         Some(c) => c.is_line(k, 10, tol)?.is_some(),
         None => false,
@@ -560,13 +580,6 @@ pub fn classify_mixed<'s>(
     let down = leaving(k, b, seam_e, vertex, OP_CLASSIFY)?;
     let up = leaving(k, b, beyond_e, vertex, OP_CLASSIFY)?;
     Ok(down.dot(up) < 0.0 && down.is_parallel_to(up, tangency_tol_deg))
-}
-
-/// The edge of an edge use of the Mixed ring, from the caller's body:
-/// [`BlendFailure::EdgeUseWithoutEdge`] at the edge use where it has none, as
-/// [`mixed_ring`] reads the blends' edges.
-fn ring_edge(b: &Brep, eu: EdgeuseId) -> Result<EdgeId> {
-    eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu))
 }
 
 /// `smos_Min`.
