@@ -411,6 +411,27 @@ A backend that can't report a role exactly for an operation returns `Support::No
 `OpKind`. **No adapter falls back to geometric naming.** That fallback exists for old bodies and
 imports, not to make a new backend easier to add.
 
+### Topological naming: why a reshuffling kernel can't break names
+
+A kernel that reshuffles its output (faces in another order, a face split differently, new ids
+on every rebuild) is the classic topological naming problem: names tied to a kernel's entities
+break when the kernel changes. This design defends against it in three ways:
+
+- **No name ever comes from a kernel id or an order.** Names come only from the `History` each
+  operation reports, in record indices, composed by the app (above). A backend that reorders
+  faces changes nothing: its history is renumbered into the record's canonical order before the
+  app sees it.
+- **The naming gate is the defence.** A backend takes an operation only if it reports a `History`
+  that gives identical verified names on every corpus design using that operation (rule 2 of §8,
+  and `NAMING_CORPUS_KERNEL`). A backend that splits or merges faces differently fails that gate
+  for that operation and is not routed for it.
+- **Routing is deterministic.** The route is fixed for the session and recorded in the design
+  (§5). The same design therefore replays every operation on the same backend, and the same input
+  to a backend must give the same topology and the same history. The rig checks this per backend:
+  each case runs twice, and on two thread counts, and its records and histories must be
+  byte-identical. The naming corpus already builds every design twice and compares. A backend
+  whose output varies from run to run isn't routed for any operation.
+
 ### What can differ on another backend, and the answer
 
 On solidcore nothing changes: the same functions run in the same order and make the same records,
@@ -1177,6 +1198,40 @@ How this design limits the cost:
    second implementation. Is that within "only the adapter depends on solidcore crates", or
    should every crate take the record types through `kernel-api` re-exports? That would be about
    2,700 mechanical line changes.
+
+   **The other option: CADIR as the one intermediate form.** A community review suggested keeping
+   import, export and display outside the kernel, with cadmpeg's vendor-neutral CADIR as the
+   single intermediate representation, validated by round trips on a large corpus.
+
+   - **The first half is already the design.** Import, export and display are shared record
+     services outside every backend (§2): each backend makes bodies, and one shared STEP/IGES/
+     CADIR reader and writer, one mesher and one checker serve them all.
+   - **What CADIR carries.** It holds exact geometry on STEP's topology conventions: analytic and
+     NURBS carriers, in millimetres and radians, with per-vertex and per-edge tolerances and a
+     document linear tolerance. Bodies carry a name, and entities carry ids. SolidCraft already
+     reads and writes it (`solidcore-cadir`, used by `crates/io`).
+   - **What a record → CADIR → record round trip loses,** per `solidcore-cadir`'s own
+     documentation:
+     - procedural surfaces (blends, ball patches, placed revolutions) go as their NURBS nets,
+       with no definition and no certificate (a blend's bound ε is written as the face's
+       tolerance, which isn't read back);
+     - pcurves aren't read back; the reader makes them again on its own parameters;
+     - a record holding several regions comes back as one record per region, and wire edges are
+       dropped;
+     - CADIR has no field for persistent names or the operation `History` the naming rule needs
+       (§4), so they would travel beside it in any case.
+   - **What a round trip costs.** Each way is a full write and a full read, and the read is the
+     STEP-style assembly: pcurves, seams, tolerances, canonical order. The record needs none of
+     that between two operations: the solidcore backend uses it as it stands, with zero
+     conversions.
+   - **Recommendation: keep the record as the exchange format** between the app and its backends
+     and between backends. It is exact, it keeps blend definitions and certificates, it costs
+     nothing on the default path, and it is what names, meshes and the model cache already use.
+     Use **CADIR as the interchange format at the edges**: import and export, other tools, and
+     the round-trip corpus. That corpus test is worth adopting: record → CADIR → record on the
+     naming and rig corpora, reported next to the loopback run (§12, step 11), with the losses
+     above counted as `ExchangeLoss`. A backend that wants to speak CADIR can do so inside its
+     adapter. The router doesn't need to know.
 2. **The shared display crates.** viewport, viewport-gpu and gpu are shared with other front ends
    and use `solidcore-tess` display types: `TessPlan`, `Mesh`, and the display-only plan
    evaluator. Keep them as a listed display-format exception, or route them through a
