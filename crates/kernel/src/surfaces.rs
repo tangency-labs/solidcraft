@@ -808,7 +808,7 @@ pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, toleran
     let moved = picked.iter().map(|f| imp::offset_face(r, *f, distance)).collect::<Result<Vec<_>>>()?;
     let (parts, offsets) = Parts::joined(&moved.iter().collect::<Vec<_>>())?;
     let c = parts.canonical()?;
-    let (result, h) = imp::stitched(&c.brep, tolerance.max(c.brep.tolerance))?;
+    let (result, h) = imp::stitched_offsets(&c.brep, tolerance.max(c.brep.tolerance))?;
     let offset = |k: usize, _: usize| FaceOrigin::Offset { operand: 0, face: picked.get(k).copied().unwrap_or(0) };
     let faces = h
         .and_then(|h| carried(&h, &c, &offsets, 1, offset))
@@ -1368,6 +1368,12 @@ mod imp {
         stitched_with(r, tol, |_, sewn| checked_stitched(sewn, "stitch").map(|_| ()))
     }
 
+    /// [`stitched`] for Surface Offset's faces, not checked when the evaluation's validation mode
+    /// is off (`crate::validation`). Under the other modes the stitch is checked here, as before.
+    pub(super) fn stitched_offsets(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
+        if crate::validation::skipped() { stitched_with(r, tol, |_, _| Ok(())) } else { stitched(r, tol) }
+    }
+
     /// [`stitched`], taking a result whose check fails no more tests outside `exempt` than the
     /// input's does.
     pub(super) fn stitched_no_worse(r: &Brep, tol: f64, exempt: &[u32]) -> Result<(Body, Option<History>)> {
@@ -1402,11 +1408,13 @@ mod imp {
         crate::offset_backend::thicken(body, thickness, symmetric)
     }
 
-    /// The face `f` of `r` alone, offset by `d` along its normal (`smlib_offset_sheet`).
+    /// The face `f` of `r` alone, offset by `d` along its normal (`smlib_offset_sheet`), checked
+    /// unless the evaluation's validation mode is off (`crate::validation`).
     pub(super) fn offset_face(r: &Brep, f: usize, d: f64) -> Result<Brep> {
         let one = Parts::of(r, &[(f, false)])?.canonical()?;
         let sheet = SmBrep::from_record(&one.brep, true).map_err(sm("offset"))?;
-        checked(&sheet.offset_sheet(d).map_err(sm("offset"))?, "offset")
+        let moved = sheet.offset_sheet(d).map_err(sm("offset"))?;
+        if crate::validation::skipped() { moved.to_native().map_err(|e| failed(format!("SMLib offset: {e}"))) } else { checked(&moved, "offset") }
     }
 
     fn curves(plane: &Plane, chain: &[Numbered]) -> Result<Vec<Curve>> {

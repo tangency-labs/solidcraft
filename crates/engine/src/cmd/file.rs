@@ -2674,10 +2674,47 @@ impl Session {
                 thumbnail.as_deref(),
                 save,
             ),
-            None => {
-                solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
-            }
+            // The container the design was opened from: its blobs whose content has not changed
+            // are copied as they are, instead of being encoded and compressed again. A part is
+            // copied only when its name (the SHA-256 of its content), length and CRC-32 match what
+            // this save writes, so the file reads back the same either way.
+            None => match self.reuse_container().as_deref() {
+                Some(bytes) => solidcraft_io::write_design_container_reusing(
+                    &design,
+                    compression,
+                    preview.as_ref(),
+                    geometry.as_ref(),
+                    thumbnail.as_deref(),
+                    bytes,
+                ),
+                None => solidcraft_io::write_design_container_with_thumbnail(
+                    &design,
+                    compression,
+                    preview.as_ref(),
+                    geometry.as_ref(),
+                    thumbnail.as_deref(),
+                ),
+            },
         }
+    }
+
+    /// The container the design was opened from, read for a save to copy its unchanged blobs:
+    /// `None` when the design has never been saved, the file is not a container (a design script),
+    /// something else wrote the file since it was opened or saved here, or nothing is imported (an
+    /// import's source text is the part a save cannot encode cheaply). Each copied part is checked
+    /// against the content being saved as well, so a file replaced after this check is not copied
+    /// from either. Read here and dropped when the save returns, so nothing is kept between saves.
+    fn reuse_container(&self) -> Option<Vec<u8>> {
+        let path = self.path.as_deref()?;
+        let imported = self.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Import { .. }));
+        if !imported {
+            return None;
+        }
+        let known = self.disk.as_ref()?;
+        if solidcraft_io::design_lock::changed_since(path, known) {
+            return None;
+        }
+        solidcraft_io::read_container_bytes(path)
     }
 }
 

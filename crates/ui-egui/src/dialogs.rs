@@ -5031,6 +5031,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some(distance) = remembered_extrude_distance(app, &d) {
             app.preferences.extrude_last_distance = distance;
         }
+        if let Some(radius) = remembered_fillet_radius(app, &d) {
+            app.last_fillet_radius = radius;
+        }
     }
     // Cancel while computing: the result goes (its worker stops at its next feature).
     if cancel && !applied && app.applying.take().is_some() {
@@ -5688,12 +5691,33 @@ pub(crate) fn remembered_extrude_distance(app: &SolveApp, d: &Dialog) -> Option<
     usable_extrude_distance(app, distance).map(|v| format!("{v} mm"))
 }
 
-/// A new Solid Fillet's radius: the size the tool ships with (2 mm), shown in the design's unit
-/// ("0.07874 in" in an inch design). A radius is bound by the faces beside its edges, and the
-/// number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). The
-/// preference keeps the old default.
+/// A new Solid Fillet's radius: the last new Fillet applied this session, or the size the tool
+/// ships with (2 mm) shown in the design's unit. A radius is bound by the faces beside its edges,
+/// and the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). The
+/// preference keeps the old default when nothing has been applied yet.
 fn fillet_radius_default(app: &SolveApp) -> String {
+    if let Some(text) = usable_fillet_radius(app, app.last_fillet_radius.trim()) {
+        return text;
+    }
     if app.preferences.fillet_legacy_radius { length_default(&app.session, "2") } else { crate::length_input::shown(&app.session.doc, 2.0) }
+}
+
+/// `text` as a length a new Fillet can start at (finite, greater than zero).
+fn usable_fillet_radius(app: &SolveApp, text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+    let v = app.session.doc.eval(text, ValueKind::Length).ok()?;
+    (v.is_finite() && v > 1e-9).then_some(text.to_string())
+}
+
+/// The radius a new (not edited) constant Fillet was applied with, for the next new Fillet.
+fn remembered_fillet_radius(app: &SolveApp, d: &Dialog) -> Option<String> {
+    let Kind::Fillet { radius, chamfer, .. } = &d.kind else { return None };
+    if d.editing.is_some() || *chamfer {
+        return None;
+    }
+    usable_fillet_radius(app, radius)
 }
 
 /// A feature's length as its edit field shows it. A bare number is kept in millimetres: where the
