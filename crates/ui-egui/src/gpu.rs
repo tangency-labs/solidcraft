@@ -1908,7 +1908,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    /// A device the driver loses (#4172): its lost callback marks it, the painter's probe sees it
+    /// A device the driver loses (#4172): its lost callback marks it, the painter sees the mark
     /// before the next frame's uploads, those uploads no longer reach the device (they panicked
     /// inside wgpu when they were the first to meet the loss), and pictures (thumbnails of saves)
     /// come from the CPU rasterizer. `destroy` loses the device as a driver reset does; wgpu calls
@@ -1947,11 +1947,11 @@ mod tests {
         assert_eq!((picture.renderer, picture.rgba.len()), ("cpu", 16 * 16 * 4));
     }
 
-    /// The probe runs before every frame's uploads, so on a working device it must cost nothing
-    /// visible: no error for any scope or handler, and the uploads after it go through. On a
-    /// reset D3D12 device an empty submission went through and the upload after it panicked
-    /// inside wgpu (#6528); the probe now opens a command list, the driver call that upload's
-    /// queue write would make first. A driver reset can't be made here: `destroy` loses the
+    /// The probe runs after a panicked frame and before every capture, so on a working device it
+    /// must cost nothing visible: no error for any scope or handler, and the uploads after it go
+    /// through. On a reset D3D12 device an empty submission went through and the upload after it
+    /// panicked inside wgpu (#6528); the probe now opens a command list, the driver call that
+    /// upload's queue write would make first. A driver reset can't be made here: `destroy` loses the
     /// device in wgpu itself, before any driver call.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -1968,7 +1968,7 @@ mod tests {
         let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);
         let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
         for frame in 0..3 {
-            // As the painter: the probe, then the frame's first queue write.
+            // The probe, then a queue write, as a frame after a survived panic makes them.
             let (was_lost, error) = egui_wgpu::capture_errors(&device, || {
                 let was_lost = lost.probe(&device, &queue);
                 renderer.update_texture(&device, &queue, egui::TextureId::Managed(0), &delta);
@@ -1982,7 +1982,7 @@ mod tests {
         assert!(!lost.is_lost() && lost.reason().is_none(), "{:?}", lost.reason());
     }
 
-    /// A driver reset that lands after the frame's probe is met by a queue write (or the present),
+    /// A driver reset that lands mid-frame is met by a queue write (or the present),
     /// which panics inside wgpu (#10240). The painter survives that panic once the device turns
     /// out lost, and draws nothing more; on a working device a panic is a bug and carries on. A
     /// driver reset can't be made here: `destroy` loses the device in wgpu itself, so the probe
