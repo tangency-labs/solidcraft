@@ -39,6 +39,8 @@ shows what is on.
 
 The outline colours come from the theme: amber for prerequisites, blue for dependents.
 
+![The 2D Timeline's settings menu](../generated/timeline-2d-settings.png)
+
 ### Changing the height
 
 Drag the top edge of the 2D Timeline panel to change its height, as with any panel at the bottom.
