@@ -157,6 +157,10 @@ pub fn move_edge_onto_line(
     if !polygon.iter().all(|p| finite(*p)) || !finite(line.point) || !finite(line.direction) {
         return Err(bad("corners and the line must be finite"));
     }
+    // Before `next(edge, n)`, whose `edge + 1` would overflow at `usize::MAX`.
+    if edge >= n {
+        return Err(bad("an edge past the corners"));
+    }
     let corner = |i: usize| {
         polygon
             .get(i)
@@ -387,6 +391,9 @@ mod tests {
             direction: v(0.0, 1.0, 0.0),
         };
         assert!(move_edge_onto_line(&k, &sheet, 4, &on).is_err());
+        assert!(move_edge_onto_line(&k, &sheet, usize::MAX, &on).is_err());
+        // The last edge (corner 3 back to corner 0) wraps round and is the one that moves.
+        assert!(move_edge_onto_line(&k, &sheet, 3, &on).unwrap().is_some());
         assert!(move_edge_onto_line(&k, &sheet[..2], 0, &on).is_err());
         let nan = [v(f64::NAN, 0.0, 0.0), sheet[1], sheet[2], sheet[3]];
         assert!(move_edge_onto_line(&k, &nan, 3, &on).is_err());
