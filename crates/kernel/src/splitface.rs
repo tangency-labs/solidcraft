@@ -45,7 +45,7 @@ pub enum SplitTool<'a> {
 }
 
 /// Most segments a sketch tool may hold.
-const MAX_SEGMENTS: usize = 4096;
+pub(crate) const MAX_SEGMENTS: usize = 4096;
 
 fn invalid(what: impl Into<String>) -> KernelError {
     KernelError::Invalid(what.into())
@@ -432,7 +432,7 @@ fn smlib_tools(groups: &[Vec<Patch>], reach: &Aabb3) -> Result<Vec<solidcraft_sm
 }
 
 /// A result checked by SMLib and brought back with its history over `[body]`.
-fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, r: &solidcraft_smlib::Brep) -> Result<(Body, History)> {
+pub(crate) fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, r: &solidcraft_smlib::Brep) -> Result<(Body, History)> {
     let check = r.check(solidcraft_smlib::CheckLevel::All).map_err(|e| failed(name, e))?;
     if !check.is_valid() {
         return Err(failed(name, format!("SMLib's check refuses the result: {check}")));
@@ -445,7 +445,7 @@ fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, 
 }
 
 /// `body` in SMLib, tagged as operand 0, with its record's order.
-fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep, solidcraft_smlib::history::Order)> {
+pub(crate) fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep, solidcraft_smlib::history::Order)> {
     let (sb, ob) = crate::native::smlib_body_ordered(body)?;
     let ob = ob.ok_or_else(|| failed(name, "SMLib numbers the body's faces unlike its record"))?;
     Ok((sb.tagged(0).map_err(|e| failed(name, e))?, ob))
@@ -595,6 +595,28 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     split_by_sheet(body, sheet, *face, &whole)
 }
 
+/// Split a body with faces of another body exactly as they are, bounded where they end and never
+/// extended (#9305): `faces` (in `sheet`'s face order) and `face` are the tool, and `face` gives
+/// the sides (parts on its back first, as [`split_body`]). The faces must join into one sheet:
+/// picks in separate pieces are refused. Faces that do not cut the body into closed solids (they
+/// end inside it, or miss it) are refused, so the body never comes back with a slit. Each part's history is over `[body]`.
+pub fn split_body_by_faces(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "split_body_by_faces");
+    body.require_brep(SPLIT_BODY)?;
+    sheet.require_brep("a split tool")?;
+    let mut picked: Vec<usize> = faces.iter().copied().chain([face]).collect();
+    picked.sort_unstable();
+    picked.dedup();
+    if let Some(missing) = picked.iter().find(|f| **f >= sheet.face_count()) {
+        return Err(invalid(format!("the tool body has no face {missing}")));
+    }
+    let parts = split_by_sheet(body, sheet, face, &picked)?;
+    if !closed_solids(&parts)? {
+        return Err(invalid("the tool faces do not cut the body through"));
+    }
+    Ok(parts)
+}
+
 /// Whether `parts` are two or more parts, each one closed manifold solid (SMLib's exact
 /// topological test): a split that cut the body through.
 fn closed_solids(parts: &[Body]) -> Result<bool> {
@@ -623,7 +645,9 @@ fn split_by(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 }
 
 /// `tool`, a prism through the surface of `face` of `target` (run on past it), cut at that
-/// surface (extended), keeping the pieces that start at `start`: the planar faces square to
+/// surface (extended) where it crosses it the way it does at `near`, a point of the face
+/// ([`split_at_facing_side`]: on a cylinder the half the face lies on, #20389), keeping the
+/// pieces that start at `start`: the planar faces square to
 /// `plane`'s normal at that height along it. Whether the start lies in air or inside the
 /// target's material does not matter, and a piece never passes the face.
 ///
@@ -636,12 +660,13 @@ fn split_by(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 ///
 /// The two heights are told apart by a tolerance of the body's own, never more than a quarter of
 /// the distance between them.
-pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
+pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, near: Vec3, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
     let target_form = target.ops_body().ok_or_else(|| invalid("the To object is not a solid body"))?;
     let (ops_target, order) = &*target_form;
     let n = plane.normal();
     let mut out = Vec::new();
-    for part in split_body(tool, &SplitTool::Face { body: target, face })? {
+    let travel = if far > start { n } else { n * -1.0 };
+    for part in split_at_facing_side(tool, target, face, near, travel)? {
         let own = part.record().tolerance;
         let cut = solidcore_ops::cap::PrismCut {
             origin: a3(plane.origin),
@@ -666,6 +691,43 @@ pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Pl
         }
     }
     Ok(Some(out))
+}
+
+/// `tool`, a prism run along `travel`, cut at the surface of face `face` of `sheet` where it
+/// crosses that surface the way it does at `near` (a point of the face): the pieces, as
+/// [`split_body`] gives them. A cylinder, extended, meets a line along the travel twice, once on
+/// each half of it either side of its axis, and only the half the face's pick lies on ends the
+/// tool there (#20389): the tool is cut by that half, its long edges carried on tangentially
+/// along the travel (back the way it came where the tool leaves the cylinder at the pick, on
+/// ahead where it goes in), a smooth sheet a line along the travel crosses once at most; the
+/// sheet reaches past the tool every way. Every other surface (and a travel along the axis, or a
+/// pick on the cylinder's edge as seen along the travel) splits at the face's surface extended,
+/// as [`split_body`] does.
+pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, travel: Vec3) -> Result<Vec<Body>> {
+    let whole = SplitTool::Face { body: sheet, face };
+    let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::face_surface(sheet, face) else {
+        return split_body(tool, &whole);
+    };
+    let b = tool.exact_bounds()?;
+    let Some(t) = solidcore_ops::facing_trough::facing_trough(a3(origin), a3(axis.vec()), radius, a3(near), a3(travel), a3(b.min), a3(b.max)) else {
+        return split_body(tool, &whole);
+    };
+    let v3 = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let v2 = |[x, y]: [f64; 2]| Vec2::new(x, y);
+    // The frame across the axis: x along the travel, its normal along the axis.
+    let plane = Plane { origin: v3(t.origin), x: v3(t.x), y: v3(t.y) };
+    let chain = vec![
+        Seg2::Line { a: v2(t.wing_top), b: v2(t.top) },
+        Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: t.radius, start: t.start, sweep: t.sweep },
+        Seg2::Line { a: v2(t.bottom), b: v2(t.wing_bottom) },
+    ];
+    let trough = crate::extrude_sheet(&plane, &[chain], -t.reach, t.reach)?;
+    // Named by its round face: were the sheet not taken whole, that face's surface extended
+    // is the whole cylinder again, never a plane of the sheet.
+    let round = (0..trough.face_count())
+        .find(|&f| matches!(crate::face_surface(&trough, f), Some(crate::FaceSurface::Cylinder { .. })))
+        .ok_or_else(|| invalid("the sheet across the round has no round face"))?;
+    split_body(tool, &SplitTool::Face { body: &trough, face: round })
 }
 
 /// Whether `body` has a planar face square to `plane`'s normal at `height` along it (a prism's
@@ -818,7 +880,8 @@ fn split_by_sheet(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Re
     // SMLib's face `i` is the record's `order.faces[i]` (the same where none is given).
     let k = if order.faces.is_empty() { Some(at) } else { order.faces.iter().position(|f| *f == at) };
     let k = k.ok_or_else(|| failed(SPLIT_BODY, "the tool face has no SMLib face"))?;
-    sliced(body, !sheet.face_forward(face), |sb| sb.split_body_by_sheet(&tool, k))
+    // SMLib's import gives each tool face its record's side in its surface.
+    sliced(body, false, |sb| sb.split_body_by_sheet(&tool, k))
 }
 #[cfg(test)]
 mod tests {
@@ -1059,6 +1122,35 @@ mod tests {
         assert!(v.iter().all(|v| rel(*v, 500.0) < 1e-9), "{v:?}");
     }
 
+    /// Split Body by picked faces as they are (#9305), against the picked face extended. The sheet
+    /// is a line at y = 5 from x = -3 to 5, then a line rising 1 in 2 to (13, 9), extruded from
+    /// z = -5 to 15; it crosses the cube 0…10 with a crease of about 26.6° at x = 5. The first
+    /// face extended is the plane y = 5: halves of 500. Both faces as they are leave under them
+    /// 10 · (5 · 5 + ∫ (5 + (x - 5) / 2) dx over x 5…10) = 10 · (25 + 25 + 6.25) = 562.5, and
+    /// 437.5 above. The first face alone ends inside the cube at x = 5, so it is refused, and a
+    /// face number the sheet does not have is refused.
+    #[test]
+    fn picked_faces_of_a_bent_sheet_split_as_they_are_not_extended() {
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let chain = vec![Seg2::Line { a: p(-3.0, 5.0), b: p(5.0, 5.0) }, Seg2::Line { a: p(5.0, 5.0), b: p(13.0, 9.0) }];
+        let sheet = crate::extrude_sheet(&Plane::XY, &[chain], -5.0, 15.0).unwrap();
+        assert_eq!(sheet.face_count(), 2);
+        let first = leftmost(&sheet);
+        let second = 1 - first;
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let extended = volumes(&split_body(&cube, &SplitTool::Face { body: &sheet, face: first }).unwrap());
+        assert!(extended.len() == 2 && extended.iter().all(|v| rel(*v, 500.0) < 1e-9), "{extended:?}");
+        for (face, faces) in [(first, vec![second]), (second, vec![first]), (first, vec![0, 1])] {
+            let parts = split_body_by_faces(&cube, &sheet, face, &faces).unwrap();
+            let v = volumes(&parts);
+            assert!(v.len() == 2 && rel(v[0], 437.5) < 1e-9 && rel(v[1], 562.5) < 1e-9, "{face} {faces:?}: {v:?}");
+            assert!(parts.iter().all(|b| b.smlib().unwrap().is_manifold_solid().unwrap()));
+        }
+        let e = split_body_by_faces(&cube, &sheet, first, &[]).unwrap_err().to_string();
+        assert!(e.contains("do not cut the body through"), "{e}");
+        assert!(split_body_by_faces(&cube, &sheet, first, &[7]).is_err());
+    }
+
     /// A face of a creased sheet whose smooth part ends inside the body cuts with the whole sheet
     /// (#17250, the loft of #17192): two spans meeting tangent from x = -3 to 9, then a line rising
     /// 1 in 50 from their end (a crease of about 1.15°) to x = 13, extruded from z = -5 to 15. The
@@ -1189,5 +1281,71 @@ mod tests {
         let pl = Plane::new(Vec3::new(50.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
         assert!(split_faces(&b, &[0], &SplitTool::Plane(pl)).is_err());
         assert!(split_faces(&b, &[99], &SplitTool::Plane(Plane::XY)).is_err());
+    }
+
+    /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) turned over with Reverse Normal
+    /// splits at x = 5 into two halves of 50 (#13640), each facing as the turned wall did: the
+    /// other way from the wall.
+    #[test]
+    fn a_turned_wall_splits_and_its_pieces_keep_its_side() {
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }];
+        let wall = crate::extrude_sheet(&Plane::XY, &[line], 0.0, 10.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let normal = |b: &Body| b.faces(0.01).unwrap().iter().map(|f| f.plane_normal.unwrap()).collect::<Vec<_>>();
+        let [n] = normal(&turned)[..] else { panic!("one face") };
+        let [m] = normal(&wall)[..] else { panic!("one face") };
+        assert!(n.dot(m) < -1.0 + 1e-9, "{n:?} vs {m:?}");
+        let pl = Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let s = split_faces(&turned, &[0], &SplitTool::Plane(pl)).unwrap();
+        assert_eq!(s.face_count(), 2);
+        assert!(s.faces(0.01).unwrap().iter().all(|f| rel(f.area, 50.0) < 1e-9));
+        assert!(normal(&s).iter().all(|k| k.dot(n) > 1.0 - 1e-9), "{:?} vs {n:?}", normal(&s));
+    }
+
+    /// A box 10 × 20 × 30 split by a wall at x = 4 (a sheet past the box on every side) comes
+    /// apart into 2400 and 3600, the part behind the wall's face first; split by the same wall
+    /// turned over with Reverse Normal, the parts come in the other order (#13640).
+    #[test]
+    fn a_turned_tool_sheet_splits_a_body_with_its_sides_swapped() {
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let line = vec![Seg2::Line { a: Vec2::new(4.0, -5.0), b: Vec2::new(4.0, 25.0) }];
+        let wall = crate::extrude_sheet(&Plane::XY, &[line], -5.0, 35.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let v = |tool: &Body| split_body_by_faces(&b, tool, 0, &[0]).unwrap().iter().map(|p| measure(p).unwrap().volume).collect::<Vec<_>>();
+        let (a, z) = (v(&wall), v(&turned));
+        assert!(a.len() == 2 && z.len() == 2, "{a:?} {z:?}");
+        assert!(rel(a[0] + a[1], 6000.0) < 1e-9 && (rel(a[0], 2400.0) < 1e-9 || rel(a[0], 3600.0) < 1e-9), "{a:?}");
+        assert!(rel(z[0], a[1]) < 1e-9 && rel(z[1], a[0]) < 1e-9, "{a:?} then {z:?}");
+    }
+
+    /// #20389: a bar run along the travel up to a quarter of a cylinder (axis z through (30, 20),
+    /// radius 10, the quarter toward +x +y) is cut where it crosses the cylinder the way it does at
+    /// the pick, not where it first meets the cylinder extended. The bar covers y 22…28 and z 0…4,
+    /// where the cylinder spans x = 30 ∓ √(100 − (y − 20)²). From x = −10 along +x it leaves the
+    /// cylinder at the quarter: the piece at the start runs to the far crossing,
+    /// 4 · (6 · 40 + ∫₂⁸ √(100 − u²) du). From x = 60 along −x it goes in there: the piece at the
+    /// start runs to the near crossing, 4 · (6 · 30 − ∫₂⁸ √(100 − u²) du).
+    #[test]
+    fn a_bar_is_cut_where_it_crosses_the_cylinder_as_at_the_pick() {
+        let quarter = vec![Seg2::Arc { center: Vec2::new(30.0, 20.0), radius: 10.0, start: 0.0, sweep: std::f64::consts::FRAC_PI_2 }];
+        let sheet = crate::extrude_sheet(&Plane::XY, &[quarter], -5.0, 10.0).unwrap();
+        let h = 10.0 / 2f64.sqrt();
+        let near = Vec3::new(30.0 + h, 20.0 + h, 2.0);
+        let primitive = |u: f64| u / 2.0 * (100.0 - u * u).sqrt() + 50.0 * (u / 10.0).asin();
+        let segment = primitive(8.0) - primitive(2.0);
+        for (from, to, travel, want) in [(-10.0, 60.0, Vec3::X, 4.0 * (240.0 + segment)), (60.0, -10.0, -Vec3::X, 4.0 * (180.0 - segment))] {
+            let bar = crate::box_solid(Vec3::new(f64::min(from, to), 22.0, 0.0), Vec3::new(f64::max(from, to), 28.0, 4.0)).unwrap();
+            let parts = split_at_facing_side(&bar, &sheet, 0, near, travel).unwrap();
+            // The piece at the start: the one reaching `from`.
+            let start = parts
+                .iter()
+                .find(|p| {
+                    let b = p.exact_bounds().unwrap();
+                    (b.min.x - from).abs() < 1e-6 || (b.max.x - from).abs() < 1e-6
+                })
+                .unwrap();
+            let got = measure(start).unwrap().volume;
+            assert!(rel(got, want) < 1e-6, "from {from}: {got} vs {want}");
+        }
     }
 }

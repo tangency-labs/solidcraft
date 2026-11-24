@@ -3,7 +3,9 @@ use crate::display_units::{
     DimensionValue, NumberFormat, PresentedPrimary, Ties, format_angle_dimension_runs, format_dimension, format_presented_dimension,
 };
 use crate::expr::Kind;
-use crate::tolerance::{DimensionWarning, Frame, Indicator, Repeat, Role, Tolerance, TolerancePresentation, ToleranceText};
+use crate::tolerance::{
+    DecimalsRow, DimensionWarning, Frame, GeneralTolerance, Indicator, RangeRow, Repeat, Role, Tolerance, TolerancePresentation, ToleranceText,
+};
 use crate::{DocError, Result};
 
 fn value(nominal: f64, tolerance: Tolerance) -> DimensionValue {
@@ -944,4 +946,225 @@ fn precision_boundaries_cover_primary_tolerance_and_alternate() {
         p.alternate.as_mut().unwrap().decimals = precision;
         assert!(p.validate().is_err());
     }
+}
+const DEG: f64 = std::f64::consts::PI / 180.0;
+
+fn decimals_block(unit: &str, rows: &[(u8, f64)], angle: Option<f64>) -> GeneralTolerance {
+    let linear = rows.iter().map(|&(decimals, deviation)| DecimalsRow { decimals, deviation }).collect();
+    GeneralTolerance::ByDecimals { unit: unit.into(), linear, angle }
+}
+
+fn range_block(unit: &str, rows: &[(Option<f64>, f64)], angle: Option<f64>) -> GeneralTolerance {
+    let ranges = rows.iter().map(|&(up_to, deviation)| RangeRow { up_to, deviation }).collect();
+    GeneralTolerance::ByRange { unit: unit.into(), ranges, angle }
+}
+
+/// The decimal-places block: 0 dp ±0.5, 1 dp ±0.1, 2 dp ±0.05, angles ±0.3°.
+fn by_decimals() -> GeneralTolerance {
+    decimals_block("mm", &[(0, 0.5), (1, 0.1), (2, 0.05)], Some(0.3 * DEG))
+}
+
+/// The range block: up to 100 ±1, over 100 up to 1000 ±2, over 1000 ±3.
+fn by_range() -> GeneralTolerance {
+    range_block("mm", &[(Some(100.0), 1.0), (Some(1000.0), 2.0), (None, 3.0)], None)
+}
+
+/// Lengths shown in `unit` with `decimals`, a point and trailing zeros.
+fn shown(unit: &str, decimals: u8) -> DimensionStyle {
+    DimensionStyle { unit: unit.into(), number: NumberFormat::default(), decimals, ..style() }
+}
+
+/// The general tolerance a plain length of `nominal` mm, shown in `unit` with `decimals`, takes.
+fn general(block: &GeneralTolerance, nominal: f64, unit: &str, decimals: u8) -> Option<f64> {
+    block.effective(&value(nominal, Tolerance::None), &shown(unit, decimals)).unwrap()
+}
+
+/// A decimal-places block goes by the decimals a length is shown with: `25` ±0.5, `25.0` ±0.1,
+/// `25.00` ±0.05, and none at 3 dp (untoleranced); in inches the decimals mean something else, so
+/// a millimetre block gives none. Angles take its one angle value: `30.0°` ±0.3°.
+#[test]
+fn a_decimal_places_block_goes_by_the_shown_decimals() {
+    let block = by_decimals();
+    assert_eq!([0, 1, 2, 3].map(|d| general(&block, 25.0, "mm", d)), [Some(0.5), Some(0.1), Some(0.05), None]);
+    assert_eq!(general(&block, 25.4, "in", 1), None);
+    let angle = DimensionValue { kind: Kind::Angle, ..value(30.0 * DEG, Tolerance::None) };
+    assert_eq!(block.effective(&angle, &shown("deg", 1)).unwrap(), Some(0.3 * DEG));
+}
+
+/// A range block goes by the size a length is shown with, each row up to its end: 100 ±1, 1000
+/// ±2, 1000.5 at 1 dp ±3, but 1000.4 at 0 dp is shown `1000`, ±2; 100.04 is ±2 at 2 dp and shown
+/// `100` at 0 dp ±1; 4 in (101.6 mm) ±2; a size is a magnitude. A shown size within 1e-9 mm of a
+/// row's end is at it; past a closed last row, none; no angle value, none for an angle.
+#[test]
+fn a_range_block_goes_by_the_shown_size() {
+    let block = by_range();
+    let cases =
+        [(100.0, 0, 1.0), (1000.0, 0, 2.0), (1000.5, 1, 3.0), (1000.4, 0, 2.0), (100.04, 2, 2.0), (100.04, 0, 1.0), (0.0, 0, 1.0), (-50.0, 0, 1.0)];
+    for (nominal, decimals, deviation) in cases {
+        assert_eq!(general(&block, nominal, "mm", decimals), Some(deviation), "{nominal} at {decimals} dp");
+    }
+    assert_eq!(general(&block, 101.6, "in", 0), Some(2.0));
+    let near = range_block("mm", &[(Some(100.0 - 5e-10), 1.0), (None, 2.0)], None);
+    assert_eq!(general(&near, 100.0, "mm", 0), Some(1.0));
+    let closed = range_block("mm", &[(Some(100.0), 1.0)], None);
+    assert_eq!(general(&closed, 150.0, "mm", 0), None);
+    let angle = DimensionValue { kind: Kind::Angle, ..value(30.0 * DEG, Tolerance::None) };
+    assert_eq!(block.effective(&angle, &shown("deg", 1)).unwrap(), None);
+}
+
+/// A range block reads its ends in its own unit: in an inch block, up to 4 in ±0.254, then ±0.5,
+/// 3.00 in takes 0.254, 4.00 in is at the end and takes 0.254 too, and 5.00 in takes 0.5. The same
+/// lengths shown in millimetres take the same rows.
+#[test]
+fn a_range_block_reads_its_ends_in_its_unit() {
+    let inch = range_block("in", &[(Some(4.0), 0.254), (None, 0.5)], None);
+    for (inches, deviation) in [(3.0, 0.254), (4.0, 0.254), (5.0, 0.5)] {
+        assert_eq!(general(&inch, inches * 25.4, "in", 2), Some(deviation), "{inches} in");
+        assert_eq!(general(&inch, inches * 25.4, "mm", 1), Some(deviation), "{inches} in shown in mm");
+    }
+}
+
+/// A block its check refuses is refused when it judges a dimension too, so a block read from a file
+/// unchecked never gives a negative or endless ±.
+#[test]
+fn an_unchecked_block_is_refused_by_effective() {
+    let negative = decimals_block("mm", &[(0, -5.0)], None);
+    refused(negative.effective(&value(25.0, Tolerance::None), &shown("mm", 0)), "deviations");
+    let endless = range_block("mm", &[(None, 1.0)], Some(f64::INFINITY));
+    let angle = DimensionValue { kind: Kind::Angle, ..value(0.5, Tolerance::None) };
+    refused(endless.effective(&angle, &shown("deg", 0)), "angle");
+}
+
+/// No general tolerance for a dimension with its own tolerance or fit code, or an auxiliary or
+/// exact one (ISO 129-1 4.1.4, 4.1.5), and none from a block of `None`.
+#[test]
+fn own_tolerances_auxiliary_and_exact_dimensions_take_none() {
+    for block in [by_decimals(), by_range()] {
+        assert!(general(&block, 25.0, "mm", 0).is_some());
+        let own = [Tolerance::Symmetric { deviation: 0.2 }, Tolerance::Deviations { upper: 0.1, lower: 0.0 }, Tolerance::Fit { class: "H7".into() }];
+        for tolerance in own {
+            assert_eq!(block.effective(&value(25.0, tolerance.clone()), &shown("mm", 0)).unwrap(), None, "{tolerance:?}");
+        }
+        for role in [Role::Auxiliary, Role::Exact] {
+            assert_eq!(block.effective(&DimensionValue { role, ..value(25.0, Tolerance::None) }, &shown("mm", 0)).unwrap(), None, "{role:?}");
+        }
+    }
+    assert_eq!(general(&GeneralTolerance::None, 25.0, "mm", 0), None);
+}
+
+/// Every limit of a block, each refused with its reason; a dimension the block can't judge is
+/// refused too.
+#[test]
+fn a_general_tolerance_out_of_its_limits_is_refused() {
+    let point = NumberFormat::default();
+    for ok in [by_decimals(), by_range(), GeneralTolerance::None, range_block("in", &[(Some(1e12), 1e6)], Some(std::f64::consts::PI))] {
+        ok.validate(&point).unwrap();
+    }
+    let open = |d| range_block("mm", &[(None, d)], None);
+    for unit in ["deg", "", "parsec"] {
+        refused(range_block(unit, &[(None, 1.0)], None).validate(&point), "length unit");
+    }
+    refused(decimals_block("mm", &[], None).validate(&point), "1 to 64 rows");
+    let rows: Vec<(Option<f64>, f64)> = (1..=65).map(|i| (Some(f64::from(i)), 1.0)).collect();
+    refused(range_block("mm", &rows, None).validate(&point), "1 to 64 rows");
+    range_block("mm", rows.get(..64).unwrap(), None).validate(&point).unwrap();
+    for d in [0.0, -0.1, f64::NAN, f64::INFINITY, 1e6 * (1.0 + f64::EPSILON)] {
+        refused(open(d).validate(&point), "deviations");
+        refused(decimals_block("mm", &[(0, d)], None).validate(&point), "deviations");
+    }
+    for a in [0.0, -1.0, f64::NAN, 3.2] {
+        refused(range_block("mm", &[(None, 1.0)], Some(a)).validate(&point), "angle");
+    }
+    refused(decimals_block("mm", &[(9, 0.1)], None).validate(&point), "decimals are 0 to 8");
+    refused(decimals_block("mm", &[(1, 0.1), (1, 0.2)], None).validate(&point), "decimals are 0 to 8, each once");
+    for ends in [[Some(100.0), Some(100.0)], [Some(100.0), Some(50.0)], [Some(0.0), Some(1.0)], [Some(f64::NAN), None], [Some(1.0), Some(1e13)]] {
+        refused(range_block("mm", &[(ends[0], 1.0), (ends[1], 2.0)], None).validate(&point), "ranges go up");
+    }
+    refused(range_block("mm", &[(None, 1.0), (Some(100.0), 2.0)], None).validate(&point), "last range");
+    let no_zeros = NumberFormat { trailing_zeros: false, ..point };
+    refused(by_decimals().validate(&no_zeros), "trailing zeros");
+    by_range().validate(&no_zeros).unwrap();
+    let mut bare = shown("mm", 1);
+    bare.number.trailing_zeros = false;
+    refused(by_decimals().effective(&value(25.0, Tolerance::None), &bare), "trailing zeros");
+    refused(by_range().effective(&value(f64::NAN, Tolerance::None), &shown("mm", 0)), "finite");
+    assert!(by_range().effective(&value(25.0, Tolerance::None), &shown("parsec", 0)).is_err());
+    assert!(by_range().effective(&DimensionValue { kind: Kind::Unitless, ..value(25.0, Tolerance::None) }, &shown("mm", 0)).is_err());
+}
+
+/// Blocks and dimensions, three in four tidy (valid blocks, lengths in the block's unit with a
+/// point and trailing zeros) and the rest hostile (any unit, no rows or 65, non-finite, zero and
+/// negative numbers, ends out of order, decimals over 8, no trailing zeros), 20,000 seeded cases:
+/// checking and judging never panic and give the same answer twice, a block that fails its check
+/// is refused when it judges, and a block that passes it gives only its own values, to plain
+/// dimensions only.
+#[test]
+fn general_tolerance_seeded_never_panics_and_is_deterministic() {
+    let mut seed = 0x4896_e09e_5eed_7a11;
+    let hostile = [0.0, -1.0, -0.0, 0.1, 1e13, f64::NAN, f64::INFINITY, f64::MIN_POSITIVE, 1e300];
+    let sizes = [0.0, 1.0, 25.0, 25.4, 99.99, 100.0, 100.04, 999.6, 1000.0, 1000.5, 1e6];
+    let units = ["mm", "in", "cm", "deg", "", "parsec"];
+    let any = |seed: &mut u64, list: &[f64]| list.get((random(seed) % list.len() as u64) as usize).copied().unwrap_or(0.0);
+    let (mut checked, mut judged) = (0, 0);
+    for case in 0..20_000 {
+        let tidy = !random(&mut seed).is_multiple_of(4);
+        let unit = if tidy { units[(random(&mut seed) % 3) as usize] } else { units[(random(&mut seed) % 6) as usize] };
+        let rows = if tidy {
+            1 + random(&mut seed) % 4
+        } else if random(&mut seed).is_multiple_of(10) {
+            65
+        } else {
+            random(&mut seed) % 6
+        };
+        let angle = match (tidy, random(&mut seed) % 2) {
+            (true, 0) => Some(0.3 * DEG),
+            (false, 0) => Some(any(&mut seed, &hostile)),
+            _ => None,
+        };
+        let block = if random(&mut seed).is_multiple_of(2) {
+            let linear: Vec<(u8, f64)> = (0..rows)
+                .map(|i| if tidy { (i as u8, 0.5 / 10f64.powi(i as i32)) } else { ((random(&mut seed) % 11) as u8, any(&mut seed, &hostile)) })
+                .collect();
+            decimals_block(unit, &linear, angle)
+        } else {
+            let ranges: Vec<(Option<f64>, f64)> = (0..rows)
+                .map(|i| match tidy {
+                    true => ((i + 1 < rows || random(&mut seed).is_multiple_of(2)).then(|| 100.0 * 10f64.powi(i as i32)), 1.0 + i as f64),
+                    false => ((!random(&mut seed).is_multiple_of(4)).then(|| any(&mut seed, &hostile)), any(&mut seed, &hostile)),
+                })
+                .collect();
+            range_block(unit, &ranges, angle)
+        };
+        let mut v = value(if tidy { any(&mut seed, &sizes) } else { f64::from_bits(random(&mut seed)) }, Tolerance::None);
+        v.kind = [Kind::Length, Kind::Length, Kind::Length, Kind::Angle, Kind::Unitless][(random(&mut seed) % 5) as usize];
+        v.role = [Role::Normal, Role::Normal, Role::Normal, Role::Auxiliary, Role::Exact][(random(&mut seed) % 5) as usize];
+        if random(&mut seed).is_multiple_of(6) {
+            v.tolerance = Tolerance::Symmetric { deviation: 0.1 };
+        }
+        let number = NumberFormat { trailing_zeros: tidy || random(&mut seed).is_multiple_of(2), ..NumberFormat::default() };
+        let style_unit = match (tidy, v.kind) {
+            (true, Kind::Angle) => "deg",
+            (true, _) => unit,
+            (false, _) => units[(random(&mut seed) % 6) as usize],
+        };
+        let decimals = if tidy { random(&mut seed) % 4 } else { random(&mut seed) % 11 };
+        let style = DimensionStyle { number, ..shown(style_unit, decimals as u8) };
+        let valid = block.validate(&number).is_ok();
+        let first = block.effective(&v, &style);
+        // The same answer twice, compared by bits: a block that fails `validate` may hold NaN, which `==` never equals.
+        let bits = |r: &Result<Option<f64>>| r.as_ref().map(|d| d.map(f64::to_bits)).map_err(ToString::to_string);
+        assert_eq!(bits(&first), bits(&block.effective(&v, &style)), "case {case}");
+        assert!(valid || first.is_err(), "case {case}: {block:?} fails its check but judged {first:?}");
+        checked += usize::from(valid);
+        if let (true, Ok(Some(d))) = (valid, &first) {
+            judged += 1;
+            let own = match &block {
+                GeneralTolerance::ByDecimals { linear, angle, .. } => linear.iter().any(|r| r.deviation == *d) || *angle == Some(*d),
+                GeneralTolerance::ByRange { ranges, angle, .. } => ranges.iter().any(|r| r.deviation == *d) || *angle == Some(*d),
+                GeneralTolerance::None => false,
+            };
+            assert!(own && v.role == Role::Normal && v.tolerance == Tolerance::None, "case {case}: {d} from {block:?} for {v:?}");
+        }
+    }
+    assert!(checked > 10_000 && judged > 1_000, "checked {checked}, judged {judged}");
 }

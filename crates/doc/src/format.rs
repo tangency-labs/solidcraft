@@ -550,10 +550,21 @@ fn v2_to_v3(v: &mut Value) -> Result<()> {
 /// Read a design file's JSON, upgrading older formats.
 pub fn read(s: &str) -> Result<Document> {
     let mut v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+    let drawings = if v.get("drawings").is_some() {
+        #[derive(serde::Deserialize)]
+        struct Inline<'a> {
+            #[serde(borrow)]
+            drawings: &'a serde_json::value::RawValue,
+        }
+        let raw: Inline<'_> = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+        serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.drawings.get()).ok()
+    } else {
+        None
+    };
     let (version, applied) = DESIGN.take_version(&mut v)?;
     match DESIGN.newer(version, applied.as_deref()) {
-        Some(newer) => crate::newer_file::read(v, version, applied, newer),
-        None => decode(v, version, applied.as_deref()),
+        Some(newer) => crate::newer_file::read(v, version, applied, newer, drawings.as_deref()),
+        None => decode(v, version, applied.as_deref(), drawings.as_deref()),
     }
 }
 
@@ -589,7 +600,7 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
 /// itself ([`crate::newer_file`]), with nothing else in the file for it to refer to.
 pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<()> {
     // Each drawing is a record of its own family, read by its own rules, numbers and all.
-    take_drawings(&mut v)?;
+    take_drawings(&mut v, None)?;
     check_raw(&v, version)?;
     DESIGN.upgrade(&mut v, version, applied)?;
     let d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
@@ -597,9 +608,14 @@ pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>
 }
 
 /// A design's JSON, its format taken out, as the document it holds.
-pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Document> {
+pub(crate) fn decode(
+    mut v: Value,
+    version: u32,
+    applied: Option<&[String]>,
+    drawing_text: Option<&[&serde_json::value::RawValue]>,
+) -> Result<Document> {
     // Each drawing is a record of its own family, read by its own rules, numbers and all.
-    let drawings = take_drawings(&mut v)?;
+    let drawings = take_drawings(&mut v, drawing_text)?;
     let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied)?;
@@ -730,9 +746,9 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     }
     // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     crate::format_offsets::validate_typed(&d)?;
-    normalise(&mut d)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
     // and the next feature, component or occurrence would then reuse an id that is already taken.
+    // It is repaired before `normalise`, which gives an occurrence to each component that has none.
     let largest =
         d.features.iter().map(|f| f.id).chain(d.components.iter().map(|c| c.id)).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap_or(0);
     let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
@@ -740,6 +756,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    normalise(&mut d)?;
     d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
@@ -748,12 +765,17 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
 
 /// Take a plain JSON design's drawings out of its JSON and read each, before the design's own
 /// rules see anything: a drawing this build can't read refuses the design, never dropped.
-fn take_drawings(v: &mut Value) -> Result<Vec<crate::drawing::Drawing>> {
+fn take_drawings(v: &mut Value, text: Option<&[&serde_json::value::RawValue]>) -> Result<Vec<crate::drawing::Drawing>> {
     let Some(list) = v.as_object_mut().and_then(|o| o.remove("drawings")) else { return Ok(Vec::new()) };
     let Value::Array(list) = list else { return Err(DocError::Invalid("damaged design: `drawings` is not a list".into())) };
     crate::drawing::check_count(list.len()).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
-    let read = |(i, d): (usize, Value)| crate::drawing::Drawing::from_value(d).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)));
-    list.into_iter().enumerate().map(read).collect()
+    list.into_iter()
+        .enumerate()
+        .map(|(i, drawing)| {
+            let text = text.and_then(|records| records.get(i)).map(|raw| raw.get());
+            crate::drawing::Drawing::read_value(drawing, text).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)))
+        })
+        .collect()
 }
 
 fn all_unique(ids: impl Iterator<Item = u64>) -> bool {
@@ -1294,12 +1316,7 @@ fn check_numbers(v: &Value, noun: &str, depth: usize) -> Result<()> {
 fn normalise(d: &mut Document) -> Result<()> {
     d.normalise_component_color_indices()?;
     d.name_all_feature_inputs();
-    let missing: Vec<(u64, u64)> =
-        d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
-    for (c, p) in missing {
-        d.add_occurrence(c, p, crate::IDENTITY)?;
-    }
-    Ok(())
+    d.place_unplaced_components()
 }
 
 #[cfg(test)]
@@ -2054,6 +2071,7 @@ mod tests {
                         direction: Direction::Negative,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: Some("0 deg".into()),
@@ -2708,6 +2726,323 @@ mod tests {
             let fresh = back.add_component(None, 0).unwrap();
             assert!(fresh > largest, "new component reused id {fresh}");
         }
+    }
+
+    /// #1017. An import's rigid group takes its id from the shared counter. A design whose saved
+    /// `next_id` is missing or stale must not hand that id out again, in memory or after it opens.
+    #[test]
+    fn a_stale_next_id_never_reuses_a_rigid_group_id() {
+        let mut d = two_components_one_occurrence();
+        let component = d.components[0].id;
+        let members = d.occurrences.iter().map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component, members });
+        d.next_id = group;
+        assert!(d.next_item_id().unwrap() > group, "next_item_id {} with the group at {group}", d.next_item_id().unwrap());
+        for stale in [None, Some(0), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+            });
+            let mut back = read(&json).unwrap();
+            assert_eq!(back.assembly.rigid_groups.len(), 1, "the group survives loading with {stale:?}");
+            assert!(back.next_id > group, "next_id {} after load with {stale:?}, group at {group}", back.next_id);
+            let fresh = back.allocate_id().unwrap();
+            assert!(fresh > group, "a new object reused the rigid group's id {fresh} with {stale:?}");
+        }
+    }
+
+    /// Loading gives an occurrence to each component that has none, as an older design may have.
+    /// With a missing or stale saved `next_id`, that occurrence must not take an id the design
+    /// already uses, a rigid group's included, so the counter is repaired before it is made.
+    #[test]
+    fn an_occurrence_made_while_loading_takes_no_id_in_use() {
+        let mut d = two_components_one_occurrence();
+        let (first, second) = (d.components[0].id, d.components[1].id);
+        let members = d.occurrences.iter().filter(|o| o.component == first).map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component: first, members });
+        for stale in [None, Some(0), Some(1), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+                // The file leaves out the second component's occurrences, so loading makes one.
+                if let Some(list) = o.get_mut("occurrences").and_then(Value::as_array_mut) {
+                    list.retain(|x| x.get("component").and_then(Value::as_u64) != Some(second));
+                }
+            });
+            let saved: Value = serde_json::from_str(&json).unwrap();
+            let kept = saved["occurrences"].as_array().map_or(0, |l| l.iter().filter(|x| x["component"].as_u64() == Some(second)).count());
+            assert_eq!(kept, 0, "the file holds no occurrence of the second component");
+            let back = read(&json).unwrap();
+            assert!(back.occurrences.iter().any(|x| x.component == second), "loading gave the second component an occurrence with {stale:?}");
+            let mut ids: Vec<u64> = back
+                .components
+                .iter()
+                .map(|c| c.id)
+                .chain(back.occurrences.iter().map(|o| o.id))
+                .chain(back.assembly.rigid_groups.iter().map(|g| g.id))
+                .collect();
+            let all = ids.len();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), all, "an id is used twice after loading with {stale:?}: {ids:?}");
+        }
+    }
+
+    /// How loading placed each component that has no occurrence before it kept what it looks up
+    /// in sets and maps, copied as it was. It called `Document::add_occurrence` (copied below as
+    /// it was) once per component, and each call looked through the whole design.
+    fn old_place_unplaced(d: &mut Document) -> Result<()> {
+        let missing: Vec<(u64, u64)> =
+            d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
+        for (c, p) in missing {
+            old_add_occurrence(d, c, p, crate::IDENTITY)?;
+        }
+        Ok(())
+    }
+
+    fn old_add_occurrence(d: &mut Document, component: u64, parent: u64, transform: crate::Mat) -> Result<u64> {
+        if component == 0 || !d.components.iter().any(|c| c.id == component) {
+            return Err(DocError::Unknown(format!("component {component}")));
+        }
+        if old_inside_component(d, parent, component) {
+            return Err(DocError::Invalid("a component can't contain itself".into()));
+        }
+        if d.occurrences.len() >= 100_000 {
+            return Err(DocError::Invalid("too many occurrences".into()));
+        }
+        if !crate::is_placement(&transform) {
+            return Err(DocError::Invalid("an occurrence's placement must be a rigid motion (no scaling or mirroring) within 1e9 mm".into()));
+        }
+        let id = d.next_id.max(1);
+        d.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
+        let cname = d.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
+        let next = d.occurrences.iter().filter(|o| o.component == component).count() + 1;
+        let free = |k: &usize| {
+            let name = format!("{cname}:{k}");
+            !d.occurrences.iter().any(|o| o.name == name)
+        };
+        let k = std::iter::once(next).chain(1..).find(free).unwrap_or(next);
+        d.occurrences.push(crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("{cname}:{k}"),
+            transform,
+            grounded: false,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        });
+        Ok(id)
+    }
+
+    fn old_component_within(d: &Document, a: u64, b: u64) -> bool {
+        let mut c = a;
+        for _ in 0..1000 {
+            if c == b {
+                return true;
+            }
+            if c == 0 {
+                return false;
+            }
+            match d.components.iter().find(|x| x.id == c) {
+                Some(x) => c = x.parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    fn old_inside_component(d: &Document, parent: u64, component: u64) -> bool {
+        if old_component_within(d, parent, component) {
+            return true;
+        }
+        let tree = crate::occurrence_tree::OccurrenceTree::new(d);
+        let mut stack = vec![component];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) || seen.len() > crate::MAX_PLACEMENTS {
+                continue;
+            }
+            for o in tree.children(c) {
+                if o.component == parent {
+                    return true;
+                }
+                stack.push(o.component);
+            }
+        }
+        false
+    }
+
+    /// Numbers for drawn designs, the same on every run (splitmix64).
+    struct Draw(u64);
+
+    impl Draw {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            (z ^ (z >> 31)) % n.max(1)
+        }
+
+        fn pick<'a>(&mut self, of: &[&'a str]) -> &'a str {
+            of[self.below(of.len() as u64) as usize]
+        }
+    }
+
+    fn occurrence(id: u64, component: u64, parent: u64, name: String) -> crate::Occurrence {
+        crate::Occurrence { id, component, parent, name, transform: crate::IDENTITY, grounded: false, expressed_moves: Vec::new(), bom_type: None }
+    }
+
+    /// A small design with components to place while loading. Components share a name or have
+    /// their own, names hold colons and digits, occurrences take the names other components'
+    /// occurrences would, leave gaps between numbers or end in what only looks like a number
+    /// (`P:01`, `P:+2`), components sit in other components or in unknown ones, and some
+    /// placements fail (an unknown component 0, a component inside itself through its parents or
+    /// its placements, no id left).
+    fn drawn_design(draw: &mut Draw) -> Document {
+        const NAMES: [&str; 9] = ["P", "P", "A", "A:1", "P:2", "7", "", "x:y:3", "P:1:1"];
+        let mut d = Document::new("drawn");
+        let n = draw.below(8) + 1;
+        for i in 1..=n {
+            // Mostly its own id, sometimes 0 or another component's (a damaged file).
+            let id = match draw.below(25) {
+                0 => 0,
+                1 => draw.below(n) + 1,
+                _ => i,
+            };
+            // Mostly the root, else a component of the design (itself too) or an unknown one.
+            let parent = match draw.below(8) {
+                0..=3 => 0,
+                4..=6 => draw.below(n + 1),
+                _ => 900 + draw.below(2),
+            };
+            d.components.push(crate::Component { id, name: draw.pick(&NAMES).into(), parent, ..Default::default() });
+        }
+        for i in 0..draw.below(12) {
+            let component = match draw.below(10) {
+                0 => 0,
+                1 => 900,
+                _ => draw.below(n) + 1,
+            };
+            let parent = if draw.below(3) == 0 { draw.below(n) + 1 } else { 0 };
+            let name = match draw.below(6) {
+                0 => draw.pick(&NAMES).to_string(),
+                1 => format!("o{i}"),
+                2 => format!("{}:{}", draw.pick(&NAMES), draw.pick(&["01", "+2", "0", "2x", " 3", "18446744073709551617"])),
+                _ => format!("{}:{}", draw.pick(&NAMES), draw.below(5) + 1),
+            };
+            d.occurrences.push(occurrence(500 + i, component, parent, name));
+        }
+        d.next_id = match draw.below(10) {
+            0 => u64::MAX - draw.below(3),
+            1 => 0,
+            _ => 600 + draw.below(3),
+        };
+        d
+    }
+
+    /// Loading gives each component without an occurrence the occurrence one `add_occurrence`
+    /// call per component gave, with the same names, ids, parents and order, or fails at the same
+    /// component with the same error. A command adding occurrences afterwards gets what it got
+    /// before too.
+    #[test]
+    fn loading_places_unplaced_components_as_one_add_occurrence_each_did() {
+        let mut draw = Draw(0x5eed_1017);
+        let mut scaled = crate::IDENTITY;
+        scaled[0][0] = 2.0;
+        let mut outcomes = std::collections::BTreeMap::<String, usize>::new();
+        for case in 0..5000 {
+            let design = drawn_design(&mut draw);
+            let shown = || {
+                let components: Vec<_> = design.components.iter().map(|c| (c.id, &c.name, c.parent)).collect();
+                let occurrences: Vec<_> = design.occurrences.iter().map(|o| (o.id, o.component, o.parent, &o.name)).collect();
+                format!("case {case}, next id {}, components {components:?}, occurrences {occurrences:?}", design.next_id)
+            };
+            let (mut old, mut new) = (design.clone(), design.clone());
+            let was = old_place_unplaced(&mut old);
+            assert_eq!(new.place_unplaced_components(), was, "{}", shown());
+            assert_eq!(new.occurrences, old.occurrences, "{}", shown());
+            assert_eq!(new.next_id, old.next_id, "{}", shown());
+            *outcomes.entry(was.err().map_or("placed".into(), |e| e.to_string())).or_default() += 1;
+            for _ in 0..3 {
+                let (component, parent) = (draw.below(10), draw.below(10));
+                let transform = if draw.below(8) == 0 { scaled } else { crate::IDENTITY };
+                let was = old_add_occurrence(&mut old, component, parent, transform);
+                assert_eq!(new.add_occurrence(component, parent, transform), was, "{}, then {component} into {parent}", shown());
+                assert_eq!(new.occurrences, old.occurrences, "{}, then {component} into {parent}", shown());
+                assert_eq!(new.next_id, old.next_id, "{}, then {component} into {parent}", shown());
+            }
+        }
+        for outcome in ["placed", "unknown component 0", "a component can't contain itself", "too many items in the design"] {
+            assert!(outcomes.contains_key(outcome), "no drawn design ended with {outcome}, outcomes {outcomes:?}");
+        }
+    }
+
+    /// Near the cap of 100 000 occurrences, loading stops at the component where one
+    /// `add_occurrence` per component stopped. Two short of the cap, three components named P
+    /// are to be placed. The first takes `P:1` (no occurrence has a name starting with P) and
+    /// the first id, the second finds `P:1` taken and takes `P:2`, and the third is refused. At
+    /// the cap, a component inside itself is refused as that, since it is checked before the
+    /// count.
+    #[test]
+    fn loading_stops_at_the_occurrence_cap_where_add_occurrence_did() {
+        let component =
+            |id: u64, parent: u64| crate::Component { id, name: if id == 1 { "Big".into() } else { "P".into() }, parent, ..Default::default() };
+        let mut short = Document::new("two short of the cap");
+        short.components = vec![component(1, 0), component(2, 0), component(3, 0), component(4, 0)];
+        short.occurrences = (1..=99_998).map(|i| occurrence(10 + i, 1, 0, format!("Big:{i}"))).collect();
+        short.next_id = 200_000;
+        let mut full = short.clone();
+        full.name = "at the cap".into();
+        full.components[1].parent = 2;
+        full.occurrences.extend((99_999..=100_000).map(|i| occurrence(10 + i, 1, 0, format!("Big:{i}"))));
+        let expected = [Err(DocError::Invalid("too many occurrences".into())), Err(DocError::Invalid("a component can't contain itself".into()))];
+        let mut loaded = Vec::new();
+        for (design, expected) in [short, full].into_iter().zip(expected) {
+            let (mut old, mut new) = (design.clone(), design.clone());
+            assert_eq!(old_place_unplaced(&mut old), expected, "{}", design.name);
+            assert_eq!(new.place_unplaced_components(), expected, "{}", design.name);
+            assert_eq!(new.occurrences, old.occurrences, "{}", design.name);
+            assert_eq!(new.next_id, old.next_id, "{}", design.name);
+            loaded.push(new);
+        }
+        let placed: Vec<_> = loaded[0].occurrences[99_998..].iter().map(|o| (o.id, o.component, o.parent, o.name.as_str())).collect();
+        assert_eq!(placed, [(200_000, 2, 0, "P:1"), (200_001, 3, 0, "P:2")]);
+        assert_eq!(loaded[0].next_id, 200_002);
+        assert_eq!(loaded[1].occurrences.len(), 100_000, "nothing is placed at the cap");
+    }
+
+    /// The shape of a design built by a code audit of how designs are read, at a tenth of its
+    /// size. Component 1 (A) has 9 000 occurrences named `P:1` to `P:9000`, and the 999
+    /// components named P (ids 2 to 1000) have none. Loading places them in file order. Each has
+    /// no occurrence yet, so it tries `P:1` first, which is taken, and then takes the first free
+    /// number. `P:1` to `P:9000` are taken by the file and the components before it took one
+    /// each, so component `k` gets `P:{8999 + k}`, which is `P:9001` to `P:9999`. The largest id
+    /// in the file is 109 000, so new ids start at 109 001 and component `k` gets `108 999 + k`,
+    /// in the root, and the counter ends at 110 000.
+    #[test]
+    fn loading_names_many_unplaced_components_past_many_taken_numbers() {
+        let components: Vec<Value> =
+            std::iter::once(serde_json::json!({"id": 1, "name": "A"})).chain((2..=1000).map(|k| serde_json::json!({"id": k, "name": "P"}))).collect();
+        let occurrences: Vec<Value> = (1..=9000).map(|i| serde_json::json!({"id": 100_000 + i, "component": 1, "name": format!("P:{i}")})).collect();
+        let json = edited(&Document::new("audit shape"), |v| {
+            v["components"] = components.into();
+            v["occurrences"] = occurrences.into();
+        });
+        let d = read(&json).unwrap();
+        let placed: Vec<_> = d.occurrences[9000..].iter().map(|o| (o.id, o.component, o.parent, o.name.clone())).collect();
+        let expected: Vec<_> = (2..=1000u64).map(|k| (108_999 + k, k, 0, format!("P:{}", 8999 + k))).collect();
+        assert_eq!(placed, expected);
+        assert_eq!(d.next_id, 110_000);
     }
 
     #[test]

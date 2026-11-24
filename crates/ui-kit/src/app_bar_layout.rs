@@ -9,8 +9,8 @@
 //! down its ladder, and an unlocked item already at its last step moves into overflow; the
 //! overflow button then takes its own room, once. Locked items step down but never overflow. If
 //! even that does not fit, the lowest-priority placed items are left out so nothing overlaps.
-//! The measured application uses the same fit rule. Established positions are retained only
-//! when every requested control fits, including the document tabs' minimum width.
+//! The application uses the same fit rule and uniform neighbour gap for every item; drawing
+//! projection adds no per-item padding, group reservations or position offsets.
 //!
 //! The input is hostile: widths that are not finite or are negative count as zero, widths are
 //! capped, repeated ids and items past [`MAX_ITEMS`] are ignored, and nothing here panics.
@@ -45,6 +45,8 @@ pub struct Item {
     pub priority: u8,
     /// Never moved to overflow (it still steps down its ladder).
     pub locked: bool,
+    /// Retains a visible slot while still allowing the user to move it.
+    pub never_overflow: bool,
     /// A Centre item takes all the room left; otherwise it keeps its least width.
     pub flexible: bool,
 }
@@ -52,7 +54,7 @@ pub struct Item {
 impl Item {
     /// An unlocked, fixed item.
     pub fn new(id: &str, zone: Zone, ladder: &[f32], priority: u8) -> Self {
-        Self { id: id.to_owned(), zone, ladder: ladder.to_vec(), priority, locked: false, flexible: false }
+        Self { id: id.to_owned(), zone, ladder: ladder.to_vec(), priority, locked: false, never_overflow: false, flexible: false }
     }
 
     /// This item locked.
@@ -64,6 +66,11 @@ impl Item {
     /// This item flexible.
     pub fn flexible(mut self) -> Self {
         self.flexible = true;
+        self
+    }
+
+    pub fn never_overflow(mut self) -> Self {
+        self.never_overflow = true;
         self
     }
 }
@@ -148,6 +155,10 @@ impl Work {
     }
 }
 
+fn card_item(item: &Item) -> bool {
+    !item.locked && item.zone != Zone::Centre && !matches!(item.id.as_str(), "managed" | "offered")
+}
+
 fn total(work: &[Work], gap: f32, button: f32) -> f32 {
     let mut sum = 0.0_f32;
     let mut count = 0_usize;
@@ -161,7 +172,6 @@ fn total(work: &[Work], gap: f32, button: f32) -> f32 {
     }
     sum + gap * count.saturating_sub(1) as f32
 }
-
 /// Lays `spec` out. Deterministic: ties in priority go to the earlier item in source order.
 pub fn layout(spec: &Spec) -> Placed {
     if let Some(policy) = &spec.application {
@@ -173,9 +183,15 @@ pub fn layout(spec: &Spec) -> Placed {
 fn layout_row(spec: &Spec) -> Placed {
     let (width, left, right) = (clean(spec.width), clean(spec.captions_left), clean(spec.captions_right));
     let (gap, button) = (clean(spec.gap), clean(spec.overflow_button_width));
-    let room = (width - left - right).max(0.0);
+    // Application chrome is the next neighbour of the End stack. Its boundary uses
+    // the same gap as logo/items/tabs; this is independent of edit-card painting.
+    let boundary_gap = if spec.application.is_some() { gap } else { 0.0 };
+    let room = (width - left - right - boundary_gap).max(0.0);
 
     let mut seen = std::collections::HashSet::new();
+    // A saved list is bounded to 64 movable objects. Application chrome has its own
+    // small allowance so a full list of separators cannot truncate File or the tabs.
+    let limit = MAX_ITEMS + if spec.application.is_some() { 8 } else { 0 };
     let mut centre_taken = false;
     let mut work: Vec<Work> = spec
         .items
@@ -191,11 +207,18 @@ fn layout_row(spec: &Spec) -> Placed {
                 *width = width.min(previous);
                 previous = *width;
             }
-            // Only the first MAX_ITEMS items take part, so `seen` stays small.
-            let taken = index < MAX_ITEMS && seen.insert(item.id.as_str());
+            let taken = index < limit && seen.insert(item.id.as_str());
             let second_centre = taken && item.zone == Zone::Centre && std::mem::replace(&mut centre_taken, true);
             let state = if taken && !second_centre { State::Placed } else { State::Out };
-            Work { zone: item.zone, ladder, priority: item.priority, locked: item.locked, flexible: item.flexible, step: 0, state }
+            Work {
+                zone: item.zone,
+                ladder,
+                priority: item.priority,
+                locked: item.locked || item.never_overflow,
+                flexible: item.flexible,
+                step: 0,
+                state,
+            }
         })
         .collect();
 
@@ -227,7 +250,6 @@ fn layout_row(spec: &Spec) -> Placed {
         }
     }
     let show_button = work.iter().any(|w| w.state == State::Overflow) && total(&work, gap, button) <= room;
-
     let mut placements: Vec<Option<Placement>> = vec![None; work.len()];
     // Start items, left to right.
     let mut x = left;
@@ -239,6 +261,7 @@ fn layout_row(spec: &Spec) -> Placed {
                 *slot = Some(Placement { x, width, step: w.step });
             }
             x += width;
+
             starts += 1;
             x += gap;
         }
@@ -255,8 +278,8 @@ fn layout_row(spec: &Spec) -> Placed {
             if let Some(slot) = placements.get_mut(i) {
                 *slot = Some(Placement { x: at, width, step: w.step });
             }
-            edge = at - gap;
             end_left = at;
+            edge = end_left - gap;
             ends += 1;
         }
     }
@@ -289,19 +312,23 @@ fn layout_row(spec: &Spec) -> Placed {
 
 /// The application's measured bar and the projection from fitted slots to drawing geometry.
 pub mod application {
-    use super::{Item, MAX_ITEMS, MAX_WIDTH, Placed, Placement, Spec, Zone, clean, layout_row};
+    use super::{Item, MAX_ITEMS, Placed, Placement, Spec, Zone, clean, layout_row};
+    use crate::app_bar_items::{Layout, Zone as SavedZone};
 
-    const COMPACT: f32 = 640.0;
-    const HOME_MIN: f32 = 128.0;
-    const NAME_GAP: f32 = 6.0;
-    const TABS_KEPT: f32 = 124.0;
-    const TABS_LABEL_ROOM: f32 = 216.0;
-    const RIGHT_GROUP: f32 = 60.0;
-    const CLUSTER_BUTTONS: f32 = 108.0;
-    const REPORT_TEXT_X: f32 = 29.0;
-    const SEARCH_GAP: f32 = 4.0;
-    const PILL_GAP: f32 = 6.0;
-
+    /// Every adjacent pair, including chrome and tabs, uses this one spacing rule.
+    pub const GAP: f32 = 4.0;
+    pub const ICON_WIDTH: f32 = 26.0;
+    pub const PILL_HEIGHT: f32 = 20.0;
+    pub const SEPARATOR_WIDTH: f32 = 1.0;
+    pub const EDIT_SEPARATOR_WIDTH: f32 = SPACE_WIDTH;
+    pub const CARD_PADDING: f32 = GAP;
+    pub const SPACE_WIDTH: f32 = 11.0;
+    pub const VERSION_PADDING: f32 = 12.0;
+    pub const CONTENT_PADDING: f32 = 8.0;
+    pub const PILL_ICON: f32 = 14.0;
+    pub const SQUARE_ICON: f32 = 18.0;
+    pub const PILL_MIN: f32 = CONTENT_PADDING * 2.0 + PILL_ICON * 2.0 + GAP;
+    const TABS_MIN: f32 = 124.0;
     /// Measurements only; no egui state or registry access enters the engine.
     #[derive(Clone)]
     pub struct Measurements {
@@ -325,26 +352,16 @@ pub mod application {
         pub pixels_per_point: f32,
     }
 
-    /// Measurements for drawing. Established positions are retained only when they fit.
+    /// Counts and label availability only: projection never adds item-specific offsets.
     #[derive(Clone, Debug, PartialEq)]
     pub struct Policy {
-        origin: f32,
-        fitted: bool,
-        compact: bool,
-        quick: bool,
-        leading: Option<f32>,
+        pub(super) editing: bool,
+        name: bool,
         action_count: usize,
+        quick_count: usize,
+        pill_count: usize,
         report_label: bool,
-        report_icon_only: bool,
-        search: bool,
-        assistant: bool,
-        version: Option<f32>,
-        pills: Vec<f32>,
-        offered: f32,
-        managed: Option<f32>,
-        pixels_per_point: f32,
     }
-
     /// A horizontal drawing span, projected from a packed slot.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct Span {
@@ -366,6 +383,7 @@ pub mod application {
     /// unchanged and remains the painter's responsibility.
     #[derive(Clone, Debug, Default, PartialEq)]
     pub struct Geometry {
+        pub cards: [Option<Span>; 2],
         pub compact: bool,
         pub name_visible: bool,
         pub visible: Vec<String>,
@@ -378,14 +396,11 @@ pub mod application {
         pub name: f32,
         pub leading: Option<Span>,
         pub home: Span,
-        pub brand_separator: f32,
         pub file: Span,
         pub actions: Vec<Option<f32>>,
-        pub quick_separator: Option<f32>,
         pub quick: Option<(f32, f32)>,
         /// Index into the host's quick list and its independently placed centre.
         pub quick_slots: Vec<(usize, f32)>,
-        pub documents_separator: f32,
         pub tabs_start: f32,
         pub controls_left: f32,
         pub offer: Span,
@@ -400,483 +415,260 @@ pub mod application {
         pub pills: Vec<Span>,
     }
 
-    fn slot(spec: &Spec, placed: &Placed, id: &str) -> Placement {
-        spec.items.iter().position(|i| i.id == id).and_then(|i| placed.placements.get(i)).copied().flatten().unwrap_or(Placement {
-            x: 0.0,
-            width: 0.0,
-            step: 0,
-        })
+    fn slot(spec: &Spec, placed: &Placed, id: &str) -> Option<Placement> {
+        spec.items.iter().position(|i| i.id == id).and_then(|i| placed.placements.get(i)).copied().flatten()
     }
 
-    fn item(id: &str, zone: Zone, width: f32) -> Item {
-        Item::new(id, zone, &[clean(width)], u8::MAX).locked()
-    }
-
-    /// Build the measured slots, choosing exactly the old bar's compact/label/visibility modes.
-    /// Variable-count groups each occupy one slot; their children are projected by layout.
-    fn established_spec(width: f32, captions_left: f32, captions_right: f32, m: Measurements) -> Spec {
-        let (width, left, right) = (clean(width), clean(captions_left), clean(captions_right));
-        let compact = width - left < COMPACT;
-        let step = if compact { 22.0 } else { 34.0 };
-        let home = if compact { 56.0 } else { HOME_MIN.max(36.0 + clean(m.name) + NAME_GAP + 20.0) };
-        let leading = m.leading.map(clean);
-        let mut items = vec![item("logo", Zone::Start, home - 20.0)];
-        if let Some(w) = leading {
-            items.push(item("leading", Zone::Start, w + 8.0));
+    fn build(width: f32, left: f32, right: f32, m: Measurements, saved: Option<(&Layout, &[&str], &[&str], &[&str])>) -> Spec {
+        let quick_count = m.quick.min(24);
+        let action_count = m.actions.len().min(MAX_ITEMS.saturating_sub(16 + quick_count));
+        let pill_count = m.pills.len().min(MAX_ITEMS.saturating_sub(14 + action_count + quick_count));
+        let name = clean(m.name);
+        let mut slots = Vec::new();
+        if m.leading.is_some() {
+            slots.push(Item::new("leading", Zone::Start, &[ICON_WIDTH], 85));
         }
-        items.push(item("home", Zone::Start, 32.0));
-        // Home -> separator (8), then File's left edge (3).
-        items.push(item("brand", Zone::Start, 11.0));
-        // First file-action centre is 17 beyond File; each slot centres on step / 2.
-        items.push(item("file", Zone::Start, clean(m.file) + 17.0 - step / 2.0));
-        // Keep room under MAX_ITEMS for the fixed slots and the flexible tabs.
-        let action_count = m.actions.len().min(MAX_ITEMS.saturating_sub(17));
-        for (i, &wide_only) in m.actions.iter().take(action_count).enumerate() {
-            if !(compact && wide_only) {
-                items.push(item(&format!("action:{i}"), Zone::Start, step));
-            }
+        slots.push(Item::new("home", Zone::Start, &[ICON_WIDTH], 85));
+        slots.push(Item::new("file", Zone::Start, &[clean(m.file).max(ICON_WIDTH)], 255).never_overflow());
+        for (i, wide) in m.actions.iter().take(action_count).enumerate() {
+            slots.push(Item::new(&format!("action:{i}"), Zone::Start, &[ICON_WIDTH], if *wide { 80 } else { 90 }));
         }
-        let quick = !compact && m.quick > 0;
-        if quick {
-            items.push(item("quick_gap", Zone::Start, 8.0));
-            items.push(item("quick", Zone::Start, m.quick.min(MAX_ITEMS) as f32 * step));
-        }
-        // The old cursor is half a step beyond these slots. Documents start another
-        // 24 (19 compact) - half a step + 10 beyond their right edge.
-        items.push(item("documents", Zone::Start, if compact { 19.0 } else { 24.0 } - step / 2.0 + 10.0));
-        let tabs_start = left + items.iter().filter_map(|i| i.ladder.first()).sum::<f32>();
-        items.push(Item::new("tabs", Zone::Centre, &[0.0], u8::MAX).locked().flexible());
-        let version = m.version.map(clean).filter(|&w| {
-            let need = 12.0 + w + 8.0;
-            width >= COMPACT
-                && (need <= RIGHT_GROUP || width - right - RIGHT_GROUP.max(need) - 28.0 - CLUSTER_BUTTONS - 8.0 - tabs_start >= TABS_KEPT)
-        });
-        let version_room = version.map_or(8.0, |w| RIGHT_GROUP.max(12.0 + w + 8.0));
-        let report_full = REPORT_TEXT_X + clean(m.report) + 11.0;
-        let report_label = !m.report_icon_only && width - right - version_room - CLUSTER_BUTTONS - tabs_start >= TABS_LABEL_ROOM + report_full;
-        let report_width = if m.report_icon_only {
-            32.0
-        } else if report_label {
-            report_full
-        } else {
-            28.0
-        };
-        // These are widths of packed slots, not offsets from Report's anchor.
-        let end_fixed = version_room + report_width + 34.0 + 34.0 + 40.0;
-        let search = m.search.map(|(full, compact_width)| {
-            let full = clean(full);
-            if width >= COMPACT && width - right - end_fixed - tabs_start - full - SEARCH_GAP >= TABS_LABEL_ROOM {
-                full
-            } else {
-                clean(compact_width)
-            }
-        });
-        let controls = width - right - end_fixed - search.map_or(0.0, |w| w + SEARCH_GAP);
-        let offered = m.offered.map_or(0.0, |w| clean(w) + 4.0);
-        let pills: Vec<f32> = m.pills.into_iter().take(MAX_ITEMS).map(clean).collect();
-        let pills_width: f32 = pills.iter().map(|w| w + PILL_GAP).sum();
-        let pills = if !pills.is_empty() && controls - offered - pills_width - tabs_start >= TABS_LABEL_ROOM { pills } else { Vec::new() };
-        if let Some(w) = m.managed {
-            items.push(item("managed", Zone::End, clean(w) + PILL_GAP));
-        }
-        if !pills.is_empty() {
-            items.push(item("pills", Zone::End, pills_width));
-        }
-        if offered > 0.0 {
-            items.push(item("offered", Zone::End, offered));
-        }
-        items.push(item("assistant", Zone::End, 40.0));
-        if let Some(w) = search {
-            items.push(item("search", Zone::End, w + SEARCH_GAP));
-        }
-        items.push(item("settings", Zone::End, 34.0));
-        items.push(item("help", Zone::End, 34.0));
-        items.push(item("report", Zone::End, report_width));
-        items.push(item("version", Zone::End, version_room));
-        let policy = Policy {
-            fitted: false,
-            origin: if m.origin.is_finite() { m.origin.clamp(-MAX_WIDTH, MAX_WIDTH) } else { 0.0 },
-            compact,
-            quick,
-            leading,
-            action_count,
-            report_label,
-            report_icon_only: m.report_icon_only,
-            search: search.is_some(),
-            assistant: m.assistant,
-            version,
-            pills,
-            offered,
-            managed: m.managed.map(clean),
-            pixels_per_point: if m.pixels_per_point.is_finite() && m.pixels_per_point > 0.0 { m.pixels_per_point } else { 1.0 },
-        };
-        Spec { width, captions_left: left, captions_right: right, gap: 0.0, overflow_button_width: 0.0, items, application: Some(policy) }
-    }
-
-    /// Every requested control participates in fitting; thresholds never discard actions.
-    pub fn spec(width: f32, captions_left: f32, captions_right: f32, m: Measurements) -> Spec {
-        let mut established = established_spec(width, captions_left, captions_right, m.clone());
-        let Some(old) = established.application.clone() else { return established };
-        let complete = !old.compact && old.pills.len() == m.pills.len() && old.version.is_some() == m.version.is_some();
-        if let Some(tabs) = established.items.iter_mut().find(|i| i.id == "tabs") {
-            tabs.ladder = vec![TABS_KEPT + 8.0];
-        }
-        let needed: f32 = established.items.iter().map(|i| i.ladder.first().copied().unwrap_or(0.0)).sum();
-        if complete && needed <= clean(width) - clean(captions_left) - clean(captions_right) {
-            return established;
-        }
-        fitted_spec(width, captions_left, captions_right, m, old)
-    }
-
-    fn fitted_spec(width: f32, captions_left: f32, captions_right: f32, m: Measurements, old: Policy) -> Spec {
-        let mut items = vec![Item::new("logo", Zone::Start, &[HOME_MIN.max(36.0 + clean(m.name) + NAME_GAP + 20.0) - 20.0, 36.0], 0).locked()];
-        if let Some(w) = m.leading {
-            items.push(Item::new("leading", Zone::Start, &[clean(w) + 8.0], 85));
-        }
-        items.push(Item::new("home", Zone::Start, &[32.0], 85));
-        items.push(Item::new("brand", Zone::Start, &[11.0, 0.0], 0).locked());
-        items.push(Item::new("file", Zone::Start, &[clean(m.file)], 255).locked());
-        let action_count = m.actions.len().min(MAX_ITEMS.saturating_sub(16 + m.quick.min(24)));
-        let pill_count = m.pills.len().min(MAX_ITEMS.saturating_sub(14 + action_count + m.quick.min(24)));
-        for (i, wide_only) in m.actions.iter().take(action_count).enumerate() {
-            items.push(Item::new(&format!("action:{i}"), Zone::Start, &[34.0], if *wide_only { 80 } else { 90 }));
-        }
-        for i in 0..m.quick.min(24) {
-            items.push(Item::new(&format!("quick:{i}"), Zone::Start, &[34.0], 70_u8.saturating_sub(i as u8)));
-        }
-        items.push(Item::new("tabs", Zone::Centre, &[TABS_KEPT], 255).locked().flexible());
-        if let Some(w) = m.managed {
-            items.push(Item::new("managed", Zone::End, &[clean(w) + 6.0, 32.0], 65));
+        for i in 0..quick_count {
+            slots.push(Item::new(&format!("quick:{i}"), Zone::Start, &[ICON_WIDTH], 70_u8.saturating_sub(i as u8)));
         }
         for (i, w) in m.pills.iter().take(pill_count).enumerate() {
-            items.push(Item::new(&format!("pill:{i}"), Zone::End, &[clean(*w).round() + PILL_GAP, 51.0], 20));
-        }
-        if let Some(w) = m.offered {
-            items.push(Item::new("offered", Zone::End, &[clean(w) + 4.0, 32.0], 70));
+            slots.push(Item::new(&format!("pill:{i}"), Zone::End, &[clean(*w).max(PILL_MIN), PILL_MIN], 20));
         }
         if m.assistant {
-            items.push(Item::new("assistant", Zone::End, &[40.0], 60));
+            slots.push(Item::new("assistant", Zone::End, &[ICON_WIDTH], 60));
         }
-        if let Some((full, small)) = m.search {
-            items.push(Item::new("search", Zone::End, &[clean(full) + SEARCH_GAP, clean(small) + SEARCH_GAP], 30));
+        if let Some((full, _)) = m.search {
+            slots.push(Item::new("search", Zone::End, &[clean(full).max(ICON_WIDTH), ICON_WIDTH], 30));
         }
-        items.push(Item::new("settings", Zone::End, &[34.0], 100));
-        items.push(Item::new("help", Zone::End, &[34.0], 95));
-        let report = if m.report_icon_only { vec![32.0] } else { vec![REPORT_TEXT_X + clean(m.report) + 11.0, 32.0] };
-        items.push(Item::new("report", Zone::End, &report, 40));
+        slots.push(Item::new("settings", Zone::End, &[ICON_WIDTH], 90));
+        slots.push(Item::new("help", Zone::End, &[ICON_WIDTH], 90));
+        let report_full = CONTENT_PADDING * 2.0 + PILL_ICON + GAP + clean(m.report);
+        let report = if m.report_icon_only { vec![PILL_HEIGHT] } else { vec![report_full, PILL_HEIGHT] };
+        slots.push(Item::new("report", Zone::End, &report, 40));
         if let Some(w) = m.version {
-            items.push(Item::new("version", Zone::End, &[RIGHT_GROUP.max(clean(w) + 20.0)], 10));
+            slots.push(Item::new("version", Zone::End, &[clean(w) + VERSION_PADDING * 2.0], 10));
         }
-        let policy = Policy {
-            fitted: true,
-            compact: false,
-            action_count,
-            version: m.version.map(clean),
-            pills: m.pills.into_iter().take(pill_count).map(clean).collect(),
-            ..old
-        };
+
+        let mut items = vec![Item::new("logo", Zone::Start, &[ICON_WIDTH + if name > 0.0 { GAP + name } else { 0.0 }, ICON_WIDTH], 0).locked()];
+        if let Some((saved, actions, quick, pills)) = saved {
+            let defaults = Layout::default_for(quick.iter().copied());
+            let mut saved = saved.clone();
+            saved.sanitize(&defaults);
+            let stable = |id: &str| -> String {
+                if id == "leading" {
+                    return "documents".into();
+                }
+                if let Some(i) = id.strip_prefix("action:").and_then(|i| i.parse::<usize>().ok()) {
+                    return actions.get(i).copied().unwrap_or("").to_owned();
+                }
+                if let Some(i) = id.strip_prefix("quick:").and_then(|i| i.parse::<usize>().ok()) {
+                    return quick.get(i).map(|id| format!("quick:{id}")).unwrap_or_default();
+                }
+                if let Some(i) = id.strip_prefix("pill:").and_then(|i| i.parse::<usize>().ok()) {
+                    return pills.get(i).copied().unwrap_or("").to_owned();
+                }
+                id.to_owned()
+            };
+            for p in saved.items.iter().filter(|p| p.shown) {
+                let zone = if p.zone == SavedZone::Start { Zone::Start } else { Zone::End };
+                let object_width = if p.id.starts_with("separator:") {
+                    Some(SEPARATOR_WIDTH)
+                } else if p.id.starts_with("space:") {
+                    Some(SPACE_WIDTH)
+                } else {
+                    None
+                };
+                if let Some(w) = object_width {
+                    items.push(Item::new(&p.id, zone, &[w], 0));
+                } else if let Some(slot) = slots.iter().find(|s| stable(&s.id) == p.id) {
+                    let mut slot = slot.clone();
+                    slot.zone = zone;
+                    items.push(slot);
+                }
+            }
+        } else {
+            items.extend(slots.iter().filter(|s| s.zone == Zone::Start).cloned());
+            if let Some(at) = items.iter().position(|s| s.id == "file") {
+                items.insert(at, Item::new("separator:1", Zone::Start, &[SEPARATOR_WIDTH], 0));
+            }
+            items.push(Item::new("separator:2", Zone::Start, &[SEPARATOR_WIDTH], 0));
+            items.extend(slots.iter().filter(|s| s.zone == Zone::End).cloned());
+        }
+        items.push(Item::new("tabs", Zone::Centre, &[TABS_MIN], 255).locked().flexible());
+        for (id, width) in [("managed", m.managed), ("offered", m.offered)] {
+            if let Some(w) = width {
+                items.push(Item::new(id, Zone::End, &[clean(w).max(ICON_WIDTH), ICON_WIDTH], 55));
+            }
+        }
+        // The source order represents the two stacks. Chrome belongs to the engine;
+        // moving it here changes no spacing, and every gap still comes from Spec::gap.
+        items.sort_by_key(|i| match i.zone {
+            Zone::Start => 0,
+            Zone::Centre => 1,
+            Zone::End => 2,
+        });
         Spec {
-            width: clean(width),
-            captions_left: clean(captions_left),
-            captions_right: clean(captions_right),
-            gap: 0.0,
-            overflow_button_width: 32.0,
+            width,
+            captions_left: left,
+            captions_right: right,
+            gap: GAP,
+            overflow_button_width: ICON_WIDTH,
             items,
-            application: Some(policy),
+            application: Some(Policy { editing: false, name: name > 0.0, action_count, quick_count, pill_count, report_label: !m.report_icon_only }),
         }
     }
 
-    /// Apply the saved movable list to the measured slots. Default lists retain the established
-    /// geometry; customised lists use the same fitting engine with independent slots.
-    pub fn spec_with_items(
-        dimensions: (f32, f32, f32),
-        m: Measurements,
-        saved: &crate::app_bar_items::Layout,
-        action_ids: &[&str],
-        quick_ids: &[&str],
-        pill_ids: &[&str],
-    ) -> Spec {
-        use crate::app_bar_items::{Layout, Zone as SavedZone};
-        let defaults = Layout::default_for(quick_ids.iter().copied());
-        let mut saved = saved.clone();
-        saved.sanitize(&defaults);
-        let (width, left, right) = dimensions;
-        if [SavedZone::Start, SavedZone::End].into_iter().all(|zone| {
-            saved
-                .items
-                .iter()
-                .filter(|p| p.zone == zone && defaults.items.iter().any(|d| d.id == p.id))
-                .eq(defaults.items.iter().filter(|p| p.zone == zone))
-        }) {
-            return spec(width, left, right, m);
-        }
-        let established = established_spec(width, left, right, m.clone());
-        let Some(policy) = established.application else { return spec(width, left, right, m) };
-        let mut spec = fitted_spec(width, left, right, m, policy);
-        let slots = std::mem::take(&mut spec.items);
-        let stable = |id: &str| -> String {
-            if let Some(i) = id.strip_prefix("action:").and_then(|s| s.parse::<usize>().ok()) {
-                return action_ids.get(i).copied().unwrap_or("").to_string();
-            }
-            if let Some(i) = id.strip_prefix("quick:").and_then(|s| s.parse::<usize>().ok()) {
-                return quick_ids.get(i).map(|id| format!("quick:{id}")).unwrap_or_default();
-            }
-            if let Some(i) = id.strip_prefix("pill:").and_then(|s| s.parse::<usize>().ok()) {
-                return pill_ids.get(i).copied().unwrap_or("").to_string();
-            }
-            id.to_string()
-        };
-        let movable = |zone| {
-            saved
-                .items
-                .iter()
-                .filter(move |p| p.zone == zone && p.shown)
-                .filter_map(|p| {
-                    let mut item = slots
-                        .iter()
-                        .find(|s| {
-                            stable(&s.id) == p.id && !matches!(s.id.as_str(), "logo" | "leading" | "brand" | "file" | "tabs" | "managed" | "offered")
-                        })?
-                        .clone();
-                    item.zone = match zone {
-                        SavedZone::Start => Zone::Start,
-                        SavedZone::End => Zone::End,
-                    };
-                    Some(item)
-                })
-                .collect::<Vec<_>>()
-        };
-        spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "logo" | "leading")).cloned());
-        let mut start = movable(SavedZone::Start);
-        // Keep Home before the locked File group when it is still the first Start control.
-        // Hiding an unrelated item must not move Home across File.
-        if start.first().is_some_and(|item| item.id == "home") {
-            spec.items.extend(start.drain(..1));
-        }
-        spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "brand" | "file")).cloned());
-        spec.items.extend(start);
-        spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "tabs" | "managed")).cloned());
-        let mut end = movable(SavedZone::End);
-        // Update follows the community pills in today's bar, immediately before the cluster.
-        let offer_at = end.iter().position(|s| !s.id.starts_with("pill:")).unwrap_or(end.len());
-        if let Some(offer) = slots.iter().find(|s| s.id == "offered") {
-            end.insert(offer_at, offer.clone());
-        }
-        spec.items.extend(end);
-        spec
+    pub fn spec(width: f32, captions_left: f32, captions_right: f32, m: Measurements) -> Spec {
+        build(width, captions_left, captions_right, m, None)
     }
 
-    fn fit(spec: &Spec, policy: &Policy) -> Placed {
+    pub fn spec_with_items(dimensions: (f32, f32, f32), m: Measurements, saved: &Layout, actions: &[&str], quick: &[&str], pills: &[&str]) -> Spec {
+        build(dimensions.0, dimensions.1, dimensions.2, m, Some((saved, actions, quick, pills)))
+    }
+
+    /// Editing changes only separator slots. Card decoration uses existing gaps; saved data and
+    /// all other item ladders stay unchanged. Calling this repeatedly is idempotent.
+    pub fn set_editing(spec: &mut Spec, editing: bool) {
+        let Some(policy) = &mut spec.application else { return };
+        policy.editing = editing;
+        for item in &mut spec.items {
+            if item.id.starts_with("separator:") {
+                item.ladder = vec![if editing { EDIT_SEPARATOR_WIDTH } else { SEPARATOR_WIDTH }];
+            }
+        }
+    }
+
+    pub(super) fn place(spec: &Spec, policy: &Policy) -> Placed {
         let mut p = layout_row(spec);
         let at = |id: &str| slot(spec, &p, id);
-        let present = |id: &str| spec.items.iter().position(|i| i.id == id).and_then(|i| p.placements.get(i)).is_some_and(Option::is_some);
-        let span = |id: &str, padding: f32| {
-            let s = at(id);
-            Span::new(s.x, (s.width - padding).max(0.0))
-        };
+        let span = |id: &str| at(id).map(|p| Span::new(p.x, p.width));
         let logo = at("logo");
-        let tabs = at("tabs");
         let end = p
             .overflow_button
             .map(|b| b.0)
             .into_iter()
             .chain(spec.items.iter().zip(&p.placements).filter(|(i, _)| i.zone == Zone::End).filter_map(|(_, p)| p.map(|p| p.x)))
-            .fold(clean(spec.width) - clean(spec.captions_right), f32::min);
-        let quick_count = (0..24).filter(|i| present(&format!("quick:{i}"))).count();
-        let mut g = Geometry {
+            .fold((clean(spec.width) - clean(spec.captions_right) - clean(spec.gap)).max(clean(spec.captions_left)), f32::min);
+        let tabs = span("tabs").unwrap_or(Span::new(end, 0.0));
+        let quick_slots: Vec<_> = (0..policy.quick_count).filter_map(|i| at(&format!("quick:{i}")).map(|p| (i, p.x + p.width / 2.0))).collect();
+        let quick = quick_slots.first().map(|&(_, x)| (x, ICON_WIDTH + GAP));
+        let report = at("report");
+        let offer = at("offered");
+        let managed = at("managed");
+        let cards = [Zone::Start, Zone::End].map(|zone| {
+            let mut edges: Option<(f32, f32)> = None;
+            for (item, slot) in spec.items.iter().zip(&p.placements) {
+                if policy.editing
+                    && item.zone == zone
+                    && super::card_item(item)
+                    && let Some(slot) = slot
+                {
+                    edges = Some(edges.map_or((slot.x, slot.right()), |(lo, hi)| (lo.min(slot.x), hi.max(slot.right()))));
+                }
+            }
+            edges.map(|(lo, hi)| {
+                let mut left = (lo - CARD_PADDING).max(clean(spec.captions_left));
+                let mut right = (hi + CARD_PADDING).min((clean(spec.width) - clean(spec.captions_right)).max(left));
+                let fixed = spec.items.iter().zip(&p.placements).filter(|(i, _)| !super::card_item(i)).filter_map(|(_, p)| *p);
+                for fixed in fixed.chain(p.overflow_button.map(|(x, width)| Placement { x, width, step: 0 })) {
+                    if fixed.right() <= lo {
+                        left = left.max(fixed.right());
+                    }
+                    if fixed.x >= hi {
+                        right = right.min(fixed.x);
+                    }
+                }
+                Span { left, right }
+            })
+        });
+        let g = Geometry {
+            cards,
             compact: false,
-            name_visible: present("logo") && logo.step == 0,
+            name_visible: policy.name && logo.is_some_and(|p| p.step == 0),
             visible: spec.items.iter().zip(&p.placements).filter(|(_, p)| p.is_some()).map(|(i, _)| i.id.clone()).collect(),
-            mark: logo.x + 20.0,
-            name: logo.x + 36.0,
-            leading: present("leading").then(|| span("leading", 8.0)),
-            home: span("home", 0.0),
-            brand_separator: at("brand").x + at("brand").width.min(8.0),
-            file: span("file", 0.0),
-            actions: (0..policy.action_count)
-                .map(|i| {
-                    let id = format!("action:{i}");
-                    present(&id).then(|| at(&id).x + 17.0)
-                })
-                .collect(),
-            quick_separator: None,
-            quick: present("quick:0").then(|| (at("quick:0").x + 17.0, 34.0)),
-            quick_slots: (0..24)
-                .filter_map(|i| {
-                    let id = format!("quick:{i}");
-                    present(&id).then(|| (i, at(&id).x + 17.0))
-                })
-                .collect(),
-            quick_count,
-            documents_separator: tabs.x,
-            tabs_start: tabs.x,
-            tabs_end: tabs.right(),
+            mark: logo.map_or(0.0, |p| p.x + ICON_WIDTH / 2.0),
+            name: logo.map_or(0.0, |p| p.x + ICON_WIDTH + GAP),
+            leading: span("leading"),
+            home: span("home").unwrap_or_default(),
+            file: span("file").unwrap_or_default(),
+            actions: (0..policy.action_count).map(|i| at(&format!("action:{i}")).map(|p| p.x + p.width / 2.0)).collect(),
+            quick,
+            quick_count: quick_slots.len(),
+            quick_slots,
+            tabs_start: tabs.left,
+            tabs_end: tabs.right,
             controls_left: end,
-            offer: if present("offered") { span("offered", 4.0) } else { Span::new(end, 0.0) },
-            offer_labeled: present("offered") && at("offered").step == 0,
-            managed: present("managed").then(|| span("managed", 6.0)),
-            managed_labeled: present("managed") && at("managed").step == 0,
+            report: span("report").unwrap_or_default(),
+            report_labeled: policy.report_label && report.is_some_and(|p| p.step == 0),
+            settings: span("settings").unwrap_or_default(),
+            help: at("help").map_or(0.0, |p| p.x + p.width / 2.0),
+            search: span("search"),
+            assistant: span("assistant"),
+            version: span("version"),
+            pills: (0..policy.pill_count).map(|i| span(&format!("pill:{i}")).unwrap_or_default()).collect(),
+            offer: span("offered").unwrap_or(Span::new(end, 0.0)),
+            offer_labeled: offer.is_some_and(|p| p.step == 0),
+            managed: span("managed"),
+            managed_labeled: managed.is_some_and(|p| p.step == 0),
             reserved_offers: true,
-            report: span("report", 0.0),
-            report_labeled: !policy.report_icon_only && present("report") && at("report").step == 0,
-            search: present("search").then(|| span("search", SEARCH_GAP)),
-            assistant: present("assistant").then(|| {
-                let s = at("assistant");
-                Span::new(s.x + 6.0, 32.0)
-            }),
-            settings: span("settings", 2.0),
-            help: at("help").x + 16.0,
-            version: present("version").then(|| {
-                let s = at("version");
-                let w = policy.version.unwrap_or(0.0);
-                Span::new(s.right() - 12.0 - w, w)
-            }),
-            pills: (0..policy.pills.len())
-                .map(|i| {
-                    let id = format!("pill:{i}");
-                    if present(&id) { span(&id, PILL_GAP) } else { Span::default() }
-                })
-                .collect(),
         };
-        if !present("tabs") {
-            g.tabs_start = end;
-            g.tabs_end = end;
-        }
         p.overflow.sort_by_key(|id| spec.items.iter().position(|i| &i.id == id));
         p.application = Some(g);
         p
     }
-
-    pub(super) fn place(spec: &Spec, policy: &Policy) -> Placed {
-        if policy.fitted {
-            return fit(spec, policy);
-        }
-        let mut placed = layout_row(spec);
-        let at = |id: &str| slot(spec, &placed, id);
-        let step = if policy.compact { 22.0 } else { 34.0 };
-        let logo = at("logo");
-        let home = at("home");
-        let brand = at("brand");
-        let file = at("file");
-        let documents = at("documents");
-        let report = at("report");
-        let help = at("help");
-        let settings = at("settings");
-        let assistant = at("assistant");
-        let search = at("search");
-        let version = at("version");
-        let pills = at("pills");
-        let controls_left = if policy.pills.is_empty() { assistant.x } else { pills.x };
-        let snap = |v: f32| {
-            let scaled = (v + policy.origin) * policy.pixels_per_point;
-            if scaled.is_finite() { scaled.round() / policy.pixels_per_point - policy.origin } else { v }
-        };
-        let mut pills_right = assistant.x - 4.0 - policy.offered;
-        let mut pill_spans = Vec::new();
-        for &width in policy.pills.iter().rev() {
-            let scaled_width = width * policy.pixels_per_point;
-            let w = if scaled_width.is_finite() { scaled_width.round() / policy.pixels_per_point } else { width };
-            let left = snap(pills_right - w);
-            pill_spans.push(Span::new(left, w));
-            pills_right = left - PILL_GAP;
-        }
-        pill_spans.reverse();
-        let geometry = Geometry {
-            compact: policy.compact,
-            name_visible: !policy.compact,
-            visible: spec.items.iter().map(|i| i.id.clone()).collect(),
-            quick_count: (slot(spec, &placed, "quick").width / step).round() as usize,
-            tabs_end: controls_left - 8.0,
-            managed: policy.managed.map(|_| {
-                let update_left = if policy.offered > 0.0 { assistant.x + 2.0 - policy.offered } else { controls_left };
-                Span { left: documents.x + step / 2.0, right: update_left.min(controls_left) - PILL_GAP }
-            }),
-            managed_labeled: policy.report_label || (policy.report_icon_only && clean(spec.width) >= COMPACT),
-            reserved_offers: false,
-            mark: logo.x + 20.0,
-            name: logo.x + 36.0,
-            leading: policy.leading.map(|w| Span::new(at("leading").x + 20.0 - w / 2.0, w)),
-            home: Span::new(home.x, home.width),
-            brand_separator: brand.x + 8.0,
-            file: Span::new(file.x, (file.width - 17.0 + step / 2.0).max(0.0)),
-            actions: (0..policy.action_count)
-                .map(|i| {
-                    let id = format!("action:{i}");
-                    spec.items.iter().any(|item| item.id == id).then(|| at(&id).x + step / 2.0)
-                })
-                .collect(),
-            quick_separator: policy.quick.then(|| at("quick").x),
-            quick: policy.quick.then(|| (at("quick").x + step / 2.0, step)),
-            quick_slots: (0..(slot(spec, &placed, "quick").width / step).round() as usize)
-                .map(|i| (i, at("quick").x + step / 2.0 + i as f32 * step))
-                .collect(),
-            documents_separator: documents.right() - 10.0,
-            tabs_start: documents.right(),
-            controls_left,
-            offer: Span { left: documents.x + step / 2.0, right: assistant.x - 2.0 },
-            offer_labeled: policy.report_label || (policy.report_icon_only && clean(spec.width) >= COMPACT),
-            report: Span::new(report.x, report.width),
-            report_labeled: policy.report_label,
-            search: policy.search.then(|| Span::new(search.x, (search.width - SEARCH_GAP).max(0.0))),
-            assistant: policy.assistant.then(|| Span::new(assistant.right() - 34.0, 32.0)),
-            settings: Span::new(settings.x, 32.0),
-            help: help.x + 16.0,
-            version: policy.version.map(|w| Span::new(version.right() - 12.0 - w, w)),
-            pills: pill_spans,
-        };
-        placed.application = Some(geometry);
-        placed
-    }
 }
 
-/// Today's default bar as a [`Spec`], reproducing `app_bar::show`'s default arrangement. The
-/// widths with a measured source in `app_bar.rs` are exact; label-dependent ones (File, the pills,
-/// the search field, Report a bug, the version) are typical widths, and the app measures its own.
+/// A representative measured bar for property tests; it uses the same uniform item spec.
 pub mod default_bar {
-    use super::{Item, Spec, Zone};
-
-    /// The id of the document tabs, the Centre item.
+    use super::{Item, Spec, application};
     pub const TABS: &str = "tabs";
-    /// The least room the tabs keep (`TABS_KEPT`).
     pub const TABS_MIN: f32 = 124.0;
 
-    /// The default bar's items in source order, left to right as drawn today.
     pub fn items() -> Vec<Item> {
-        use Zone::{Centre, End, Start};
-        vec![
-            // Mark and name end where Home's button starts (HOME_MIN 128, 20 before it); a
-            // compact bar keeps the mark only (Home at 56, its button at 36). The name goes first.
-            Item::new("logo", Start, &[108.0, 36.0], 45).locked(),
-            Item::new("home", Start, &[32.0], 85),
-            // 8 after Home, the separator, 16 before File.
-            Item::new("separator.brand", Start, &[24.0], 255).locked(),
-            // The text button: 16 around its label, and 17 after it.
-            Item::new("file", Start, &[62.0], 255).locked(),
-            // Each file action steps 34, or 22 on a compact bar; Undo and Redo go first there.
-            Item::new("save", Start, &[34.0, 22.0], 90),
-            Item::new("undo", Start, &[34.0, 22.0], 50),
-            Item::new("redo", Start, &[34.0, 22.0], 50),
-            Item::new(TABS, Centre, &[TABS_MIN], 255).locked().flexible(),
-            // The offer pill: labelled where Report a bug is, else just its icon.
-            Item::new("update", End, &[110.0, 34.0], 70),
-            // Donate and Discord: pad, mark, label, x, plus PILL_GAP; no label shrinks them.
-            Item::new("donate", End, &[100.0, 51.0], 20),
-            Item::new("discord", End, &[106.0, 51.0], 20),
-            // The right-hand cluster steps 34 (anchor - 86, - 52, - 18).
-            Item::new("assistant", End, &[34.0], 60),
-            // The closed field, else its magnifier (CommandSearch::compact_width).
-            Item::new("search", End, &[160.0, 42.0], 30),
-            Item::new("settings", End, &[34.0], 80),
-            Item::new("help", End, &[34.0], 75),
-            // Report a bug: REPORT_TEXT_X, the label and 11; the icon alone is a 32 square.
-            Item::new("report", End, &[118.0, 32.0], 40),
-            // RIGHT_GROUP, the room kept for the version.
-            Item::new("version", End, &[60.0], 10),
-        ]
+        let m = application::Measurements {
+            origin: 0.0,
+            name: 72.0,
+            file: 40.0,
+            leading: None,
+            actions: vec![false, true, true],
+            quick: 0,
+            report: 80.0,
+            report_icon_only: false,
+            pills: vec![90.0, 46.0],
+            search: Some((160.0, application::ICON_WIDTH)),
+            assistant: true,
+            version: Some(40.0),
+            offered: Some(100.0),
+            managed: None,
+            pixels_per_point: 1.0,
+        };
+        let mut items = application::spec(1200.0, 0.0, 0.0, m).items;
+        for item in &mut items {
+            item.id = match item.id.as_str() {
+                "action:0" => "save".into(),
+                "action:1" => "undo".into(),
+                "action:2" => "redo".into(),
+                "pill:0" => "donate".into(),
+                "pill:1" => "discord".into(),
+                _ => item.id.clone(),
+            };
+        }
+        items
     }
-
-    /// The default bar `width` wide with `captions_left`/`captions_right` taken by the window.
     pub fn spec(width: f32, captions_left: f32, captions_right: f32) -> Spec {
-        Spec { width, captions_left, captions_right, gap: 0.0, overflow_button_width: 32.0, items: items(), application: None }
+        Spec {
+            width,
+            captions_left,
+            captions_right,
+            gap: application::GAP,
+            overflow_button_width: application::ICON_WIDTH,
+            items: items(),
+            application: None,
+        }
     }
 }

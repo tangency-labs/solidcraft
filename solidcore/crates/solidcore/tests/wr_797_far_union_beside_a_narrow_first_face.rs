@@ -88,9 +88,7 @@ fn a_shell_with_no_face_wide_enough_for_the_step_is_still_refused() {
     let err = joined.unwrap_err();
     assert_eq!(
         err.topology_failure(),
-        Some(&TopologyFailure::Failed(
-            "the stepped-off point does not lie on the face"
-        )),
+        Some(&TopologyFailure::SteppedOffFace),
         "{err:?}"
     );
 }

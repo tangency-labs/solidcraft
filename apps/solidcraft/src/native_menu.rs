@@ -207,6 +207,8 @@ pub struct NativeMenu {
 impl NativeMenu {
     pub fn new(app: &SolveApp, ctx: &egui::Context) -> Result<Self, String> {
         let recent_paths: Vec<String> = app.home.recent.iter().take(RECENT_COUNT).cloned().collect();
+        // The system's About and Hide entries are labelled here, outside any frame's language.
+        let _language = solidcraft_ui_text::scope(&app.preferences.language);
         let menu = native_menu::NativeMenu::new(&menu_bar(app, &recent_paths), ctx)?;
         let native = Self { menu, recent_paths };
         native.update(app, ctx);

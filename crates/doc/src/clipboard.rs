@@ -358,7 +358,13 @@ impl crate::Feature {
                     checked_plane(&end.plane, 0)?;
                 }
             }
-            K::ConstructionPlane { plane }
+            K::FrameGusset { supports, .. } => {
+                for support in supports {
+                    checked_plane(&support.plane, 0)?;
+                }
+            }
+            K::FramePlate { plane, .. }
+            | K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
@@ -381,6 +387,12 @@ impl crate::Feature {
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
             | K::Move { rotate_about: Some(geo), .. } => checked_geo(geo, 0)?,
+            K::FrameMember { pairs, .. } => {
+                for p in pairs {
+                    checked_geo(&p.a, 0)?;
+                    checked_geo(&p.b, 0)?;
+                }
+            }
             _ => {}
         }
         // Feature names are remapped once here; the geometry pass below handles only
@@ -437,7 +449,13 @@ impl crate::Feature {
                     remap_plane(&mut end.plane, ids, bodies, 0, occurrences, doc)?;
                 }
             }
-            K::ConstructionPlane { plane }
+            K::FrameGusset { supports, .. } => {
+                for support in supports {
+                    remap_plane(&mut support.plane, ids, bodies, 0, occurrences, doc)?;
+                }
+            }
+            K::FramePlate { plane, .. }
+            | K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
@@ -460,6 +478,12 @@ impl crate::Feature {
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
             | K::Move { rotate_about: Some(geo), .. } => remap_geo(geo, ids, bodies, 0, occurrences, doc)?,
+            K::FrameMember { pairs, .. } => {
+                for p in pairs {
+                    remap_geo(&mut p.a, ids, bodies, 0, occurrences, doc)?;
+                    remap_geo(&mut p.b, ids, bodies, 0, occurrences, doc)?;
+                }
+            }
             // An Align frame's joint origin finds its faces and edges by name, as the feature's
             // own face names are found.
             K::Align { from_frame, to_frame, .. } => {
