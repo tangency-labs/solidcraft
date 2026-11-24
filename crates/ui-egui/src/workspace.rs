@@ -1086,6 +1086,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetFold { .. } => "fold",
         FeatureKind::SheetPath { .. } => "path_flange",
         FeatureKind::SheetTab { .. } => "sheet_tab",
+        FeatureKind::SheetBead { .. } => "rib",
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
         FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } | FeatureKind::SheetRecognize { .. } => "convert_sheet",
