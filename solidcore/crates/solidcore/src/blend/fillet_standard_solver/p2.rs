@@ -4100,7 +4100,6 @@ mod tests {
             let e = Failure::new("blend::op", cause).into_error();
             assert_eq!(e.kind(), class, "{cause:?}");
             assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
-            assert!(!cause.is_phrase(), "{cause:?}");
             assert!(!e.is_defect(), "{cause:?}");
         }
         for why in [

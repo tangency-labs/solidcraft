@@ -280,7 +280,7 @@ fn iso_curve(k: &Kernel, surface: &Surface, line: Line) -> Result<Curve> {
 }
 
 /// The first and last knot; an empty vector is [`IntersectFailure::NoKnots`], with the knot
-/// query's error as its cause where the query failed (rule 6).
+/// query's error as its cause where the query failed.
 fn ends(knots: &[f64], query: Option<&SolidError>) -> Result<(f64, f64)> {
     if let (Some(&first), Some(&last)) = (knots.first(), knots.last()) {
         return Ok((first, last));

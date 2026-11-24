@@ -469,7 +469,7 @@ impl OffsetFacesExecutive {
     }
 
     /// [`Self::refuse`] for a refusal decided by an error the step caught (`cause`), kept as
-    /// the failure's cause (rule 6): [`OffsetFailure::FacesMoveRefused`] is neither a defect
+    /// the failure's cause: [`OffsetFailure::FacesMoveRefused`] is neither a defect
     /// nor a refusal class of its own, so the cause's class decides
     /// ([`SolidError::is_refusal`], [`SolidError::is_defect`]). A refusal the move decides
     /// from the geometry itself has none.

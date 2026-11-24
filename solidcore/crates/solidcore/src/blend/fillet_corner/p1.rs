@@ -1347,7 +1347,7 @@ const OP_END_PATCH: &str = "blend::fillet_corner::p1::create_end_patch";
 /// Error")`, then `SM_ERR`): the corner's end face could not be made. One site for every
 /// path that makes it (upstream's one face, the seam cap's two):
 /// [`CornerPatchMiss::FaceNotMade`] (`SM_ERR`), with the error of the step that could not
-/// make it kept as the cause (rule 6).
+/// make it kept as the cause.
 #[track_caller]
 fn end_face_not_made(cause: SolidError) -> SolidError {
     Failure::new(
@@ -3857,7 +3857,7 @@ fn make_face(
 }
 
 /// `error`, a failure this module builds in place of a routine's error, keeping `cause`,
-/// that routine's error (guide rule 6, #13790). Its operation, reason and status stay
+/// that routine's error (#13790). Its operation, reason and status stay
 /// `error`'s.
 ///
 /// **An `error` that is not a [`SolidError::Failed`] is returned as it is and `cause` is
@@ -4041,7 +4041,7 @@ mod tests {
                 "calculator",
                 BlendFailure::NoRoom(crate::blend::fillet_executive::NoRoomReason::BallDoesNotFit),
             ),
-            SolidError::blend("calculator", BlendFailure::StageFailed),
+            SolidError::blend("calculator", BlendFailure::Defect { why: "x" }),
             SolidError::PreparationRequired {
                 operation: "calculator",
             },
@@ -4168,7 +4168,7 @@ mod tests {
     }
 
     /// An end face that `make_face_brep` does not make is reported as before (`SM_ERR`),
-    /// keeping the face builder's error as its cause (rule 6).
+    /// keeping the face builder's error as its cause.
     #[test]
     fn an_end_face_not_made_keeps_the_face_builders_error() {
         for cause in calculator_errors() {
@@ -4189,12 +4189,9 @@ mod tests {
         let cancelled = SolidError::Cancelled {
             operation: "re-solve",
         };
-        let cause = Failure::new(
-            "calculator",
-            BlendFailure::Failed("the calculation stopped"),
-        )
-        .caused_by(cancelled.clone())
-        .into_error();
+        let cause = Failure::new("calculator", BlendFailure::ExecutiveStepFailed)
+            .caused_by(cancelled.clone())
+            .into_error();
         // the site passes on only a cancellation itself, not one beneath another error
         assert!(!cause.is_unported_or_cancelled());
         let e = corner_vertex_failure(&cause);

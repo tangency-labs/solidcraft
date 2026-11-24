@@ -2918,7 +2918,7 @@ mod tests {
             "blend::drop",
             BlendFailure::NoRoom(NoRoomReason::BandsOverlap),
         );
-        let defect = SolidError::blend("blend::drop", BlendFailure::StageFailed);
+        let defect = SolidError::blend("blend::drop", BlendFailure::Defect { why: "x" });
         for cause in [refusal, defect] {
             let e = end_drop_failed::<()>(Err(cause.clone()), true, 1e-4);
             assert_eq!(e.operation(), OP_FIF, "{e:?}");

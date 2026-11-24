@@ -37,13 +37,8 @@
 //! `NER(...)`), which each records as its comparison status. A method whose NLib call
 //! fails keeps that call's failure as its cause ([`BSplineFailure::RoutineFailed`]). A
 //! check that refuses builds a typed cause with its numbers ([`BSplineFailure::EndsApart`],
-//! ...); a stage that fails with no reason the kernel names is a
-//! [`BSplineFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping
-//! the error of the call it made as its cause where it has one. That is the form not yet
-//! reviewed: a stage reviewed as the kernel's fault is a [`BSplineFailure::Defect`] with its
-//! reason, of the same class and status. [`BSplineFailure::Failed`] and
-//! [`BSplineFailure::Missing`] are sites not yet converted (the conversion guide:
-//! `docs/failure-codes-and-reproduction.md` §6).
+//! ...); a stage that fails as the kernel's fault is a [`BSplineFailure::Defect`] with its
+//! reason, a defect ([`ErrorKind::StageFailed`], #15034).
 //!
 //! Deviations: not upstream. A failure of a routine that has the data (a degree, an
 //! index, a parameter and its domain) carries it; the others are unit variants, and the
@@ -323,9 +318,6 @@ pub enum BSplineFailure {
     /// Expanding the surface's boundary span changed its control point or knot counts,
     /// which the expansion is to keep; the surface is left unchanged. Class `failed`.
     ExpansionChangesCounts,
-    /// The method failed, as the phrase says (e.g. "the end tangent is not given"): a site
-    /// not yet converted to a typed cause.
-    Failed(&'static str),
     /// The blend's derivatives are faired for two points with a tangent each, and `points`
     /// points and `tangents` tangents are given. [`ErrorKind::InvalidInput`].
     FairBlendInputs {
@@ -359,9 +351,6 @@ pub enum BSplineFailure {
     /// failure's cause says why (for example ends farther apart than the construction takes).
     /// Class `failed`; whether it is a defect or a refusal is its cause's.
     JoinNotBuilt,
-    /// Something the method needs is missing, as the phrase says (e.g. "the boundary
-    /// curve").
-    Missing(&'static str),
     /// The control point (`u_index`, `v_index`) is past the last one, (`u_last`, `v_last`).
     /// [`ErrorKind::InvalidInput`].
     NetIndexOutside {
@@ -447,12 +436,6 @@ pub enum BSplineFailure {
     /// The first rail is to be the spine, and no first rail is given.
     /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
     SpineRailMissing,
-    /// A stage of the method failed with no reason the kernel names: a defect
-    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
-    /// reports (for the goldens only), where it was built, and the error of the call it made
-    /// where it has one. The form not yet reviewed: new code builds
-    /// [`BSplineFailure::Defect`], a named cause or a refusal instead.
-    StageFailed,
     /// The start tangent is asked to be the one given, and none is given.
     /// [`ErrorKind::InvalidInput`].
     StartTangentNotGiven,
@@ -500,7 +483,6 @@ impl BSplineFailure {
         match self {
             Self::BoundaryCurveMissing
             | Self::BoundaryWithoutSurface
-            | Self::Missing(_)
             | Self::RailIntersectionsMissing
             | Self::SpineRailMissing => SM_ERR_NULL_POINTER,
             Self::ZeroAxis => SM_ERR_INVALID_INPUT,
@@ -509,7 +491,7 @@ impl BSplineFailure {
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
-    /// [`BSplineFailure::StageFailed`] and [`BSplineFailure::Defect`], a defect;
+    /// [`BSplineFailure::Defect`], a defect;
     /// [`ErrorKind::InvalidInput`] for a check of the caller's arguments or curve,
     /// [`ErrorKind::Unsupported`] for a curve the method does not take,
     /// [`ErrorKind::NotWithinTolerance`] for a result outside the tolerance asked for; the
@@ -567,7 +549,7 @@ impl BSplineFailure {
             Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
                 ErrorKind::Unsupported
             }
-            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::Defect { .. } => ErrorKind::StageFailed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -673,7 +655,6 @@ impl core::fmt::Display for BSplineFailure {
             Self::ExpansionChangesCounts => {
                 f.write_str("expanding the boundary span changes the surface's counts")
             }
-            Self::Failed(what) => f.write_str(what),
             Self::FairBlendInputs { points, tangents } => write!(
                 f,
                 "{points} points and {tangents} tangents are given, not two of each"
@@ -693,7 +674,6 @@ impl core::fmt::Display for BSplineFailure {
             }
             Self::JoinEndWeightZero => f.write_str("an end weight of the curves to join is zero"),
             Self::JoinNotBuilt => f.write_str("the curves could not be joined into one"),
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NetIndexOutside {
                 u_index,
                 v_index,
@@ -753,7 +733,6 @@ impl core::fmt::Display for BSplineFailure {
                 write!(f, "a sphere is made from three or four arcs, not {given}")
             }
             Self::SpineRailMissing => f.write_str("the spine rail is missing"),
-            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
             Self::StartTangentNotGiven => {
                 f.write_str("the start tangent is specified but not given")
             }
@@ -949,9 +928,8 @@ impl crate::SolidError {
     /// `if (NL_YES == N_...) SER(SM_ERR)`) to a [`BSplineFailure::RoutineFailed`] of
     /// `operation` that keeps the call's error as its cause. [`crate::SolidError::Unported`],
     /// [`crate::SolidError::Cancelled`], [`crate::SolidError::PreparationRequired`] and a
-    /// blend certificate past its budget pass through unchanged, as through
-    /// `SolidError::nl_ser`, which this replaces: no upstream status stands for
-    /// them, and callers match them at the top. Use as
+    /// blend certificate past its budget pass through unchanged: no upstream status stands
+    /// for them, and callers match them at the top. Use as
     /// `.map_err(SolidError::nurbs_routine(OP))`.
     pub(crate) fn nurbs_routine(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
@@ -990,13 +968,18 @@ mod tests {
     use super::*;
     use crate::SolidError;
 
+    /// The bare status a reviewed defect at `status` replaced.
+    fn upstream(code: i32) -> SolidError {
+        SolidError::Upstream {
+            operation: "nurbs::op",
+            code,
+            entity: None,
+        }
+    }
+
+    /// A typed cause keeps the status of the bare status it replaced.
     #[test]
-    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
-        super::super::tests::assert_stage_failure(
-            &SolidError::b_spline("nurbs::op", BSplineFailure::StageFailed),
-            "nurbs::op",
-            SM_ERR,
-        );
+    fn a_typed_cause_keeps_its_status() {
         for cause in [
             BSplineFailure::EndsCoincide,
             BSplineFailure::EndsApart {
@@ -1011,10 +994,10 @@ mod tests {
         }
     }
 
-    /// The named causes that replace phrase sites keep the phrase's status, so
-    /// `upstream_status()` reads as before, and carry the class of what they check.
+    /// The named causes keep the status of the bare status they replace, so
+    /// `upstream_status()` reads it, and carry the class of what they check.
     #[test]
-    fn the_named_causes_keep_the_phrase_status_and_name_their_class() {
+    fn the_named_causes_keep_their_status_and_name_their_class() {
         let invalid = [
             BSplineFailure::ContinuityNotExtendable {
                 continuity: ContinuityType::C0,
@@ -1153,7 +1136,7 @@ mod tests {
         );
     }
 
-    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    /// A reviewed defect is of class 127 with its site's status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why = "the knot vector the insertion just built does not rise, which insertion keeps";
@@ -1161,7 +1144,7 @@ mod tests {
         let e = SolidError::b_spline("nurbs::op", defect);
         super::super::tests::assert_defect(
             &e,
-            &SolidError::b_spline("nurbs::op", BSplineFailure::StageFailed),
+            &upstream(SM_ERR),
             "nurbs::op",
             SM_ERR,
             &format!("nurbs::op: stage_failed: {why}"),
@@ -1173,46 +1156,10 @@ mod tests {
             .into_error();
         super::super::tests::assert_defect(
             &missing,
-            &SolidError::b_spline("nurbs::op", BSplineFailure::Missing("x")),
+            &upstream(SM_ERR_NULL_POINTER),
             "nurbs::op",
             SM_ERR_NULL_POINTER,
             &format!("nurbs::op: stage_failed: {why}"),
-        );
-    }
-
-    /// The NURBS routines describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
-    /// whose conversion waits on other open work.
-    #[test]
-    fn the_nurbs_routines_build_no_bare_statuses() {
-        assert_eq!(
-            super::super::query::tests::bare_statuses_in("nurbs", 60),
-            Vec::<(String, usize)>::new()
-        );
-    }
-
-    /// The sites that build a B-spline phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_bspline_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("BSplineFailure", "Failed"),
-                Builder::Variant("BSplineFailure", "Missing"),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-        ];
-        assert_pinned(
-            "B-spline phrase-cause sites",
-            &crate_sites(&PHRASES),
-            PINNED,
         );
     }
 }

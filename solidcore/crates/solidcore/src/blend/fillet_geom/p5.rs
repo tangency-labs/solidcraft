@@ -187,7 +187,7 @@ fn defect(op: &'static str, why: &'static str) -> SolidError {
 
 /// The drop of a processed end vertex onto its rail that found no point: the last
 /// attempt's error, where it returned one, kept as the cause of
-/// [`BlendFailure::RailEndNotDropped`] (rule 6, its class deciding); a drop that found no
+/// [`BlendFailure::RailEndNotDropped`] (its class deciding); a drop that found no
 /// foot, a [`BlendFailure::Defect`]. Both keep upstream's `SM_ERR`.
 #[track_caller]
 fn rail_end_not_dropped(op: &'static str, last_err: Option<SolidError>) -> SolidError {

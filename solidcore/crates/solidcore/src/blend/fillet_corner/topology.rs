@@ -157,7 +157,7 @@ fn defect(op: &'static str, why: &'static str) -> SolidError {
 }
 
 /// [`defect`] with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces: something the
-/// kernel built, or found, before the corner is not there (guide rule 2).
+/// kernel built, or found, before the corner is not there.
 #[track_caller]
 fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
@@ -166,7 +166,7 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 }
 
 /// The corner's edges meet at its vertex in `shape`, which the corner topology does not
-/// build ([`BlendFailure::CornerShapeNotBuilt`], guide rule 8), with the status of the site
+/// build ([`BlendFailure::CornerShapeNotBuilt`]), with the status of the site
 /// it replaces.
 #[track_caller]
 pub(super) fn shape_not_built(op: &'static str, shape: CornerShape) -> SolidError {

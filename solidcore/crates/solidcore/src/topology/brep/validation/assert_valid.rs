@@ -640,9 +640,9 @@ pub use brep::ToleranceGaps;
 ///
 /// # Errors
 ///
-/// [`crate::error::topology::TopologyFailure::Failed`] (`SM_ERR`) for an edge use end
-/// without vertex (upstream's `NER`, after the reports and updates of the earlier edge
-/// uses);
+/// [`crate::error::topology::TopologyFailure::VertexuseWithoutVertex`] (`SM_ERR`) for an
+/// edge use end without vertex (upstream's `NER`, after the reports and updates of the
+/// earlier edge uses);
 /// [`SolidError::InvalidInput`] for a level above 4 or broken topology links upstream
 /// would dereference; those of the gap and bounding box computations.
 pub fn validate_and_update_tolerances(

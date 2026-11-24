@@ -3229,7 +3229,7 @@ fn defect(op: &'static str, why: &'static str) -> SolidError {
 }
 
 /// A defect ([`BlendFailure::Defect`]) with the status `SM_ERR` of the `SER` it replaces,
-/// keeping `cause`, the error of the step that failed, where there is one (rule 6): its
+/// keeping `cause`, the error of the step that failed, where there is one: its
 /// class decides whether the failure reads as a defect or a refusal.
 #[track_caller]
 fn defect_after(op: &'static str, why: &'static str, cause: Option<SolidError>) -> SolidError {

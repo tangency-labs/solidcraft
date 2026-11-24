@@ -1891,7 +1891,7 @@ mod ball_fit_tests {
         let before = keeping_cause(step_failed(), root);
         let after = rooted_in(
             before.clone(),
-            SolidError::blend_missing("blend::blend_corner::setback", "z"),
+            SolidError::blend("blend::blend_corner::setback", BlendFailure::CornerRefused),
         );
         assert_eq!(after, before);
         assert_eq!(
@@ -1904,26 +1904,20 @@ mod ball_fit_tests {
     }
 
     /// #19803: a later failure whose root is a record that could keep a cause, but is not
-    /// the missing corner (another stage's failure at another edge, the same phrase in
-    /// another operation, a missing corner that already keeps a cause), is returned as it
-    /// is: nothing ties it to the unsupported vertex.
+    /// the missing corner (another stage's failure at another edge, another failure of the
+    /// session, the missing corner in another operation or one that already keeps a cause),
+    /// is returned as it is: nothing ties it to the unsupported vertex.
     #[test]
     fn a_classification_error_is_not_kept_under_an_unrelated_root() {
         let unrelated = [
-            SolidError::blend_failed("blend::fillet_geom::p2::srf_srf_intersection", "w"),
-            SolidError::blend_missing("blend::fillet_executive::session", "the corner"),
-            SolidError::blend_missing(
-                "blend::fillet_solver::p1::set_extension_flags",
-                "the vertex's corner",
+            SolidError::blend(
+                "blend::fillet_geom::p2::srf_srf_intersection",
+                BlendFailure::Defect { why: "w" },
             ),
-            keeping_cause(
-                SolidError::blend_missing(
-                    "blend::fillet_executive::session",
-                    "the vertex's corner",
-                ),
-                SolidError::sm_err("op"),
+            SolidError::blend(
+                "blend::fillet_executive::session",
+                BlendFailure::CornerRefused,
             ),
-            // the same with the cause the session's missing corner now has
             SolidError::blend(
                 "blend::fillet_solver::p1::set_extension_flags",
                 BlendFailure::FilletVertexWithoutCorner,

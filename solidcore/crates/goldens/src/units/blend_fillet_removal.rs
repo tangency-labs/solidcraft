@@ -150,7 +150,6 @@ impl UnitDiff for Runner {
 mod exact_only_tests {
     use super::{path, Inputs};
     use solidcore::blend::fillet_removal::FilletRemoval;
-    use solidcore::error::blend::BlendFailure;
     use solidcore::error::{ErrorKind, SolidError};
     use solidcore::kernel::Kernel;
     use solidcore::topology::brep::p1 as bp1;
@@ -240,15 +239,10 @@ mod exact_only_tests {
                 if not_exact {
                     assert!(!ok, "{file} face {index}: not exact but removed");
                     assert_eq!(after, before, "{file} face {index}: refused but changed");
-                    // every not-exact refusal is class 130, a refusal, never a stage failure
+                    // every not-exact refusal is class 130, a refusal, never a defect
                     let e = error.unwrap();
                     assert_eq!(e.kind(), ErrorKind::RemovalNotExact, "{file} face {index}: {e}");
                     assert!(e.is_refusal() && !e.is_defect(), "{file} face {index}: {e}");
-                    assert_ne!(
-                        e.blend_failure(),
-                        Some(&BlendFailure::StageFailed),
-                        "{file} face {index}"
-                    );
                     refused.push(format!("{file} face {index}"));
                 } else if ok {
                     let (default_error, _, _, default_after) = remove(file, index, false);

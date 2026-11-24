@@ -154,7 +154,7 @@ pub fn intersect_curves(
 
     // If no intersections return error
     if solutions.is_empty() {
-        // an empty search on valid curves (rule 7)
+        // an empty search on valid curves
         return Err(SolidError::intersect(
             OP_CURVES,
             IntersectFailure::NoIntersection,
@@ -976,7 +976,7 @@ pub(crate) fn intersect_curve_face_within(
     // (an evaluation copy of the face's surface: same owner and cache slot)
     let surface = crate::topology::face::p2::surface(b, f)?
         .ok_or_else(|| {
-            // the caller's face (rule 9), keeping upstream's SM_ERR
+            // the caller's face, keeping upstream's SM_ERR
             Failure::new(OP_CURVE_FACE, IntersectFailure::FaceWithoutSurface)
                 .with_status(SM_ERR)
                 .into_error()

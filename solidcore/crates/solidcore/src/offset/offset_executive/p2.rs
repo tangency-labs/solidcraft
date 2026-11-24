@@ -27,8 +27,7 @@
 //! Static entry points take non-null references/owned values (null is undefined
 //! upstream); member null is native 1006, API null/invalid selection is native 1007.
 //!
-//! Failures (the conversion guide, `docs/failure-codes-and-reproduction.md` §6): each keeps
-//! the status upstream's site returned. A link or entity of a B-rep the kernel built, or of
+//! Failures: each keeps the status upstream's site returned. A link or entity of a B-rep the kernel built, or of
 //! the executive's own data, that is not there is an [`OffsetFailure::Defect`] whose `why`
 //! says which (p1's reasons where the two files share the link); a missing B-rep, a link
 //! of the input body that is not there (a caller can build such a body with `Brep`'s public
@@ -1984,7 +1983,7 @@ pub(super) fn select_offset_faceuse(
     Ok(faceuse)
 }
 
-// The links of the operation's input below are the caller's (rule 9): a caller can build a
+// The links of the operation's input below are the caller's: a caller can build a
 // body without them with `Brep`'s public mutators, so each is a named invalid input that
 // keeps upstream's null-pointer status.
 
@@ -6353,7 +6352,7 @@ mod tests {
 
     /// TE-O-18 part 5 (#19851): what the offset and the shell refuse of their input, and
     /// the extended offset's refusals, are named offset causes that keep the status upstream
-    /// returned (`solidcore/docs/failure-codes-and-reproduction.md` §6, rules 1, 7 and 9).
+    /// returned.
     #[test]
     fn the_inputs_and_refusals_of_p2_are_named_causes_with_their_statuses() {
         use crate::error::{ErrorKind, SM_ERR_INVALID_INPUT};
@@ -6497,7 +6496,7 @@ mod tests {
 
     /// TE-O-18 part 5 (#19851): a link of the input's B-rep, or the executive's own offset
     /// B-rep, that is not there is a defect that says which, with the status of upstream's
-    /// `NER` (the conversion guide, rule 2).
+    /// `NER`.
     #[test]
     fn a_missing_offset_brep_is_a_defect_and_a_missing_input_link_is_named() {
         let defect = |e: SolidError, says: &str| {
@@ -6596,8 +6595,8 @@ mod tests {
     }
 
     /// TE-O-18 part 6 (#19851): the shell's difference missing an operand or its result,
-    /// and a sheet's wall without a surface, are defects that say which (the conversion
-    /// guide, rule 2), with the status of upstream's `NER`.
+    /// and a sheet's wall without a surface, are defects that say which, with the status of
+    /// upstream's `NER`.
     #[test]
     fn a_missing_operand_result_or_wall_surface_is_a_defect_that_says_which() {
         let defect = |e: SolidError, says: &str| {

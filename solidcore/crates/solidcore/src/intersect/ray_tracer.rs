@@ -1724,7 +1724,7 @@ fn find_poly_hit(
                 continue;
             }
             let (normal, _) = brep.face_normal(k, poly_face, false, true)?;
-            // a face of the caller's poly B-rep without a boundary (rule 9)
+            // a face of the caller's poly B-rep without a boundary
             let no_edges = || SolidError::intersect(OP, IntersectFailure::PolyFaceWithoutEdges);
             let poly_loop = brep.face_outer_poly_loop(poly_face)?.ok_or_else(no_edges)?;
             let first_edge = brep.loop_first_poly_edge(poly_loop)?.ok_or_else(no_edges)?;

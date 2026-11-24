@@ -596,10 +596,10 @@ fn a_held_input_is_reported_not_waited_for() {
 /// error on top.)
 #[test]
 fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() {
-    use solidcore::error::{Failure, Reason};
+    use solidcore::error::{boolean::BooleanFailure, Failure};
 
     let wrap = |cause: SolidError| {
-        Failure::new("test::stage", Reason::Failed("a stage failed"))
+        Failure::new("test::stage", BooleanFailure::TreeBooleanFailed)
             .caused_by(cause)
             .into_error()
     };

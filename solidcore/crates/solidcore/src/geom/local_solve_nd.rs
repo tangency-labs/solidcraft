@@ -938,7 +938,12 @@ mod tests {
     struct Failing;
     impl EvalNFunctions for Failing {
         fn evaluate(&mut self, _: &[f64], _: &mut [f64], _: Option<&mut Matrix>) -> Result<bool> {
-            Err(SolidError::geom("test", GeomFailure::StageFailed))
+            Err(SolidError::geom(
+                "test",
+                GeomFailure::Defect {
+                    why: "the test's evaluation fails",
+                },
+            ))
         }
     }
 

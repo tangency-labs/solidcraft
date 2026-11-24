@@ -159,9 +159,8 @@ const SOLVER_ON_ITS_EDGEUSE: &str = "each fillet solver is built on the edge use
 const CORNER_OF_ITS_ID: &str =
     "a corner id is an index of the session's corner table, which only grows";
 
-/// A reviewed defect (section 6 of `docs/failure-codes-and-reproduction.md`): `why` says why
-/// the missing thing is there. Status `SM_ERR_NULL_POINTER`, the fork's `NER`, as the phrase
-/// cause it replaces had.
+/// A reviewed defect: `why` says why the missing thing is there. Status
+/// `SM_ERR_NULL_POINTER`, the fork's `NER`.
 #[track_caller]
 fn null_defect(op: &'static str, why: &'static str) -> SolidError {
     crate::error::Failure::new(op, crate::error::blend::BlendFailure::Defect { why })

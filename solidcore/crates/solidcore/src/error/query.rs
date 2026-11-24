@@ -10,19 +10,13 @@
 //! | Rust                           | Status difftest compares |
 //! |--------------------------------|--------------------------|
 //! | [`QueryFailure::Defect`]       | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`QueryFailure::Failed`]       | `SM_ERR`                 |
-//! | [`QueryFailure::InvalidValue`] | `SM_ERR_INVALID_INPUT`   |
-//! | [`QueryFailure::Missing`]      | `SM_ERR_NULL_POINTER`    |
-//! | the named causes, from [`QueryFailure::BoundOverflows`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
+//! | the named causes               | each its own (`comparison_status`), or the site's through `with_status` |
 //!
 //! [`QueryFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes
-//! ([`QueryFailure::Failed`], [`QueryFailure::Missing`], [`QueryFailure::InvalidValue`]) have
-//! no library sites left, and `the_query_phrase_cause_sites_only_shrink` keeps it so (the
-//! conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127).
 //!
-//! Deviations: not upstream. A failure names what went wrong (a named cause, or a phrase
-//! where a site is not yet converted); the failure's `operation` path says which routine.
+//! Deviations: not upstream. A failure names what went wrong (a named cause); the
+//! failure's `operation` path says which routine.
 //! A failure names an entity only where the site it replaces did (the point
 //! classification's seam failure, at its face). A check of a caller's argument or body
 //! that upstream answers with a status is a named cause of kind
@@ -79,22 +73,11 @@ pub enum QueryFailure {
     FaceWithoutLoops,
     /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
     FaceWithoutSurface,
-    /// The query could not continue, as the phrase says (for example "the loop does not
-    /// close").
-    Failed(&'static str),
     /// The reach given is not finite and at least zero. [`ErrorKind::InvalidInput`].
     InvalidReach,
-    /// A value the query computes with has no defined result, as the phrase says (for
-    /// example "a tangent of zero length has no direction"). Upstream returns
-    /// `SM_ERR_INVALID_INPUT` as a status here, so its kind is
-    /// [`ErrorKind::InvalidInput`].
-    InvalidValue(&'static str),
     /// A loop use of the caller's body lists a vertex use slot that holds none.
     /// [`ErrorKind::InvalidInput`].
     LoopuseWithoutVertexuse,
-    /// Something the query needs is missing, as the phrase says (for example "the edge's
-    /// curve").
-    Missing(&'static str),
     /// The closest-point search found no point: the solver returned no solution, or the drop
     /// onto the curve, surface or edge found no foot. Class `failed`.
     NoClosestPoint,
@@ -201,7 +184,6 @@ impl QueryFailure {
             | Self::EdgeuseOrientationUnset
             | Self::EdgeuseWithoutEdge
             | Self::FaceWithoutLoops
-            | Self::Failed(_)
             | Self::InvalidReach
             | Self::NoClosestPoint
             | Self::NoEdgeAtPoint
@@ -227,7 +209,6 @@ impl QueryFailure {
             | Self::FaceWithoutFaceuse
             | Self::FaceWithoutSurface
             | Self::LoopuseWithoutVertexuse
-            | Self::Missing(_)
             | Self::NoEdgeGiven
             | Self::NoPolyBrep
             | Self::NoTessDriver
@@ -236,17 +217,13 @@ impl QueryFailure {
             | Self::PolyEdgeWithoutVertex
             | Self::UvLineNotMade
             | Self::VertexuseWithoutVertex => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) | Self::UndefinedScale | Self::ZeroLengthVector => {
-                SM_ERR_INVALID_INPUT
-            }
+            Self::UndefinedScale | Self::ZeroLengthVector => SM_ERR_INVALID_INPUT,
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for
-    /// [`QueryFailure::InvalidValue`] and for a check of the caller's argument or body,
-    /// [`ErrorKind::Unsupported`] for a surface or object the routine does not take,
-    /// [`ErrorKind::Missing`] for [`QueryFailure::Missing`], otherwise the kind of the status
-    /// it replaced.
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for a check of the
+    /// caller's argument or body, [`ErrorKind::Unsupported`] for a surface or object the
+    /// routine does not take, otherwise the kind of its status.
     /// [`QueryFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
@@ -302,10 +279,8 @@ impl core::fmt::Display for QueryFailure {
             Self::FaceWithoutFaceuse => f.write_str("the face has no face use"),
             Self::FaceWithoutLoops => f.write_str("the face has no loops"),
             Self::FaceWithoutSurface => f.write_str("the face has no surface"),
-            Self::Failed(what) | Self::InvalidValue(what) => f.write_str(what),
             Self::InvalidReach => f.write_str("the reach must be finite and at least zero"),
             Self::LoopuseWithoutVertexuse => f.write_str("a loop use's vertex use is missing"),
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NoClosestPoint => f.write_str("no closest point was found"),
             Self::NoEdgeAtPoint => f.write_str("no edge is at the point"),
             Self::NoEdgeGiven => f.write_str("no edge was given"),
@@ -376,57 +351,13 @@ impl crate::SolidError {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+mod tests {
     use super::*;
     use crate::SolidError;
 
+    /// Each named cause reports its status and its kind.
     #[test]
-    fn query_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
-        let cases = [
-            (QueryFailure::Failed("x"), SM_ERR),
-            (QueryFailure::Missing("x"), SM_ERR_NULL_POINTER),
-            (QueryFailure::InvalidValue("x"), SM_ERR_INVALID_INPUT),
-        ];
-        for (failure, code) in cases {
-            let typed = SolidError::query("query::op", failure);
-            let before = SolidError::Upstream {
-                operation: "query::op",
-                code,
-                entity: None,
-            };
-            assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
-            assert_eq!(typed.kind(), before.kind(), "{failure:?}");
-            assert_eq!(typed.operation(), before.operation(), "{failure:?}");
-            assert_eq!(typed.entity(), before.entity(), "{failure:?}");
-            assert_eq!(typed.is_port_failure(), before.is_port_failure());
-            assert_eq!(typed.is_status_answer(), before.is_status_answer());
-            assert_eq!(
-                typed.is_unported_or_cancelled(),
-                before.is_unported_or_cancelled()
-            );
-            assert_eq!(typed.query_failure(), Some(&failure));
-        }
-        assert_eq!(
-            SolidError::query("query::op", QueryFailure::Missing("the edge's curve")).to_string(),
-            "query::op: the edge's curve is missing"
-        );
-        assert_eq!(
-            SolidError::query("query::op", QueryFailure::Failed("the loop does not close"))
-                .to_string(),
-            "query::op: the loop does not close"
-        );
-        assert_eq!(
-            SolidError::query("query::op", QueryFailure::InvalidValue("x")).kind(),
-            ErrorKind::InvalidInput
-        );
-        assert_eq!(SolidError::sm_err("query::op").query_failure(), None);
-    }
-
-    /// Each named cause reports the status of the phrase it replaced, and its kind.
-    #[test]
-    fn the_named_query_causes_keep_the_status_they_replaced() {
+    fn the_named_query_causes_keep_their_status() {
         use ErrorKind as K;
         use QueryFailure as F;
         let cases = [
@@ -500,25 +431,10 @@ pub(super) mod tests {
             SolidError::query("query::op", F::FaceWithoutSurface).to_string(),
             "query::op: the face has no surface"
         );
+        assert_eq!(SolidError::sm_err("query::op").query_failure(), None);
     }
 
-    /// The query routines describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
-    /// whose conversion waits on other open work.
-    #[test]
-    fn the_query_routines_build_no_bare_statuses() {
-        assert_eq!(bare_statuses_in("query", 20), Vec::<(String, usize)>::new());
-    }
-
-    /// The files under `src/<area>` (and `src/<area>.rs`) whose library code builds bare
-    /// statuses, with the number each builds, sorted by path; at least `least` files are
-    /// read. Kept for the ratchets that call it; the scan is [`super::super::bare_scan`].
-    pub(in crate::error) fn bare_statuses_in(area: &str, least: usize) -> Vec<(String, usize)> {
-        super::super::bare_scan::bare_statuses_in(area, least)
-    }
-
-    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
-    /// and says why.
+    /// A reviewed defect is of class 127 with its status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why = "the face's cache was built just before and has no loops, which a built cache always has";
@@ -526,7 +442,7 @@ pub(super) mod tests {
         let op = "query::op";
         super::super::tests::assert_defect(
             &SolidError::query(op, defect),
-            &SolidError::query(op, QueryFailure::Failed("x")),
+            &SolidError::query(op, QueryFailure::BoundOverflows),
             op,
             SM_ERR,
             &format!("{op}: stage_failed: {why}"),
@@ -536,33 +452,11 @@ pub(super) mod tests {
             .into_error();
         super::super::tests::assert_defect(
             &missing,
-            &SolidError::query(op, QueryFailure::Missing("x")),
+            &SolidError::query(op, QueryFailure::NoEdgeGiven),
             op,
             SM_ERR_NULL_POINTER,
             &format!("{op}: stage_failed: {why}"),
         );
         assert_eq!(missing.query_failure(), Some(&defect));
-    }
-
-    /// The sites that build a query phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_query_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("QueryFailure", "Failed"),
-                Builder::Variant("QueryFailure", "Missing"),
-                Builder::Variant("QueryFailure", "InvalidValue"),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-        ];
-        assert_pinned("query phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

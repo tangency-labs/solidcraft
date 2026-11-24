@@ -247,7 +247,7 @@ fn edge_vertex(v: Option<VertexId>, edge: EdgeId) -> Result<VertexId> {
 
 /// `curve` (of the edge `edge`, where there is one) has no B-spline form where upstream
 /// casts it to `SmBSplineCurve` and dereferences the result
-/// ([`BlendFailure::CurveWithoutNet`], keeping `SM_ERR_NULL_POINTER`; rule 8).
+/// ([`BlendFailure::CurveWithoutNet`], keeping `SM_ERR_NULL_POINTER`).
 #[track_caller]
 fn curve_without_net(edge: Option<EdgeId>, curve: &Curve) -> SolidError {
     Failure::new(

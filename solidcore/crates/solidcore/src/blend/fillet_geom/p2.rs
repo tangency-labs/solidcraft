@@ -610,8 +610,7 @@ fn solver_surface<'s>(
 
 /// A step of the routine `op` that cannot fail unless the kernel broke its own contract: a
 /// reviewed [`BlendFailure::Defect`] whose `why` says why (the reasons are the `const`s at
-/// the end of this file), keeping upstream's `SM_ERR`; its origin is the call's file and line
-/// (guide section 6, rules 2 and 4).
+/// the end of this file), keeping upstream's `SM_ERR`; its origin is the call's file and line.
 #[track_caller]
 fn defect(op: &'static str, why: &'static str) -> SolidError {
     SolidError::blend(op, BlendFailure::Defect { why })
@@ -646,7 +645,7 @@ fn face_without_surface(op: &'static str, f: FaceId) -> SolidError {
 
 /// `NER(p)`: an object the kernel built or linked that is not there. A reviewed
 /// [`BlendFailure::Defect`] whose `why` names the link, keeping upstream's
-/// `SM_ERR_NULL_POINTER`; its origin is the call's file and line (guide section 6, rule 2).
+/// `SM_ERR_NULL_POINTER`; its origin is the call's file and line.
 #[track_caller]
 fn broken_link(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
@@ -657,7 +656,7 @@ fn broken_link(op: &'static str, why: &'static str) -> SolidError {
 /// `NER(p)` of a link of the fillet structures the routine is given (the fillet body, its
 /// corners and solvers, which a caller can build with the public API and leave without it):
 /// [`BlendFailure::FilletSetUpInvalid`] naming the link, keeping upstream's
-/// `SM_ERR_NULL_POINTER` (guide section 6, rule 12).
+/// `SM_ERR_NULL_POINTER`.
 #[track_caller]
 fn missing_set_up(op: &'static str, part: FilletSetUp) -> SolidError {
     Failure::new(op, BlendFailure::FilletSetUpInvalid(part))

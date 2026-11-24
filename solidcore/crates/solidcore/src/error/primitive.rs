@@ -12,19 +12,15 @@
 //! | [`PrimitiveFailure::AxisInsideFace`]   | `SM_ERR_AXIS_INSIDE_FACE`     |
 //! | [`PrimitiveFailure::Defect`]           | `SM_ERR` (or the site's, through `with_status`) |
 //! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`], [`PrimitiveFailure::MergeOperandMissing`], [`PrimitiveFailure::MergeGaveNoBrep`], [`PrimitiveFailure::PlanarDifferenceEmpty`], [`PrimitiveFailure::FaceWithoutSurface`], [`PrimitiveFailure::EdgeWithoutFace`], [`PrimitiveFailure::SphereEdgeNotDropped`], [`PrimitiveFailure::ClosestPointNotFound`] | `SM_ERR_NULL_POINTER` |
-//! | [`PrimitiveFailure::Failed`]           | `SM_ERR`                      |
 //! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`], [`PrimitiveFailure::SheetHasNoFace`], [`PrimitiveFailure::CircleNotMade`], [`PrimitiveFailure::CylinderDomainNotSet`], [`PrimitiveFailure::ConeSurfaceNotMade`], [`PrimitiveFailure::AnalyticSweepRefused`], [`PrimitiveFailure::SweptSurfaceNotMade`], [`PrimitiveFailure::SweptFaceNotMade`], [`PrimitiveFailure::NoProfiles`], [`PrimitiveFailure::SectionNotFinite`], [`PrimitiveFailure::SectionLoopNoInterval`], [`PrimitiveFailure::SectionLayersDiffer`], [`PrimitiveFailure::OffsetMapMissing`], [`PrimitiveFailure::OffsetMapIndexOutOfRange`], [`PrimitiveFailure::OffsetFacesMissing`], [`PrimitiveFailure::RuledSidesTooShort`], [`PrimitiveFailure::ProfileSlotEmpty`], [`PrimitiveFailure::ProfileMakesNoWire`], [`PrimitiveFailure::CappedSweepNoRepetition`], [`PrimitiveFailure::CappedRevolutionRepeats`] | `SM_ERR` |
 //! | [`PrimitiveFailure::HelixDeviates`]    | `SM_ERR_NOT_WITHIN_TOLERANCE` |
-//! | [`PrimitiveFailure::Missing`]          | `SM_ERR_NULL_POINTER`         |
 //! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
 //!
 //! [`PrimitiveFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
-//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127).
 //!
-//! Deviations: not upstream. A failure says in a phrase (or its data) what went wrong;
-//! the failure's `operation` path says which routine. No failure names an entity: the
-//! sites they replace named none. The checks of a caller's arguments that report no
+//! Deviations: not upstream. A failure says by its variant (and its data) what went wrong;
+//! the failure's `operation` path says which routine. No failure names an entity. The checks of a caller's arguments that report no
 //! status stay [`crate::SolidError::InvalidInput`]; those that report one are causes of
 //! class [`ErrorKind::InvalidInput`] keeping it. [`PrimitiveFailure::PlaneCannotCover`] is
 //! not upstream: it is the refusal of WR-536's fix (`Boolean2D` refuses a plane it cannot grow
@@ -104,9 +100,6 @@ pub enum PrimitiveFailure {
     /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`], status
     /// `SM_ERR_NULL_POINTER`.
     FaceWithoutSurface,
-    /// The routine could not continue, as the phrase says (for example "a cone side has
-    /// zero length").
-    Failed(&'static str),
     /// The caller's height is below the zero tolerance. [`ErrorKind::InvalidInput`],
     /// status `SM_ERR`.
     HeightTooSmall {
@@ -136,9 +129,6 @@ pub enum PrimitiveFailure {
         /// The missing operand is the other (second) one.
         other: bool,
     },
-    /// Something the routine needs is missing, as the phrase says (for example "the
-    /// face's surface").
-    Missing(&'static str),
     /// The caller gave no curve to build from. [`ErrorKind::InvalidInput`], status
     /// `SM_ERR_NULL_POINTER`.
     NoCurveGiven,
@@ -372,7 +362,6 @@ impl PrimitiveFailure {
             | Self::CurvesMakeNoLoop
             | Self::CylinderDomainNotSet
             | Self::Defect { .. }
-            | Self::Failed(_)
             | Self::HeightTooSmall { .. }
             | Self::HelixNotEvaluated
             | Self::NoProfiles
@@ -410,7 +399,6 @@ impl PrimitiveFailure {
             | Self::FaceWithoutSurface
             | Self::MergeGaveNoBrep
             | Self::MergeOperandMissing { .. }
-            | Self::Missing(_)
             | Self::NoCurveGiven
             | Self::NoRegion
             | Self::PlanarDifferenceEmpty
@@ -421,8 +409,7 @@ impl PrimitiveFailure {
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
-    /// [`PrimitiveFailure::Missing`], [`ErrorKind::NotWithinTolerance`] for
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::NotWithinTolerance`] for
     /// [`PrimitiveFailure::HelixDeviates`], [`ErrorKind::InvalidInput`] for
     /// [`PrimitiveFailure::PlaneCannotCover`] and the checks of the caller's arguments and
     /// body, [`ErrorKind::Unsupported`] for a path or a sweep the planar-path sweep does not
@@ -514,7 +501,6 @@ impl core::fmt::Display for PrimitiveFailure {
             Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
             Self::EdgeWithoutFace => f.write_str("the edge bounds no face"),
             Self::FaceWithoutSurface => f.write_str("the face has no surface"),
-            Self::Failed(what) => f.write_str(what),
             Self::HeightTooSmall { height, minimum } => write!(
                 f,
                 "the height {height} is below the zero tolerance {minimum}"
@@ -534,7 +520,6 @@ impl core::fmt::Display for PrimitiveFailure {
             Self::MergeOperandMissing { other: true } => {
                 f.write_str("the merge stage has no other operand")
             }
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NoCurveGiven => f.write_str("no curve was given"),
             Self::NoProfiles => f.write_str("no profiles to sweep"),
             Self::NoRegion => f.write_str("there is no region to build the faces in"),
@@ -658,8 +643,6 @@ mod tests {
     #[test]
     fn primitive_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
         let cases = [
-            (PrimitiveFailure::Failed("x"), SM_ERR),
-            (PrimitiveFailure::Missing("x"), SM_ERR_NULL_POINTER),
             (
                 PrimitiveFailure::HelixDeviates {
                     deviation: 2.0,
@@ -694,22 +677,6 @@ mod tests {
         assert_eq!(
             SolidError::primitive(
                 "primitive::op",
-                PrimitiveFailure::Missing("the face's surface")
-            )
-            .to_string(),
-            "primitive::op: the face's surface is missing"
-        );
-        assert_eq!(
-            SolidError::primitive(
-                "primitive::op",
-                PrimitiveFailure::Failed("the step could not go on")
-            )
-            .to_string(),
-            "primitive::op: the step could not go on"
-        );
-        assert_eq!(
-            SolidError::primitive(
-                "primitive::op",
                 PrimitiveFailure::HelixDeviates {
                     deviation: 0.5,
                     tolerance: 0.25,
@@ -719,28 +686,12 @@ mod tests {
             ErrorKind::NotWithinTolerance
         );
         assert_eq!(
-            SolidError::primitive("primitive::op", PrimitiveFailure::Failed("x"))
-                .primitive_failure(),
-            Some(&PrimitiveFailure::Failed("x"))
-        );
-        assert_eq!(
             SolidError::sm_err("primitive::op").primitive_failure(),
             None
         );
     }
 
-    /// The primitive-creation routines describe their failures: their library code builds
-    /// no bare `Upstream` status.
-    #[test]
-    fn the_primitive_routines_build_no_bare_statuses() {
-        assert_eq!(
-            super::super::query::tests::bare_statuses_in("primitive", 25),
-            Vec::<(String, usize)>::new()
-        );
-    }
-
-    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
-    /// and says why.
+    /// A reviewed defect is of class 127 with its status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why = "the face the extrusion just built has no loop, which its own construction always gives";
@@ -748,7 +699,7 @@ mod tests {
         let op = "primitive::op";
         super::super::tests::assert_defect(
             &SolidError::primitive(op, defect),
-            &SolidError::primitive(op, PrimitiveFailure::Failed("x")),
+            &SolidError::primitive(op, PrimitiveFailure::CircleNotMade),
             op,
             SM_ERR,
             &format!("{op}: stage_failed: {why}"),
@@ -758,7 +709,7 @@ mod tests {
             .into_error();
         super::super::tests::assert_defect(
             &missing,
-            &SolidError::primitive(op, PrimitiveFailure::Missing("x")),
+            &SolidError::primitive(op, PrimitiveFailure::MergeGaveNoBrep),
             op,
             SM_ERR_NULL_POINTER,
             &format!("{op}: stage_failed: {why}"),
@@ -766,8 +717,8 @@ mod tests {
         assert_eq!(missing.primitive_failure(), Some(&defect));
     }
 
-    /// The named causes of the profile-driven primitives keep the status of the phrase each
-    /// replaced, and have their class; a caught error stays the cause.
+    /// The named causes of the profile-driven primitives have their status and class; a
+    /// caught error stays the cause.
     #[test]
     fn the_profile_primitive_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -926,8 +877,8 @@ mod tests {
         assert_eq!(e.kind(), K::InvalidInput);
     }
 
-    /// The named causes keep the status of the phrase each replaced, and have their class;
-    /// a caught error stays the cause, and decides defect or refusal.
+    /// The named causes have their status and class; a caught error stays the cause, and
+    /// decides defect or refusal.
     #[test]
     fn the_named_primitive_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -1201,31 +1152,5 @@ mod tests {
             Some(&PrimitiveFailure::Defect { why })
         );
         assert_eq!(link.to_string(), format!("{op}: stage_failed: {why}"));
-    }
-
-    /// The sites that build a primitive phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_primitive_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("PrimitiveFailure", "Failed"),
-                Builder::Variant("PrimitiveFailure", "Missing"),
-                Builder::Method("primitive_failed", Some(1)),
-                Builder::Method("primitive_missing", Some(1)),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[];
-        assert_pinned(
-            "primitive phrase-cause sites",
-            &crate_sites(&PHRASES),
-            PINNED,
-        );
     }
 }

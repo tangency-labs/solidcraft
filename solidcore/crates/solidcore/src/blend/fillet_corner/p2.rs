@@ -2649,7 +2649,7 @@ mod tests {
                 "re-solve",
                 BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
             ),
-            SolidError::blend("re-solve", BlendFailure::StageFailed),
+            SolidError::blend("re-solve", BlendFailure::Defect { why: "x" }),
             SolidError::sm_err("re-solve"),
         ] {
             let unable = || patch_miss(OP_VAR_RAD, CornerPatchMiss::VariableRadiusReSolveFailed);

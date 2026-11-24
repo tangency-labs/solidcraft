@@ -415,7 +415,7 @@ fn eu_without_face(op: &'static str, eu: EdgeuseId) -> SolidError {
 }
 
 /// The caller's body's face `face` without a surface, which upstream dereferences
-/// ([`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER`; rule 9).
+/// ([`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER`).
 #[track_caller]
 fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
     Failure::new(op, BlendFailure::FaceHasNoSurface)
@@ -426,7 +426,7 @@ fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
 
 /// `curve` (of fillet edge `edge`, where the step names one) is of a kind not derived
 /// from a B-spline curve, where upstream casts it to `SmBSplineCurve` and dereferences
-/// the result ([`BlendFailure::CurveWithoutNet`], keeping `SM_ERR_NULL_POINTER`; rule 8).
+/// the result ([`BlendFailure::CurveWithoutNet`], keeping `SM_ERR_NULL_POINTER`).
 #[track_caller]
 fn curve_without_net(op: &'static str, edge: Option<EdgeId>, curve: &Curve) -> SolidError {
     Failure::new(
@@ -455,7 +455,7 @@ fn ends_unresolved(start: usize, end: usize) -> SolidError {
 
 /// A surface/surface intersection at a fillet corner that gave no curve: its error
 /// (`Some`) chained as the cause of [`BlendFailure::CornerSurfacesNotIntersected`], so
-/// that error decides defect or refusal (rule 6), or, for an intersection that returned
+/// that error decides defect or refusal, or, for an intersection that returned
 /// no curve (`None`), a reviewed [`BlendFailure::Defect`] ([`CORNER_SSI_NO_CURVE`]: the
 /// corners' calls never get `Ok` without a curve). Status `SM_ERR` either way, as
 /// upstream's `SER`.

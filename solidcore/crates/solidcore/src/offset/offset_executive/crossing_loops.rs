@@ -523,8 +523,7 @@ const INDEX_PAST_END: &str = "an index into the crossings' own lists is past the
 
 /// A wall strip's result: a strip that cannot be made is `None`, as [`crate::error::ignored`]
 /// reads it. A defect (the kernel's fault, [`SolidError::is_defect`]) is passed on with its
-/// reason, never read as a strip that cannot be made
-/// (`solidcore/docs/failure-codes-and-reproduction.md` §6, rule 5).
+/// reason, never read as a strip that cannot be made.
 fn strip_result<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Err(e) if e.is_defect() => Err(e),

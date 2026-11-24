@@ -72,8 +72,7 @@
 //! error as its cause, which decides its class (a defect is passed on), unported callees
 //! aside.
 //!
-//! Failures (the conversion guide, `docs/failure-codes-and-reproduction.md` §6): each keeps
-//! the status upstream's site returned. A link or entity of a B-rep, or of the executive's
+//! Failures: each keeps the status upstream's site returned. A link or entity of a B-rep, or of the executive's
 //! own data, that is not there is an [`OffsetFailure::Defect`] (`SM_ERR_NULL_POINTER`)
 //! whose `why` says which; a missing argument, a face of the input with no surface and an
 //! edge of the input with no curve are the caller's input; a kind the routine does not
@@ -1552,7 +1551,6 @@ impl OffsetExecutive {
             match status {
                 Ok(()) => {}
                 // a defect (the kernel's fault) is passed on, never read as a gap left open
-                // (`solidcore/docs/failure-codes-and-reproduction.md` §6, rule 5)
                 Err(error) if error.is_unported_or_cancelled() || error.is_defect() => {
                     return Err(error)
                 }
@@ -3243,7 +3241,7 @@ fn present<T>(value: Option<T>, why: &'static str) -> Result<T> {
 /// The value of a call whose failure the executive reads as a step that did not apply
 /// ([`crate::error::ignored`]: upstream ignores its status). A defect (the kernel's fault,
 /// [`SolidError::is_defect`]) is passed on with its reason, never read as a step that did
-/// not apply (`solidcore/docs/failure-codes-and-reproduction.md` §6, rule 5).
+/// not apply.
 pub(super) fn ignored_unless_defect<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Err(e) if e.is_defect() => Err(e),
@@ -3806,9 +3804,9 @@ mod tests {
     use crate::surface::side::BoxSide;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
 
-    /// A radial or face use missing from an edge use of the input is the caller's input
-    /// (the conversion guide, rule 9): a caller can build such a body with the public record
-    /// mutators, so each names its cause, not a defect.
+    /// A radial or face use missing from an edge use of the input is the caller's input: a
+    /// caller can build such a body with the public record mutators, so each names its cause,
+    /// not a defect.
     #[test]
     fn a_missing_input_edgeuse_radial_or_faceuse_is_named() {
         // an edge use in no loop and with no neighbour around its edge

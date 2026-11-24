@@ -29,8 +29,7 @@
 //!
 //! [`SweepFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). Every other cause names what
-//! happened, with its class (the conversion guide: `docs/failure-codes-and-reproduction.md`
-//! §6).
+//! happened, with its class.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. The failures
 //! that are checks of a caller's arguments the routines made before this record stay
@@ -585,8 +584,8 @@ impl crate::SolidError {
         Failure::new(operation, failure).into_error()
     }
 
-    /// A sweep failure that answers with `status` in place of its cause's default (rule 1:
-    /// the site's status is kept).
+    /// A sweep failure that answers with `status` in place of its cause's default (the
+    /// site's status is kept).
     #[must_use]
     pub(crate) fn sweep_with_status(
         operation: &'static str,
@@ -890,16 +889,7 @@ mod tests {
         assert!(!e.is_port_failure());
     }
 
-    /// The sweep routines describe their failures: their library code builds no bare
-    /// `Upstream` status (the count is the bare sites a file may still hold while a site
-    /// waits on other work).
-    #[test]
-    fn the_sweep_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("sweep", 21, &[]);
-    }
-
-    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
-    /// and says why.
+    /// A reviewed defect is of class 127 with its status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why =
@@ -922,27 +912,5 @@ mod tests {
             &format!("{op}: stage_failed: {why}"),
         );
         assert_eq!(missing.sweep_failure(), Some(&defect));
-    }
-
-    /// The sites that build a sweep phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_sweep_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("SweepFailure", "Failed"),
-                Builder::Variant("SweepFailure", "Missing"),
-                Builder::Method("sweep_failed", Some(1)),
-                Builder::Method("sweep_missing", Some(1)),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        // every sweep site is converted (TE-O-22): none may come back
-        const PINNED: &[(&str, usize)] = &[];
-        assert_pinned("sweep phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

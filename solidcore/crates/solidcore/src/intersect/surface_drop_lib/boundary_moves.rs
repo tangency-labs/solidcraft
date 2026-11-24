@@ -399,14 +399,14 @@ pub fn fix_boundary_curves_bounded(
     };
     let (dlo, dhi) = (uv_domain.min(), uv_domain.max());
     if !(dlo.x <= dhi.x && dlo.y <= dhi.y) {
-        // the caller's domain (rule 9)
+        // the caller's domain
         return Err(refuse(IntersectFailure::EmptyDomain));
     }
     if ctrl_poly
         .iter()
         .any(|p| !(p.x.is_finite() && p.y.is_finite()))
     {
-        // the caller's polygon (rule 9)
+        // the caller's polygon
         return Err(refuse(IntersectFailure::NotFinite));
     }
     let bad = || SolidError::invalid_input(OP, "control point index");

@@ -813,7 +813,7 @@ impl DropPt {
         if self.degen_curve != Some(true) {
             // can't drop Crv1stDeriv vectors parallel to m_SrfNormal (degenerate case)
             // (no angle: a zero tangent or normal, which upstream reads as 0 degrees; the
-            // angle's error stays the cause, rule 6)
+            // angle's error stays the cause)
             let stop = match self.srf_normal.angle_between(self.crv_pd[1]) {
                 Ok(rad) => Some(rad_to_deg(rad))
                     .filter(|degrees| *degrees < 3.0)
@@ -1026,7 +1026,7 @@ impl DropPt {
         let (found_answer, local_uv) =
             local_point_solve(k, surface, uv_domain, end.crv_pd[0], end.uv_pd[0])?;
 
-        // MINIMIZE should always find some solution (none found: rule 7).
+        // MINIMIZE should always find some solution (none found).
         if !found_answer {
             return Err(SolidError::intersect(OP_NEXT, IntersectFailure::NoFoot));
         }

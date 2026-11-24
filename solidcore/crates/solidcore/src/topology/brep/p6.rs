@@ -1935,7 +1935,7 @@ fn native_keeping<T>(r: Result<T>, last: &mut Option<SolidError>) -> Result<Opti
 }
 
 /// [`TopologyFailure::NoClassifiablePoint`], with the last native failure of a step or a
-/// ray fire as its cause where there was one (rule 6).
+/// ray fire as its cause where there was one.
 fn no_classifiable_point(last: Option<SolidError>) -> SolidError {
     let failure = Failure::new(OP, TopologyFailure::NoClassifiablePoint);
     match last {

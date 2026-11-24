@@ -69,16 +69,13 @@
 //! | [`TopologyFailure::FaceWithoutSurface`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::FaceWithoutUses`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::FacesNotCopiedOnce`] | `SM_ERR` |
-//! | [`TopologyFailure::Failed`]          | `SM_ERR`                      |
 //! | [`TopologyFailure::GatheredBothSides`] | `SM_ERR_ASSERT_FAILURE` |
 //! | [`TopologyFailure::HitAtRayStart`] | `SM_ERR` |
 //! | [`TopologyFailure::HitNotOnBoundary`] | `SM_ERR` |
-//! | [`TopologyFailure::Inconsistent`]    | `SM_ERR_ASSERT_FAILURE`       |
 //! | [`TopologyFailure::InfiniteRegionNotFirst`] | `SM_ERR` |
 //! | [`TopologyFailure::InfiniteRegionNotFound`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::InnerLoopsOnBothSides`] | `SM_ERR` |
 //! | [`TopologyFailure::IntersectingProtoEdgeEmpty`] | `SM_ERR` |
-//! | [`TopologyFailure::InvalidValue`]    | `SM_ERR_INVALID_INPUT`        |
 //! | [`TopologyFailure::IsoLineNotMade`] | `SM_ERR` |
 //! | [`TopologyFailure::JoinedVertexReaches`] | `SM_ERR` (not upstream, #15718) |
 //! | [`TopologyFailure::LaminaEdgeIsStrut`] | `SM_ERR` |
@@ -100,7 +97,6 @@
 //! | [`TopologyFailure::MatrixNotDecomposed`] | `SM_ERR` |
 //! | [`TopologyFailure::MergeGaveNoVertex`] | `SM_ERR` |
 //! | [`TopologyFailure::MergedGroupNotOneFace`] | `SM_ERR` |
-//! | [`TopologyFailure::Missing`]         | `SM_ERR_NULL_POINTER`         |
 //! | [`TopologyFailure::NewPrimaryNotOnEdge`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::NoBrepGiven`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::NoClassifiablePoint`] | `SM_ERR` |
@@ -147,7 +143,6 @@
 //! | [`TopologyFailure::NotOnOwnerList`] | `SM_ERR` |
 //! | [`TopologyFailure::NothingToLink`] | `SM_ERR` |
 //! | [`TopologyFailure::OldEdgeNotAmongSplit`] | `SM_ERR_NULL_POINTER` |
-//! | [`TopologyFailure::OutOfMemory`]     | `SM_ERR_OUT_OF_MEMORY`        |
 //! | [`TopologyFailure::OverlapBelowSplitResolution`] | `SM_ERR` |
 //! | [`TopologyFailure::OwnerListBroken`] | `SM_ERR` |
 //! | [`TopologyFailure::OwnerListOverCount`] | `SM_ERR` |
@@ -210,16 +205,14 @@
 //! | [`TopologyFailure::ZeroLengthVector`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::ZeroSurfaceTangent`] | `SM_ERR` |
 //!
-//! A named cause keeps the status of the phrase it replaced, unless its site overrides it
-//! through `with_status`.
+//! A named cause has its status, unless its site overrides it through `with_status`.
 //!
 //! [`TopologyFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
-//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127).
 //!
-//! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
-//! wrong; the failure's `operation` path says which routine, and its entity is the one
-//! the site it replaces named (a vertex use for the vertex-use routines, none
+//! Deviations: not upstream. A failure says by its variant what went wrong; the
+//! failure's `operation` path says which routine, and its entity is the one upstream
+//! names (a vertex use for the vertex-use routines, none
 //! elsewhere). A check of a caller's argument that reports no status (upstream
 //! dereferences null) stays [`crate::SolidError::InvalidInput`]; one that reports a status
 //! is a named cause of class `invalid_input`, keeping that status.
@@ -458,9 +451,6 @@ pub enum TopologyFailure {
     /// A requested face has no copy, or more than one, after the copy: the merge passed
     /// over a face it failed to make, or split one. Class `failed`.
     FacesNotCopiedOnce,
-    /// The routine could not continue, as the phrase says (for example "the loop does
-    /// not close").
-    Failed(&'static str),
     /// Gathering the face uses connected to one side of a face reached more face uses than
     /// faces remain to be oriented (upstream's "Nonorientable Brep" assert): the body is not
     /// orientable, or it is an open sheet the closed-solid orientation does not take. Class
@@ -476,8 +466,6 @@ pub enum TopologyFailure {
     },
     /// The hit the caller gave names no face, edge or vertex. [`ErrorKind::InvalidInput`].
     HitNotOnBoundary,
-    /// A consistency check of the routine's own data did not hold, as the phrase says.
-    Inconsistent(&'static str),
     /// The infinite region of the B-rep the caller gave is not first on its region list.
     /// [`ErrorKind::InvalidInput`].
     InfiniteRegionNotFirst,
@@ -492,11 +480,6 @@ pub enum TopologyFailure {
     /// definitions: an earlier split, whose failure the Boolean only warns on, left it
     /// empty. Class `failed`.
     IntersectingProtoEdgeEmpty,
-    /// A value the routine is given or computes with is not usable, as the phrase says
-    /// (for example "the plane normal has zero length"). Upstream returns
-    /// `SM_ERR_INVALID_INPUT` as a status here, so its kind is
-    /// [`ErrorKind::InvalidInput`].
-    InvalidValue(&'static str),
     /// The UV line segment across the face's domain at one iso-parameter could not be made; the
     /// segment constructor's error is kept as the cause.
     IsoLineNotMade,
@@ -591,9 +574,6 @@ pub enum TopologyFailure {
     /// A group of faces the merge joined across removed edges left other than one face. Class
     /// `failed`.
     MergedGroupNotOneFace,
-    /// Something the routine needs is missing, as the phrase says (for example "the
-    /// edge's curve").
-    Missing(&'static str),
     /// The edge use the caller gave as the edge's new primary is not one of the edge's.
     NewPrimaryNotOnEdge,
     /// The caller gave no B-rep. [`ErrorKind::InvalidInput`].
@@ -732,8 +712,6 @@ pub enum TopologyFailure {
     /// Neither of the two new edges the caller gave after a split is the old edge.
     /// [`ErrorKind::InvalidInput`].
     OldEdgeNotAmongSplit,
-    /// Memory for the data could not be had, as the phrase says.
-    OutOfMemory(&'static str),
     /// Two proto edges overlap along a piece whose both ends fall where an end of either
     /// edge's definitions refuses to split (within ten times their tolerance of it), so
     /// there is no piece of that edge to combine. Class `failed`.
@@ -1084,7 +1062,6 @@ impl TopologyFailure {
             | Self::FaceWithoutEdges
             | Self::FaceWithoutLoops
             | Self::FacesNotCopiedOnce
-            | Self::Failed(_)
             | Self::HitAtRayStart { .. }
             | Self::HitNotOnBoundary
             | Self::InfiniteRegionNotFirst
@@ -1196,7 +1173,6 @@ impl TopologyFailure {
             | Self::FaceWithoutSurface
             | Self::FaceWithoutUses
             | Self::InfiniteRegionNotFound
-            | Self::Missing(_)
             | Self::NoEdgeuseGiven
             | Self::NoFaceGiven
             | Self::NoFinalVertexAtEnd
@@ -1223,7 +1199,6 @@ impl TopologyFailure {
             Self::CurveLoopsInvalid
             | Self::EdgeUseNotInLoop
             | Self::EdgeuseWithoutEdge
-            | Self::InvalidValue(_)
             | Self::LoopIndexOutOfRange { .. }
             | Self::NewPrimaryNotOnEdge
             | Self::NoBrepGiven
@@ -1237,22 +1212,17 @@ impl TopologyFailure {
             | Self::VerticesNotJoinable
             | Self::ZeroLengthVector => SM_ERR_INVALID_INPUT,
             Self::DropFailed { status } => *status,
-            Self::Inconsistent(_) | Self::GatheredBothSides | Self::EdgesOnDifferentBreps => {
-                SM_ERR_ASSERT_FAILURE
-            }
-            Self::OutOfMemory(_) | Self::TooManyOutputSlots { .. } | Self::AllocationFailed => {
-                SM_ERR_OUT_OF_MEMORY
-            }
+            Self::GatheredBothSides | Self::EdgesOnDifferentBreps => SM_ERR_ASSERT_FAILURE,
+            Self::TooManyOutputSlots { .. } | Self::AllocationFailed => SM_ERR_OUT_OF_MEMORY,
             // upstream's `TRUE`: the repair's note, not an error status
             Self::SheetReoriented => 1,
         }
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
-    /// [`TopologyFailure::Missing`], [`TopologyFailure::RadialFaceWithoutSurface`] and
-    /// [`TopologyFailure::RadialRimWithoutEdge`], [`ErrorKind::InvalidInput`] for
-    /// [`TopologyFailure::InvalidValue`] and for a check of the caller's arguments, state or
-    /// body, [`ErrorKind::Unsupported`] for a kind or configuration the routine does not
+    /// [`TopologyFailure::RadialFaceWithoutSurface`] and
+    /// [`TopologyFailure::RadialRimWithoutEdge`], [`ErrorKind::InvalidInput`] for a check of
+    /// the caller's arguments, state or body, [`ErrorKind::Unsupported`] for a kind or configuration the routine does not
     /// handle, [`ErrorKind::NotWithinTolerance`] for a trim curve end off its edge, the
     /// drop status's kind for [`TopologyFailure::DropFailed`], [`ErrorKind::Failed`]
     /// otherwise. [`TopologyFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
@@ -1546,7 +1516,6 @@ impl core::fmt::Display for TopologyFailure {
             Self::FacesNotCopiedOnce => {
                 f.write_str("a requested face has no copy, or more than one")
             }
-            Self::Failed(what) | Self::InvalidValue(what) => f.write_str(what),
             Self::GatheredBothSides => {
                 f.write_str("more face uses are connected than faces remain to be oriented")
             }
@@ -1561,7 +1530,6 @@ impl core::fmt::Display for TopologyFailure {
                 )
             }
             Self::HitNotOnBoundary => f.write_str("the hit names no face, edge or vertex"),
-            Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::InfiniteRegionNotFirst => {
                 f.write_str("the infinite region is not first on the B-rep's region list")
             }
@@ -1634,7 +1602,6 @@ impl core::fmt::Display for TopologyFailure {
             Self::MergedGroupNotOneFace => {
                 f.write_str("merged faces that do not leave exactly one face")
             }
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NewPrimaryNotOnEdge => {
                 f.write_str("the new primary edge use is not one of the edge's")
             }
@@ -1719,7 +1686,6 @@ impl core::fmt::Display for TopologyFailure {
             Self::OldEdgeNotAmongSplit => {
                 f.write_str("neither new edge of the split is the old edge")
             }
-            Self::OutOfMemory(what) => write!(f, "out of memory for {what}"),
             Self::OverlapBelowSplitResolution => {
                 f.write_str("two proto edges overlap along less than their definitions can split")
             }
@@ -1929,19 +1895,12 @@ mod tests {
     #[test]
     fn topology_failures_keep_the_status_kind_and_entity_of_the_upstream_they_replace() {
         let vu = Some(EntityRef::Vertexuse(VertexuseId::from_index(3)));
-        let cases = [
-            (TopologyFailure::Failed("x"), SM_ERR),
-            (TopologyFailure::Missing("x"), SM_ERR_NULL_POINTER),
-            (TopologyFailure::InvalidValue("x"), SM_ERR_INVALID_INPUT),
-            (TopologyFailure::Inconsistent("x"), SM_ERR_ASSERT_FAILURE),
-            (TopologyFailure::OutOfMemory("x"), SM_ERR_OUT_OF_MEMORY),
-            (
-                TopologyFailure::DropFailed {
-                    status: SM_ERR_OUTSIDE_OF_DOMAIN,
-                },
-                SM_ERR_OUTSIDE_OF_DOMAIN,
-            ),
-        ];
+        let cases = [(
+            TopologyFailure::DropFailed {
+                status: SM_ERR_OUTSIDE_OF_DOMAIN,
+            },
+            SM_ERR_OUTSIDE_OF_DOMAIN,
+        )];
         for (failure, code) in cases {
             for entity in [None, vu] {
                 let typed = match entity {
@@ -1969,75 +1928,33 @@ mod tests {
             }
         }
         assert_eq!(
-            SolidError::topology("topology::op", TopologyFailure::Missing("the edge's curve"))
-                .to_string(),
-            "topology::op: the edge's curve is missing"
-        );
-        assert_eq!(
             SolidError::topology_at(
                 "topology::op",
-                TopologyFailure::Failed("the vertex use has no point"),
+                TopologyFailure::FacesNotCopiedOnce,
                 EntityRef::Vertexuse(VertexuseId::from_index(3)),
             )
             .to_string(),
             format!(
-                "topology::op: the vertex use has no point ({})",
+                "topology::op: a requested face has no copy, or more than one ({})",
                 EntityRef::Vertexuse(VertexuseId::from_index(3))
             )
         );
         assert_eq!(
-            SolidError::topology("topology::op", TopologyFailure::Failed("x")).kind(),
+            SolidError::topology("topology::op", TopologyFailure::FacesNotCopiedOnce).kind(),
             ErrorKind::Failed
         );
         assert_eq!(SolidError::sm_err("topology::op").topology_failure(), None);
     }
 
-    /// A sample of the second set of converted files (`brep/p1`, `p5` to `p10`,
-    /// `face/p2`): each keeps the operation, status, kind and entity of its `Upstream`.
+    /// A sample from `brep/p1`: it keeps the operation, status, kind and entity of its
+    /// `Upstream`.
     #[test]
     fn the_brep_edit_and_face_samples_keep_their_upstream_answers() {
-        let samples = [
-            (
-                "topology::brep::p1",
-                TopologyFailure::NoRegionGiven,
-                SM_ERR_INVALID_INPUT,
-            ),
-            (
-                "topology::brep::p5",
-                TopologyFailure::Failed("editing is not enabled"),
-                SM_ERR,
-            ),
-            (
-                crate::topology::brep::p5::NO_VERTEX_SECTOR_OP,
-                TopologyFailure::Missing("a vertex sector at the curve's start"),
-                SM_ERR_NULL_POINTER,
-            ),
-            (
-                "topology::brep::p6",
-                TopologyFailure::Missing("the face's upward face use"),
-                SM_ERR_NULL_POINTER,
-            ),
-            (
-                "topology::brep::p7::unstitch",
-                TopologyFailure::Failed("not every face could be copied"),
-                SM_ERR,
-            ),
-            (
-                "topology::brep::p8",
-                TopologyFailure::InvalidValue("the curve loops are not valid"),
-                SM_ERR_INVALID_INPUT,
-            ),
-            (
-                "topology::brep::p9",
-                TopologyFailure::Missing("the face use's mate"),
-                SM_ERR_NULL_POINTER,
-            ),
-            (
-                "topology::face::trim_curve_breaks",
-                TopologyFailure::Failed("the trim curve has fewer than two knots"),
-                SM_ERR,
-            ),
-        ];
+        let samples = [(
+            "topology::brep::p1",
+            TopologyFailure::NoRegionGiven,
+            SM_ERR_INVALID_INPUT,
+        )];
         for (operation, failure, code) in samples {
             let typed = SolidError::topology(operation, failure);
             let before = SolidError::Upstream {
@@ -2055,8 +1972,7 @@ mod tests {
         }
     }
 
-    /// The named causes of the B-rep edits keep the status of the phrase each replaced, and
-    /// have their class.
+    /// The named causes of the B-rep edits have their status and class.
     #[test]
     fn the_brep_edit_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -2214,8 +2130,7 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
     }
 
-    /// The named causes of the B-rep edits of `brep/p4` keep the status of the phrase each
-    /// replaced, and have their class.
+    /// The named causes of the B-rep edits of `brep/p4` have their status and class.
     #[test]
     fn the_brep_p4_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -2239,8 +2154,7 @@ mod tests {
         }
     }
 
-    /// The named causes of the Boolean's proto topology keep the status of the phrase each
-    /// replaced, and have their class.
+    /// The named causes of the Boolean's proto topology have their status and class.
     #[test]
     fn the_proto_topology_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -2312,7 +2226,7 @@ mod tests {
     }
 
     /// The named causes of the B-rep constructor, the file and projection wrappers and the
-    /// owner lists keep the status of the phrase each replaced, and have their class.
+    /// owner lists have their status and class.
     #[test]
     fn the_construction_causes_keep_their_status_and_have_their_class() {
         use ConstructorPart as P;
@@ -2380,8 +2294,7 @@ mod tests {
         );
     }
 
-    /// The named causes of the B-rep edits of `brep/p5` keep the status of the phrase each
-    /// replaced, and have their class.
+    /// The named causes of the B-rep edits of `brep/p5` have their status and class.
     #[test]
     fn the_brep_p5_causes_keep_their_status_and_have_their_class() {
         use crate::topology::{EdgeId, FaceId};
@@ -2476,8 +2389,8 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
-    /// The named causes of the B-rep cache and the file reads and writes keep the status of
-    /// the phrase each replaced, and have their class.
+    /// The named causes of the B-rep cache and the file reads and writes have their status
+    /// and class.
     #[test]
     fn the_cache_and_file_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -2543,15 +2456,7 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
-    /// The topology routines describe their failures: their library code builds no bare
-    /// `Upstream` status, except the file listed (with the bare sites it may still hold).
-    #[test]
-    fn the_topology_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("topology", 53, &[]);
-    }
-
-    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
-    /// and says why.
+    /// A reviewed defect is of class 127 with its status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why = "the edge use the loop walk just reached has no loop use, which the B-rep's links always give";
@@ -2559,7 +2464,7 @@ mod tests {
         let op = "topology::op";
         super::super::tests::assert_defect(
             &SolidError::topology(op, defect),
-            &SolidError::topology(op, TopologyFailure::Failed("x")),
+            &SolidError::topology(op, TopologyFailure::FacesNotCopiedOnce),
             op,
             SM_ERR,
             &format!("{op}: stage_failed: {why}"),
@@ -2569,7 +2474,7 @@ mod tests {
             .into_error();
         super::super::tests::assert_defect(
             &missing,
-            &SolidError::topology(op, TopologyFailure::Missing("x")),
+            &SolidError::topology(op, TopologyFailure::VertexWithoutUses),
             op,
             SM_ERR_NULL_POINTER,
             &format!("{op}: stage_failed: {why}"),
@@ -2578,8 +2483,8 @@ mod tests {
     }
 
     /// The named causes of the topology entity routines (edges, edge uses, faces, loop uses,
-    /// shells, vertex uses, the traverser) keep the status of the phrase cause each replaced,
-    /// answer with it the way an `Upstream` does, and have the kind their doc says.
+    /// shells, vertex uses, the traverser) have their status, answer with it the way an
+    /// `Upstream` does, and have the kind their doc says.
     #[test]
     fn the_topology_entity_causes_keep_their_statuses() {
         let op = "topology::op";
@@ -2789,14 +2694,14 @@ mod tests {
             assert!(e.is_status_answer(), "{failure:?}");
             assert!(e.to_string().starts_with("topology::op: "), "{failure:?}");
         }
-        // A site whose phrase cause had another status than the named cause's keeps it.
+        // A site with another status than the named cause's keeps it.
         let at_site = Failure::new(op, TopologyFailure::FaceWithoutSurface)
             .with_status(SM_ERR)
             .into_error();
         assert_eq!(at_site.sm_status(), Some(SM_ERR));
         assert_eq!(super::super::upstream_status(&at_site), Some(SM_ERR));
         assert_eq!(at_site.kind(), ErrorKind::InvalidInput);
-        // A reviewed consistency defect keeps the assertion status of the check it replaced.
+        // A reviewed consistency defect keeps the assertion status of its check.
         let asserted = Failure::new(op, TopologyFailure::Defect { why: "x" })
             .with_status(SM_ERR_ASSERT_FAILURE)
             .into_error();
@@ -2805,8 +2710,8 @@ mod tests {
         assert!(asserted.is_defect());
     }
 
-    /// The named causes of the later B-rep edits (face copy and surface transfer) keep the
-    /// status of the phrase each replaced, and have their class.
+    /// The named causes of the later B-rep edits (face copy and surface transfer) have their
+    /// status and class.
     #[test]
     fn the_face_copy_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -2995,34 +2900,5 @@ mod tests {
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(SM_ERR));
-    }
-
-    /// The sites that build a topology phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_topology_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("TopologyFailure", "Failed"),
-                Builder::Variant("TopologyFailure", "Missing"),
-                Builder::Variant("TopologyFailure", "InvalidValue"),
-                Builder::Variant("TopologyFailure", "Inconsistent"),
-                Builder::Variant("TopologyFailure", "OutOfMemory"),
-                Builder::Method("topology_failed", Some(1)),
-                Builder::Method("topology_missing", Some(1)),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[];
-        assert_pinned(
-            "topology phrase-cause sites",
-            &crate_sites(&PHRASES),
-            PINNED,
-        );
     }
 }

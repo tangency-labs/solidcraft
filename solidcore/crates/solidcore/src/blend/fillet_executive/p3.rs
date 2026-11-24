@@ -131,8 +131,8 @@ fn caught_but_refusal(result: Result<()>) -> Result<Result<()>> {
     }
 }
 
-/// [`failure`] keeping `cause`, the error of the stage that failed (guide rule 6, #13790):
-/// the same operation, phrase and status.
+/// [`failure`] keeping `cause`, the error of the stage that failed (#13790):
+/// the same operation, reason and status.
 fn failure_after(cause: SolidError) -> SolidError {
     keeping_cause(failure(), cause)
 }

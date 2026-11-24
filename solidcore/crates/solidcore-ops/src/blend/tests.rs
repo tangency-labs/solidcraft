@@ -67,12 +67,15 @@ fn a_certificate_past_its_budget_is_refused_as_not_certified() {
     );
 }
 
+/// The session's statement of a step that failed.
+const STEP: &str = "failed: a step of the fillet executive failed (the error info says which)";
+
 /// A blend failure with status `SM_ERR` whose statement is the session's generic one.
 fn not_built() -> SolidError {
     use solidcore::error::blend::BlendFailure;
     solidcore::error::Failure::new(
         "blend::fillet_executive::session::finish",
-        BlendFailure::Failed("the fillet body is not built"),
+        BlendFailure::ExecutiveStepFailed,
     )
     .into_error()
 }
@@ -87,7 +90,7 @@ fn noting(code: FilletErrorType, comment: &str) -> ErrorInfo<FilletObject> {
 }
 
 /// A session's failure says what the session noted of the step that failed: two failures the
-/// kernel states alike ("the fillet body is not built") are told apart by it.
+/// kernel states alike ("a step of the fillet executive failed") are told apart by it.
 #[test]
 fn a_session_failure_says_what_the_session_noted() {
     let said = |info: &ErrorInfo<FilletObject>| {
@@ -101,8 +104,10 @@ fn a_session_failure_says_what_the_session_noted() {
             FilletErrorType::VertexProblem,
             "Fillet Corner Error: Corner Edge Computation Failure"
         )),
-        "the blend failed (status 1001): the fillet body is not built: Fillet Corner Error: \
-         Corner Edge Computation Failure"
+        format!(
+            "the blend failed (status 1001): {STEP}: Fillet Corner Error: \
+             Corner Edge Computation Failure"
+        )
     );
     assert_eq!(
         said(&noting(
@@ -110,9 +115,11 @@ fn a_session_failure_says_what_the_session_noted() {
             "SmFilletEdge::CalcFilletIntFillet(): failure to calculate intersection of two \
              fillet surfaces"
         )),
-        "the blend failed (status 1001): the fillet body is not built: \
-         SmFilletEdge::CalcFilletIntFillet(): failure to calculate intersection of two fillet \
-         surfaces"
+        format!(
+            "the blend failed (status 1001): {STEP}: \
+             SmFilletEdge::CalcFilletIntFillet(): failure to calculate intersection of two fillet \
+             surfaces"
+        )
     );
     // without the prefix that says only that the note is the fillet's
     assert_eq!(
@@ -120,11 +127,13 @@ fn a_session_failure_says_what_the_session_noted() {
             FilletErrorType::NotExact,
             "Fillet Error: a kept boss's wall continued down meets no round"
         )),
-        "the blend failed (status 1001): the fillet body is not built: a kept boss's wall \
-         continued down meets no round"
+        format!(
+            "the blend failed (status 1001): {STEP}: a kept boss's wall \
+             continued down meets no round"
+        )
     );
     // a session that noted nothing, or said nothing of what it noted, adds nothing
-    let plain = "the blend failed (status 1001): the fillet body is not built";
+    let plain = format!("the blend failed (status 1001): {STEP}");
     assert_eq!(said(&ErrorInfo::default()), plain);
     assert_eq!(
         said(&noting(
@@ -145,7 +154,7 @@ fn a_session_failure_says_what_the_session_noted() {
         Some(Error::BlendFailed {
             class: solidcore::error::ErrorKind::Failed,
             status: 1001,
-            phrase: "the fillet body is not built: why".to_owned(),
+            phrase: format!("{STEP}: why"),
         })
     );
     // an error that is no blend failure is not one for the note

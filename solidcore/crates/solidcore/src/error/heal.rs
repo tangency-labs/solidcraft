@@ -8,22 +8,15 @@
 //! | Rust                             | Status difftest compares  |
 //! |----------------------------------|---------------------------|
 //! | [`HealFailure::Defect`]          | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`HealFailure::Failed`]          | `SM_ERR`                  |
-//! | [`HealFailure::Inconsistent`]    | `SM_ERR_ASSERT_FAILURE`   |
-//! | [`HealFailure::Missing`]         | `SM_ERR_NULL_POINTER`     |
 //! | [`HealFailure::NotYetHealable`]  | `SM_ERR_NOTYET_HEAL_FACE` |
-//! | the named causes, from [`HealFailure::PairOfDifferentKinds`] on | the status of the phrase each replaced (`comparison_status`) |
+//! | the named causes                 | each its own (`comparison_status`) |
 //!
 //! [`HealFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The named causes from
-//! [`HealFailure::PairOfDifferentKinds`] on say what happened, with their numbers where a
-//! check measured them. The phrase causes ([`HealFailure::Failed`], `Missing`,
-//! `Inconsistent`) are sites not yet converted (the conversion guide:
-//! `docs/failure-codes-and-reproduction.md` §6).
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The named causes say what
+//! happened, with their numbers where a check measured them.
 //!
-//! Deviations: not upstream. A failure says by its variant (or a phrase) what went wrong;
-//! the failure's `operation` path says which routine. No failure names an entity: the
-//! sites they replace named none. Checks of a caller's arguments that report no status
+//! Deviations: not upstream. A failure says by its variant what went wrong; the failure's
+//! `operation` path says which routine. No failure names an entity. Checks of a caller's arguments that report no status
 //! (upstream dereferences null) stay [`crate::SolidError::InvalidInput`].
 
 use super::{
@@ -83,9 +76,6 @@ pub enum HealFailure {
     /// has no edge of the other between the paired vertices. [`ErrorKind::InvalidInput`];
     /// status `SM_ERR`.
     FacesDoNotMatch,
-    /// The step could not continue, as the phrase says (for example "the faces cannot
-    /// be stitched").
-    Failed(&'static str),
     /// The gap record the caller gave does not define exactly two end points (one of its
     /// parameters is undefined). [`ErrorKind::InvalidInput`]; status `SM_ERR`.
     GapWithoutTwoEnds,
@@ -93,14 +83,9 @@ pub enum HealFailure {
     /// has run on the B-rep (the tolerance sizes, or the edge splits at the seams).
     /// [`ErrorKind::InvalidInput`]; status `SM_ERR`.
     HealStepNotRun,
-    /// A consistency check of the step's own data did not hold, as the phrase says.
-    Inconsistent(&'static str),
     /// Missed edge intersections are listed, and the healer has no fix for them (none
     /// upstream). [`ErrorKind::Unsupported`]; status `SM_ERR`.
     MissedEdgeIntersectionsUnfixed,
-    /// Something the step needs is missing, as the phrase says (for example "the
-    /// edge").
-    Missing(&'static str),
     /// The faces, edges or vertices the caller gave are not part of the B-rep (or the
     /// lists hold none). [`ErrorKind::InvalidInput`]; status `SM_ERR`.
     NotInBrep,
@@ -135,23 +120,19 @@ impl HealFailure {
             | Self::EdgesNotGlued
             | Self::FaceListsDiffer
             | Self::FacesDoNotMatch
-            | Self::Failed(_)
             | Self::GapWithoutTwoEnds
             | Self::HealStepNotRun
             | Self::MissedEdgeIntersectionsUnfixed
             | Self::NotInBrep
             | Self::VerticesApart { .. } => SM_ERR,
-            Self::Inconsistent(_) | Self::EmptySampleInterval => SM_ERR_ASSERT_FAILURE,
-            Self::Missing(_) | Self::PairOfDifferentKinds | Self::EdgeWithoutCurve => {
-                SM_ERR_NULL_POINTER
-            }
+            Self::EmptySampleInterval => SM_ERR_ASSERT_FAILURE,
+            Self::PairOfDifferentKinds | Self::EdgeWithoutCurve => SM_ERR_NULL_POINTER,
             Self::NotYetHealable => SM_ERR_NOTYET_HEAL_FACE,
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
-    /// [`HealFailure::Missing`], [`ErrorKind::InvalidInput`] for a check of the caller's
-    /// arguments or body, [`ErrorKind::Degenerate`] for a degenerate edge interval,
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for a check of the
+    /// caller's arguments or body, [`ErrorKind::Degenerate`] for a degenerate edge interval,
     /// [`ErrorKind::NotWithinTolerance`] for entities to stitch that are too far apart,
     /// [`ErrorKind::Unsupported`] for problems the healer has no fix for,
     /// [`ErrorKind::Failed`] otherwise. [`HealFailure::Defect`] is
@@ -208,16 +189,13 @@ impl core::fmt::Display for HealFailure {
             Self::FacesDoNotMatch => {
                 f.write_str("the face to keep and the face to delete do not match")
             }
-            Self::Failed(what) => f.write_str(what),
             Self::GapWithoutTwoEnds => f.write_str("the gap does not have two end points"),
             Self::HealStepNotRun => {
                 f.write_str("the heal step these properties depend on has not run yet")
             }
-            Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::MissedEdgeIntersectionsUnfixed => {
                 f.write_str("missed edge intersections cannot be fixed")
             }
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NotInBrep => f.write_str("the topology given is not part of the B-rep"),
             Self::NotYetHealable => {
                 f.write_str("the face has problems the healer does not handle yet")
@@ -266,12 +244,7 @@ mod tests {
 
     #[test]
     fn heal_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
-        let cases = [
-            (HealFailure::Failed("x"), SM_ERR),
-            (HealFailure::Missing("x"), SM_ERR_NULL_POINTER),
-            (HealFailure::Inconsistent("x"), SM_ERR_ASSERT_FAILURE),
-            (HealFailure::NotYetHealable, SM_ERR_NOTYET_HEAL_FACE),
-        ];
+        let cases = [(HealFailure::NotYetHealable, SM_ERR_NOTYET_HEAL_FACE)];
         for (failure, code) in cases {
             let typed = SolidError::heal("heal::op", failure);
             let before = SolidError::Upstream {
@@ -293,30 +266,10 @@ mod tests {
             );
             assert_eq!(typed.heal_failure(), Some(&failure));
         }
-        assert_eq!(
-            SolidError::heal("heal::op", HealFailure::Missing("the edge")).to_string(),
-            "heal::op: the edge is missing"
-        );
-        assert_eq!(
-            SolidError::heal("heal::op", HealFailure::Failed("x")).kind(),
-            ErrorKind::Failed
-        );
         assert_eq!(SolidError::sm_err("heal::op").heal_failure(), None);
     }
 
-    /// The healing routines build no bare `Upstream` status in their library code, and
-    /// their messages name no SMLib API.
-    #[test]
-    fn the_heal_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("heal", 7, &[]);
-        for (rel, text) in super::super::bare_scan::library_files("heal", 7) {
-            let library = super::super::bare_scan::library_text(&text);
-            assert!(!library.contains("\"SmApi"), "\"SmApi in {rel}");
-        }
-    }
-
-    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
-    /// and says why.
+    /// A reviewed defect is of class 127 with its status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why =
@@ -325,7 +278,7 @@ mod tests {
         let op = "heal::op";
         super::super::tests::assert_defect(
             &SolidError::heal(op, defect),
-            &SolidError::heal(op, HealFailure::Failed("x")),
+            &SolidError::heal(op, HealFailure::EdgeNotSplit),
             op,
             SM_ERR,
             &format!("{op}: stage_failed: {why}"),
@@ -335,7 +288,7 @@ mod tests {
             .into_error();
         super::super::tests::assert_defect(
             &missing,
-            &SolidError::heal(op, HealFailure::Missing("x")),
+            &SolidError::heal(op, HealFailure::EdgeWithoutCurve),
             op,
             SM_ERR_NULL_POINTER,
             &format!("{op}: stage_failed: {why}"),
@@ -343,8 +296,7 @@ mod tests {
         assert_eq!(missing.heal_failure(), Some(&defect));
     }
 
-    /// The named causes of the stitcher and the healer keep the status of the phrase each
-    /// replaced, and have their class.
+    /// The named causes of the stitcher and the healer have their status and class.
     #[test]
     fn the_heal_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -423,27 +375,5 @@ mod tests {
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(SM_ERR));
-    }
-
-    /// The sites that build a healing phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_heal_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("HealFailure", "Failed"),
-                Builder::Variant("HealFailure", "Missing"),
-                Builder::Variant("HealFailure", "Inconsistent"),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-        ];
-        assert_pinned("healing phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

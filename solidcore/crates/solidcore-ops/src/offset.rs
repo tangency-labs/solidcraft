@@ -275,8 +275,8 @@ fn offset_refused(
             Some(what) => OffsetRefusal::Unsound { what },
             None => unnamed(&o),
         },
-        // the kernel's phrase causes (`OffsetFailure::is_phrase`), and a reason the kernel adds
-        // later: still classed and said, never a bare status
+        // the kernel's defects, and a reason the kernel adds later: still classed and said,
+        // never a bare status
         other => match by_kind(other.kind()) {
             Some(e) => return e,
             None => unnamed(&other),

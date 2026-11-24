@@ -999,7 +999,7 @@ impl Surface {
                 CreateUvTrimCurvePathType::DropDomainUncontainedFail,
                 &early,
             );
-            // the caller's domain (rule 9)
+            // the caller's domain
             return Err(SolidError::intersect(
                 OP,
                 IntersectFailure::DomainOutsideSurface,
@@ -1152,7 +1152,7 @@ impl Surface {
             )?
         };
 
-        // there should always be at least one solution (none found: rule 7)
+        // there should always be at least one solution (none found)
         if solutions.is_empty() {
             return Err(SolidError::intersect(OP, IntersectFailure::NoFoot));
         }
@@ -1453,7 +1453,7 @@ impl Surface {
             let mut have_start_uv_tan = false;
             let mut fix_bc_change = false;
 
-            // the curve cache (made once; the build's error stays the cause, rule 6)
+            // the curve cache (made once; the build's error stays the cause)
             let cache = match &mut curve_cache {
                 Some(c) => &*c,
                 slot => &*slot.insert(match make_curve_cache::<()>(k, curve, None) {
@@ -1988,7 +1988,7 @@ impl Surface {
                                     added?;
                                     None
                                 } else {
-                                    // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
+                                    // the fix-up's refusal, kept as the cause of the drop's stop
                                     let refusal = added.as_ref().err().cloned();
                                     ignore_status(added)?;
                                     refusal

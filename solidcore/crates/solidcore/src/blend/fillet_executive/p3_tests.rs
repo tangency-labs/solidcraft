@@ -1372,13 +1372,13 @@ fn failing_at(stage: &'static str, error: SolidError) -> (FilletExecutive<Handle
 fn stage_errors() -> [SolidError; 5] {
     use crate::error::blend::BlendFailure;
     let over = |cause: SolidError| {
-        Failure::new("test::stage", BlendFailure::Failed("the stage failed"))
+        Failure::new("test::stage", BlendFailure::ExecutiveStepFailed)
             .caused_by(cause)
             .into_error()
     };
     [
         SolidError::sm_err("test::stage"),
-        SolidError::blend("test::stage", BlendFailure::StageFailed),
+        SolidError::blend("test::stage", BlendFailure::Defect { why: "x" }),
         over(SolidError::blend(
             "test::corner",
             BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
@@ -1391,7 +1391,7 @@ fn stage_errors() -> [SolidError; 5] {
 }
 
 /// `e` is the executive's failure as it was before its cause was kept (the same operation,
-/// phrase, status and kind), now keeping `cause`, whose class it takes.
+/// reason, status and kind), now keeping `cause`, whose class it takes.
 fn assert_failure_keeps(e: &SolidError, cause: &SolidError) {
     let bare = failure();
     assert_eq!(e.operation(), OP, "{e:?}");

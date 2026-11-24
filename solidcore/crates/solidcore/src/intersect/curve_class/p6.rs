@@ -386,7 +386,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     are_coincident_maybe(a.kernel(), a.geometry(), self, self, index)?;
                 match coin {
                     // unsure only for an end classified to an edge whose object is not an
-                    // edge (`are_coincident_maybe`): the classification's object (rule 9)
+                    // edge (`are_coincident_maybe`): the classification's object
                     Coincident::Unsure => {
                         return Err(Failure::new(OP, IntersectFailure::NoClassObject)
                             .with_status(crate::error::SM_ERR)
@@ -2273,7 +2273,7 @@ fn homogenize_boundaries<O: ClassObject>(
         let tol = pc.obj_zone_tol_3d(k, geometry)?;
         let found = dst.find_interval(k, geometry, param, last, tol)?;
         // a found parameter is at an interval's start or end or inside one; find_interval
-        // fails otherwise, so no `Outside` reaches here (rule 11)
+        // fails otherwise, so no `Outside` reaches here
         let mut pos = found.position;
         let mut force = false;
         if pos != IntervalPosition::Inside && found.end_dist_3d.abs() > point.scaled_zero() {

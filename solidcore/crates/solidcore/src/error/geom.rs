@@ -10,21 +10,15 @@
 //! | Rust                                  | Status difftest compares     |
 //! |---------------------------------------|------------------------------|
 //! | [`GeomFailure::CoincidentPoints`]     | `FALSE` (0)                  |
-//! | [`GeomFailure::Failed`]               | `SM_ERR`                     |
-//! | [`GeomFailure::Missing`], [`GeomFailure::EdgeWithoutCurve`] | `SM_ERR_NULL_POINTER` |
+//! | [`GeomFailure::EdgeWithoutCurve`]     | `SM_ERR_NULL_POINTER`        |
 //! | [`GeomFailure::NearlySingular`]       | `SM_ERR_WARNING`             |
 //! | [`GeomFailure::ToleranceTooSmall`]    | `SM_ERR_INVALID_INPUT`       |
 //! | every other cause                     | `SM_ERR`                     |
 //! | [`GeomFailure::Defect`]               | the site's (`SM_ERR`)        |
-//! | [`GeomFailure::StageFailed`]          | the site's (`SM_ERR`)        |
 //!
 //! **The record** (#15034). A check that refuses builds a typed cause with its numbers; a
 //! stage that fails through the kernel's own fault is a [`GeomFailure::Defect`] with its
-//! reviewed reason, a defect ([`ErrorKind::StageFailed`]). [`GeomFailure::StageFailed`] is
-//! the same class not yet reviewed, and the phrase causes ([`GeomFailure::Failed`],
-//! [`GeomFailure::Missing`]) are sites not yet converted (how: the conversion guide,
-//! `docs/failure-codes-and-reproduction.md` §6). The geometry utilities build none of
-//! these three any more (#19849).
+//! reviewed reason, a defect ([`ErrorKind::StageFailed`]).
 //!
 //! **Classes.** A check of the caller's argument that is malformed (a shape, an index, a
 //! dimension, an object not set up) is [`ErrorKind::InvalidInput`]; geometry that is
@@ -108,9 +102,6 @@ pub enum GeomFailure {
     /// The grid element given has no surface (it is not a surface element).
     /// [`ErrorKind::InvalidInput`].
     ElementWithoutSurface,
-    /// The routine could not continue, as the phrase says (for example "the matrix is
-    /// singular"). Not built by the geometry utilities any more.
-    Failed(&'static str),
     /// An index is not below the number of entries. [`ErrorKind::InvalidInput`].
     IndexOutOfRange {
         /// The index given.
@@ -126,9 +117,6 @@ pub enum GeomFailure {
         /// The off-diagonal sum measured at the last sweep.
         off_diagonal: f64,
     },
-    /// Something the routine needs is missing, as the phrase says (for example "the
-    /// edge's curve"). Not built by the geometry utilities any more.
-    Missing(&'static str),
     /// The linear system for the circle's centre is nearly singular: the three points
     /// lie (nearly) on one line.
     NearlySingular,
@@ -207,11 +195,6 @@ pub enum GeomFailure {
         /// The extent's period.
         period: f64,
     },
-    /// A stage of a geometry utility failed with no reason the kernel names: a defect
-    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
-    /// reports (for the goldens only) and where it was built. The form not yet reviewed:
-    /// new code builds [`GeomFailure::Defect`], a named cause or a refusal instead.
-    StageFailed,
     /// The tolerance to set is below the smallest tolerance the kernel tells apart from
     /// zero.
     ToleranceTooSmall {
@@ -279,16 +262,15 @@ impl GeomFailure {
         match self {
             // upstream returns FALSE, not a status
             Self::CoincidentPoints => 0,
-            Self::Missing(_) | Self::EdgeWithoutCurve => SM_ERR_NULL_POINTER,
+            Self::EdgeWithoutCurve => SM_ERR_NULL_POINTER,
             Self::NearlySingular => SM_ERR_WARNING,
             Self::ToleranceTooSmall { .. } => SM_ERR_INVALID_INPUT,
             _ => SM_ERR,
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: as each variant says; [`ErrorKind::Missing`]
-    /// for [`GeomFailure::Missing`], [`ErrorKind::Failed`] for the phrase cause and the
-    /// causes that name no other class.
+    /// The failure's stable [`ErrorKind`]: as each variant says; [`ErrorKind::Failed`] for
+    /// the causes that name no other class.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -310,8 +292,7 @@ impl GeomFailure {
             | Self::VoxelArrayTooLarge { .. } => ErrorKind::InvalidInput,
             Self::BrentDidNotConverge { .. }
             | Self::Defect { .. }
-            | Self::JacobiDidNotConverge { .. }
-            | Self::StageFailed => ErrorKind::StageFailed,
+            | Self::JacobiDidNotConverge { .. } => ErrorKind::StageFailed,
             Self::CallFailed { class } => *class,
             Self::CollinearPoints { .. }
             | Self::NoPerpendicular
@@ -369,7 +350,6 @@ impl core::fmt::Display for GeomFailure {
             ),
             Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
             Self::ElementWithoutSurface => f.write_str("the grid element has no surface"),
-            Self::Failed(what) => f.write_str(what),
             Self::IndexOutOfRange { index, len } => {
                 write!(f, "the index {index} is not below the {len} entries")
             }
@@ -381,7 +361,6 @@ impl core::fmt::Display for GeomFailure {
                 "{}: the Jacobi sweeps did not converge after {sweeps} sweeps (off-diagonal sum {off_diagonal:e})",
                 ErrorKind::StageFailed
             ),
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NearlySingular => {
                 f.write_str("the points lie (nearly) on one line: the system is nearly singular")
             }
@@ -426,7 +405,6 @@ impl core::fmt::Display for GeomFailure {
                 f,
                 "the span from {from} to {to} does not lie in the period [0, {period}]"
             ),
-            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
             Self::ToleranceTooSmall { tolerance } => write!(
                 f,
                 "the tolerance {tolerance} is too small to tell apart from zero"
@@ -521,8 +499,13 @@ mod tests {
     #[test]
     fn geom_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
         let cases = [
-            (GeomFailure::Failed("x"), SM_ERR),
-            (GeomFailure::Missing("x"), SM_ERR_NULL_POINTER),
+            (
+                GeomFailure::Disjoint {
+                    a: [0.0, 1.0],
+                    b: [2.0, 3.0],
+                },
+                SM_ERR,
+            ),
             (GeomFailure::NearlySingular, SM_ERR_WARNING),
             (GeomFailure::CoincidentPoints, 0),
             (
@@ -552,10 +535,6 @@ mod tests {
             assert_eq!(typed.geom_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::geom("geom::op", GeomFailure::Missing("the edge's curve")).to_string(),
-            "geom::op: the edge's curve is missing"
-        );
-        assert_eq!(
             SolidError::geom(
                 "geom::op",
                 GeomFailure::ToleranceTooSmall { tolerance: 0.0 }
@@ -566,13 +545,9 @@ mod tests {
         assert_eq!(SolidError::sm_err("geom::op").geom_failure(), None);
     }
 
+    /// A typed cause keeps the status of the bare status it replaced.
     #[test]
-    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
-        super::super::tests::assert_stage_failure(
-            &SolidError::geom("geom::op", GeomFailure::StageFailed),
-            "geom::op",
-            SM_ERR,
-        );
+    fn a_typed_cause_keeps_its_status() {
         for cause in [
             GeomFailure::Disjoint {
                 a: [0.0, 1.0],
@@ -602,14 +577,18 @@ mod tests {
         );
     }
 
-    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    /// A reviewed defect is of class 127 with its site's status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why = "the bracketing step lost its sign change, which the kernel's bracket guarantees";
         let defect = GeomFailure::Defect { why };
         super::super::tests::assert_defect(
             &SolidError::geom("geom::op", defect),
-            &SolidError::geom("geom::op", GeomFailure::StageFailed),
+            &SolidError::Upstream {
+                operation: "geom::op",
+                code: SM_ERR,
+                entity: None,
+            },
             "geom::op",
             SM_ERR,
             &format!("geom::op: stage_failed: {why}"),
@@ -617,42 +596,6 @@ mod tests {
         assert_eq!(
             SolidError::geom("geom::op", defect).geom_failure(),
             Some(&defect)
-        );
-    }
-
-    /// The geometry utilities describe their failures: their library code builds no bare
-    /// `Upstream` status.
-    #[test]
-    fn the_geom_routines_build_no_bare_statuses() {
-        assert_eq!(
-            super::super::query::tests::bare_statuses_in("geom", 30),
-            Vec::<(String, usize)>::new()
-        );
-    }
-
-    /// The sites that build a geometry-utility phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_geom_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("GeomFailure", "Failed"),
-                Builder::Variant("GeomFailure", "Missing"),
-                Builder::Method("geom_failed", Some(1)),
-                Builder::Method("geom_missing", Some(1)),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[];
-        assert_pinned(
-            "geometry-utility phrase-cause sites",
-            &crate_sites(&PHRASES),
-            PINNED,
         );
     }
 }

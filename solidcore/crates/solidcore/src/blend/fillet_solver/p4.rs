@@ -3232,9 +3232,10 @@ mod tests_c4 {
     /// cusp recovery would read its stale centre line, or at the end.
     #[test]
     fn an_unmade_geometry_fails_unless_a_later_flush_makes_it() {
-        let skin = || SolidError::blend_failed(OP, "skin");
-        let skin2 = || SolidError::blend_failed(OP, "skin again");
-        let traced = || SolidError::blend_failed(OP, "traced");
+        let failed = |why| SolidError::blend(OP, BlendFailure::Defect { why });
+        let skin = || failed("skin");
+        let skin2 = || failed("skin again");
+        let traced = || failed("traced");
         // a failed flush, then a final pass whose flush makes the geometry: success
         let mut u = UnmadeGeometry::default();
         u.after_pass(true, false, Err(skin()));

@@ -258,8 +258,7 @@ fn broken_link(why: &'static str) -> SolidError {
         .into_error()
 }
 
-/// `failure`, with the error a step before it ignored as its cause when there is one
-/// (`docs/failure-codes-and-reproduction.md` §6, rule 6).
+/// `failure`, with the error a step before it ignored as its cause when there is one.
 #[track_caller]
 fn caused(failure: TopologyFailure, ignored: Option<SolidError>) -> SolidError {
     let f = Failure::new(OP, failure);
