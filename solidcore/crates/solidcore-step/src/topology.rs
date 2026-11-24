@@ -1792,6 +1792,56 @@ fn angle_of(a: f64, b: f64) -> f64 {
     if t < 0.0 { t + TAU } else { t }
 }
 
+/// The angle in [0, 2π) of the point of the ellipse `(r0 cos t, r1 sin t)` nearest the point
+/// `(x, y)` of its plane: a vertex's parameter on it. On a circle that is the point's own angle.
+/// On an ellipse the angle of the point scaled onto the circle (`atan2(y / r1, x / r0)`) is that
+/// only for a point exactly on it: a point a file's rounding off a flat ellipse (radii 1000.95 and
+/// 0.31 mm) is off it across its minor radius by a large part of that radius, and that angle put
+/// such a vertex 5 to 8 mm along the curve from where it is. So the angle starts from the best of
+/// the point's angle on the circle and the angles its two coordinates give alone (`acos(x / r0)`,
+/// `asin(y / r1)`, either way round), and Newton's method on the distance's derivative finds the
+/// nearest point, every step taken only where it brings the curve nearer.
+fn ellipse_angle(x: f64, y: f64, [r0, r1]: [f64; 2]) -> f64 {
+    let scaled = angle_of(x / r0, y / r1);
+    if r0 == r1 || !(r0 > 0.0 && r1 > 0.0) || !x.is_finite() || !y.is_finite() {
+        return scaled;
+    }
+    // Half the squared distance from the point at `t`, and its first and second derivatives.
+    let dist = |t: f64| 0.5 * ((r0 * t.cos() - x).powi(2) + (r1 * t.sin() - y).powi(2));
+    let slope = |t: f64| (r1 * r1 - r0 * r0) * t.sin() * t.cos() + r0 * x * t.sin() - r1 * y * t.cos();
+    let bend = |t: f64| (r1 * r1 - r0 * r0) * (2.0 * t).cos() + r0 * x * t.cos() + r1 * y * t.sin();
+    // A point on the ellipse to rounding: its angle on the circle is the nearest point's.
+    if (2.0 * dist(scaled)).sqrt() <= 1e-12 * r0.max(r1) {
+        return scaled;
+    }
+    let (c, s) = ((x / r0).clamp(-1.0, 1.0).acos(), (y / r1).clamp(-1.0, 1.0).asin());
+    let starts = [scaled, if y < 0.0 { -c } else { c }, s, std::f64::consts::PI - s];
+    let Some(mut t) = starts.into_iter().min_by(|a, b| dist(*a).total_cmp(&dist(*b))) else { return scaled };
+    let mut d = dist(t);
+    for _ in 0..64 {
+        let (g, h) = (slope(t), bend(t));
+        if !(h > 0.0) || g == 0.0 {
+            break;
+        }
+        let mut step = g / h;
+        // A step that does not bring the curve nearer is halved, a few times at most.
+        let mut moved = false;
+        for _ in 0..16 {
+            let next = t - step;
+            let e = dist(next);
+            if e < d {
+                (t, d, moved) = (next, e, true);
+                break;
+            }
+            step *= 0.5;
+        }
+        if !moved || step.abs() <= 1e-16 * (1.0 + t.abs()) {
+            break;
+        }
+    }
+    angle_of(t.cos(), t.sin())
+}
+
 /// `x` reduced to [0, 2π).
 fn turn(x: f64) -> f64 {
     let r = x.rem_euclid(TAU);
@@ -1942,7 +1992,7 @@ fn conic(curve: BCurve, position: &Placement, radii: [f64; 2], ps: P3, pe: P3, s
     let y = position.y();
     let param = |p: P3| {
         let q = sub(p, position.origin);
-        angle_of(dot(q, position.ref_direction) / radii[0], dot(q, y) / radii[1])
+        ellipse_angle(dot(q, position.ref_direction), dot(q, y), radii)
     };
     let (ts, te) = (param(ps), param(pe));
     // Along the curve from `from` to `to`, increasing.
@@ -2016,7 +2066,7 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
         if t - a <= eps || b - t <= eps || v3(ps).dist(pa).min(v3(ps).dist(pb)) <= tol {
             return Ok(Mapped { curve, interval: [a, b], with_step: true, sense_mismatch: false });
         }
-        let curve = crate::kernel::restart_curve(&curve, t)?;
+        let curve = crate::kernel::restart_curve(&ends_joined(curve), t)?;
         return Ok(Mapped { curve, interval: [t, t + (b - a)], with_step: true, sense_mismatch: false });
     }
     let ts = project(&eval, a, b, &knots, v3(ps)).ok_or("no parameter for the edge's start")?;
@@ -2055,10 +2105,70 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
         return Err("a degenerate edge on a closed spline".into());
     }
     if from > to {
-        let curve = crate::kernel::restart_curve(&curve, from)?;
+        let curve = crate::kernel::restart_curve(&ends_joined(curve), from)?;
         return Ok(Mapped { curve, interval: [from, to + (b - a)], with_step: same_sense, sense_mismatch: false });
     }
     Ok(Mapped { curve, interval: [from, to], with_step: same_sense, sense_mismatch: false })
+}
+
+/// A closed spline or polyline (its ends within the tolerance of each other, as
+/// [`open_or_closed`] takes it) whose two ends are not one point to the last digit, with both end
+/// control points made their mean, each keeping its weight: the curve's ends become one point, so
+/// a restart of it ([`crate::kernel::restart_curve`], which joins the seam exactly) finds the seam
+/// closed. Files close a curve on itself to their own uncertainty, not to the last digit (a
+/// closed B-spline written with its first control point at x = -24.9475248 and its last at
+/// -24.9475247999999). The curve moves by at most half the gap: its points are convex
+/// combinations of its control points, and only the two end ones move, each by half the gap.
+/// A curve not clamped at both ends (its end control points are not its ends) is as it was.
+fn ends_joined(curve: BCurve) -> BCurve {
+    let clamped = |knots: &[f64], count: usize| -> bool {
+        let Some(p) = knots.len().checked_sub(count + 1) else { return false };
+        let (Some(head), Some(tail)) = (knots.get(..=p), knots.len().checked_sub(p + 1).and_then(|at| knots.get(at..))) else {
+            return false;
+        };
+        head.windows(2).all(|w| w.first() == w.last()) && tail.windows(2).all(|w| w.first() == w.last())
+    };
+    let mean = |a: [f64; 3], b: [f64; 3]| [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2])];
+    match curve {
+        BCurve::Spline { knots, mut points } if points.len() >= 2 && clamped(&knots, points.len()) => {
+            if let (Some(&a), Some(&b)) = (points.first(), points.last()) {
+                let m = mean(a, b);
+                if let Some(p) = points.first_mut() {
+                    *p = m;
+                }
+                if let Some(p) = points.last_mut() {
+                    *p = m;
+                }
+            }
+            BCurve::Spline { knots, points }
+        }
+        BCurve::RationalSpline { knots, mut homogeneous } if homogeneous.len() >= 2 && clamped(&knots, homogeneous.len()) => {
+            let point = |h: &[f64; 4]| (h[3] > 0.0).then(|| [h[0] / h[3], h[1] / h[3], h[2] / h[3]]);
+            if let (Some(a), Some(b)) = (homogeneous.first().and_then(point), homogeneous.last().and_then(point)) {
+                let m = mean(a, b);
+                let last = homogeneous.len() - 1;
+                for i in [0, last] {
+                    if let Some(h) = homogeneous.get_mut(i) {
+                        *h = [m[0] * h[3], m[1] * h[3], m[2] * h[3], h[3]];
+                    }
+                }
+            }
+            BCurve::RationalSpline { knots, homogeneous }
+        }
+        BCurve::Polyline { mut points } if points.len() >= 2 => {
+            if let (Some(&a), Some(&b)) = (points.first(), points.last()) {
+                let m = mean(a, b);
+                if let Some(p) = points.first_mut() {
+                    *p = m;
+                }
+                if let Some(p) = points.last_mut() {
+                    *p = m;
+                }
+            }
+            BCurve::Polyline { points }
+        }
+        other => other,
+    }
 }
 
 /// A closed edge on an open curve that runs on past it: a full turn written as a spline that
