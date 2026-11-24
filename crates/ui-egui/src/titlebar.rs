@@ -274,6 +274,30 @@ mod tests {
         assert_eq!(w.caption(Caption::Close), Rect::NOTHING);
     }
 
+    /// Window control buttons off (#20385, for a tiling window manager): no caption buttons, the
+    /// bar's contents reach the window's right edge, and empty bar space still moves the window.
+    #[test]
+    fn window_control_buttons_can_be_turned_off_and_the_bar_still_drags() {
+        let mut w = Win::new(1600.0);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        let shown = crate::scenario::rect_of("titlebar:report").expect("Report a bug");
+        assert!(shown.right() <= w.caption(Caption::Minimize).left(), "on by default: {shown:?}");
+        w.app.preferences.show_window_controls = false;
+        w.frame(vec![]);
+        w.frame(vec![]);
+        for c in CAPTIONS {
+            assert_eq!(w.caption(c), Rect::NOTHING, "{c:?} is left out");
+        }
+        let hidden = crate::scenario::rect_of("titlebar:report").expect("Report a bug");
+        assert!(hidden.right() > shown.right() + 100.0, "the contents take the buttons' room: {shown:?} -> {hidden:?}");
+        let empty = pos2(900.0, 17.0);
+        let cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+        assert_eq!(cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count(), 1, "{cmds:?}");
+        let corner = pos2(1590.0, 17.0);
+        assert!(!w.click(corner).contains(&ViewportCommand::Close), "nothing closes the window from the corner");
+    }
+
     #[test]
     fn minimize_maximize_and_close() {
         let mut w = Win::new(1200.0);
