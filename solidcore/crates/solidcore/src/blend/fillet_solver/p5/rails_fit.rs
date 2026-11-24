@@ -36,7 +36,7 @@ use crate::blend::fillet_solver::p1::{
 };
 use crate::curve::curve::Curve;
 use crate::error::blend::{BlendFailure, CrossingInput, FilletSetUp, SolverFailure};
-use crate::error::{EntityRef, Failure, Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::curve_class::p1::CurveClassification;

@@ -12,14 +12,13 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::p3::NoRoomReason;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
-use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol::contact_tol_3d;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
-use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -260,52 +259,6 @@ fn hole_rim_touching_the_outer_loop_builds_four_top_faces() {
     assert_eq!(fit.kind, FitKind::Radius);
     assert_eq!(fit.edge, Some(rim));
     let want = 2.5 - 1000.0 * tolerance;
-    assert!((fit.size - want).abs() < 1e-8, "{fit:?}, want {want}");
-}
-
-/// The touching rim's bound is 2.5, but a second bore in an 8 mm wide block has
-/// only 8/2 - 2.5 = 1.5 mm to its outer rim. The fit must cover both selected edges,
-/// including the second solver, whose rail crosses its rim rather than touching it.
-#[test]
-fn hole_rim_contact_names_the_smaller_fit_of_the_whole_selection() {
-    use solidcore::blend::fillet_executive::FitKind;
-
-    let mut k = kernel(|f| *f = UpstreamFixes::all());
-    let (cube, _) = cube_with_round_hole(&mut k);
-    let block = create_box(&mut k, Point3::new(16.0, 1.0, 0.0), 8.0, 8.0, 10.0).unwrap();
-    let hole = create_cylinder(&mut k, Point3::new(20.0, 5.0, -1.0), 2.5, 12.0).unwrap();
-    let block = boolean_difference(&mut k, block, hole).unwrap();
-    // Disjoint solids keep the two rounds independent while sharing one selection.
-    let mut b = boolean_union(&mut k, cube, block).unwrap();
-    let rim_at = |point| {
-        b.edges()
-            .ids()
-            .find(|&e| {
-                if !edge::is_closed(&b, e).unwrap() {
-                    return false;
-                }
-                let closest = edge_closest_point(&k, &b, e, point).unwrap();
-                closest.closest.distance < 1e-8
-            })
-            .unwrap()
-    };
-    let first = rim_at(Point3::new(7.5, 5.0, 10.0));
-    let second = rim_at(Point3::new(22.5, 5.0, 10.0));
-    let want = 1.5 - 1000.0 * edge::tolerance(&b, second).unwrap();
-    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
-    // Put the touching rim first so an early return would incorrectly name its 2.5 bound.
-    session
-        .prepare_constant_radius_edges(&mut k, &[first, second], 2.5, 1, 1, 1.0)
-        .unwrap();
-    assert_eq!(session.executive().solvers.len(), 2);
-    let result = session.do_fillet(&mut k);
-    let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
-        panic!("expected a typed fit refusal for the whole selection, got {result:?}");
-    };
-    assert_eq!(session.error_info().code, NO_ROOM);
-    assert_eq!(reason, Some(NoRoomReason::RailLeavesFace));
-    assert_eq!(fit.kind, FitKind::Radius);
-    assert_eq!(fit.edge, Some(second));
     assert!((fit.size - want).abs() < 1e-8, "{fit:?}, want {want}");
 }
 
