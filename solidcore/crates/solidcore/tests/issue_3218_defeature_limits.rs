@@ -34,7 +34,7 @@ use solidcore::topology::brep::validation;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::FaceId;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, EntityRef, Kernel, SolidError};
 
 /// An upstream test file, read and arena-named as the goldens reader does.
 fn read(k: &mut Kernel, file: &str) -> Option<Brep> {
@@ -270,6 +270,268 @@ fn the_three_rounds_of_fillet1019_as_one_feature_leave_the_frustum() {
     };
     certify(&mut k, &mut b, Removed::All);
     certify_feature(&mut k, features, Removed::All);
+}
+
+/// The trimmed faces containing a point, including their boundaries.
+fn faces_at(k: &Kernel, b: &mut Brep, p: solidcore::Vec3) -> Vec<FaceId> {
+    use solidcore::query::face::p1::point_on_face;
+
+    bp1::faces(b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            point_on_face(k, b, f, p, k.tolerances.zone_tol_3d)
+                .unwrap()
+                .is_some()
+        })
+        .collect()
+}
+
+/// Registers the single face containing the point for removal.
+fn feature_at<'a>(k: &mut Kernel, b: &'a mut Brep, p: solidcore::Vec3) -> FeatureExecutive<'a> {
+    let picked = faces_at(k, b, p);
+    assert_eq!(picked.len(), 1);
+    let mut ex = FeatureExecutive::new(k, b).unwrap();
+    ex.add_feature(
+        k,
+        &picked,
+        RebuildBrepType::ExtendSurface,
+        RebuildBrepType::FromOtherBrep,
+    )
+    .unwrap()
+    .unwrap();
+    ex
+}
+
+/// The native B-rep, including the topology, trims and tolerances.
+fn native_body(k: &Kernel, b: &Brep) -> Vec<u8> {
+    use solidcore::geom::attribute::ObjectKey;
+    use solidcore::topology::api_files::write_brep_to_file;
+    use solidcore::topology::brep_data_write::FromBrepEnv;
+
+    let env = FromBrepEnv {
+        attributes: &AttributeStore::default(),
+        records: &NotifyRecords::new(),
+        key_of: &solidcore::topology::loopuse::notify_ref,
+        curve_key: &|_| ObjectKey(0),
+        uv_curve_key: &|_| ObjectKey(0),
+        surface_key: &|_| ObjectKey(0),
+    };
+    write_brep_to_file(k, Some(b), &env, false).unwrap()
+}
+
+/// A plate and ball joined by a conical bevel from their top and equator.
+fn beveled_ball_on_plate(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::primitive::api_primitives::{create_cone, create_cylinder, create_sphere};
+    use solidcore::Vec3;
+
+    let plate = create_cylinder(k, Vec3::new(0.0, 0.0, -2.0), 8.0, 2.0).unwrap();
+    let ball = create_sphere(k, Vec3::new(0.0, 0.0, 1.0), 3.0).unwrap();
+    let bevel = create_cone(k, Vec3::ZERO, 4.0, 3.0, 1.0).unwrap();
+    let sharp = boolean_union(k, plate, ball).unwrap();
+    boolean_union(k, sharp, bevel).unwrap()
+}
+
+/// The bevel joins two disjoint rims whose extended supports meet on one circle.
+/// A valid closed shell can still carry the buried part of the sphere and the
+/// plate's interior disc. Test the actual trim and the material on both sides.
+#[test]
+fn the_bevel_between_a_ball_and_a_plate_leaves_one_sharp_circle() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::mass::integrator::properties::{brep_area, brep_volume_default};
+    use solidcore::primitive::api_primitives::create_sphere;
+    use solidcore::query::api_queries::find_edge;
+    use solidcore::topology::brep::is_outward_solid;
+    use solidcore::topology::edge;
+    use solidcore::Vec3;
+    use std::f64::consts::PI;
+
+    // Both cavities stay below the restored top; the closer one clears it by 0.005.
+    for (radius, z) in [(0.0_f64, -1.0), (0.1, -1.0), (0.1, -0.105)] {
+        let mut k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut b = beveled_ball_on_plate(&mut k);
+        if radius > 0.0 {
+            let cavity = create_sphere(&mut k, Vec3::new(3.4, 0.0, z), radius).unwrap();
+            b = boolean_difference(&mut k, b, cavity).unwrap();
+        }
+        let mut ex = feature_at(&mut k, &mut b, Vec3::new(0.0, 3.5, 0.5));
+        assert!(ex.do_defeature(&mut k).unwrap().is_empty());
+        let first = native_body(&k, ex.base_brep());
+        let repeated = ex.do_defeature(&mut k);
+        assert!(
+            repeated.as_ref().is_ok_and(Vec::is_empty),
+            "repeated with cavity radius {radius} at z = {z}: {repeated:?}"
+        );
+        assert_eq!(ex.features().len(), 1);
+        assert!(
+            first == native_body(&k, ex.base_brep()),
+            "the repeated edit changed the base"
+        );
+        let mut removed = ex.into_feature_breps().pop().unwrap().unwrap();
+
+        // Plate plus the spherical cap of height 4, less any cavity. The removed ring is the
+        // conical frustum less the sphere's zone between z = 0 and z = 1.
+        for (body, volume, area) in [
+            (
+                &mut b,
+                (464.0 - 4.0 * radius.powi(3)) * PI / 3.0,
+                (176.0 + 4.0 * radius.powi(2)) * PI,
+            ),
+            (
+                &mut removed,
+                11.0 * PI / 3.0,
+                (14.0 + 7.0 * 2.0_f64.sqrt()) * PI,
+            ),
+        ] {
+            let check =
+                validation::check_brep(&mut k, body, validation::CheckLevel::Level2).unwrap();
+            assert!(check.is_valid(), "{check:?}");
+            assert!(is_outward_solid(&mut k, body).unwrap());
+            let v = brep_volume_default(&k, body, 1e-10).unwrap();
+            let a = brep_area(&k, body, 1e-10).unwrap();
+            assert!(
+                (v - volume).abs() <= 1e-8 * volume,
+                "volume {v}, expected {volume}"
+            );
+            assert!((a - area).abs() <= 1e-8 * area, "area {a}, expected {area}");
+        }
+
+        // Both points satisfy x² + y² = 8 and lie away from the primitive seams.
+        for p in [Vec3::new(2.0, 2.0, 0.0), Vec3::new(-2.0, -2.0, 0.0)] {
+            let faces = faces_at(&k, &mut b, p);
+            assert_eq!(faces.len(), 2, "the plate and ball at {p:?}");
+            let e = find_edge(&k, &b, p).unwrap();
+            let incident = edge::faces(&b, bp1::edges(&b, None).unwrap()[e.index], None).unwrap();
+            assert!(
+                faces.iter().all(|f| incident.contains(f)),
+                "the two trims share an edge at {p:?}"
+            );
+        }
+        assert!(
+            faces_at(&k, &mut b, Vec3::new(0.5, 0.5, 0.0)).is_empty(),
+            "no buried disc"
+        );
+        assert!(
+            faces_at(&k, &mut b, Vec3::new(0.0, 5.0_f64.sqrt(), -1.0)).is_empty(),
+            "no buried spherical cap"
+        );
+    }
+}
+
+/// A small cavity touches the new plate at one point when its centre is at
+/// z = -0.1, crosses it at z = 0, and lies wholly in the bevel at z = 0.25.
+#[test]
+fn a_cavity_in_the_removed_bevel_keeps_the_original_body() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::primitive::api_primitives::create_sphere;
+    use solidcore::Vec3;
+
+    for (z, turn_sphere) in [(-0.1, false), (-0.1, true), (0.0, false), (0.25, false)] {
+        let mut k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut input = beveled_ball_on_plate(&mut k);
+        let mut sphere = if turn_sphere {
+            // Same cavity, with the tangency in the face interior instead of at a pole vertex.
+            let mut s = create_sphere(&mut k, Vec3::ZERO, 0.1).unwrap();
+            let placement = [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [3.4, 0.0, z, 1.0],
+            ];
+            solidcore::topology::brep::mirror::transform_matrix(&mut k, &mut s, &placement, true)
+                .unwrap();
+            s
+        } else {
+            create_sphere(&mut k, Vec3::new(3.4, 0.0, z), 0.1).unwrap()
+        };
+        if z < 0.0 {
+            // The old outer boundary clears the spherical cavity before a new
+            // plane is extended to its top point (3.4, 0, 0).
+            let clearance =
+                solidcore::query::contact::boundary_distance(&k, &mut input, &mut sphere, 0.2)
+                    .unwrap();
+            assert!(clearance.lower > 0.1, "original clearance {clearance:?}");
+        }
+        let mut b = boolean_difference(&mut k, input, sphere).unwrap();
+        let obstacle = faces_at(&k, &mut b, Vec3::new(3.4, 0.1, z));
+        assert_eq!(obstacle.len(), 1);
+        if z < 0.0 {
+            assert_eq!(faces_at(&k, &mut b, Vec3::new(3.4, 0.0, 0.0)), obstacle);
+        }
+        let mut ex = feature_at(&mut k, &mut b, Vec3::new(0.0, 3.5, 0.5));
+        let before = native_body(&k, ex.base_brep());
+        let error = ex
+            .do_defeature(&mut k)
+            .expect_err("the cavity prevents this patch");
+        let face = obstacle[0];
+        let expected = if z > 0.0 {
+            DefeatureFailure::PatchEnclosesFace { face }
+        } else {
+            DefeatureFailure::PatchIntersectsFace { face }
+        };
+        assert!(
+            matches!(error, SolidError::Failed(ref f) if f.reason == Reason::Defeature(expected)),
+            "at z = {z}, sphere turned = {turn_sphere}: expected {expected:?}, got {error:?}"
+        );
+        assert!(ex.features().is_empty(), "a refused feature was published");
+        let after = native_body(&k, ex.base_brep());
+        assert!(
+            before == after,
+            "the native B-rep changed on refusal at z = {z}"
+        );
+    }
+}
+
+/// The two rims of a through hole lie on distinct, parallel planes. Each cap
+/// fills its own rim. The healed solid is the entire 40 × 30 × 5 plate.
+#[test]
+fn the_two_caps_of_a_through_hole_fill_the_plate_separately() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::mass::integrator::properties::{brep_area, brep_volume_default};
+    use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+    use solidcore::topology::brep::is_outward_solid;
+    use solidcore::Vec3;
+
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let plate = create_box(&mut k, Vec3::ZERO, 40.0, 30.0, 5.0).unwrap();
+    let cutter = create_cylinder(&mut k, Vec3::new(20.0, 15.0, -1.0), 5.0, 7.0).unwrap();
+    let mut b = boolean_difference(&mut k, plate, cutter).unwrap();
+    let wall = Vec3::new(20.0, 20.0, 2.5);
+    {
+        let mut ex = feature_at(&mut k, &mut b, wall);
+        assert!(ex.do_defeature(&mut k).unwrap().is_empty());
+    }
+
+    let check = validation::check_brep(&mut k, &mut b, validation::CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{check:?}");
+    assert!(is_outward_solid(&mut k, &mut b).unwrap());
+    assert!(
+        faces_at(&k, &mut b, wall).is_empty(),
+        "the cylindrical wall was removed"
+    );
+    let top = faces_at(&k, &mut b, Vec3::new(20.0, 15.0, 5.0));
+    let bottom = faces_at(&k, &mut b, Vec3::new(20.0, 15.0, 0.0));
+    assert_eq!(top.len(), 1);
+    assert_eq!(bottom.len(), 1);
+    assert_ne!(top, bottom, "the top and bottom have separate disks");
+
+    let v = brep_volume_default(&k, &mut b, 1e-10).unwrap();
+    let a = brep_area(&k, &mut b, 1e-10).unwrap();
+    assert!((v - 6000.0).abs() <= 1e-8 * 6000.0, "volume {v}");
+    assert!((a - 3100.0).abs() <= 1e-8 * 3100.0, "area {a}");
 }
 
 #[test]

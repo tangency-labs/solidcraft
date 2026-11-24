@@ -6270,6 +6270,7 @@ dependencies = [
  "image",
  "log",
  "png",
+ "quick-xml",
  "resvg",
  "schemars",
  "serde",
@@ -6306,6 +6307,7 @@ dependencies = [
 name = "solidcraft-format"
 version = "0.48.0"
 dependencies = [
+ "crc32fast",
  "serde_json",
  "sha2 0.10.9",
  "zip",

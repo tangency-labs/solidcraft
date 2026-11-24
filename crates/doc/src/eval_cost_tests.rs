@@ -193,6 +193,7 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
+        dynamics: Vec::new(),
     });
     // One body supplies both old nearest-face snaps and persistent named-face snaps.
     // A scratch model shares its measurements, even though each sample changes the pose.
@@ -601,7 +602,7 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let steps = super::ImportDigests::default();
         let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, 0).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -875,6 +876,7 @@ fn a_cams_profile_is_meshed_once() {
         b: origin(occurrence),
         values: Vec::new(),
         limits: Vec::new(),
+        dynamics: Vec::new(),
         flip: false,
         offset: 0.0,
         angle: 0.0,
