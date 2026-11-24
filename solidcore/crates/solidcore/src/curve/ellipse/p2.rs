@@ -2695,6 +2695,55 @@ fn crossings_merged_upstream(points: &[Point3], tol: f64) -> bool {
     }
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Ellipse {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            position,
+            anal_domain,
+            radius_x,
+            radius_y,
+            polar,
+            inside_out,
+            circle,
+        } = self;
+        d.tag(0xE11);
+        base.content(d)?;
+        position.content(d)?;
+        anal_domain.content(d)?;
+        d.f64(*radius_x);
+        d.f64(*radius_y);
+        polar.content(d)?;
+        d.bool(*inside_out);
+        d.bool(*circle);
+        Some(())
+    }
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for PolarConversion {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            possible,
+            natural_knots,
+            angles,
+            exact_conversion,
+            has_curve,
+        } = self;
+        d.tag(0x9C);
+        d.bool(*possible);
+        d.f64s(natural_knots);
+        d.f64s(angles);
+        d.usize(exact_conversion.len());
+        for &x in exact_conversion {
+            d.bool(x);
+        }
+        d.bool(*has_curve);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
