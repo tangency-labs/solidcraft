@@ -518,11 +518,10 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {
         return analysis(i, k);
     }
-    // Every shown body is selected: the selection colour replaces the body's own before lighting,
-    // as the highlight pipeline draws one selected body (`lit_color(i, .., u.sel.rgb, ..)`). One
-    // uniform, no per-body highlight entry.
-    let base = select(i.c, vec4<f32>(u.sel.rgb, i.c.a), u.sel.w > 0.5);
-    let c = lit_color(i, occlusion(i), base, true);
+    // Every shown body is selected: an exact copy of what the highlight pipeline's one-body tint
+    // computes (`fs_hl_selected`: `lit_color(i, 1.0, vec4(u.sel.rgb, i.c.a), false)`), so the two
+    // tints agree instead of merely looking similar. One uniform, no per-body highlight entry.
+    let c = select(lit(i, occlusion(i)), lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a), false), u.sel.w > 0.5);
     // Silhouettes (styles with edges): where a curved surface turns away from the eye, a line
     // about 1.5 px wide, on the visible surface only (depth-correct).
     if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {
