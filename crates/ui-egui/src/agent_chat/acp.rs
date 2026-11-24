@@ -233,7 +233,10 @@ measure or inspect_design. Before building anything beyond one primitive, read `
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
 each stage compare `measure` with them. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
 the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
-Keep answers short.";
+On a drawing, make section views and their section lines with `drawing.view.section`, and dimensions with \
+`drawing.dimension.add` or `drawing.dimension.from_model`, never with free sketch lines or text notes: those do not move with their \
+view, cannot be selected as section lines or dimensions, and do not update the model. If a drawing object has no command, say so \
+and explain the limitation instead of drawing an imitation. Keep answers short.";
 
 /// The most of the user's custom instructions (#8220) a session gets, in characters: the
 /// Preferences field takes no more, and a longer text from an edited settings file is cut here.
@@ -255,6 +258,13 @@ pub fn system_note(instructions: &str) -> String {
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
     &["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task"];
 
+/// The Claude Code adapter's built-in tools the session has (`_meta.claudeCode.options.tools`):
+/// only these, so a tool a later Claude Code adds (or one the list above doesn't name, such as its
+/// schedulers and message senders) stays off (#19554). `ExitPlanMode` is how the agent leaves the
+/// plan mode the panel's mode picker offers; it only asks. [`CLAUDE_DISALLOWED_TOOLS`] stays as a
+/// second guard.
+pub const CLAUDE_TOOLS: &[&str] = &["ExitPlanMode"];
+
 /// The `session/new` parameters. `init` is the agent's `initialize` reply: agents read the system
 /// note from different places (#9811), and the standard field may only go to an agent offering it.
 /// `note` is the system note ([`system_note`]).
@@ -266,7 +276,14 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
         // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
         // every tool call the agent asks about reaches the panel.
         // Its own shell and file tools are off: the agent works through SolidCraft's tools.
-        "claudeCode": {"options": {"allowDangerouslySkipPermissions": false, "disallowedTools": CLAUDE_DISALLOWED_TOOLS}},
+        // Only the MCP servers given here (`strictMcpConfig`): not the user's claude.ai
+        // connectors, nor the servers in their own Claude Code configuration (#19554).
+        "claudeCode": {"options": {
+            "allowDangerouslySkipPermissions": false,
+            "disallowedTools": CLAUDE_DISALLOWED_TOOLS,
+            "tools": CLAUDE_TOOLS,
+            "strictMcpConfig": true,
+        }},
     });
     if takes_antigravity_note(init)
         && let Some(meta) = meta.as_object_mut()
@@ -742,6 +759,17 @@ mod tests {
         assert!(is_bridge_tool(&format!("mcp__{BRIDGE_NAME}__batch"), Some("other")));
     }
 
+    /// #20731: the note sends drawing work to the real commands and says to explain a limitation
+    /// rather than imitate a section line or a dimension with free lines or text.
+    #[test]
+    fn the_note_names_the_drawing_commands_and_forbids_imitations() {
+        for name in ["drawing.view.section", "drawing.dimension.add", "drawing.dimension.from_model"] {
+            assert!(SYSTEM_NOTE.contains(name), "{name}");
+        }
+        assert!(SYSTEM_NOTE.contains("never with free sketch lines or text notes"));
+        assert!(SYSTEM_NOTE.contains("explain the limitation instead of drawing an imitation"));
+    }
+
     /// Only the whole name of a tool of the chat's own server counts, whatever else a title holds.
     #[test]
     fn only_the_bridges_exact_tool_names_are_its_tools() {
@@ -794,6 +822,22 @@ mod tests {
         assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
         assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE)["mcpServers"], json!([]));
+    }
+
+    /// #19554: Claude Code gets only the chat's MCP server, none of the user's claude.ai connectors
+    /// or own servers (`strictMcpConfig`), and only the built-in tools the chat names (`tools`),
+    /// none of which the disallowed list turns off.
+    #[test]
+    fn claude_code_gets_only_the_chats_server_and_named_tools() {
+        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
+        for bridge in [Some(&b), None] {
+            let p = session_new_params(std::path::Path::new("/tmp"), bridge, &json!({}), SYSTEM_NOTE);
+            let options = &p["_meta"]["claudeCode"]["options"];
+            assert_eq!(options["strictMcpConfig"], json!(true), "{p}");
+            assert_eq!(options["tools"], json!(["ExitPlanMode"]), "{p}");
+            assert!(CLAUDE_TOOLS.iter().all(|t| !CLAUDE_DISALLOWED_TOOLS.contains(t)));
+            assert_eq!(p["mcpServers"].as_array().map(Vec::len), Some(usize::from(bridge.is_some())));
+        }
     }
 
     /// #9811: the note goes by the routes an agent's `initialize` reply offers, and the standard

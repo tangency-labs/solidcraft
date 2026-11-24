@@ -206,6 +206,69 @@ fn a_pocket_rim_notes_that_no_radius_fits() {
     assert!(fit.edge.is_some_and(|e| edges.contains(&e)), "{fit:?}");
 }
 
+/// An L-shaped prism, two 20 x 10 x 5 boxes crossed at the origin, so the L's inner corner is a
+/// sharp concave vertical edge at (10, 10). Its two inner walls' top edges are rounded r 1
+/// together: convex rounds, whose ball lies in the material, turning round a concave side edge,
+/// whose air side is a 90 degree wedge. The ball keeps its distance r from that wedge by
+/// circling the edge, so the swept turn passes, a horn torus of radii 1, 1, where a ball in the
+/// air (the pocket rim's) could not.
+///
+/// Closed form: the L is 300 x 5 = 1500. Each straight round takes the spandrel between the
+/// square corner and its arc, r^2 (1 - pi/4), off each unit length of its 10 mm wall: it ends
+/// square at the wall's far end (the end face there is square to it) and at the corner's
+/// section. The corner revolves the same spandrel about the side edge through the turn, pi/2.
+/// By Pappus that is its area times pi/2 times its centroid's distance from the axis, the
+/// distance from the wall, (10 - 3 pi) r / (3 (4 - pi)): pi r^3 (10 - 3 pi) / 24.
+#[test]
+fn convex_rounds_turn_round_a_concave_side_edge_as_a_horn_torus() {
+    let mut k = all_fixes();
+    let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0, 5.0).unwrap();
+    let c = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 5.0).unwrap();
+    let mut b = boolean_union(&mut k, a, c).unwrap();
+    round(
+        &mut k,
+        &mut b,
+        &[[15.0, 10.0, 5.0], [10.0, 15.0, 5.0]],
+        &[1.0; 2],
+    )
+    .unwrap();
+    let v = volume(&k, &mut b);
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    let tori = tori(&b);
+    let pi = std::f64::consts::PI;
+    let expect = 1500.0 - 2.0 * 10.0 * (1.0 - pi / 4.0) - pi * (10.0 - 3.0 * pi) / 24.0;
+    eprintln!("volume {v:.12} (closed form {expect:.12}), tori {tori:?}");
+    assert!(lines.is_empty(), "{lines:?}");
+    assert_eq!(tori.len(), 1, "{tori:?}");
+    assert!((tori[0].0 - 1.0).abs() <= 1e-12 && (tori[0].1 - 1.0).abs() <= 1e-12);
+    assert!((v - expect).abs() <= 1e-9 * expect, "{v} against {expect}");
+}
+
+/// Two convex rounds at a box's corner, the third edge there (the convex side edge) left sharp:
+/// the ball lies in the material, which is only a 90 degree wedge round that edge, so it cannot
+/// circle it. The swept turn is refused, as the pocket rim's is (a ball in the air at a concave
+/// side edge), naming the radius to round the side edge first, and builds no body
+/// (tangency-labs/solidcraft#13805).
+#[test]
+fn convex_rounds_at_a_convex_side_edge_are_refused_naming_the_radius() {
+    let mut k = all_fixes();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+    let (code, why) = round(
+        &mut k,
+        &mut b,
+        &[[5.0, 0.0, 10.0], [0.0, 5.0, 10.0]],
+        &[1.0; 2],
+    )
+    .unwrap_err();
+    assert_eq!(code, FilletErrorType::NoRoom as i32, "{why}");
+    assert!(
+        why.contains("round that edge at a radius of at least 1 first"),
+        "{why}"
+    );
+}
+
 #[test]
 fn unequal_rounds_are_not_swept_yet() {
     let mut k = all_fixes();

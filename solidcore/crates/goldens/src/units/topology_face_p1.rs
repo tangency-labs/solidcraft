@@ -795,6 +795,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             let serial =
                 solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b).map_err(e)?;
             put_owners(&mut o, &b, serial).map_err(e)?;
+            crate::trim_hook::observe(&mut b);
         }
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;
@@ -1025,7 +1026,7 @@ pub(super) fn own_built(
         // the gap walk may leave size estimates a copy does not carry: read afresh
         return read_as(&mut k, &path, *rebuild, validate_only, init_gaps, conv);
     }
-    if crate::tolsub::active() {
+    if crate::tolsub::active() || crate::refit::active() {
         // (a tolerance-substitution replay sees every read: no cached copy)
         return read_as(&mut k, &path, *rebuild, validate_only, false, conv);
     }

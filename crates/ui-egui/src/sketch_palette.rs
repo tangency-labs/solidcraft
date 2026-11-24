@@ -1,6 +1,6 @@
 //! The Sketch Palette: a panel docked at the right while a sketch is being edited, like a
 //! command dialog. Feature Options: the modes of the creation tool that is running, as icon
-//! buttons. Options: the line type of the selected curves (normal, construction, centerline),
+//! buttons, or for Canvas and Decal whether the placed image follows a frame in the sketch. Options: the line type of the selected curves (normal, construction, centerline),
 //! Look At, and the display toggles kept with the sketch (grid, snap, slice, profiles, points,
 //! dimensions, constraints, projected geometry, construction geometry, 3D sketch); the sketch's
 //! degrees of freedom. Finish Sketch sits at the bottom, beside the ribbon's Exit group. Toggles run `sketch.options`, line types
@@ -46,7 +46,7 @@ pub const TOGGLES: [(&str, &str); 10] = [
 /// Does the sketch hold any geometry of its own: a drawn curve or a 3D curve? Projected curves
 /// and the origin are held in place and do not count.
 pub fn has_geometry(sketch: &solidcraft_engine::sketch::Sketch) -> bool {
-    !sketch.curves.is_empty() || !sketch.wires.is_empty()
+    sketch.curves.iter().any(|c| c.link.is_none()) || sketch.wires.iter().any(|w| w.link.is_none())
 }
 
 /// Nothing the user added: no curve, 3D curve, constraint or dimension, pattern, projection,
@@ -93,7 +93,7 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
         3 => "Infinite mode: new lines are infinite construction lines",
         _ => "Normal mode",
     };
-    app.set_status(hint, false);
+    app.set_tool_hint(hint);
 }
 
 /// X / the toolbar's Construction: convert the selected curves, or with nothing selected
@@ -249,7 +249,45 @@ const LINE_TYPES: [(&str, &str, &str); 4] = [
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
+    crate::workspace::tool_receives_input(app)
+        && app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
+}
+
+/// Is the Canvas or Decal tool running? The palette then shows the tool's frame mode (#18405),
+/// with no sketch open as well: there it holds that mode alone.
+pub fn image_tool(app: &SolveApp) -> bool {
+    app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "canvas.insert" | "canvas.decal"))
+}
+
+/// The panel while Canvas or Decal runs with no sketch open: the tool's name, and its frame mode.
+fn image_tool_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
+    let spec = solidcraft_engine::find_command(app.tool.as_ref()?.cmd)?;
+    Some(crate::panel_runtime::PanelPresentation {
+        title: app.tr_command(spec.id, spec.label).to_owned(),
+        icon: spec.icon.into(),
+        status: None,
+        attention: false,
+        actions: Vec::new(),
+    })
+}
+
+/// The frame mode as a Feature Options checkbox; whether it was clicked.
+fn frame_mode_row(ui: &mut egui::Ui, framing: bool) -> bool {
+    let section = crate::ui_kit::section(ui, "feature", "Feature Options", true, |ui| {
+        crate::ui_kit::checkbox_row(ui, "frame_image", solidcraft_ui_text::tr("ui.palette_frame_image"), framing)
+    });
+    section_alias("sketch_palette:feature_fold", "Feature Options");
+    section.unwrap_or(false)
+}
+
+/// The body while Canvas or Decal runs with no sketch open: only the frame mode, which then
+/// frames the placed image in a new sketch.
+fn image_tool_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let framing = app.preferences.frame_images_in_sketch;
+    let clicked = crate::ui_kit::scope(ui, |ui| frame_mode_row(ui, framing));
+    if clicked {
+        app.preferences.frame_images_in_sketch = !framing;
+    }
 }
 
 /// The creation family of the tool that is running, and the exact variant it is running, when
@@ -314,8 +352,12 @@ fn constraint_status(remaining: usize, solved: bool, geometry: bool) -> String {
 /// The active sketch supplies presentation while the host retains placement.
 pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    if !editing(app) {
+        return image_tool_presentation(app);
+    }
+    let active = app.session.active_sketch?;
     let world = crate::open_meshing::session_world(&app.session);
-    let sketch = world.sketch(app.session.active_sketch?)?;
+    let sketch = world.sketch(active)?;
     let solved = sketch.report.shown_ok();
     let title =
         if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
@@ -331,9 +373,16 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
 pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    if !editing(app) {
+        if image_tool(app) {
+            image_tool_body(app, ui);
+        }
+        return;
+    }
     let (opts, remaining, solved, total, geometry, open_ends, untied_ends) = {
+        let Some(active) = app.session.active_sketch else { return };
         let st = crate::open_meshing::session_world(&app.session);
-        let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
+        let Some(ss) = st.sketch(active) else { return };
         (
             ss.sketch.view.clone(),
             ss.report.shown_dof(),
@@ -371,6 +420,12 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut tie = false;
     let mut start = None;
     let feature = active_feature(app);
+    // The Canvas and Decal tools' mode (#18405): whether the image they place on this sketch's
+    // plane gets a construction rectangle in it to follow. A tool's mode, so it is here and not
+    // in Preferences; it is kept for the next time either tool runs.
+    let image_tool = image_tool(app);
+    let framing = app.preferences.frame_images_in_sketch;
+    let mut frame_image = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -417,7 +472,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .map(|spec| crate::ui_kit::ToolChoice {
                         key: spec.id,
                         icon: spec.icon,
-                        label: app.tr_label(spec.label),
+                        label: app.tr_command(spec.id, spec.label),
                         enabled: spec.info(&app.session).enabled,
                     })
                     .collect();
@@ -428,6 +483,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             start = section.flatten();
             section_alias("sketch_palette:feature_fold", "Feature Options");
             // The tool icons' last row otherwise all but touches the Line Type row.
+            ui.add_space(t.space_6);
+        }
+        if image_tool {
+            frame_image = frame_mode_row(ui, framing);
             ui.add_space(t.space_6);
         }
         crate::ui_kit::row(ui, "Line Type", |ui| {
@@ -543,6 +602,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if construction {
         toggle_construction(app);
     }
+    if frame_image {
+        app.preferences.frame_images_in_sketch = !framing;
+    }
     if let Some(id) = start {
         app.start(id);
     }
@@ -606,6 +668,35 @@ mod tests {
         h.call("ui.click", json!({"x":infinite.x,"y":infinite.y}));
         assert_eq!(mode(&h.app), 3);
         set_mode(&mut h.app, 0);
+    }
+
+    /// Whether a placed image follows a frame in the sketch is the Canvas and Decal tools' own
+    /// mode (#18405): it shows in the palette while either runs, not with other tools, and the
+    /// choice is kept for the next image.
+    #[test]
+    fn canvas_and_decal_show_their_frame_mode_in_the_palette() {
+        let mut h = crate::scenario::Harness::new();
+        // With no sketch open, the panel opens for Canvas with the mode alone.
+        crate::sketch_tools::start_image_placement(&mut h.app, "canvas.insert", "picture.png".into());
+        h.settle();
+        let at = crate::scenario::handle_at("sketch_palette:toggle:frame_image").expect("the mode shows with no sketch open");
+        h.call("ui.click", json!({"x":at.x,"y":at.y}));
+        assert!(h.app.preferences.frame_images_in_sketch);
+        h.call("ui.click", json!({"x":at.x,"y":at.y}));
+        assert!(!h.app.preferences.frame_images_in_sketch);
+        h.app.tool = None;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.tool = crate::tools::Tool::for_command("sketch.line");
+        h.settle();
+        assert!(crate::scenario::handle_at("sketch_palette:toggle:frame_image").is_none(), "other tools leave the palette as it was");
+        for (cmd, on) in [("canvas.insert", true), ("canvas.decal", false)] {
+            crate::sketch_tools::start_image_placement(&mut h.app, cmd, "picture.png".into());
+            h.settle();
+            assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(cmd), "{cmd} waits for its click");
+            let at = crate::scenario::handle_at("sketch_palette:toggle:frame_image").unwrap_or_else(|| panic!("{cmd}: no frame mode"));
+            h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            assert_eq!(h.app.preferences.frame_images_in_sketch, on, "{cmd}");
+        }
     }
 
     #[test]
@@ -951,7 +1042,7 @@ mod tests {
         h.app.start("sketch.rectangle.two_point");
         h.settle();
         let rect = crate::sketch_families::family("sketch.rectangle.two_point").unwrap();
-        assert_eq!(rect.commands.len(), 4);
+        assert_eq!(rect.commands.len(), 5);
         assert_eq!(pressed_modes(&h, rect), ["sketch.rectangle.two_point"]);
         assert!(crate::scenario::handle_at("sketch_palette:feature:sketch.circle.center").is_none(), "only the running family is shown");
     }
@@ -1042,6 +1133,26 @@ mod tests {
         assert!(h.widget("Fully constrained").is_none());
         assert_eq!(crate::scenario::count_of("sketch_palette:constrained_fraction"), Some(0.0));
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,5]})).unwrap();
+        h.settle();
+        assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
+    }
+
+    /// A new sketch on a face holds only the face's projected outline, which is fixed: it says
+    /// there is no geometry yet rather than "Fully constrained", until a curve is drawn.
+    #[test]
+    fn a_new_sketch_on_a_face_is_not_reported_fully_constrained() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
+        h.settle();
+        let line = |h: &crate::scenario::Harness| {
+            let st = h.app.session.world_state().unwrap();
+            let ss = h.app.session.active_sketch.and_then(|s| st.sketch(s)).unwrap();
+            assert!(ss.sketch.curves.iter().any(|c| c.link.is_some()), "the face outline is projected");
+            dof_text(ss.report.dof, ss.report.ok(), has_geometry(&ss.sketch))
+        };
+        assert_eq!(line(&h), "No geometry yet");
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[15,10]})).unwrap();
         h.settle();
         assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
     }

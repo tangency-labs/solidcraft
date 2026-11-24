@@ -35,6 +35,23 @@ fn record_surface(g: &SurfaceGeometry) -> (solidcore_record::brep::Surface, bool
     }
 }
 
+/// A surface's `∂u × ∂v` at (u, v), by central differences.
+fn normal_at(f: impl Fn(f64, f64) -> [f64; 3], u: f64, v: f64) -> [f64; 3] {
+    let h = 1e-6;
+    let d = |p: [f64; 3], q: [f64; 3]| [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+    let du = d(f(u - h, v), f(u + h, v));
+    let dv = d(f(u, v - h), f(u, v + h));
+    [
+        du[1] * dv[2] - du[2] * dv[1],
+        du[2] * dv[0] - du[0] * dv[2],
+        du[0] * dv[1] - du[1] * dv[0],
+    ]
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 /// The record's volume: positive when its faces face out of the material.
 fn volume(s: &Solid) -> f64 {
     let (body, _) = solidcore_ops::Body::from_record(&s.brep, false).unwrap();
@@ -116,17 +133,24 @@ fn a_face_on_a_plane_facing_the_other_way_keeps_its_side() {
     assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
 }
 
+/// A missing coedge is hostile input: no panic, and the face whose loop uses it is left out of an
+/// open surface of the others (the refusal names that face).
 #[test]
-fn a_missing_coedge_refuses_its_region_without_a_panic() {
+fn a_missing_coedge_leaves_its_face_out_without_a_panic() {
     let mut ir = cube();
     ir.model.coedges.remove(0);
     let bodies = read_bodies(&ir, None);
-    assert!(bodies.read.is_empty());
-    assert_eq!(bodies.failures.len(), 1);
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
     assert!(
-        bodies.failures[0].message.contains("missing coedge"),
+        s.sheet && s.brep.faces.len() == 5,
+        "{} faces",
+        s.brep.faces.len()
+    );
+    assert!(
+        s.notes.iter().any(|n| n.contains("missing coedge")),
         "{:?}",
-        bodies.failures
+        s.notes
     );
 }
 
@@ -140,8 +164,8 @@ fn refused(ir: &CadIr) -> String {
 
 /// A region's shells, a shell's faces and a face's loops are counted against their caps before
 /// the region is read. At each cap, the extra ids (none of them in the model) are looked up and
-/// the first is missing; one past it, the region is refused for the count, before any is looked
-/// up. Without the counts, the reader walked them all to join collapsed edges first.
+/// the first is missing (a missing loop leaves its face out of an open surface); one past it, the
+/// region is refused for the count, before any is looked up. Without the counts, the reader walked them all to join collapsed edges first.
 #[test]
 fn a_regions_shells_faces_and_loops_are_refused_past_their_caps() {
     use cadmpeg_ir::ids::{FaceId, LoopId, ShellId};
@@ -187,7 +211,21 @@ fn a_regions_shells_faces_and_loops_are_refused_past_their_caps() {
         face.loops = FaceLoops::unspecified(ids);
         ir
     };
-    assert!(refused(&loops(MAX_BOUNDS)).contains("missing loop"));
+    // At the loop cap the first extra loop is missing, which names its face: that face is left
+    // out of an open surface of the others, as a face with a missing coedge is.
+    let bodies = read_bodies(&loops(MAX_BOUNDS), None);
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
+    assert!(
+        s.sheet && s.brep.faces.len() == 5,
+        "{} faces",
+        s.brep.faces.len()
+    );
+    assert!(
+        s.notes.iter().any(|n| n.contains("missing loop")),
+        "{:?}",
+        s.notes
+    );
     assert!(
         refused(&loops(MAX_BOUNDS + 1)).ends_with(&format!("with {} loops", MAX_BOUNDS + 1)),
         "{}",
@@ -230,8 +268,10 @@ fn a_face_or_loop_used_twice_in_a_region_refuses_it() {
     );
 }
 
+/// A vertex 5 mm from its edges: the faces the refusals name, one at a time, are left out of an
+/// open surface of the others; only faces a refusal names, and never all of them.
 #[test]
-fn a_vertex_far_from_its_edges_refuses_its_region() {
+fn a_vertex_far_from_its_edges_leaves_the_faces_at_it_out() {
     let mut ir = cube();
     let v = ir.model.vertices.first().unwrap().point.clone();
     let p = ir.model.points.iter_mut().find(|p| p.id == v).unwrap();
@@ -241,11 +281,21 @@ fn a_vertex_far_from_its_edges_refuses_its_region() {
     wire["position"]["x"] = serde_json::json!(x + 5.0);
     *p = serde_json::from_value(wire).unwrap();
     let bodies = read_bodies(&ir, None);
-    assert!(bodies.read.is_empty());
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
+    let left_out: Vec<&String> = s
+        .notes
+        .iter()
+        .filter(|n| n.starts_with("left out: "))
+        .collect();
     assert!(
-        bodies.failures[0].message.contains("off its curve"),
-        "{:?}",
-        bodies.failures
+        s.sheet && !left_out.is_empty() && s.brep.faces.len() + left_out.len() == 6,
+        "{} faces, {left_out:?}",
+        s.brep.faces.len()
+    );
+    assert!(
+        left_out.iter().all(|n| n.contains("off its curve")),
+        "{left_out:?}"
     );
 }
 
@@ -393,8 +443,9 @@ fn widened(s: &Solid) -> (usize, usize) {
 
 /// A polyline's chords stand within the chordal deflection its producer states of the curve
 /// they sample: the edge on it holds that allowance (and its two vertices with it), so the record
-/// does not take the chords for the curve; one past what an edge's tolerance holds refuses its
-/// region with why, and a polyline whose chords are the curve (deflection 0) changes nothing.
+/// does not take the chords for the curve; one past what an edge's tolerance holds is refused with
+/// why (its faces left out of an open surface), and a polyline whose chords are the curve
+/// (deflection 0) changes nothing.
 #[test]
 fn a_polylines_chordal_deflection_is_its_edges_tolerance() {
     use cadmpeg_ir::geometry::sampled::{PolylineCurve, PolylineSamples, PolylineVertex};
@@ -448,21 +499,30 @@ fn a_polylines_chordal_deflection_is_its_edges_tolerance() {
             == 2
     );
     assert_eq!(widened(&one(&with(0.0))), (0, 0));
+    // Past what an edge's tolerance holds: refused, and as the refusal names each face on the
+    // polyline, those faces are left out of an open surface of the others, the reason noted.
     let bodies = read_bodies(&with(2.0), None);
-    assert!(bodies.read.is_empty());
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
     assert!(
-        bodies.failures[0]
-            .message
-            .contains("more than an edge's tolerance holds"),
+        s.sheet && s.brep.faces.len() == 4,
+        "{} faces",
+        s.brep.faces.len()
+    );
+    assert!(
+        s.notes
+            .iter()
+            .any(|n| n.starts_with("left out: ")
+                && n.contains("more than an edge's tolerance holds")),
         "{:?}",
-        bodies.failures
+        s.notes
     );
 }
 
 /// A procedural surface's solved cache fitted within a tolerance its construction states is not
 /// the exact surface: read as the face's surface, the face's edges (and their vertices) hold that
-/// tolerance; a cache whose fit no edge's tolerance holds refuses the region, naming the face;
-/// a cache stated with no fit is read as before.
+/// tolerance; a cache whose fit no edge's tolerance holds is refused, naming the face, which is
+/// left out of an open surface; a cache stated with no fit is read as before.
 #[test]
 fn a_fitted_procedural_cache_is_held_to_its_fit_not_taken_as_exact() {
     use cadmpeg_ir::geometry::ProceduralSurfaceDefinition as D;
@@ -515,12 +575,22 @@ fn a_fitted_procedural_cache_is_held_to_its_fit_not_taken_as_exact() {
     assert_eq!(widened(&s), (4, 4));
     assert!(s.brep.edges.iter().filter(|e| e.tolerance >= 0.05).count() == 4);
     assert_eq!(widened(&one(&with(None))), (0, 0));
+    // Past what an edge's tolerance holds: the refusal names the face, which is left out of an
+    // open surface of the other five, the reason noted.
     let bodies = read_bodies(&with(Some(2.0)), None);
-    assert!(bodies.read.is_empty());
-    let why = &bodies.failures[0].message;
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
     assert!(
-        why.contains("face") && why.contains("its solved cache"),
-        "{why}"
+        s.sheet && s.brep.faces.len() == 5,
+        "{} faces",
+        s.brep.faces.len()
+    );
+    assert!(
+        s.notes
+            .iter()
+            .any(|n| n.starts_with("left out: ") && n.contains("its solved cache")),
+        "{:?}",
+        s.notes
     );
 }
 
@@ -1238,10 +1308,11 @@ fn a_chain_of_joined_vertices_is_walked_once() {
     assert_eq!(b.joined_to(last), last);
 }
 
-/// A coedge with a 3D curve of its own in place of its edge's refuses its region with the reason,
-/// rather than being built on the edge's curve.
+/// A coedge with a 3D curve of its own in place of its edge's is refused with the reason, rather
+/// than being built on the edge's curve: its face is left out of an open surface of the others
+/// (the refusal names that face).
 #[test]
-fn a_coedge_on_a_curve_of_its_own_refuses_its_region() {
+fn a_coedge_on_a_curve_of_its_own_leaves_its_face_out() {
     let mut ir = cube();
     let curve = ir.model.curves.first().unwrap().id.clone();
     let c = ir.model.coedges.first_mut().unwrap();
@@ -1250,11 +1321,19 @@ fn a_coedge_on_a_curve_of_its_own_refuses_its_region() {
         parameter_range: cadmpeg_ir::topology::ParameterInterval::new([0.0, 1.0]).unwrap(),
     });
     let bodies = read_bodies(&ir, None);
-    assert!(bodies.read.is_empty());
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
     assert!(
-        bodies.failures[0].message.contains("a 3D curve of its own"),
+        s.sheet && s.brep.faces.len() == 5,
+        "{} faces",
+        s.brep.faces.len()
+    );
+    assert!(
+        s.notes
+            .iter()
+            .any(|n| n.starts_with("left out: ") && n.contains("a 3D curve of its own")),
         "{:?}",
-        bodies.failures
+        s.notes
     );
 }
 
@@ -1614,4 +1693,344 @@ fn a_body_placed_by_a_scale_or_mirror_is_refused_and_a_rigid_one_moves_it() {
         b.read[0].placement.map(|m| m[3]),
         Some([100.0, 0.0, 0.0, 1.0])
     );
+}
+
+/// A solid refused for one face (its plane moved 5 mm off its edges) comes in as an open surface
+/// of its other faces, as the STEP reader brings in a solid it cannot close: the record says why
+/// it is open and which face was left out, and the face is only left out because the refusal
+/// names it.
+#[test]
+fn a_solid_refused_for_one_face_comes_in_as_an_open_surface_of_the_others() {
+    let mut ir = cube();
+    let face = ir.model.faces.first().unwrap().clone();
+    let surface = ir
+        .model
+        .surfaces
+        .iter_mut()
+        .find(|s| s.id == face.surface)
+        .unwrap();
+    let SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(plane)) = &surface.geometry else {
+        panic!("{:?}", surface.geometry)
+    };
+    let o = plane.origin().get();
+    let (n, u) = (
+        plane.frame().axis().as_raw(),
+        plane.frame().reference().as_raw(),
+    );
+    let moved = cadmpeg_ir::geometry::analytic::PlaneSurface::try_new(
+        Point3::new(o.x + 5.0 * n.x, o.y + 5.0 * n.y, o.z + 5.0 * n.z),
+        Vector3::new(n.x, n.y, n.z),
+        Vector3::new(u.x, u.y, u.z),
+    )
+    .unwrap();
+    surface.geometry = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(moved));
+    let bodies = read_bodies(&ir, None);
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
+    assert!(s.sheet, "an open surface");
+    assert_eq!(s.brep.faces.len(), 5);
+    assert!(
+        !s.face_origin.contains(&0),
+        "face 0 left out: {:?}",
+        s.face_origin
+    );
+    assert!(
+        s.notes.iter().any(|n| n.starts_with("not closed")),
+        "{:?}",
+        s.notes
+    );
+    assert!(
+        s.notes
+            .iter()
+            .any(|n| n.starts_with("left out: ") && n.contains("face #0")),
+        "{:?}",
+        s.notes
+    );
+}
+
+/// A solid refused for two faces (both planes moved 5 mm off their edges) leaves both out in one
+/// read again: the refusal names every face whose pcurves failed, not only the first, so a solid
+/// with more such faces than reads still comes in.
+#[test]
+fn a_solid_refused_for_several_faces_leaves_them_all_out_in_one_read() {
+    let mut ir = cube();
+    for k in 0..2 {
+        let face = ir.model.faces[k].clone();
+        let surface = ir
+            .model
+            .surfaces
+            .iter_mut()
+            .find(|s| s.id == face.surface)
+            .unwrap();
+        let SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(plane)) = &surface.geometry else {
+            panic!("{:?}", surface.geometry)
+        };
+        let o = plane.origin().get();
+        let (n, u) = (
+            plane.frame().axis().as_raw(),
+            plane.frame().reference().as_raw(),
+        );
+        let moved = cadmpeg_ir::geometry::analytic::PlaneSurface::try_new(
+            Point3::new(o.x + 5.0 * n.x, o.y + 5.0 * n.y, o.z + 5.0 * n.z),
+            Vector3::new(n.x, n.y, n.z),
+            Vector3::new(u.x, u.y, u.z),
+        )
+        .unwrap();
+        surface.geometry = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(moved));
+    }
+    let bodies = read_bodies(&ir, None);
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
+    assert!(s.sheet, "an open surface");
+    assert_eq!(s.brep.faces.len(), 4);
+    assert!(
+        !s.face_origin.contains(&0) && !s.face_origin.contains(&1),
+        "{:?}",
+        s.face_origin
+    );
+    let left: Vec<&String> = s
+        .notes
+        .iter()
+        .filter(|n| n.starts_with("left out: "))
+        .collect();
+    assert_eq!(left.len(), 1, "one read left both out: {:?}", s.notes);
+    assert!(
+        left[0].contains("face #0") && left[0].contains("face #1"),
+        "{left:?}"
+    );
+}
+
+/// A refusal that names its face by the face's id in the model (as this reader names a face it
+/// cannot read: here its surface is missing) leaves that face out as one naming it by index does.
+#[test]
+fn a_face_named_by_its_model_id_is_left_out_of_an_open_surface() {
+    let mut ir = cube();
+    let surface = ir.model.faces.first().unwrap().surface.clone();
+    ir.model.surfaces.retain(|s| s.id != surface);
+    let bodies = read_bodies(&ir, None);
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
+    assert!(
+        s.sheet && s.brep.faces.len() == 5,
+        "{} faces",
+        s.brep.faces.len()
+    );
+    assert!(
+        s.notes
+            .iter()
+            .any(|n| n.starts_with("left out: ") && n.contains("missing surface")),
+        "{:?}",
+        s.notes
+    );
+}
+
+/// A region is built at the largest tolerance its faces carry (a STEP file's part states its own
+/// uncertainty, which CADIR gives every face of the part), else at the document's: the cube with
+/// one face at 0.05 mm is a record of that tolerance, still closed. An edge's own tolerance (one
+/// off its curve) stays that edge's: the cube with one edge at 0.05 mm is built at the
+/// document's.
+#[test]
+fn a_region_is_built_at_the_largest_tolerance_its_faces_carry() {
+    assert!(
+        (one(&cube()).brep.tolerance - tolerance(&cube())).abs() < 1e-15,
+        "the document's"
+    );
+    let mut ir = cube();
+    let mut wire = serde_json::to_value(&ir.model.faces[0]).unwrap();
+    wire["tolerance"] = serde_json::json!(0.05);
+    ir.model.faces[0] = serde_json::from_value(wire).unwrap();
+    let s = one(&ir);
+    assert!(
+        (s.brep.tolerance - 0.05).abs() < 1e-12,
+        "{}",
+        s.brep.tolerance
+    );
+    assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
+    let mut ir = cube();
+    let mut wire = serde_json::to_value(&ir.model.edges[0]).unwrap();
+    wire["tolerance"] = serde_json::json!(0.05);
+    ir.model.edges[0] = serde_json::from_value(wire).unwrap();
+    assert!(
+        (one(&ir).brep.tolerance - tolerance(&ir)).abs() < 1e-15,
+        "an edge's own tolerance is not the region's"
+    );
+}
+
+/// A torus whose tube reaches its axis (a spindle torus: major radius 1 under the tube's 5, as
+/// cadmpeg reads a STEP torus written with a negative major radius) is its meridian circle
+/// revolved about its axis, as the STEP reader reads one: the circle starts where the torus does
+/// (`C + (R + r) x` at u = v = 0) and turns towards the axis. It keeps its side for either sign of
+/// the tube radius, as a plain torus does, checked by the normals at one point: CADIR's torus
+/// `C + (R + r cos v)(cos u x + sin u y) + r sin v z` with `r = -5` is the one with `r = 5` at
+/// `v + π`, the same surface with the same `∂u × ∂v`, and the revolution `∂angle × ∂profile` of
+/// the circle of radius 5 is that of `r = 5`.
+#[test]
+fn a_spindle_torus_is_its_meridian_circle_revolved() {
+    use cadmpeg_ir::geometry::analytic::TorusSurface;
+    use solidcore_step::assembly::SweptSurface;
+    let (c, z, x) = (
+        Point3::new(1.0, 2.0, 3.0),
+        Vector3::new(0.0, 0.0, 1.0),
+        Vector3::new(1.0, 0.0, 0.0),
+    );
+    let theirs = |r: f64| {
+        move |u: f64, v: f64| {
+            let ring = 1.0 + r * v.cos();
+            [
+                1.0 + ring * u.cos(),
+                2.0 + ring * u.sin(),
+                3.0 + r * v.sin(),
+            ]
+        }
+    };
+    let (u, v) = (0.3, 0.4);
+    let pi = std::f64::consts::PI;
+    for r in [5.0, -5.0] {
+        let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Torus(
+            TorusSurface::try_new(c, z, x, 1.0, r).unwrap(),
+        ));
+        let Some((
+            geometry::FaceSurface::Swept(SweptSurface::Revolution {
+                profile,
+                origin,
+                axis,
+            }),
+            reversed,
+        )) = geometry::surface(&g, fit()).unwrap()
+        else {
+            panic!("not a revolution: {:?}", geometry::surface(&g, fit()))
+        };
+        assert_eq!((origin, axis), ([1.0, 2.0, 3.0], [0.0, 0.0, 1.0]));
+        let solidcore_record::brep::Curve::Circle { frame, radius } = profile else {
+            panic!("{profile:?}")
+        };
+        assert_eq!(radius, 5.0);
+        assert_eq!(
+            frame.origin,
+            [2.0, 2.0, 3.0],
+            "the tube's centre at C + R x"
+        );
+        assert_eq!(
+            (frame.x_axis, frame.y_axis),
+            ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            "from x towards z"
+        );
+        // The revolution's point at (angle, profile parameter).
+        let ours = move |u: f64, t: f64| {
+            let p = [
+                frame.origin[0] - origin[0]
+                    + radius * (t.cos() * frame.x_axis[0] + t.sin() * frame.y_axis[0]),
+                frame.origin[1] - origin[1]
+                    + radius * (t.cos() * frame.x_axis[1] + t.sin() * frame.y_axis[1]),
+                frame.origin[2] - origin[2]
+                    + radius * (t.cos() * frame.x_axis[2] + t.sin() * frame.y_axis[2]),
+            ];
+            [
+                origin[0] + p[0] * u.cos() - p[1] * u.sin(),
+                origin[1] + p[0] * u.sin() + p[1] * u.cos(),
+                origin[2] + p[2],
+            ]
+        };
+        let ot = if r < 0.0 { v + pi } else { v };
+        let (a, b) = (theirs(r)(u, v), ours(u, ot));
+        assert!(
+            (0..3).all(|i| (a[i] - b[i]).abs() < 1e-9),
+            "tube radius {r}: {a:?} {b:?}"
+        );
+        let agree = dot3(normal_at(theirs(r), u, v), normal_at(ours, u, ot)) > 0.0;
+        assert!(agree, "tube radius {r}");
+        assert!(!reversed, "tube radius {r}");
+    }
+    // A torus whose tube stays clear of its axis is still the record's torus.
+    let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Torus(
+        TorusSurface::try_new(c, z, x, 20.0, 5.0).unwrap(),
+    ));
+    assert!(matches!(
+        geometry::surface(&g, fit()).unwrap(),
+        Some((geometry::FaceSurface::Record(_), false))
+    ));
+}
+
+/// A placed spindle torus is its meridian circle revolved, placed: the circle, the axis point and
+/// the axis are mapped by the placement, and the side is kept (a placement that mirrors is
+/// refused). The torus of [`a_spindle_torus_is_its_meridian_circle_revolved`] (C = (1, 2, 3),
+/// R = 1, tube 5) placed by the quarter turn about z, twice the size and moved by 10 along x
+/// (`p ↦ (10 - 2y, 2x, 2z)`) is the spindle torus about (6, 2, 6) with reference direction y,
+/// R = 2 and tube 10: its circle about (6, 2, 6) + 2 y = (6, 4, 6), from y towards z. The
+/// identity placement leaves it as it was.
+#[test]
+fn a_placed_spindle_torus_is_its_meridian_circle_revolved_and_placed() {
+    use cadmpeg_ir::geometry::PlacedSurface;
+    use cadmpeg_ir::geometry::analytic::TorusSurface;
+    use cadmpeg_ir::transform::Transform;
+    use solidcore_step::assembly::SweptSurface;
+    let quarter = Transform::affine([
+        [0.0, -2.0, 0.0, 10.0],
+        [2.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 2.0, 0.0],
+    ])
+    .unwrap();
+    let identity = Transform::affine([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ])
+    .unwrap();
+    for r in [5.0, -5.0] {
+        let torus = SolvedSurfaceGeometry::Torus(
+            TorusSurface::try_new(
+                Point3::new(1.0, 2.0, 3.0),
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                1.0,
+                r,
+            )
+            .unwrap(),
+        );
+        for (placement, centre, tube, reference, radius) in [
+            (
+                quarter,
+                [6.0, 2.0, 6.0],
+                [6.0, 4.0, 6.0],
+                [0.0, 1.0, 0.0],
+                10.0,
+            ),
+            (
+                identity,
+                [1.0, 2.0, 3.0],
+                [2.0, 2.0, 3.0],
+                [1.0, 0.0, 0.0],
+                5.0,
+            ),
+        ] {
+            let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Transformed(
+                PlacedSurface::try_new(Box::new(torus.clone()), placement).unwrap(),
+            ));
+            let read = geometry::surface(&g, fit());
+            let Ok(Some((
+                geometry::FaceSurface::Swept(SweptSurface::Revolution {
+                    profile:
+                        solidcore_record::brep::Curve::Circle {
+                            frame,
+                            radius: tube_radius,
+                        },
+                    origin,
+                    axis,
+                }),
+                reversed,
+            ))) = read
+            else {
+                panic!("tube radius {r}: not a placed revolution: {read:?}")
+            };
+            assert_eq!((origin, axis), (centre, [0.0, 0.0, 1.0]), "tube radius {r}");
+            assert_eq!(tube_radius, radius, "tube radius {r}");
+            assert_eq!(frame.origin, tube, "tube radius {r}: the tube's centre");
+            assert_eq!(
+                (frame.x_axis, frame.y_axis),
+                (reference, [0.0, 0.0, 1.0]),
+                "tube radius {r}: from the reference direction towards the axis"
+            );
+            assert!(!reversed, "tube radius {r}");
+        }
+    }
 }

@@ -101,6 +101,7 @@ struct BodyKey {
     feature: u64,
     component: u64,
     transferred: bool,
+    envelope: bool,
     name: String,
     source_name: Option<String>,
     source_transform: [u64; 16],
@@ -120,6 +121,7 @@ impl BodyKey {
             feature: b.feature,
             component: b.component,
             transferred: b.transferred,
+            envelope: b.envelope,
             name: b.name.clone(),
             source_name: b.source_name.clone(),
             source_transform,
@@ -273,6 +275,9 @@ impl Writer {
         if b.transferred {
             r["transferred"] = json!(true);
         }
+        if b.envelope {
+            r["envelope"] = json!(true);
+        }
         if let Some(look) = &b.imported {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
             r["imported"] = json!({"color": look.color, "opacity": look.opacity, "faces": faces});
@@ -406,6 +411,19 @@ impl Model {
         pending.settle(&mut saved).then_some(saved)
     }
 
+    /// [`Self::saved`] when no import's SMLib check of its parts is still running
+    /// ([`Self::checking_imports`]); `None` while one is, without waiting for it (#20133). A
+    /// check can take many times as long as the import's read, and what it finds (a warning, a
+    /// healed part) is part of the model a design keeps: a model kept before the check ends
+    /// would open without it. A design saved meanwhile keeps no model, and is rebuilt when it
+    /// opens, as a design saved without the cache is; a save once the check has ended keeps it.
+    pub fn saved_if_checked(&self, doc: &Document) -> Option<SavedModel> {
+        if self.checking_imports() {
+            return None;
+        }
+        self.saved(doc)
+    }
+
     /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
     /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
@@ -423,12 +441,19 @@ impl Model {
             let mut w = Writer::default();
             let mut features = Vec::with_capacity(self.results.len());
             let mut pending = Vec::new();
-            for (k, r) in self.results.iter().enumerate() {
+            for (k, (feature, r)) in doc.features.iter().zip(&self.results).enumerate() {
                 if let Some(report) = r.import_report.as_ref().filter(|i| !i.checks.is_empty()) {
                     pending.push((k, report.clone()));
                 }
                 let state = w.state(&r.state).ok_or_else(|| kernel::KernelError::Invalid("not kept".into()))?;
                 let mut f = json!({"id": r.id, "fingerprint": hex(r.fingerprint), "ms": r.ms, "skipped": r.skipped, "state": state});
+                // The pose a pose-only feature was evaluated at, which its fingerprint leaves out:
+                // opening finds it the same and keeps the result (#12139).
+                if pose_only(feature)
+                    && let Some(pose) = self.poses.get(&r.id)
+                {
+                    f["pose"] = json!(hex(*pose));
+                }
                 if let Some(w) = &r.warning {
                     f["warning"] = json!(w);
                 }
@@ -557,6 +582,7 @@ impl SavedModel {
                 b.source_transform = m;
             }
             b.transferred = r.get("transferred").and_then(Json::as_bool).unwrap_or(false);
+            b.envelope = r.get("envelope").and_then(Json::as_bool).unwrap_or(false);
             // Measured once here, so every state holding it adds it up for the cache's budget.
             b.bytes = b.body.retained_bytes();
             if let Some(look) = r.get("imported") {
@@ -1072,6 +1098,8 @@ impl Model {
         let mut results = Vec::with_capacity(features.len());
         let mut construction = HashMap::new();
         let mut prepared_states = std::collections::HashSet::new();
+        // The pose-only features saved at the pose `doc` gives them: their results stand.
+        let mut poses = HashMap::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
@@ -1103,10 +1131,18 @@ impl Model {
                 }
             }
             let state = state.map(|at| states.get(at).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
+            if exact
+                && pose_only(f)
+                && let Some(pose) = r.get("pose").map(unhex).transpose()?
+                && pose == placement_digest(doc, f, Some(&before))
+            {
+                poses.insert(f.id, pose);
+            }
             let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
+                error_code: None,
                 internal: false,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
                 import_report: r
@@ -1128,11 +1164,18 @@ impl Model {
             }
             results.push(result);
         }
+        // The retained-outline notes as the model is now, whatever the file kept (an older one
+        // has none; a sketch may have been renamed since).
+        for (f, r) in doc.features.iter().zip(results.iter_mut()).filter(|(_, r)| !r.skipped && !r.unkept) {
+            r.warning = crate::eval::with_retained_notes(doc, r.warning.take(), f, &r.state);
+        }
         let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, heal_off: !heal, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
         // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
-        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f));
+        // One saved with the pose `doc` gives it is `doc`'s result as it is.
+        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f) && !poses.contains_key(&f.id));
+        model.poses = poses;
         if unkept > 0 || posed {
             // The features whose state the file did not keep, each evaluated again from the state
             // before it: nothing else in the model is missing then.
@@ -1155,23 +1198,38 @@ impl Model {
                     before = r.state.clone();
                     continue;
                 }
-                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
-                    ^ placement_digest(doc, f, Some(&before))
-                    ^ construct_digest(doc, &vals, f, Some(&before));
-                cache.states.put(
-                    cache_key(f, r.fingerprint, local, ctx, &before),
-                    CachedEval {
-                        error: None,
-                        warning: r.warning.clone(),
-                        import_report: r.import_report.clone(),
-                        repair: r.repair.clone(),
-                        lost_projections: None,
-                        ms: r.ms,
-                        state: r.state.clone(),
-                    },
-                    r.state.retained_bytes(),
-                    r.ms,
-                );
+                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, &before, &model.import_digests, 0);
+                let whole = CachedEval {
+                    error: None,
+                    error_code: None,
+                    warning: crate::eval::without_retained_notes(r.warning.clone()),
+                    import_report: r.import_report.clone(),
+                    repair: r.repair.clone(),
+                    lost_projections: None,
+                    ms: r.ms,
+                    state: r.state.clone(),
+                };
+                // And what it changed, by what it read, as an evaluation keeps it: the first edit
+                // after opening then evaluates only the features that read what the edit changed,
+                // as every later edit does, not every feature after the edit. An import's key also
+                // digests the features before it, so an import is left out (evaluated as before),
+                // as is a feature that names its pieces as later features pick them. So is one
+                // whose bodies were not stamped with this key (saved by a version that keyed them
+                // otherwise, or stamped by the whole model): `stamp` would work their names out
+                // afresh, with no lineage to work them from. It is evaluated again instead.
+                if let Some((k, read)) = &key.reads
+                    && !matches!(f.kind, FeatureKind::Import { .. })
+                    && !f.shell_piece_order
+                    && let Some(change) = r.state.change_from(&before, f.id, read)
+                    && change.bodies.iter().all(|b| match b {
+                        Changed::Made(b) => b.key == made_body_key(*k, &b.name),
+                        Changed::Kept(_) => true,
+                    })
+                {
+                    let bytes = change.retained_bytes();
+                    cache.changes.put(*k, whole.with(change), bytes, r.ms);
+                }
+                cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
                 before = r.state.clone();
             }
         }

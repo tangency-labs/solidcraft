@@ -31,8 +31,10 @@ editing a row and again when activating a saved row. An invalid value leaves the
 Clearing a body appearance allows component appearance or material colour to show through;
 face appearances keep their existing priority. Physical material changes affect measured mass.
 
-`config.row` supports `from` to copy another row, `rename` to rename an existing row, and
-`delete` to remove it. Names must be unique. To remove a style column, use
+`config.row` supports `from` to copy another row, `rename` to rename an existing row,
+`index` to move an existing row to that place in the table (0 is the first; the other rows keep
+their order and the active row stays active), and `delete` to remove it. Names must be unique.
+In the table, double-click a row's name to rename it, and use its up and down arrows to move it. To remove a style column, use
 `config.column` with `material` or `appearance` set to the target body and `delete: true`.
 
 Each row also has a fixed id, which `config.table` lists with the row. A rename keeps the id.

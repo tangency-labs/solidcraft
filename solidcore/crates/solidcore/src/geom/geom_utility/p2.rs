@@ -66,6 +66,7 @@
 //!   tangent; pinned v1.0.1's skewed line made them fall through to
 //!   [`PointSetType::Planar`].
 
+use crate::error::geom::GeomFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::geom_utility::p1::{
     self, add_point, determinant_3_vectors, determinate_4x4, intersect_three_planes,
@@ -401,12 +402,7 @@ pub fn line_line_at_distance(
     let (cl1, cl2) = match line_line_closest_point(line_pnt1, line_vec1, line_pnt2, line_vec2) {
         Ok(v) => v,
         Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
-        Err(_) => {
-            return Err(SolidError::geom_failed(
-                OP,
-                "the lines have no closest points",
-            ))
-        }
+        Err(e) => return Err(SolidError::geom_call(OP)(e)),
     };
     let p1 = line_pnt1 + cl1 * line_vec1;
     let p2 = line_pnt2 + cl2 * line_vec2;
@@ -414,7 +410,13 @@ pub fn line_line_at_distance(
     let mut beta = line_vec1.angle_between(line_vec2)?;
     beta /= 2.0;
     if dist_between > at_distance {
-        return Err(SolidError::geom_failed(OP, "the lines are too far apart"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::TooFarApart {
+                distance: dist_between,
+                limit: at_distance,
+            },
+        ));
     }
     let half_proj = sqrt(at_distance * at_distance - dist_between * dist_between) / 2.0;
     let dist_along_a = half_proj / beta.sin();
@@ -763,7 +765,12 @@ pub fn circle_plane_intersect(
         match intersect_two_planes(circle_origin, circle_normal, plane_point, plane_normal)? {
             PlanesIntersection::Line { point, direction } => (point, direction),
             PlanesIntersection::Parallel { .. } => {
-                return Err(SolidError::geom_failed(OP, "the planes are parallel"))
+                return Err(SolidError::geom(
+                    OP,
+                    GeomFailure::Defect {
+                        why: "intersect_two_planes found the circle's plane parallel to the plane, though the cross product of their normals passed the non-parallel check above (|n1 x n2|^2 >= SM_EFF_ZERO, above its own threshold)",
+                    },
+                ))
             }
         };
 
@@ -869,9 +876,11 @@ pub fn sphere_circle_sphere_circle_intersect(
         let mut dir2 = cir2_normal.normal_in_plane(cir1_normal);
         if dir1.length() <= EFF_ZERO || dir2.length() <= EFF_ZERO {
             // upstream: WARN("unexpected branch - needs review")
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 OP,
-                "the circles' planes give no direction",
+                GeomFailure::ZeroDirection {
+                    length: dir1.length().min(dir2.length()),
+                },
             ));
         }
         dir1 = dir1.unitize_or_z();
@@ -1031,9 +1040,9 @@ pub fn mult_4x4(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
 pub fn inverse_4x4(a: &[[f64; 4]; 4]) -> Result<[[f64; 4]; 4]> {
     let det = determinate_4x4(a);
     if is_zero(det) {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p2::inverse_4x4",
-            "the matrix is singular",
+            GeomFailure::Singular { measure: det },
         ));
     }
 
@@ -1069,11 +1078,52 @@ fn minor_3x3(a: &[[f64; 4]; 4], row: usize, col: usize) -> [[f64; 3]; 3] {
 
 // ---- curve differential geometry -------------------------------------------------------
 
+/// The power of two that brings `m` into `[1, 2)` (into `[2, 4)` from `2^1023` on;
+/// `2^1023` for zero or a subnormal, `2^-1022` for a value that is not finite). Scaling
+/// by a power of two is exact while the scaled values stay normal, so a product or
+/// quotient on the scaled values has the same bits as on the originals wherever neither
+/// overflows nor underflows.
+fn pow2_unit_scale(m: f64) -> f64 {
+    pow2(unit_scale_exponent(m))
+}
+
+/// The exponent of [`pow2_unit_scale`], in `[-1022, 1023]`.
+fn unit_scale_exponent(m: f64) -> i32 {
+    let biased_exponent = ((m.abs().to_bits() >> 52) & 0x7ff) as i32;
+    (1023 - biased_exponent).clamp(-1022, 1023)
+}
+
+/// `2^k` for `k` in `[-1022, 1023]` (clamped to it), a normal `f64`.
+fn pow2(k: i32) -> f64 {
+    f64::from_bits(((k.clamp(-1022, 1023) + 1023) as u64) << 52)
+}
+
+/// `v * 2^e` for any `|e| <= 4092`, in four factors of one sign, each a normal power of
+/// two: the product moves monotonically, so it overflows or underflows only where the
+/// result does, and is exact otherwise.
+fn times_pow2(v: Vec3, e: i32) -> Vec3 {
+    let quarter = e / 4;
+    let factor = pow2(quarter);
+    v * factor * factor * factor * pow2(e - 3 * quarter)
+}
+
+/// `v.length()` taken on `v` scaled by a power of two: finite for every finite `v`
+/// whose length is at most `f64::MAX`, and the same value as `v.length()` wherever
+/// no square overflows or underflows (before or after the scaling).
+fn scaled_length(v: Vec3) -> f64 {
+    let scale = pow2_unit_scale(v.max_dimension());
+    (v * scale).length() / scale
+}
+
 /// Frenet quantities from curve derivatives `vals = [P, P', P'', P''']`
 /// (`smgu_FrenetFromDerivatives`): returns `n + 1` vectors `[position, first
 /// derivative, curvature vector, torsion vector]` (`n <= 3`); the curvature vector
 /// has magnitude `k` along the normal, the torsion vector magnitude `tau` along the
-/// binormal.
+/// binormal. The curvature `P' x P'' x P' / |P'|^4` is taken with `P'` and `P''` each
+/// scaled by a power of two into `[1, 2)` and the exponents put back at the end, so
+/// `|P'|^4` does not overflow for a long tangent (upstream's then reads 0) and products
+/// that cancel do not overflow for a short one; wherever upstream's products neither
+/// overflow nor underflow the value is the same.
 ///
 /// # Errors
 ///
@@ -1101,23 +1151,49 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
 
     let tan_len_sq = d1.length_squared();
     if tan_len_sq < EFF_ZERO_SQ {
-        return Err(SolidError::geom_failed(OP, "the tangent has zero length"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::ZeroDerivative {
+                order: 1,
+                length: tan_len_sq,
+            },
+        ));
     }
-    let tan_len_fourth = tan_len_sq * tan_len_sq;
+    // with P' scaled by 2^e1 and P'' by 2^e2 the formula gives 2^(e2 - 2 e1) times the
+    // curvature, so 2^(2 e1 - e2) restores it
     let d2 = get(2);
-    let curvature = d1.cross(d2).cross(d1) / tan_len_fourth;
+    let e1 = unit_scale_exponent(d1.max_dimension());
+    let e2 = unit_scale_exponent(d2.max_dimension());
+    let d1_scaled = d1 * pow2(e1);
+    let d2_scaled = d2 * pow2(e2);
+    let scaled_len_sq = d1_scaled.length_squared();
+    let curvature = times_pow2(
+        d1_scaled.cross(d2_scaled).cross(d1_scaled) / (scaled_len_sq * scaled_len_sq),
+        2 * e1 - e2,
+    );
     out.push(curvature);
     if n == 2 {
         return Ok(out);
     }
 
     if is_zero(d2.length()) {
-        return Err(SolidError::geom_failed(OP, "the second derivative is zero"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::ZeroDerivative {
+                order: 2,
+                length: d2.length(),
+            },
+        ));
     }
     let cross_len = d1.cross(d2).length();
     let denominator = cross_len * cross_len;
     if is_zero(denominator) {
-        return Err(SolidError::geom_failed(OP, "the derivatives are parallel"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::Parallel {
+                measure: denominator,
+            },
+        ));
     }
     let numerator = determinant_3_vectors(d1, d2, get(3));
     let torsion = numerator / denominator;
@@ -1125,9 +1201,12 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
     let mut torsion_vec = d1.cross(curvature);
     let vec_len = torsion_vec.length();
     if vec_len < EFF_ZERO {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             OP,
-            "the torsion vector has zero length",
+            GeomFailure::ZeroDerivative {
+                order: 3,
+                length: vec_len,
+            },
         ));
     }
     torsion_vec *= torsion / vec_len;
@@ -1146,7 +1225,11 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
 /// lengths are compared relative to the larger (`SM_EFF_ZERO_SQRT / 10 * (1 + max)`), and
 /// the angle is between the two normals, where both curvatures exceed that gap; a smaller
 /// one is zero at it and has no normal, and then the two curvature vectors must lie within
-/// the gap of each other. Upstream takes the curvatures as the lengths of
+/// the gap of each other. Tangent and curvature lengths are taken on vectors scaled by a
+/// power of two, so a square past `f64::MAX` does not make them infinite; a tangent or
+/// curvature length that is still not finite grades the join below G1 or G2, and a G3
+/// gap or tolerance that is not finite grades it below G3. Upstream takes the curvatures
+/// as the lengths of
 /// the raw second derivatives (which depend on the parameter speed), compares them with
 /// an absolute `SM_EFF_ZERO_SQRT / 10`, and measures the angle of the first normal with
 /// itself (always 0).
@@ -1195,12 +1278,17 @@ pub fn evaluate_curve_continuity(
     let mut kind = ContinuityType::C0;
 
     // zero tangents stay C0
-    let vec1_len = vec1.length();
+    let vec1_len = scaled_length(vec1);
     if vec1_len < EFF_ZERO * (1.0 + vec1_max) {
         return Ok(kind);
     }
-    let vec2_len = vec2.length();
+    let vec2_len = scaled_length(vec2);
     if vec2_len < EFF_ZERO * (1.0 + vec2_max) {
+        return Ok(kind);
+    }
+    // a length that is not finite has no unit tangent (it would read as zero, and the
+    // angle as 0)
+    if !(vec1_len.is_finite() && vec2_len.is_finite()) {
         return Ok(kind);
     }
 
@@ -1229,8 +1317,13 @@ pub fn evaluate_curve_continuity(
         .get(2)
         .copied()
         .unwrap_or(Vec3::ZERO);
-    let curvature1 = k1.length();
-    let curvature2 = k2.length();
+    let curvature1 = scaled_length(k1);
+    let curvature2 = scaled_length(k2);
+    // A length past `f64::MAX` (or NaN) has no gap to compare against: an infinite
+    // tolerance would accept any pair (`inf <= inf`), so the join is not G2.
+    if !(curvature1.is_finite() && curvature2.is_finite()) {
+        return Ok(kind);
+    }
     let gap_tol = EFF_ZERO_SQRT / 10.0 * (1.0 + max2(curvature1, curvature2));
     // Two curvatures above the gap compare by length and normal. A curvature within the
     // gap of zero is zero at it and has no normal (upstream compares normals above
@@ -1282,7 +1375,8 @@ pub fn evaluate_curve_continuity(
         scaled_zero = max2(scaled_zero, this_scaled_zero);
         let g3_target = t1 - a1 * a1 * a1 * t2 - 3.0 * a1 * a2 * second2;
         let (g3_gap, _) = line_point_distance(Point3::ZERO, vec2, g3_target);
-        if g3_gap > scaled_zero {
+        // an overflow makes the gap NaN or the tolerance infinite: neither passes
+        if !(scaled_zero.is_finite() && g3_gap <= scaled_zero) {
             return Ok(kind);
         }
         kind = match kind {
@@ -1533,6 +1627,92 @@ mod tests {
         let a = ev(v(1.0, 0.0, 0.0), v(600.0, 9.0, 0.0));
         let b = ev(v(1.0 + 1e-7, 0.0, 0.0), v(600.0, 9.0, 0.0));
         assert_eq!(c(&a, &b), ContinuityType::C1);
+
+        // a curvature of length 1e200, whose square is past f64::MAX: an infinite length
+        // would make the gap tolerance infinite, and `inf <= inf` would accept any pair:
+        // opposite normals, and a unit curvature against the long one, are not G2
+        let huge_up = ev(v(1.0, 0.0, 0.0), v(0.0, 1e200, 0.0));
+        let huge_down = ev(v(1.0, 0.0, 0.0), v(0.0, -1e200, 0.0));
+        assert_eq!(c(&huge_up, &huge_down), ContinuityType::C1);
+        assert_eq!(c(&up, &huge_up), ContinuityType::C1);
+        assert_eq!(c(&huge_up, &up), ContinuityType::C1);
+        // the same overflowing curvature on both sides is the same curve: C2
+        assert_eq!(c(&huge_up, &huge_up), ContinuityType::C1C2);
+
+        // |P'|^4 overflows in the Frenet curvature (|P'| 2e77) while the true curvatures
+        // are 0.0625 with opposite normals: not G2 (both read as 0 when the denominator
+        // overflows)
+        let fast_up = ev(v(2e77, 0.0, 0.0), v(0.0, 2.5e153, 0.0));
+        let fast_down = ev(v(2e77, 0.0, 0.0), v(0.0, -2.5e153, 0.0));
+        assert_eq!(c(&fast_up, &fast_down), ContinuityType::C1);
+
+        // a short tangent (|P'| 2e-6) with P'' near f64::MAX whose products cancel: the
+        // curvature (0, 0, 1 / (2 a^2)) is finite, so the same evaluation on both sides is
+        // C2 (scaling P' up alone would overflow the cross product to NaN)
+        let a = 1.5 * 2f64.powi(-20);
+        let big = 1.5 * 2f64.powi(1023);
+        let cancel = ev(v(a, a, 0.0), v(big, big, 1.0));
+        assert_eq!(c(&cancel, &cancel), ContinuityType::C1C2);
+
+        // perpendicular tangents whose squared lengths overflow (|P'| 1e160): not G1
+        // (both unit tangents read as zero when the length overflows)
+        let along_x = ev(v(1e160, 0.0, 0.0), Vec3::ZERO);
+        let along_y = ev(v(0.0, 1e160, 0.0), Vec3::ZERO);
+        assert_eq!(c(&along_x, &along_y), ContinuityType::C0);
+
+        // G3: second derivatives (±1e200, 1, 0) along equal unit tangents are G2 (the
+        // same curvature 1) but not G3 by the Taylor test, whose gap is about 6e200; the
+        // overflowing gap must not pass as G3
+        let ev3 = |second| CurveEval {
+            position: v(1.0, 1.0, 0.0),
+            first: v(1.0, 0.0, 0.0),
+            second,
+            third: Some(Vec3::ZERO),
+        };
+        let g3_ahead = ev3(v(1e200, 1.0, 0.0));
+        let g3_behind = ev3(v(-1e200, 1.0, 0.0));
+        assert_eq!(c(&g3_ahead, &g3_behind), ContinuityType::C1G2);
+    }
+
+    /// The power-of-two scale at the ends of the `f64` range, and lengths of a 3-4-5
+    /// vector from the smallest normal to the largest finite exponent.
+    #[test]
+    fn scaled_length_is_exact_and_does_not_overflow() {
+        assert_eq!(pow2_unit_scale(1.0), 1.0);
+        assert_eq!(pow2_unit_scale(1.5), 1.0);
+        assert_eq!(pow2_unit_scale(-3.0), 0.5);
+        assert_eq!(pow2_unit_scale(0.0), 2f64.powi(1023));
+        assert_eq!(pow2_unit_scale(f64::MIN_POSITIVE / 4.0), 2f64.powi(1023));
+        assert_eq!(pow2_unit_scale(f64::MAX), f64::MIN_POSITIVE);
+        assert_eq!(pow2_unit_scale(f64::INFINITY), f64::MIN_POSITIVE);
+        assert_eq!(pow2_unit_scale(f64::NAN), f64::MIN_POSITIVE);
+
+        // where the plain length is finite and normal, the same bits
+        for (x, y, z) in [(3.0, 4.0, 0.0), (0.1, 0.2, 0.3), (1e150, -2e149, 7e148)] {
+            let a = v(x, y, z);
+            assert_eq!(scaled_length(a).to_bits(), a.length().to_bits());
+        }
+        // 3-4-5 at 2^e for e from -1020 to 1020: exactly 5 * 2^e
+        for e in (-1020..=1020).step_by(17) {
+            let p = 2f64.powi(e);
+            assert_eq!(scaled_length(v(3.0 * p, 4.0 * p, 0.0)), 5.0 * p);
+        }
+        // 2^e in four factors: exact across the whole range, overflow only past it
+        let one = v(1.0, 0.0, 0.0);
+        assert_eq!(times_pow2(one, 3068).x, f64::INFINITY);
+        assert_eq!(
+            times_pow2(v(2f64.powi(-1022), 0.0, 0.0), 2045).x,
+            2f64.powi(1023)
+        );
+        assert_eq!(
+            times_pow2(v(2f64.powi(1023), 0.0, 0.0), -2045).x,
+            2f64.powi(-1022)
+        );
+        assert_eq!(times_pow2(one, -5).x, 1.0 / 32.0);
+        assert_eq!(times_pow2(one, 0).x, 1.0);
+        assert_eq!(scaled_length(Vec3::ZERO), 0.0);
+        assert_eq!(scaled_length(v(f64::MAX, f64::MAX, 0.0)), f64::INFINITY);
+        assert!(scaled_length(v(f64::NAN, 1.0, 0.0)).is_nan());
     }
 
     /// WR-10: an oblique collinear set is Linear with the line tangent (pinned v1.0.1:

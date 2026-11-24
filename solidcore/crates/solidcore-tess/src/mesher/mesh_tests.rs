@@ -16,7 +16,7 @@ use solidcore::Vec3;
 
 use crate::vec::VecExt as _;
 
-use super::{PoleCap, SplitSide, cap_fan, cap_ring, edges, on_edges, ring_off_boundary, size};
+use super::{Lenient, Planned, PoleCap, Purpose, Shape, Sides, SplitSide, cap_fan, cap_ring, edges, on_edges, plan_face, poles, ring_off_boundary, seam, size, uv};
 
 fn record(body: &solidcore_ops::Body) -> brep::Brep {
     body.to_record().expect("the body's record").0
@@ -462,8 +462,8 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
 /// halved those sides round after round, and the walls' with them, toward the crescent's width,
 /// until edge 20 passed 20000 nodes and its faces were refused. Meshed at SolidCraft's export
 /// spec (a chord of 1/5000 of its size), a triangle of boundary nodes narrower than the chord is
-/// left as it is: the body meshes, nothing folds, the mesh is closed, a face is named short of
-/// its shape for being narrower than the chord, and no edge is near the node bound.
+/// left as it is: the body meshes, nothing folds, the mesh is closed, every face short of its
+/// shape is named for a sharp corner or a few degrees, and no edge is near the node bound.
 #[test]
 fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() {
     let b = crate::fixtures::fixture("rig_join_cap_touching_lips_base");
@@ -499,12 +499,17 @@ fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() 
     let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "lips on a base");
-    // Faces 11 and 17, the lips' end walls (1 x 18 mm), each have a side 0.0001 mm long at a
-    // corner, beside which the triangles are narrower than the chord: they are named. Their ears
-    // (two sides on the boundary) are still split, so they keep a smallest angle near the spec's.
-    for face in [11, 17] {
-        let u = stats.unshaped.iter().find(|u| u.face == face);
-        assert!(u.is_some_and(|u| u.limits.contains(&crate::ShapeLimit::Narrow) && u.smallest_angle > 15.0), "face {face}: {u:?}");
+    // The faces named short of their shape, as measured: the crescent's faces 9, 10 and 16 for
+    // corners sharper than the spec, and faces 5 and 7 for the shaping's rounds alone, with a
+    // smallest angle of 25.05 degrees. Faces 11 and 17, the lips' end walls (1 x 18 mm, a side
+    // 0.0001 mm long at a corner), reach the spec at the longest side the body's extent gives with
+    // its edges counted.
+    let named: Vec<usize> = stats.unshaped.iter().map(|u| u.face).collect();
+    assert_eq!(named, [5, 7, 9, 10, 16], "{:?}", stats.unshaped);
+    for u in &stats.unshaped {
+        let corner = u.limits.contains(&crate::ShapeLimit::Corner);
+        assert_eq!(corner, [9, 10, 16].contains(&u.face), "{u:?}");
+        assert!(corner || u.smallest_angle > 25.05, "{u:?}");
     }
     let most = plan.edges.iter().map(Vec::len).max().unwrap_or(0);
     assert!(most < edges::MAX_EDGE_NODES / 10, "an edge has {most} nodes");
@@ -636,6 +641,153 @@ fn a_pole_ring_is_even_round_the_pole_in_3d() {
     }
 }
 
+
+/// A face of a spline sphere whose only loop is 45 nodes all at its north pole (a manufacturer
+/// IGES fitting's face, #19469) has no area: the mesh path leaves the collapsed loop out and
+/// gives the face no triangles, where it refused the body with "a loop of 45 nodes all at one
+/// pole". The same face with a real loop beside it keeps meshing that loop.
+#[test]
+fn a_loop_collapsed_at_a_pole_bounds_no_area_on_the_mesh_path() {
+    let s = spline_sphere();
+    let face = poles::Face::new(s.clone(), 0.0);
+    let nodes: Vec<[f64; 2]> = (0..45).map(|k| [f64::from(k) / 45.0, 1.0]).collect();
+    let pts: Vec<Vec3> = nodes.iter().map(|q| s.derivs(q[0], q[1]).expect("evaluates").0).collect();
+    let collapsed = seam::Loop { uv: nodes, pts };
+    let rules = size::Rules::new(0.05, 22.9, None);
+    let (h, speed) = size::face_size(&s, &uv::domain(&s), &rules);
+    let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Split };
+    let mut stats = PlanStats::default();
+    let plan = plan_face(3, "rational spline", &face, std::slice::from_ref(&collapsed), &rules, (h, speed), 1e-6, &mut stats, Lenient::No, Purpose::Mesh(shape));
+    let Ok(Planned::Face(fp)) = plan else { panic!("the collapsed loop is left out") };
+    assert_eq!(fp.face, 3);
+    assert!(fp.triangles.is_empty() && fp.uv.is_empty());
+}
+
+/// The same collapsed loop run the other way round the pole has the surface's whole patch on its
+/// left: the face has area, but its boundary is one point, so the mesh path refuses it with "a
+/// loop of 45 nodes all at one pole" rather than leave a silent hole of zero-area triangles.
+#[test]
+fn a_loop_collapsed_at_a_pole_with_the_patch_on_its_left_is_refused() {
+    let s = spline_sphere();
+    let face = poles::Face::new(s.clone(), 0.0);
+    let nodes: Vec<[f64; 2]> = (0..45).map(|k| [1.0 - f64::from(k) / 45.0, 1.0]).collect();
+    let pts: Vec<Vec3> = nodes.iter().map(|q| s.derivs(q[0], q[1]).expect("evaluates").0).collect();
+    let collapsed = seam::Loop { uv: nodes, pts };
+    let rules = size::Rules::new(0.05, 22.9, None);
+    let (h, speed) = size::face_size(&s, &uv::domain(&s), &rules);
+    let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Split };
+    let mut stats = PlanStats::default();
+    let plan = plan_face(3, "rational spline", &face, std::slice::from_ref(&collapsed), &rules, (h, speed), 1e-6, &mut stats, Lenient::No, Purpose::Mesh(shape));
+    match plan {
+        Err(why) => {
+            let why = format!("{why:?}");
+            assert!(why.contains("all at one pole") || why.contains("boundary winds around the surface"), "refused for another reason: {why}");
+        }
+        Ok(_) => panic!("a face whose boundary is one point was planned"),
+    }
+}
+
+/// A loop with every node at a pole is refused ("a loop of N nodes all at one pole") when its
+/// nodes are one point in 3D, and is no cap to fan (a sliver, meshed by its boundary nodes) when
+/// they are spread along the collapsed line: the cap planner tells the two apart by the 3D points.
+#[test]
+fn an_all_pole_loop_is_refused_when_one_point_and_left_to_its_nodes_when_spread() {
+    let s = spline_sphere();
+    let face = poles::Face::new(s.clone(), 0.0);
+    let uvs: Vec<[f64; 2]> = (0..45).map(|k| [f64::from(k) / 45.0, 1.0]).collect();
+    let whole = 0..uvs.len();
+    let ranges = std::slice::from_ref(&whole);
+    let one_point: Vec<Vec3> = uvs.iter().map(|_| Vec3::new(0.0, 0.0, 1.0)).collect();
+    let why = super::pole_caps(&face, &uvs, &one_point, ranges, 1e-3).err();
+    assert_eq!(why.as_deref(), Some("a loop of 45 nodes all at one pole"));
+    let spread: Vec<Vec3> = (0..45).map(|k| Vec3::new(f64::from(k), 0.0, 1.0)).collect();
+    let caps = super::pole_caps(&face, &uvs, &spread, ranges, 1e-3).expect("a sliver is not refused");
+    assert!(caps.is_empty());
+}
+
+/// A sliver face narrower than the reach all along (a degree 1 patch 5.6 mm long and 0.0002 mm
+/// wide, cut along its diagonal: a triangle, #20167) has every boundary node at a collapsed
+/// line, though its loop is no point. The mesh path (with its sides kept whole, as the planner
+/// plans a face whose shaping would split sides on no edge) triangulates it by its boundary nodes
+/// instead of refusing it with "a loop of nodes all at one pole".
+#[test]
+fn a_sliver_narrower_than_the_reach_is_meshed_by_its_boundary_nodes() {
+    let ctrl = vec![[0.0, 0.0, 0.0, 1.0], [5.6, 0.0, 0.0, 1.0], [0.0, 0.0, 2e-4, 1.0], [5.6, 0.0, 2e-4, 1.0]];
+    let s = EvalSurface::nurbs([1, 1], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], [2, 2], ctrl);
+    let face = poles::Face::new(s.clone(), 0.0);
+    let mut nodes: Vec<[f64; 2]> = Vec::new();
+    for k in 0..4 {
+        let t = f64::from(k) / 4.0;
+        nodes.push([t, 0.0]);
+    }
+    for k in 0..4 {
+        let t = f64::from(k) / 4.0;
+        nodes.push([1.0, t]);
+    }
+    for k in 0..4 {
+        let t = f64::from(k) / 4.0;
+        nodes.push([1.0 - t, 1.0 - t]);
+    }
+    let pts: Vec<Vec3> = nodes.iter().map(|q| s.derivs(q[0], q[1]).expect("evaluates").0).collect();
+    let sliver = seam::Loop { uv: nodes, pts };
+    let rules = size::Rules::new(0.001, 22.9, None);
+    let (h, speed) = size::face_size(&s, &uv::domain(&s), &rules);
+    let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Kept };
+    let mut stats = PlanStats::default();
+    let plan = plan_face(7, "spline", &face, std::slice::from_ref(&sliver), &rules, (h, speed), 1e-3, &mut stats, Lenient::No, Purpose::Mesh(shape));
+    let fp = match plan {
+        Ok(Planned::Face(fp)) => fp,
+        Ok(Planned::Split(sides)) => panic!("the sliver asked for {} sides split", sides.len()),
+        Err(why) => panic!("the sliver is meshed, not refused: {why:?}"),
+    };
+    assert_eq!(fp.face, 7);
+    assert!(!fp.triangles.is_empty());
+    let n = u32::try_from(fp.uv.len()).expect("a count");
+    assert!(fp.triangles.iter().all(|t| t.iter().all(|&i| i < n)));
+}
+
+/// A flat open patch 0.0005 mm by 0.0002 mm, every boundary node within the reach (0.001 mm) of a
+/// collapsed line and of one point, has an area of 1e-7 mm2 though its surface has no period to
+/// run round: the mesh path never gives it an empty plan (it meshes it or refuses it).
+#[test]
+fn a_tiny_open_patch_within_the_reach_is_never_given_an_empty_plan() {
+    let ctrl = vec![[0.0, 0.0, 0.0, 1.0], [5e-4, 0.0, 0.0, 1.0], [0.0, 2e-4, 0.0, 1.0], [5e-4, 2e-4, 0.0, 1.0]];
+    let s = EvalSurface::nurbs([1, 1], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], [2, 2], ctrl);
+    let face = poles::Face::new(s.clone(), 0.0);
+    let nodes: Vec<[f64; 2]> = vec![[0.0, 0.0], [0.5, 0.0], [1.0, 0.0], [1.0, 0.5], [1.0, 1.0], [0.5, 1.0], [0.0, 1.0], [0.0, 0.5]];
+    let pts: Vec<Vec3> = nodes.iter().map(|q| s.derivs(q[0], q[1]).expect("evaluates").0).collect();
+    let tiny = seam::Loop { uv: nodes, pts };
+    let rules = size::Rules::new(0.001, 22.9, None);
+    let (h, speed) = size::face_size(&s, &uv::domain(&s), &rules);
+    let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Kept };
+    let mut stats = PlanStats::default();
+    let plan = plan_face(9, "spline", &face, std::slice::from_ref(&tiny), &rules, (h, speed), 1e-3, &mut stats, Lenient::No, Purpose::Mesh(shape));
+    if let Ok(Planned::Face(fp)) = plan {
+        assert!(!fp.triangles.is_empty(), "a face with area was given an empty plan");
+    }
+}
+
+/// A flat open patch whose v span is 1e-10 of its domain (0.0005 mm by 2e-14 mm) has area: its
+/// nodes are within the reach of one point, but the span is no rounding of a pole line, so the
+/// mesh path never gives it an empty plan.
+#[test]
+fn an_open_patch_with_a_span_under_a_billionth_of_its_domain_is_never_given_an_empty_plan() {
+    let ctrl = vec![[0.0, 0.0, 0.0, 1.0], [5e-4, 0.0, 0.0, 1.0], [0.0, 2e-4, 0.0, 1.0], [5e-4, 2e-4, 0.0, 1.0]];
+    let s = EvalSurface::nurbs([1, 1], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], [2, 2], ctrl);
+    let face = poles::Face::new(s.clone(), 0.0);
+    let top = 1e-10;
+    let nodes: Vec<[f64; 2]> = vec![[0.0, 0.0], [0.5, 0.0], [1.0, 0.0], [1.0, top], [0.5, top], [0.0, top]];
+    let pts: Vec<Vec3> = nodes.iter().map(|q| s.derivs(q[0], q[1]).expect("evaluates").0).collect();
+    let thin = seam::Loop { uv: nodes, pts };
+    let rules = size::Rules::new(0.001, 22.9, None);
+    let (h, speed) = size::face_size(&s, &uv::domain(&s), &rules);
+    let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Kept };
+    let mut stats = PlanStats::default();
+    let plan = plan_face(9, "spline", &face, std::slice::from_ref(&thin), &rules, (h, speed), 1e-3, &mut stats, Lenient::No, Purpose::Mesh(shape));
+    if let Ok(Planned::Face(fp)) = plan {
+        assert!(!fp.triangles.is_empty(), "a face with area was given an empty plan");
+    }
+}
 
 /// The (u, v) points and 3D points of a cap test: ring nodes 0..=5 along v = 0 from (0, 0) to
 /// (1, 0), and the run's nodes from 10 on, at the given (u, v) (their 3D points: the same, at

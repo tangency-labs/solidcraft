@@ -250,6 +250,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 app.preferences.ribbon_labels = selected == 0;
                             }
                         });
+                        let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(app.tr("prefs.legacy_surface_toolbar_hint"));
+                        crate::scenario::publish_target("prefs:legacy_surface_toolbar", response.rect);
                         ui_kit::row(ui, app.tr("prefs.menus"), |ui| {
                             let mut selected = usize::from(app.preferences.ribbon_icon_grid);
                             if ui_kit::segmented(
@@ -330,6 +332,73 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 "tab_double_click_renames",
             );
             windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
+            layout_check(
+                ui,
+                app.tr("window_ribbon.ribbon"),
+                app.tr("window_ribbon.preference_help"),
+                &mut app.preferences.pop_out_window_defaults.ribbon,
+                "pop_out_ribbon",
+            );
+            ui.add_enabled_ui(app.preferences.pop_out_window_defaults.ribbon, |ui| {
+                layout_check(
+                    ui,
+                    app.tr("window_ribbon.auto_hide"),
+                    app.tr("window_ribbon.auto_hide_help"),
+                    &mut app.preferences.pop_out_window_defaults.ribbon_auto_hide,
+                    "pop_out_ribbon_auto_hide",
+                );
+            });
+            layout_check(
+                ui,
+                app.tr("window_panels.other_panels"),
+                app.tr("window_panels.workspace_panels"),
+                &mut app.preferences.pop_out_window_defaults.panels,
+                "pop_out_other_panels",
+            );
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                use solidcraft_views::{CardHeaders, TopBar};
+                let labels = [app.tr("window_options.always"), app.tr("window_topbar.edge")];
+                ui_kit::settings_row_help(ui, app.tr("window_topbar.top_bar"), app.tr("window_topbar.preference_help"), |ui| {
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let mut selection = usize::from(options.top_bar == TopBar::Edge);
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(state) = TopBar::ALL.get(selection)
+                    {
+                        options.top_bar = *state;
+                    }
+                });
+                let labels = [app.tr("window_options.always"), app.tr("window_options.on_hover"), app.tr("window_options.hidden")];
+                ui_kit::settings_row_help(ui, app.tr("window_options.card_headers"), app.tr("window_options.card_headers_help"), |ui| {
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let mut selection = CardHeaders::ALL.iter().position(|state| *state == options.card_headers).unwrap_or_default();
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(state) = CardHeaders::ALL.get(selection)
+                    {
+                        options.card_headers = *state;
+                    }
+                });
+            });
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("window_size.interface_size"), app.tr("window_size.default_help"), |ui| {
+                    use solidcraft_views::InterfaceSize;
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let labels = InterfaceSize::ALL.map(|size| format!("{}%", u16::from(size)));
+                    let labels = labels.each_ref().map(String::as_str);
+                    let mut selection = InterfaceSize::ALL.iter().position(|size| *size == options.interface_size).unwrap_or_default();
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(size) = InterfaceSize::ALL.get(selection)
+                    {
+                        options.interface_size = *size;
+                    }
+                });
+            });
+            layout_check(
+                ui,
+                app.tr("window_options.keep_on_top"),
+                app.tr("window_options.keep_on_top_help"),
+                &mut app.preferences.pop_out_window_defaults.keep_on_top,
+                "pop_out_keep_on_top",
+            );
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
@@ -355,19 +424,21 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.show_design_view_switcher,
                 "show_design_view_switcher",
             );
+            let response = setting::workspace_follows_view(app, ui);
+            crate::scenario::publish_target("prefs:workspace_follows_view", response.rect);
+            layout_check(
+                ui,
+                app.tr("prefs.clear_view_tabs"),
+                app.tr("prefs.clear_view_tabs.help"),
+                &mut app.preferences.clear_view_tabs,
+                "clear_view_tabs",
+            );
             layout_check(
                 ui,
                 app.tr("prefs.design_sub_tab_sheets"),
                 app.tr("prefs.design_sub_tab_sheets_note"),
                 &mut app.preferences.design_sub_tab_sheets,
                 "design_sub_tab_sheets",
-            );
-            layout_check(
-                ui,
-                app.tr("prefs.design_sub_tab_sketches"),
-                app.tr("prefs.design_sub_tab_sketches_note"),
-                &mut app.preferences.design_sub_tab_sketches,
-                "design_sub_tab_sketches",
             );
             layout_check(
                 ui,
@@ -427,6 +498,11 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.preferences.library_thumbnail_size = *size;
             }
             ui_kit::text(ui, app.tr("library.thumbnail_help"), ui_kit::Text::Note("document_browser_size"));
+            // The Browser tree panel can be closed from its own host menu; this control brings it
+            // back (#16058).
+            let browser_label = app.tr("prefs.layout_page.browser_tree");
+            let browser_help = app.tr("prefs.layout_page.browser_tree_note");
+            browser_tree_check(ui, app, browser_label, browser_help);
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.history_sketches"), app.tr("prefs.history_sketches_note"), |ui| {
                     let mut selected = usize::from(app.preferences.history_sketches == HistorySketches::UnderFeature);
@@ -541,6 +617,25 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.tr("prefs.history_steps_component_note"),
                     &mut app.preferences.history_steps_component,
                     "history_steps_component",
+                );
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_last_stops_at_component"),
+                    app.tr("prefs.history_last_stops_at_component_note"),
+                    &mut app.preferences.history_last_stops_at_component,
+                    "history_last_stops_at_component",
+                );
+            });
+            // What a feature's menu does with several selected features, in a row of its own for
+            // the same reason.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    app.tr("prefs.feature_menus_act_on_selection"),
+                    app.tr("prefs.feature_menus_act_on_selection_note"),
+                    &mut app.preferences.feature_menus_act_on_selection,
+                    "feature_menus_act_on_selection",
                 );
             });
         });
@@ -699,6 +794,29 @@ pub(super) fn windows_smooth_window_drag_row(app: &mut SolveApp, ui: &mut egui::
         &mut app.preferences.windows_smooth_window_drag,
         "windows_smooth_window_drag",
     );
+}
+
+/// Keep the Browser tree panel reachable from Layout settings. The panel closes from its own host
+/// menu, and the window has no other way back (#16058).
+fn browser_tree_check(ui: &mut egui::Ui, app: &mut SolveApp, label: &str, help: &str) {
+    let t = Tokens::get();
+    let mut visible = crate::browser::panel_open(app);
+    let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16).min(ui.max_rect().width());
+    ui.allocate_ui_with_layout(egui::vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui_kit::settings_form(ui, 0.0, |ui| {
+            ui_kit::row(ui, "", |ui| {
+                ui.spacing_mut().item_spacing.x = t.space_6;
+                let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
+                let response =
+                    ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, &mut visible).backing_on_hover_text(help));
+                crate::scenario::publish_target("prefs:browser_tree", response.rect);
+                ui_kit::help_icon(ui, help);
+                if response.changed() {
+                    let _ = app.run("view.browser", json!({"visible": visible}));
+                }
+            })
+        });
+    });
 }
 
 /// Keep native checkbox responses and one real search target; guidance stays on hover.

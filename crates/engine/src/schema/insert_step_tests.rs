@@ -13,7 +13,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<InsertStepParams>(),
-        &["flatten", "folder", "history", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
+        &["envelope", "flatten", "folder", "history", "link", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
     );
 }
 
@@ -41,6 +41,9 @@ fn strict_keeps_todays_errors() {
         ("file.insert_step", json!({"path": "a.iges", "names": []})),
         ("file.insert_step", json!({"path": "a.fcstd", "folder": "yes"})),
         ("file.insert_step", json!({"path": "a.3dm", "folder": 1})),
+        ("file.insert_step", json!({"path": "a.step", "envelope": "hull"})),
+        ("file.insert_step", json!({"path": "a.step", "envelope": true})),
+        ("file.insert_step", json!({"path": "x.stl", "envelope": 5})),
         ("file.insert_step", json!({"path": "a.step", "flatten": "yes"})),
         ("file.insert_step", json!({"path": "x.stl", "flatten": 1})),
         // `matrix` is the handler's to read; `tolerance` only with it.
@@ -51,6 +54,8 @@ fn strict_keeps_todays_errors() {
         ("file.insert_step", json!({"path": "a.step", "matrix": [1, 2, 3], "tolerance": "loose"})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "tolerance": 0})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "tolerance": 0.01})),
+        ("file.insert_step", json!({"path": "a.step", "link": "yes"})),
+        ("file.insert_step", json!({"path": "a.stl", "link": "yes"})),
         // A file that isn't there.
         ("file.insert_step", json!({"path": "does-not-exist.step"})),
         ("file.insert_step", json!({"path": "does-not-exist.step", "up": "Z", "names": " Auto ", "folder": false})),
@@ -158,6 +163,9 @@ fn the_schema_takes_what_the_handler_reads() {
     let matrix = json!([0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]);
     for (p, takes) in [
         (json!({"path": "a.step"}), true),
+        (json!({"path": "a.step", "link": false}), true),
+        (json!({"path": "a.step", "link": null}), true),
+        (json!({"path": "a.step", "link": "yes"}), false),
         (json!({"path": "a.STP", "name": "N", "up": "y", "names": "auto", "folder": true, "flatten": true}), true),
         (json!({"path": "a.iges", "up": null, "names": null, "folder": null, "matrix": null, "tolerance": null}), true),
         (json!({"path": "a.fcstd", "matrix": matrix, "tolerance": 1e-9}), true),
@@ -315,6 +323,10 @@ fn replies_match_the_output_schema() {
     let quarter = json!([0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]);
     let placed = run(json!({"path": frame, "up": "y", "matrix": quarter, "tolerance": 1e-9}));
     assert_eq!(placed["transform"][3][0], json!(100.0), "{placed}");
+    // With an envelope: a hidden box around the plate and both posts, in the import's component.
+    let enveloped = run(json!({"path": frame, "envelope": "box", "matrix": [1, 0, 0, 100, 0, 1, 0, 0, 0, 0, 1, 0]}));
+    assert_eq!(enveloped["envelope"], json!(format!("{} Envelope", enveloped["component_name"].as_str().unwrap_or(""))), "{enveloped}");
+    run(json!({"path": block, "envelope": null}));
 
     // A misspelt key still runs in Warn, says so, and the reply still matches.
     let warned = s.execute("file.insert_step", &json!({"path": block, "toleranc": 1})).unwrap_or_else(|e| panic!("{e}"));
@@ -333,6 +345,8 @@ fn strict_runs_the_calls_that_work() {
     for p in [
         json!({"path": block}),
         json!({"path": block, "name": "Brake"}),
+        json!({"path": block, "link": false}),
+        json!({"path": block, "link": true}),
         json!({"path": block, "up": "z", "names": "auto", "folder": true}),
         json!({"path": block, "tolerance": "x"}),
         json!({"path": block, "matrix": null, "tolerance": []}),
@@ -340,6 +354,7 @@ fn strict_runs_the_calls_that_work() {
         json!({"path": frame, "flatten": true}),
         json!({"path": frame, "flatten": null}),
         json!({"path": frame, "matrix": [0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0], "tolerance": 1e-9}),
+        json!({"path": frame, "envelope": "box"}),
     ] {
         s.execute("file.insert_step", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
     }

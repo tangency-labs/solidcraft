@@ -62,14 +62,10 @@
 
 use goldens::case::repo_root;
 use goldens::compare::values_agree;
-use goldens::{registry, CaseContext};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::mass::enclosure::{
-    enclose_face_area_relative, enclose_mass_properties, enclose_volume, Bounds,
-};
+use solidcore::mass::enclosure::{enclose_face_area_relative, enclose_volume, Bounds};
 use solidcore::mass::integrator::properties::{brep_volume, face_properties, PropertyAttributes};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
@@ -79,8 +75,6 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, FaceId, Kernel, Result, SolidError};
 
 const UNIT: &str = "blend.fillet_executive_p3";
-/// The goldens' default `--seeds`.
-const SEEDS: usize = 16;
 /// The width asked of each enclosure, relative to its value's scale.
 const ENCLOSURE_WIDTH: f64 = 1e-5;
 /// The fillet rows' integration accuracy (`brep_mass_properties` at `1e-4`), relative to
@@ -89,213 +83,27 @@ const FILLET_ACCURACY: f64 = 1e-4;
 /// The tests the fillet rows are split into, by body.
 const PARTS: usize = 4;
 
-/// Where a certified enclosure of the true value lies against two estimates of it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Side {
-    /// Strictly on the new value's side of their midpoint: the new value is nearer.
-    Closer,
-    /// Strictly on the old value's side: the new value is farther.
-    Farther,
-    /// Holding (or touching) the midpoint: neither can be ranked.
-    Equal,
-}
-
-/// The side of `[lo, hi]` against the midpoint of `o` (old) and `n` (new). `None` when they
-/// did not move (`o == n`), for an empty enclosure, or for a value that is not finite (every
-/// comparison is written so that NaN fails). The midpoint `(o + n) / 2` is bracketed by the
-/// floats either side of its rounded value: the sum rounds by at most half a unit in its last
-/// place, and the halving is exact.
-fn side(o: f64, n: f64, lo: f64, hi: f64) -> Option<Side> {
-    if !(o.is_finite() && n.is_finite() && lo <= hi) || o == n {
-        return None;
-    }
-    let m = (o + n) / 2.0;
-    if !m.is_finite() {
-        return None;
-    }
-    let (m_lo, m_hi) = (m.next_down(), m.next_up());
-    let (above, below) = (lo > m_hi, hi < m_lo);
-    Some(if (n > o && above) || (n < o && below) {
-        Side::Closer
-    } else if (n > o && below) || (n < o && above) {
-        Side::Farther
-    } else {
-        Side::Equal
-    })
-}
-
-/// A moved row: its case, main's `mass_properties` and this branch's.
-type Row = (&'static str, [f64; 12], [f64; 12]);
+#[path = "moved_mass_rows/harness.rs"]
+mod harness;
+use harness::{side, within_accuracy, Row, Side, Table};
 
 include!("mass_knot_line_moved_rows/rows.rs");
 include!("mass_knot_line_moved_rows/expected.rs");
 
-/// The names of a record's entries.
-const NAMES: [&str; 12] = [
-    "area",
-    "volume",
-    "mass",
-    "centroid x",
-    "centroid y",
-    "centroid z",
-    "inertia x",
-    "inertia y",
-    "inertia z",
-    "product yz",
-    "product zx",
-    "product xy",
-];
+/// The fillet rows and how they are classified.
+const TABLE: Table = Table {
+    unit: UNIT,
+    tag: "KNOTLINE",
+    rows: &ROWS,
+    parts: PARTS,
+    width: ENCLOSURE_WIDTH,
+    accuracy: FILLET_ACCURACY,
+};
 
-/// A body enclosed already: its rows (main's, this branch's), its result geometry, and
-/// each entry's enclosure and scale.
-type Enclosed = ([f64; 12], [f64; 12], Vec<f64>, Vec<Bounds>, Vec<f64>);
-
-/// The part of [`ROWS`] row `index` is classified in: rows with the same old and new rows
-/// share one, so a body met twice is enclosed once.
-fn part_of(index: usize) -> usize {
-    let (_, old, new) = ROWS[index];
-    let first = ROWS.iter().position(|r| r.1 == old && r.2 == new).unwrap();
-    first % PARTS
-}
-
-/// What an EQUAL entry certifies: the new value is within `|n - o| / 2 + w` of the true one.
-/// Whether that bound is within the record's accuracy (`accuracy * scale`); where it is
-/// not, the enclosure is too wide for EQUAL to say the new value is as good as asked.
-fn within_accuracy(o: f64, n: f64, band: Bounds, accuracy: f64, scale: f64) -> bool {
-    (n - o).abs() / 2.0 + band.width() <= accuracy * scale
-}
-
-/// A classification: `(case, entry, side)` for each moved entry in order, and the entries
-/// whose [`within_accuracy`] bound is not met.
-type Classified = (Vec<(&'static str, usize, Side)>, Vec<(&'static str, usize)>);
-
-/// Classifies every moved entry of the rows of [`ROWS`] in `part`.
-fn classify(part: usize) -> Classified {
-    let ctx = CaseContext {
-        root: repo_root(),
-        seeds: SEEDS,
-    };
-    let reg = registry();
-    let unit = reg.iter().find(|u| u.id() == UNIT).unwrap();
-    let cases = unit.cases(&ctx).unwrap();
-    let mut classes = Vec::new();
-    let mut wide = Vec::new();
-    let mut enclosed: Vec<Enclosed> = Vec::new();
-    let (mut rows, mut entries, mut equal) = (0_usize, 0_usize, 0_usize);
-    for (index, &(name, old, new)) in ROWS.iter().enumerate() {
-        if part_of(index) != part {
-            continue;
-        }
-        rows += 1;
-        let case = cases.iter().find(|c| c.name == name).unwrap();
-        goldens::dump::capture();
-        let out = unit.run_rust(case);
-        let captured = goldens::dump::take();
-        let out = out.unwrap();
-        // A bless keeps a committed line that agrees with the run under `values_agree`
-        // (`1e-9` relative), so the run is held to that, and the classes to the committed row.
-        let run: Vec<f64> = out.values.get("mass_properties").unwrap().clone();
-        assert_eq!(run.len(), 12, "{name}");
-        for (i, (&x, &y)) in run.iter().zip(&new).enumerate() {
-            assert!(
-                values_agree(x, y, None),
-                "{name}: the run's {} {x} does not reproduce this branch's row {y}",
-                NAMES[i]
-            );
-        }
-        let geometry: Vec<f64> = out.values.get("result_geometry").unwrap().clone();
-        let known = enclosed
-            .iter()
-            .find(|(o, n, g, _, _)| *o == old && *n == new && *g == geometry);
-        let (bands, scales) = if let Some((_, _, _, bands, scales)) = known {
-            eprintln!("{name}: the body of an earlier row (same rows, same result geometry)");
-            (bands.clone(), scales.clone())
-        } else {
-            let mut bodies = captured.into_iter().filter(|c| c.label == "mass");
-            let body = bodies.next().unwrap().brep.unwrap();
-            assert!(bodies.next().is_none(), "{name}: more than one mass body");
-            let k = Kernel::default();
-            let mut b = body.clone_standing_for_self().unwrap();
-            let r = 0.5
-                * calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default())
-                    .unwrap()
-                    .size()
-                    .length();
-            let e = enclose_mass_properties(&k, &mut b, ENCLOSURE_WIDTH).unwrap();
-            if let Some((q, stop)) = e.short {
-                eprintln!("{name}: the {q:?} enclosure stopped at {stop:?}, its band wider");
-            }
-            let v = e.volume.hi;
-            let vr2 = v * r * r;
-            let mut bands = vec![e.area, e.volume, e.volume];
-            let mut scales = vec![e.area.hi, v, v];
-            for (group, scale) in [e.centroid, e.inertia, e.products]
-                .into_iter()
-                .zip([r, vr2, vr2])
-            {
-                bands.extend(group);
-                scales.extend([scale; 3]);
-            }
-            enclosed.push((old, new, geometry, bands.clone(), scales.clone()));
-            (bands, scales)
-        };
-        for i in 0..12 {
-            let (o, n, band) = (old[i], new[i], bands[i]);
-            let Some(class) = side(o, n, band.lo, band.hi) else {
-                assert_eq!(
-                    o.to_bits(),
-                    n.to_bits(),
-                    "{name}: {} not classified",
-                    NAMES[i]
-                );
-                continue;
-            };
-            entries += 1;
-            if class == Side::Equal {
-                equal += 1;
-            }
-            eprintln!(
-                "KNOTLINE {class:?} {name}: {} main {o:e}, now {n:e}, move/scale {:e}, \
-                 enclosure [{:e}, {:e}], w/scale {:e}",
-                NAMES[i],
-                (n - o).abs() / scales[i],
-                band.lo,
-                band.hi,
-                band.width() / scales[i]
-            );
-            classes.push((name, i, class));
-            if !within_accuracy(o, n, band, FILLET_ACCURACY, scales[i]) {
-                eprintln!("KNOTLINE WIDE {name}: {}", NAMES[i]);
-                wide.push((name, i));
-            }
-        }
-    }
-    eprintln!(
-        "KNOTLINE SUMMARY part {part}: {rows} rows, {} bodies, {entries} moved entries: \
-         {equal} EQUAL",
-        enclosed.len()
-    );
-    (classes, wide)
-}
-
-/// The entries of `table` whose row is in `part`.
-fn in_part<T: Copy>(table: &[T], part: usize, case: impl Fn(&T) -> &str) -> Vec<T> {
-    table
-        .iter()
-        .copied()
-        .filter(|e| {
-            let index = ROWS.iter().position(|r| r.0 == case(e)).unwrap();
-            part_of(index) == part
-        })
-        .collect()
-}
-
-/// Classifies `part` and checks it against [`EXPECTED`] and [`WIDE`].
+/// Classifies `part` and checks it against [`EXPECTED`] and [`WIDE`]: no entry is FARTHER.
 fn check(part: usize) {
-    let (classes, wide) = classify(part);
-    assert!(classes.iter().all(|c| c.2 != Side::Farther), "{classes:#?}");
-    assert_eq!(classes, in_part(&EXPECTED, part, |e| e.0), "{classes:#?}");
-    assert_eq!(wide, in_part(&WIDE, part, |e| e.0), "{wide:#?}");
+    assert!(EXPECTED.iter().all(|e| e.2 != Side::Farther));
+    TABLE.check(part, &EXPECTED, &WIDE);
 }
 
 #[test]
@@ -325,17 +133,9 @@ fn moved_fillet_entries_are_classified_part_3() {
 /// The pinned table is the moved entries of [`ROWS`], in order, and every row is in a part.
 #[test]
 fn expected_lists_every_moved_entry() {
-    let moved: Vec<(&str, usize)> = ROWS
-        .iter()
-        .flat_map(|(name, old, new)| {
-            (0..12)
-                .filter(|&i| old[i].to_bits() != new[i].to_bits())
-                .map(move |i| (*name, i))
-        })
-        .collect();
     let pinned: Vec<(&str, usize)> = EXPECTED.iter().map(|e| (e.0, e.1)).collect();
-    assert_eq!(moved, pinned);
-    assert!((0..ROWS.len()).all(|i| part_of(i) < PARTS));
+    assert_eq!(TABLE.moved(), pinned);
+    assert!((0..ROWS.len()).all(|i| TABLE.part_of(i) < PARTS));
 }
 
 /// A `corpus.parity` file whose record moved: its path under `pt_TestFiles`, and its area

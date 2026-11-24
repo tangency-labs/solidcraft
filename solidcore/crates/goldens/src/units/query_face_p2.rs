@@ -941,6 +941,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     trace.extend(cache_state(b, f).map_err(|e| harness(e.to_string()))?);
                 }
             }
+            #[cfg(test)]
+            crate::certify::written(b);
             Ok(if traced {
                 Output::new().values("cached_pc", trace)
             } else {

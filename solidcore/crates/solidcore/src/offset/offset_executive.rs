@@ -18,6 +18,7 @@ mod face;
 mod merge;
 pub mod p1;
 pub mod p2;
+mod periodic_boundary;
 pub mod reach;
 mod step_gaps;
 mod vertex;
