@@ -3229,6 +3229,9 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
             Key::F6 => app.animate_view("fit"),
+            // With Preferences open, Delete belongs to it (a saved layout, #17129), never to the
+            // design selection behind it.
+            Key::Delete | Key::Backspace if app.prefs_window.shell.open => {}
             Key::Backspace if crate::tools::undo_spline_point(app) => {}
             Key::Delete | Key::Backspace => {
                 if !crate::timeline_left::delete_selected_folders(app) {

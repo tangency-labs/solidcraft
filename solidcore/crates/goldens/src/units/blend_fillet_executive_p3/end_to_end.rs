@@ -1886,7 +1886,7 @@ pub(super) mod round_definition_proof {
     /// golden's accuracy and at the integrator's finest, where it converges.
     pub(in super::super) struct Estimates {
         /// At [`MASS_ACCURACY`], as the golden measures.
-        golden: MassProperties,
+        pub(in super::super) golden: MassProperties,
         /// At [`ESTIMATE_ACCURACY_FINEST`].
         converged: MassProperties,
         /// The certified volume band `[lo, hi]`.
@@ -3560,6 +3560,12 @@ mod g5_blend_corner_certificates {
 #[cfg(test)]
 #[path = "wr613_certificates.rs"]
 mod wr613_certificates;
+
+/// WR-646 (#18917): the variable-radius rows whose rounds now follow their law, each
+/// certified on its finished body.
+#[cfg(test)]
+#[path = "wr646_certificates.rs"]
+mod wr646_certificates;
 
 #[cfg(test)]
 mod wr664_near_knot_trims {

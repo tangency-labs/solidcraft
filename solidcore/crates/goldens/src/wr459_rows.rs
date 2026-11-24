@@ -34,14 +34,14 @@ use crate::UnitDiff;
 /// The unit.
 const UNIT: &str = "blend.fillet_executive_p3";
 
-/// Main's committed lines of the [`ROWS`] rows (`crates/goldens/expected` at cdf65fdc6f,
+/// Main's committed lines of the [`ROWS`] rows (`crates/goldens/expected` at 77f72628af,
 /// before this change re-blessed them), one per line, sorted by case.
 const MAIN_LINES: &str = include_str!("wr459_rows/main_lines.jsonl");
 
 /// Generated cases per unit, as `goldens` runs them (`main.rs` `DEFAULT_SEEDS`).
 const SEEDS: usize = 16;
 
-/// One row: case, the hash of main's committed line (its golden file at cdf65fdc6f, the
+/// One row: case, the hash of main's committed line (its golden file at 77f72628af, the
 /// line in [`MAIN_LINES`]; [`record`]), and per
 /// moved edge `(edge, main's stored-trim count, this run's)`.
 type Row = (&'static str, u64, &'static [(usize, u8, u8)]);
@@ -214,7 +214,7 @@ const ROWS: &[Row] = &[
     ),
     (
         "issue_2176_tabbed_plate_disc_wall_r0_5",
-        0xe756_2c0e_0f28_d1d6,
+        0xf1ee_c3aa_024d_b6a2,
         &[
             (1, 2, 1),
             (2, 2, 1),
@@ -228,7 +228,7 @@ const ROWS: &[Row] = &[
     ),
     (
         "issue_2176_tabbed_plate_tab_side_r0_5",
-        0xa45f_0935_892e_92b0,
+        0x9231_648c_58ea_8229,
         &[
             (0, 2, 0),
             (1, 2, 1),
@@ -240,7 +240,7 @@ const ROWS: &[Row] = &[
     ),
     (
         "issue_2176_tabbed_plate_tab_top_r0_5",
-        0x4e8d_3761_d3bd_5d24,
+        0xc0b7_4d8b_8be8_c078,
         &[(0, 2, 1), (2, 2, 1), (4, 2, 1), (7, 2, 1)],
     ),
     (
@@ -940,7 +940,7 @@ const ROWS: &[Row] = &[
     ),
     (
         "sweep5-letter_g-e1-r1.0",
-        0xafeb_40ac_6875_4f71,
+        0xd072_7ce2_51cb_460c,
         &[(14, 2, 1), (24, 2, 1), (27, 2, 1)],
     ),
 ];

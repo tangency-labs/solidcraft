@@ -246,14 +246,11 @@ fn default_kernel_builds_the_depths_below_the_floor() {
 fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
