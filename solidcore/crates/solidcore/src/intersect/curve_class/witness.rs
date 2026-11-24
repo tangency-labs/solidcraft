@@ -127,9 +127,25 @@ fn foot(origin: Point3, direction: Vec3, point: Point3) -> Point3 {
     origin + direction * (point - origin).dot(direction)
 }
 
+/// `points` as met points, or undecided where one of them is not finite.
+fn finite(points: Vec<Point3>) -> Meet {
+    if points
+        .iter()
+        .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+    {
+        Meet::Points(points)
+    } else {
+        Meet::Undecided
+    }
+}
+
 /// How the line (`point`, unit `direction`) meets the circle; `line_is_e` says which
-/// carrier's points are returned. `reference` is a point of E's stretch, where the line's
-/// offset from the circle's plane is measured.
+/// carrier's points are returned. `stretch` holds E's points at the stretch's ends, where
+/// the line's offset from the circle's plane is measured.
+///
+/// Within the tolerance of tangent the true crossings are returned, not the touching
+/// point: a line just inside the circle crosses it twice, as far apart as the depth
+/// allows, and the caller decides whether both lie at the vertex.
 #[allow(clippy::too_many_arguments)]
 fn line_circle(
     point: Point3,
@@ -138,54 +154,62 @@ fn line_circle(
     normal: Vec3,
     radius: f64,
     line_is_e: bool,
-    reference: Point3,
+    stretch: [Point3; 2],
     tol: f64,
     sin_ang: f64,
 ) -> Meet {
-    let p = foot(point, direction, reference);
     let dn = direction.dot(normal);
     let on_circle = |x: Point3| -> Option<Point3> {
         let (len, u) = (x - origin).length_and_unit()?;
         (len > EFF_ZERO).then_some(origin + u * radius)
     };
+    let project = |points: Vec<Point3>| -> Meet {
+        if line_is_e {
+            return finite(points);
+        }
+        let mut out = Vec::new();
+        for p in points {
+            match on_circle(p) {
+                Some(c) => out.push(c),
+                None => return Meet::Undecided,
+            }
+        }
+        finite(out)
+    };
     if dn.abs() <= sin_ang {
-        // the line lies along the circle's plane: in it, or apart from it
-        let h = (p - origin).dot(normal);
-        if h.abs() > tol {
+        // the line lies along the circle's plane: in it, or apart from it, decided at
+        // both ends of the stretch
+        let [a, b] = stretch;
+        let h = |x: Point3| (foot(point, direction, x) - origin).dot(normal);
+        let (ha, hb) = (h(a), h(b));
+        if ha.abs() > tol && hb.abs() > tol && ha * hb > 0.0 {
             return Meet::Points(Vec::new());
         }
-        let in_plane = p - normal * h;
+        if ha.abs() > tol || hb.abs() > tol {
+            return Meet::Undecided;
+        }
+        let p = foot(point, direction, midpoint_of(a, b));
+        let in_plane = p - normal * (p - origin).dot(normal);
         let f = foot(in_plane, direction, origin);
         let delta = (f - origin).length();
-        if (delta - radius).abs() <= tol {
-            // tangent: one point, the foot of the centre (on the circle for a circle E)
-            if line_is_e {
-                return Meet::Points(vec![f]);
-            }
-            return match on_circle(f) {
-                Some(c) => Meet::Points(vec![c]),
-                None => Meet::Undecided,
-            };
+        if delta > radius + tol {
+            return Meet::Points(Vec::new());
         }
-        if delta < radius {
-            let half = (radius * radius - delta * delta).sqrt();
-            return Meet::Points(vec![f - direction * half, f + direction * half]);
+        let half_sq = radius * radius - delta * delta;
+        if half_sq <= 0.0 {
+            // tangent within the tolerance, outside: the one touching point
+            return project(vec![f]);
         }
-        return Meet::Points(Vec::new());
+        let half = half_sq.sqrt();
+        return project(vec![f - direction * half, f + direction * half]);
     }
     // the line crosses the circle's plane at one point
+    let p = foot(point, direction, midpoint_of(stretch[0], stretch[1]));
     let x = p + direction * ((origin - p).dot(normal) / dn);
     if ((x - origin).length() - radius).abs() > tol {
         return Meet::Points(Vec::new());
     }
-    if line_is_e {
-        Meet::Points(vec![x])
-    } else {
-        match on_circle(x) {
-            Some(c) => Meet::Points(vec![c]),
-            None => Meet::Undecided,
-        }
-    }
+    project(vec![x])
 }
 
 /// How the curve of K carried by `k_carrier` meets E's carrier `e`, within `tol` and
@@ -206,12 +230,15 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
             },
         ) => {
             if de.cross(dk).length() <= sin_ang {
-                // parallel: one line where both stretch ends lie on K's line
-                let apart = |x: Point3| (foot(pk, dk, x) - x).length();
-                if apart(a) <= tol && apart(b) <= tol {
+                // parallel within the angle: one line where both stretch ends lie on K's
+                // line, apart where both lie off it on one side; a near-parallel line that
+                // passes from one side to the other along the stretch is not decided here
+                let off = |x: Point3| x - foot(pk, dk, x);
+                let (oa, ob) = (off(a), off(b));
+                if oa.length() <= tol && ob.length() <= tol {
                     return Meet::Overlap;
                 }
-                if apart(a) > tol && apart(b) > tol {
+                if oa.length() > tol && ob.length() > tol && oa.dot(ob) > 0.0 {
                     return Meet::Points(Vec::new());
                 }
                 return Meet::Undecided;
@@ -225,8 +252,11 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
             let sk = (ee - bb * d) / den;
             let on_e = pe + de * se;
             let on_k = pk + dk * sk;
-            if (on_e - on_k).length() <= tol {
-                Meet::Points(vec![on_e])
+            let gap = (on_e - on_k).length();
+            if !gap.is_finite() {
+                Meet::Undecided
+            } else if gap <= tol {
+                finite(vec![on_e])
             } else {
                 Meet::Points(Vec::new())
             }
@@ -242,15 +272,7 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
                 ..
             },
         ) => line_circle(
-            point,
-            direction,
-            origin,
-            normal,
-            radius,
-            true,
-            midpoint_of(a, b),
-            tol,
-            sin_ang,
+            point, direction, origin, normal, radius, true, stretch, tol, sin_ang,
         ),
         (
             Carrier::Circle {
@@ -261,15 +283,7 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
             },
             Carrier::Line { point, direction },
         ) => line_circle(
-            point,
-            direction,
-            origin,
-            normal,
-            radius,
-            false,
-            midpoint_of(a, b),
-            tol,
-            sin_ang,
+            point, direction, origin, normal, radius, false, stretch, tol, sin_ang,
         ),
         (
             Carrier::Circle {
@@ -298,22 +312,22 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
             if d <= EFF_ZERO {
                 return Meet::Points(Vec::new());
             }
+            if d > r1 + r2 + tol || d < (r1 - r2).abs() - tol {
+                return Meet::Points(Vec::new());
+            }
+            // within the tolerance of crossing or touching: the true crossings where the
+            // circles cross, the touching point on E where they do not quite reach
             let u = dvec * (1.0 / d);
-            if (d - (r1 + r2)).abs() <= tol {
-                return Meet::Points(vec![o1 + u * r1]);
+            let along = (d * d + r1 * r1 - r2 * r2) / (2.0 * d);
+            let half_sq = r1 * r1 - along * along;
+            if half_sq <= 0.0 {
+                let sense = if along >= 0.0 { 1.0 } else { -1.0 };
+                return finite(vec![o1 + u * (r1 * sense)]);
             }
-            if (d - (r1 - r2).abs()).abs() <= tol {
-                let sense = if r1 >= r2 { 1.0 } else { -1.0 };
-                return Meet::Points(vec![o1 + u * (r1 * sense)]);
-            }
-            if d > (r1 - r2).abs() && d < r1 + r2 {
-                let along = (d * d + r1 * r1 - r2 * r2) / (2.0 * d);
-                let half = (r1 * r1 - along * along).max(0.0).sqrt();
-                let q = o1 + u * along;
-                let v = n1.cross(u);
-                return Meet::Points(vec![q - v * half, q + v * half]);
-            }
-            Meet::Points(Vec::new())
+            let half = half_sq.sqrt();
+            let q = o1 + u * along;
+            let v = n1.cross(u);
+            finite(vec![q - v * half, q + v * half])
         }
     }
 }
@@ -408,17 +422,26 @@ fn stretch_points(
     let mut points = Vec::new();
     for curve in k_curves {
         let k_carrier = carrier(curve)?;
-        // a line or circle within `tol` of a circle of radius r stays so along a chord of up
-        // to 2 sqrt(2 r tol) about where they touch: a stretch no longer than that may be all
-        // coincident within the tolerance, and is kept
-        let radius = [e, k_carrier]
-            .iter()
-            .map(|c| match *c {
-                Carrier::Circle { radius, .. } => radius,
-                Carrier::Line { .. } => 0.0,
-            })
-            .fold(0.0, f64::max);
-        if radius > 0.0 && (b - a).length() <= 2.0 * (2.0 * radius * tol).sqrt() {
+        // two carriers that touch with relative radius of curvature R stay within `tol` of
+        // each other along a chord of up to 2 sqrt(2 R tol) about where they touch: a
+        // stretch no longer than that may be all coincident within the tolerance, and is
+        // kept. R is r for a line and a circle, r1 r2 / |r1 - r2| for circles touching
+        // inside each other (the larger, so the bound holds for either sense)
+        let radius = match (e, k_carrier) {
+            (Carrier::Line { .. }, Carrier::Line { .. }) => 0.0,
+            (Carrier::Circle { radius, .. }, Carrier::Line { .. })
+            | (Carrier::Line { .. }, Carrier::Circle { radius, .. }) => radius,
+            (Carrier::Circle { radius: r1, .. }, Carrier::Circle { radius: r2, .. }) => {
+                let gap = (r1 - r2).abs();
+                if gap <= EFF_ZERO * r1.max(r2) {
+                    return None;
+                }
+                (r1 * r2 / gap).max(r1.max(r2))
+            }
+        };
+        if !radius.is_finite()
+            || (radius > 0.0 && (b - a).length() <= 2.0 * (2.0 * radius * tol).sqrt())
+        {
             return None;
         }
         match meet(e, k_carrier, [a, b], tol, sin_ang) {
@@ -457,7 +480,6 @@ struct RangeEnd {
 /// cylinder's top reach one) keeps the range. The caller keeps the range on every error
 /// but a cancellation: the witness only adds evidence, and where it cannot run the
 /// classifier's own answer stands.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn tangency_point<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ClassGeometry<O>,
@@ -526,11 +548,17 @@ pub(crate) fn tangency_point<O: ClassObject>(
     let Some((g_brep, EntityRef::Face(g))) = geometry.topology_entity(partner) else {
         return Ok(None);
     };
+    // the partner is the other face of the intersection, never the classifying face
+    if core::ptr::eq(g_brep, brep) && g == f {
+        return Ok(None);
+    }
 
     // 3. the range ends at an end vertex of the edge that the classification met
     let (v_start, v_end) = crate::topology::edge::start_end_vertices(brep, e)?;
     let mut at_vertex: Vec<RangeEnd> = Vec::new();
+    let mut ends_at_vertices = 0;
     for end in [lo, hi] {
+        let mut matched = false;
         let on_c = source.evaluate_point(k, end.param(ci)?)?;
         let on_e = target.evaluate_point(k, end.param(ei)?)?;
         for v in [v_start, v_end].into_iter().flatten() {
@@ -539,6 +567,9 @@ pub(crate) fn tangency_point<O: ClassObject>(
             if (on_c - point).length() > tol_v || (on_e - point).length() > tol_v {
                 continue;
             }
+            // an end at a vertex counts against a second contact whether or not the
+            // classification met that vertex
+            matched = true;
             let Some(handle) = geometry.topology_handle_in(brep, EntityRef::Vertex(v)) else {
                 continue;
             };
@@ -556,8 +587,13 @@ pub(crate) fn tangency_point<O: ClassObject>(
                 });
             }
         }
+        if matched {
+            ends_at_vertices += 1;
+        }
     }
-    if at_vertex.is_empty() {
+    // a range at one end vertex only: with both ends at vertices the range spans the
+    // edge's stretch between them, and a contact at one does not account for the other
+    if at_vertex.len() != 1 || ends_at_vertices != 1 {
         return Ok(None);
     }
 
@@ -587,6 +623,10 @@ pub(crate) fn tangency_point<O: ClassObject>(
     let sin_ang = k.tolerances.ang_tol_rad().sin();
     let mut contact: Option<&RangeEnd> = None;
     for z in zs {
+        // a Z that is G itself gives K = G and decides nothing
+        if core::ptr::eq(g_brep, brep) && z == g {
+            return Ok(None);
+        }
         let Some((z_surface, z_domain)) = face_surface(brep, z)? else {
             return Ok(None);
         };
@@ -759,9 +799,106 @@ mod tests {
             let Meet::Points(ps) = meet(round(), other(cx, r), [a, b], TOL, SIN) else {
                 panic!("decided");
             };
-            assert_eq!(ps.len(), 1);
-            assert!((ps[0] - Point3::new(want, 248.0, 7.0)).length() <= 1e-12);
+            // exactly tangent: one point, or two that rounding splits by no more than
+            // sqrt(2 r eps)
+            assert!(!ps.is_empty() && ps.len() <= 2);
+            for p in ps {
+                assert!((p - Point3::new(want, 248.0, 7.0)).length() <= 1e-6);
+            }
         }
+    }
+
+    #[test]
+    fn circles_inside_the_tangent_band_that_cross_give_their_true_crossings() {
+        // radii 1.15 and 1.149, centres 0.001 + 5e-7 apart: |d - (r1 - r2)| <= TOL, but the
+        // circles cross well away from the touching point
+        let [a, _, b] = quarter();
+        let inner = Carrier::Circle {
+            origin: Point3::new(4.0 + 0.001 + 5e-7, 248.0, 7.0),
+            x: Point3::new(1.0, 0.0, 0.0),
+            y: Point3::new(0.0, 1.0, 0.0),
+            normal: Point3::new(0.0, 0.0, 1.0),
+            radius: 1.149,
+        };
+        let Meet::Points(ps) = meet(round(), inner, [a, b], TOL, SIN) else {
+            panic!("decided");
+        };
+        assert_eq!(ps.len(), 2);
+        let touch = Point3::new(4.0 + 1.15, 248.0, 7.0);
+        for p in ps {
+            assert!((p - touch).length() > 1e-3, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_inside_the_tangent_band_gives_both_crossings() {
+        // y = 249.15 - 5e-7: within TOL of tangent, crossing twice sqrt(2 r 5e-7) either side
+        let [a, _, b] = quarter();
+        let Meet::Points(ps) = meet(
+            round(),
+            line([0.0, 249.15 - 5e-7, 7.0], [1.0, 0.0, 0.0]),
+            [a, b],
+            TOL,
+            SIN,
+        ) else {
+            panic!("decided");
+        };
+        assert_eq!(ps.len(), 2);
+        let half = (1.15_f64 * 1.15 - (1.15 - 5e-7) * (1.15 - 5e-7)).sqrt();
+        assert!((ps[0].x - (4.0 - half)).abs() <= 1e-9);
+        assert!((ps[1].x - (4.0 + half)).abs() <= 1e-9);
+    }
+
+    #[test]
+    fn a_near_parallel_line_that_changes_side_along_the_stretch_is_undecided() {
+        let e = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let stretch = [Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0)];
+        // through (1, 0) at a slope below the angle tolerance: 1e-5 off at either end, on
+        // opposite sides
+        let k = line([1.0, 0.0, 0.0], [1.0, 1e-5, 0.0]);
+        assert!(matches!(meet(e, k, stretch, TOL, SIN), Meet::Undecided));
+        // the same slope wholly on one side stays apart
+        let k = line([1.0, 1e-3, 0.0], [1.0, 1e-5, 0.0]);
+        let Meet::Points(ps) = meet(e, k, stretch, TOL, SIN) else {
+            panic!("decided");
+        };
+        assert!(ps.is_empty());
+    }
+
+    #[test]
+    fn a_line_along_the_plane_that_leaves_it_along_the_stretch_is_undecided() {
+        // a line tilted out of z = 7 below the angle tolerance, in the plane at one end of the
+        // quarter and 1e-5 above it at the other
+        let [a, _, b] = quarter();
+        let dir = b - a;
+        let rise = 1e-5 / dir.length();
+        let k = line([a.x, a.y, 7.0], [dir.x, dir.y, rise * dir.length()]);
+        assert!(matches!(
+            meet(round(), k, [a, b], TOL, SIN),
+            Meet::Undecided
+        ));
+    }
+
+    #[test]
+    fn a_stretch_inside_the_band_of_nearly_equal_circles_is_kept() {
+        // radii 1.15 and 1.14 touching inside: R = r1 r2 / |r1 - r2| ~ 131, so the band is
+        // 2 sqrt(2 R TOL) ~ 0.032, well past the 2 sqrt(2 r TOL) ~ 0.003 of the larger radius
+        let k = [Curve::from(
+            crate::curve::ellipse::Ellipse::new_circle(
+                &Kernel::default(),
+                Point3::new(4.01, 248.0, 7.0),
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_raw(0.0, 360.0),
+                1.14,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap(),
+        )];
+        let at =
+            |angle: f64| Point3::new(4.0 + 1.15 * angle.cos(), 248.0 + 1.15 * angle.sin(), 7.0);
+        let s = 0.01 / 1.15;
+        assert!(stretch_points(round(), &k, [at(s), at(s / 2.0), at(0.0)], TOL, SIN).is_none());
     }
 
     #[test]
