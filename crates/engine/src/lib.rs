@@ -18,6 +18,7 @@ pub mod control_auth;
 pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
+pub mod display_state;
 pub mod drawing_balloon_paper;
 pub mod drawing_dimension_paper;
 pub mod drawing_note_paper;
@@ -507,6 +508,9 @@ pub struct Snapshot {
     /// What was hidden or shown then (`browser.visibility`). It is saved with the design, so
     /// hiding a body is undone and redone like any other change.
     pub visibility: Visibility,
+    /// Isolate's layers then (`browser.visibility` with `isolate`): they go back and forth with
+    /// [`Snapshot::visibility`], so one undo leaves a layer and puts the view back with it.
+    pub isolation: Vec<display_state::IsolationLayer>,
     /// The part of the design the step changed: a drawing (by id), or the model and the list of
     /// drawings (`None`). Undo and redo go through one part's steps (`edit.undo`).
     pub part: Option<u64>,
@@ -527,6 +531,7 @@ impl Snapshot {
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: s.pending_moves.clone(),
             visibility: s.visibility.clone(),
+            isolation: s.isolation.clone(),
             part: None,
             section: None,
         }
@@ -569,6 +574,7 @@ pub(crate) struct SketchEntry {
     pub(crate) restore_marker: Option<Option<usize>>,
     pub(crate) pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     pub(crate) visibility: Visibility,
+    pub(crate) isolation: Vec<display_state::IsolationLayer>,
 }
 
 /// A copy of a session that evaluates commands ahead of it ([`Session::ahead`]).
@@ -1029,6 +1035,9 @@ pub struct Session {
     /// undo step of its own ([`Snapshot::visibility`]). A design brings its saved visibility when
     /// it opens (`Session::new`).
     pub visibility: Visibility,
+    /// Isolate's layers: view state that is never saved (the design file holds
+    /// [`Session::saved_view`]), and goes with `visibility` through undo, redo and checkpoints.
+    pub(crate) isolation: Vec<display_state::IsolationLayer>,
     /// The camera `view.apply` asked the view to use (view state, not saved). The desktop app
     /// moves its viewport there and takes it; headless renders keep using it until a standard
     /// view is chosen.
@@ -1100,6 +1109,7 @@ pub(crate) struct Checkpoint {
     pub open_drawing: Option<u64>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     pub visibility: Visibility,
+    pub isolation: Vec<display_state::IsolationLayer>,
     pub undo: Vec<Snapshot>,
     pub redo: Vec<Snapshot>,
     redo_watch: Option<RedoWatch>,
@@ -1480,6 +1490,7 @@ impl Session {
             saved_visibility: visibility.clone(),
             opened_import: None,
             visibility,
+            isolation: Vec::new(),
             camera: None,
             render_viewport: None,
             render_jobs: Default::default(),
@@ -1619,7 +1630,7 @@ impl Session {
     /// The design has changes not in its file: in the document, in what is hidden, or a
     /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
-        self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+        self.document_differs() || *self.saved_view() != self.saved_visibility || self.moved_uncaptured()
     }
 
     /// The design is a STEP, IGES or mesh file just opened (`doc.open`) and not changed since:
@@ -1628,7 +1639,7 @@ impl Session {
     pub fn unchanged_import(&self) -> bool {
         self.path.is_none()
             && self.opened_import.as_ref().is_some_and(|opened| Arc::ptr_eq(opened, &self.doc) || **opened == *self.doc)
-            && self.visibility == self.saved_visibility
+            && *self.saved_view() == self.saved_visibility
             && !self.moved_uncaptured()
     }
 
@@ -1669,7 +1680,7 @@ impl Session {
     pub fn mark_saved(&mut self) {
         self.forget_dirty_answer();
         self.saved = self.doc.clone();
-        self.saved_visibility = self.visibility.clone();
+        self.saved_visibility = self.saved_view().into_owned();
     }
 
     /// The name Save As offers for the design's file, without its extension: the name of the
@@ -2357,6 +2368,8 @@ impl Session {
                 for b in self.visibility.locked_bodies.iter_mut().filter(|b| **b == *old) {
                     *b = new.clone();
                 }
+                // The states Isolate's layers go back to follow the rename too.
+                self.rename_body_in_layers(old, new);
             }
         }
         if let Some((old, new, names_only)) = rename
@@ -3085,7 +3098,7 @@ impl Session {
         let changed = !Arc::ptr_eq(&self.doc, &before.doc);
         // Hiding or showing (`browser.visibility`) leaves the document alone, so it needs its own
         // test: it is saved with the design and has an undo step of its own.
-        let hidden = self.visibility != before.visibility;
+        let hidden = self.visibility != before.visibility || self.isolation != before.isolation;
         // A Section Analysis is view state outside the design, with undo steps of its own.
         let sectioned = self.section_state() != section_before;
         if sectioned {
@@ -3196,6 +3209,7 @@ impl Session {
                     self.active_sketch = before.active_sketch;
                     self.pending_moves = before.pending_moves;
                     self.visibility = before.visibility;
+                    self.isolation = before.isolation;
                     if render_only {
                         self.refresh_render(&previous_doc);
                     } else {
@@ -3313,6 +3327,7 @@ impl Session {
             undo: self.undo.clone(),
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
+            isolation: self.isolation.clone(),
             redo: self.redo.clone(),
             redo_watch: self.redo_watch.clone(),
             section: self.section_state(),
@@ -3356,6 +3371,7 @@ impl Session {
         self.open_drawing = c.open_drawing;
         self.pending_moves = c.pending_moves;
         self.visibility = c.visibility;
+        self.isolation = c.isolation;
         self.undo = c.undo;
         self.redo = c.redo;
         self.redo_watch = c.redo_watch;
@@ -3495,6 +3511,7 @@ impl Session {
             next_checkpoint: 1,
             replacements: 0,
             visibility: self.visibility.clone(),
+            isolation: self.isolation.clone(),
             camera: self.camera,
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
@@ -3664,6 +3681,7 @@ impl Session {
         // restore that current view, including sketches, folders and joint glyphs.
         if let Some(before) = prepared.computed.undo.first_mut() {
             before.visibility.clone_from(&self.visibility);
+            before.isolation.clone_from(&self.isolation);
         }
         // Only joints newly hidden by the computation (e.g. an import's rigid group) join
         // the live view. A joint shown meanwhile must not inherit the worker's old hide.
@@ -4174,6 +4192,8 @@ mod derived_units_tests;
 #[cfg(test)]
 mod display_mesh_tests;
 #[cfg(test)]
+mod display_state_tests;
+#[cfg(test)]
 mod drawing_dimension_tests;
 #[cfg(test)]
 mod exact_tool_tests;
@@ -4360,6 +4380,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        display_states,
         notes,
         visibility,
         drawings,
@@ -4402,6 +4423,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *browser_groups == b.browser_groups
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
+        && *display_states == b.display_states
         && *named_views == b.named_views
         && *notes == b.notes
         && *visibility == b.visibility

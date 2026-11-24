@@ -3160,6 +3160,10 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 // Ctrl+Shift+S is Save As; Ctrl+S keeps saving over the current file (#6558).
                 Key::S if mods.shift && !mods.alt => save_as(app),
                 Key::S => save(app),
+                // Isolate: Ctrl+I a new layer, Ctrl+Shift+I one layer back, Ctrl+Alt+I all of them.
+                Key::I if mods.alt && !mods.shift => drop(crate::isolation_banner::exit_all(app)),
+                Key::I if mods.shift && !mods.alt => drop(crate::isolation_banner::exit_one(app)),
+                Key::I if !mods.shift && !mods.alt => crate::isolation_banner::isolate_selection(app),
                 _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
             }
             continue;

@@ -14,7 +14,7 @@ use solidcraft_doc::{Document, FeatureKind, Operation, mat_inverse, point_expr, 
 use crate::Session;
 
 /// `parts` parts, four bodies each, in `parts / 4` (at least one) placed components.
-fn generated_assembly(parts: usize) -> Document {
+pub(crate) fn generated_assembly(parts: usize) -> Document {
     let mut doc = Document::new("generated assembly");
     let groups = parts.div_ceil(4).max(1);
     let comps: Vec<(u64, solidcraft_doc::Mat)> = (0..groups)
@@ -72,7 +72,7 @@ fn measured(s: &mut Session) -> serde_json::Value {
 }
 
 #[test]
-fn generated_assembly_opens_with_every_body_in_place() {
+pub(crate) fn generated_assembly_opens_with_every_body_in_place() {
     let parts = 12;
     let doc = generated_assembly(parts);
     let mut s = Session::new(doc.clone());

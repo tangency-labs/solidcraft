@@ -39,6 +39,7 @@ mod construct;
 mod construct_auto;
 pub(crate) mod delete;
 pub(crate) mod diagnostics;
+mod display;
 mod drawing;
 mod drawing_balloon;
 mod drawing_break;
@@ -649,6 +650,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
+    v.extend(display::COMMANDS.iter());
     v.extend(notes::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());

@@ -143,7 +143,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
-         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
+         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements; a new isolation layer on top of any active one, which display.unisolate and display.unisolate_all leave, putting back what was shown before it exactly; an isolate that hides nothing more adds no layer). Saved with the design (a design saved while isolated holds the view from before the first layer) and undone like any other change (the camera is not)",
     ),
     CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
         .icon("eye")
@@ -634,9 +634,11 @@ fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     // A hidden Bodies folder or group a picked body is in would keep it hidden: those show
     // again. Their other bodies are hidden one by one above, as the root's are.
     let shown_folders = folders_holding(s, &keep);
+    let layer = s.begin_isolation();
     s.visibility.hidden_folders.retain(|k| !shown_folders.contains(k));
     s.visibility.hidden_occurrences = hidden;
     s.visibility.hidden_bodies = hidden_bodies;
+    s.finish_isolation(layer);
     s.refresh_display();
     let visibility = VisibilityState::from(&s.visibility);
     reply(
@@ -772,8 +774,10 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             let mut root_bodies: Vec<String> =
                 s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0).map(|b| b.name.clone()).collect();
             root_bodies.extend(ancestor_bodies);
+            let layer = s.begin_isolation();
             s.visibility.hidden_occurrences = hidden;
             s.visibility.hidden_bodies = root_bodies;
+            s.finish_isolation(layer);
             s.refresh_display();
             let visibility = VisibilityState::from(&s.visibility);
             return reply(

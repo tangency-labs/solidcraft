@@ -1,0 +1,156 @@
+{
+  "ar": {
+    "cmd.display_unisolate": "إلغاء العزل",
+    "cmd.display_unisolate_all": "إلغاء كل عمليات العزل",
+    "ui.backToLevel": "العودة إلى المستوى {level}",
+    "ui.exitAll": "إنهاء الكل",
+    "ui.exitAllIsolations": "إلغاء كل عمليات العزل",
+    "ui.exitIsolation": "إلغاء العزل",
+    "ui.isolated": "معزول",
+    "ui.isolatedLevel": "معزول، المستوى {level}",
+    "ui.nothingToIsolate": "لا شيء للعزل: كل ما عداه مخفي بالفعل"
+  },
+  "de": {
+    "cmd.display_unisolate": "Isolierung aufheben",
+    "cmd.display_unisolate_all": "Alle Isolierungen aufheben",
+    "ui.backToLevel": "Zurück zu Ebene {level}",
+    "ui.exitAll": "Alle beenden",
+    "ui.exitAllIsolations": "Alle Isolierungen aufheben",
+    "ui.exitIsolation": "Isolierung aufheben",
+    "ui.isolated": "Isoliert",
+    "ui.isolatedLevel": "Isoliert, Ebene {level}",
+    "ui.nothingToIsolate": "Nichts zu isolieren: Alles andere ist bereits ausgeblendet"
+  },
+  "en": {
+    "cmd.display_unisolate": "Exit Isolation",
+    "cmd.display_unisolate_all": "Exit All Isolations",
+    "ui.backToLevel": "Back to level {level}",
+    "ui.exitAll": "Exit All",
+    "ui.exitAllIsolations": "Exit All Isolations",
+    "ui.exitIsolation": "Exit Isolation",
+    "ui.isolated": "Isolated",
+    "ui.isolatedLevel": "Isolated, level {level}",
+    "ui.nothingToIsolate": "Nothing to isolate: everything else is already hidden"
+  },
+  "es": {
+    "cmd.display_unisolate": "Dejar de aislar",
+    "cmd.display_unisolate_all": "Salir de todos los aislamientos",
+    "ui.backToLevel": "Volver al nivel {level}",
+    "ui.exitAll": "Salir de todo",
+    "ui.exitAllIsolations": "Salir de todos los aislamientos",
+    "ui.exitIsolation": "Dejar de aislar",
+    "ui.isolated": "Aislado",
+    "ui.isolatedLevel": "Aislado, nivel {level}",
+    "ui.nothingToIsolate": "Nada que aislar: todo lo demás ya está oculto"
+  },
+  "fr": {
+    "cmd.display_unisolate": "Annuler l'isolement",
+    "cmd.display_unisolate_all": "Quitter tous les isolements",
+    "ui.backToLevel": "Retour au niveau {level}",
+    "ui.exitAll": "Tout quitter",
+    "ui.exitAllIsolations": "Quitter tous les isolements",
+    "ui.exitIsolation": "Annuler l'isolement",
+    "ui.isolated": "Isolé",
+    "ui.isolatedLevel": "Isolé, niveau {level}",
+    "ui.nothingToIsolate": "Rien à isoler : tout le reste est déjà masqué"
+  },
+  "he": {
+    "cmd.display_unisolate": "ביטול בידוד",
+    "cmd.display_unisolate_all": "ביטול כל הבידודים",
+    "ui.backToLevel": "חזרה לרמה {level}",
+    "ui.exitAll": "יציאה מהכול",
+    "ui.exitAllIsolations": "ביטול כל הבידודים",
+    "ui.exitIsolation": "ביטול בידוד",
+    "ui.isolated": "מבודד",
+    "ui.isolatedLevel": "מבודד, רמה {level}",
+    "ui.nothingToIsolate": "אין מה לבודד: כל השאר כבר מוסתר"
+  },
+  "it": {
+    "cmd.display_unisolate": "Termina isolamento",
+    "cmd.display_unisolate_all": "Termina tutti gli isolamenti",
+    "ui.backToLevel": "Torna al livello {level}",
+    "ui.exitAll": "Esci da tutto",
+    "ui.exitAllIsolations": "Termina tutti gli isolamenti",
+    "ui.exitIsolation": "Termina isolamento",
+    "ui.isolated": "Isolato",
+    "ui.isolatedLevel": "Isolato, livello {level}",
+    "ui.nothingToIsolate": "Niente da isolare: tutto il resto è già nascosto"
+  },
+  "ja": {
+    "cmd.display_unisolate": "分離表示を解除",
+    "cmd.display_unisolate_all": "すべての分離表示を解除",
+    "ui.backToLevel": "レベル {level} に戻る",
+    "ui.exitAll": "すべて解除",
+    "ui.exitAllIsolations": "すべての分離表示を解除",
+    "ui.exitIsolation": "分離表示を解除",
+    "ui.isolated": "分離表示中",
+    "ui.isolatedLevel": "分離表示中、レベル {level}",
+    "ui.nothingToIsolate": "分離するものがありません: 他はすべて非表示です"
+  },
+  "nl": {
+    "cmd.display_unisolate": "Isolatie opheffen",
+    "cmd.display_unisolate_all": "Alle isolaties opheffen",
+    "ui.backToLevel": "Terug naar niveau {level}",
+    "ui.exitAll": "Alles verlaten",
+    "ui.exitAllIsolations": "Alle isolaties opheffen",
+    "ui.exitIsolation": "Isolatie opheffen",
+    "ui.isolated": "Geïsoleerd",
+    "ui.isolatedLevel": "Geïsoleerd, niveau {level}",
+    "ui.nothingToIsolate": "Niets te isoleren: al het andere is al verborgen"
+  },
+  "pt-BR": {
+    "cmd.display_unisolate": "Desfazer isolamento",
+    "cmd.display_unisolate_all": "Desfazer todos os isolamentos",
+    "ui.backToLevel": "Voltar ao nível {level}",
+    "ui.exitAll": "Sair de tudo",
+    "ui.exitAllIsolations": "Desfazer todos os isolamentos",
+    "ui.exitIsolation": "Desfazer isolamento",
+    "ui.isolated": "Isolado",
+    "ui.isolatedLevel": "Isolado, nível {level}",
+    "ui.nothingToIsolate": "Nada para isolar: todo o resto já está oculto"
+  },
+  "ru": {
+    "cmd.display_unisolate": "Снять изоляцию",
+    "cmd.display_unisolate_all": "Снять все изоляции",
+    "ui.backToLevel": "Назад к уровню {level}",
+    "ui.exitAll": "Выйти из всех",
+    "ui.exitAllIsolations": "Снять все изоляции",
+    "ui.exitIsolation": "Снять изоляцию",
+    "ui.isolated": "Изолировано",
+    "ui.isolatedLevel": "Изолировано, уровень {level}",
+    "ui.nothingToIsolate": "Нечего изолировать: всё остальное уже скрыто"
+  },
+  "vi": {
+    "cmd.display_unisolate": "Hủy cô lập đối tượng",
+    "cmd.display_unisolate_all": "Hủy tất cả cô lập",
+    "ui.backToLevel": "Quay lại cấp {level}",
+    "ui.exitAll": "Thoát tất cả",
+    "ui.exitAllIsolations": "Hủy tất cả cô lập",
+    "ui.exitIsolation": "Hủy cô lập đối tượng",
+    "ui.isolated": "Đã cô lập",
+    "ui.isolatedLevel": "Đã cô lập, cấp {level}",
+    "ui.nothingToIsolate": "Không có gì để cô lập: mọi thứ khác đã bị ẩn"
+  },
+  "zh": {
+    "cmd.display_unisolate": "取消隔离",
+    "cmd.display_unisolate_all": "取消所有隔离",
+    "ui.backToLevel": "返回第 {level} 层",
+    "ui.exitAll": "全部退出",
+    "ui.exitAllIsolations": "取消所有隔离",
+    "ui.exitIsolation": "取消隔离",
+    "ui.isolated": "已隔离",
+    "ui.isolatedLevel": "已隔离,第 {level} 层",
+    "ui.nothingToIsolate": "没有可隔离的内容:其余部分已全部隐藏"
+  },
+  "zh-TW": {
+    "cmd.display_unisolate": "取消隔離",
+    "cmd.display_unisolate_all": "取消所有隔離",
+    "ui.backToLevel": "返回第 {level} 層",
+    "ui.exitAll": "全部退出",
+    "ui.exitAllIsolations": "取消所有隔離",
+    "ui.exitIsolation": "取消隔離",
+    "ui.isolated": "已隔離",
+    "ui.isolatedLevel": "已隔離,第 {level} 層",
+    "ui.nothingToIsolate": "沒有可隔離的內容:其餘部分已全部隱藏"
+  }
+}

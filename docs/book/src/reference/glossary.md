@@ -276,6 +276,21 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### display state
+
+A named setting of what is shown and how the bodies look, saved with the design.
+
+A display state holds which bodies, sketches and placements are hidden and the appearance of each
+body. It never changes the model, and it doesn't hold the camera: a named view does that. Applying
+one is a single undo step, like hiding or showing. Compare *configuration*, which changes
+parameters.
+
+- **In SolidCraft:** `display.save`, `display.apply`, `display.rename`, `display.delete`,
+  `display.list`; the `display_states` design-file key; the Display States folder in the browser.
+- **Don't use:** view state, scene, visibility set.
+- **Elsewhere:** display state, representation, view configuration.
+- **For translators:** not a named view (a camera) and not a configuration.
+
 ### end cap
 
 A plate that closes the open end of a frame member, shaped like the member profile's outer outline
@@ -349,6 +364,21 @@ features are computed.
 - **Don't use:** feature folder, folder (for a group).
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
+
+### isolation layer
+
+One level of Isolate: everything but the isolated items is hidden until the layer is left.
+
+Layers stack. Leaving a layer puts back exactly what was shown before it, including bodies hidden
+by hand before or while the layer was active. Layers are not saved with the design: a design saved
+while isolated holds the view from before the first layer. Isolating and leaving a layer are undo
+steps, like hiding or showing.
+
+- **In SolidCraft:** `browser.visibility` with `isolate`, `display.unisolate`,
+  `display.unisolate_all`; Ctrl+I, Ctrl+Shift+I, Ctrl+Alt+I; the banner at the top of the viewport.
+- **Don't use:** focus mode, solo, hide others (a one-time hide in the browser).
+- **Elsewhere:** isolate, isolation, local view.
+- **For translators:** not a display state, which is named and saved.
 
 ### item number
 

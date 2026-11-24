@@ -1952,6 +1952,7 @@ fn component_rows_inner(
     if id == 0 && !crate::render_workspace::active(app) && !searching {
         doc_settings(app, rows, d);
         named_view_rows(app, rows, d, acts);
+        display_state_rows(app, rows, d, acts);
         origin_rows(app, rows, d, acts);
         canvas_rows(app, rows, d, acts);
         point_clouds::rows(app, rows, d, acts);
@@ -2483,6 +2484,86 @@ fn named_view_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: 
             acts.menu = Some((p, Target::NamedView { name }));
         }
     }
+}
+
+/// Display States: what is shown and how the bodies look. The circle in front of a state applies
+/// it and is filled for the one that shows exactly what is shown now; the others are dimmed.
+fn display_state_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
+    let key = "displaystates";
+    let open = is_open(app, key, false);
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label: "Display States", ..Default::default() },
+    );
+    if r.fold || r.clicked {
+        toggle(app, key, false);
+    }
+    if let Some(p) = r.secondary {
+        acts.menu = Some((p, Target::DisplayStates));
+    }
+    if !open {
+        return;
+    }
+    let names: Vec<String> = app.session.doc.display_states.iter().map(|v| v.name.clone()).collect();
+    let active = app.session.active_display_state().map(str::to_string);
+    let hint_on = app.tr("ui.displayStateActive");
+    let hint_off = app.tr("ui.apply");
+    for name in names {
+        let on = active.as_deref() == Some(name.as_str());
+        let state_key = format!("displaystate:{name}");
+        let r = node_row(
+            rows,
+            Spec { key: &state_key, ..Default::default() },
+            Row {
+                depth: depth + 1,
+                icon: "",
+                label: &name,
+                name: true,
+                rename: true,
+                radio: Some(on),
+                radio_hint: if on { hint_on } else { hint_off },
+                dim: !on,
+                ..Default::default()
+            },
+        );
+        if let Some(at) = r.radio_at {
+            crate::scenario::publish_handle(&format!("activate:{name}"), at);
+        }
+        if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::DisplayState(name.clone()), r.name_at());
+        } else if r.double || r.radio {
+            apply_display_state(app, &name);
+        }
+        inline_rename(app, rows.ui(), r.name_at(), &name);
+        if let Some(p) = r.secondary {
+            acts.menu = Some((p, Target::DisplayState { name }));
+        }
+    }
+}
+
+/// Show what a display state shows and give the bodies its looks: one undo step.
+pub fn apply_display_state(app: &mut SolveApp, name: &str) {
+    let _ = app.run("display.apply", json!({ "state": name }));
+}
+
+/// Save what is shown now as a display state (`name` replaces that state).
+pub fn save_display_state(app: &mut SolveApp, name: Option<&str>) {
+    if app.run("display.save", json!({ "name": name })).is_ok() {
+        app.tree.collapsed.remove("displaystates");
+        app.tree.expanded.insert("displaystates".into());
+    }
+}
+
+/// The menu of a display state.
+pub fn display_state_items(name: &str) -> Vec<Item> {
+    vec![
+        Item::action("ui.displayApply", "Apply", "activate").with(json!({ "state": name })),
+        Item::action("ui.displayUpdate", "Update to What Is Shown Now", "update").with(json!({ "state": name })),
+        Item::sep(),
+        Item::action("ui.rename", "Rename", "rename").with(json!({ "display_state": name })),
+        Item::action("display.delete", "Delete", "delete").with(json!({ "state": name })),
+    ]
 }
 
 /// Turn the camera to a named view (a saved one or a standard one), animated.

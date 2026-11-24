@@ -1,0 +1,262 @@
+{
+  "ar": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "cs": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "da": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "de": {
+    "cmd.display_apply": "Anzeigezustand anwenden",
+    "cmd.display_delete": "Anzeigezustand löschen",
+    "cmd.display_list": "Anzeigezustände auflisten",
+    "cmd.display_rename": "Anzeigezustand umbenennen",
+    "cmd.display_save": "Neuer Anzeigezustand",
+    "ui.displayStateActive": "Aktiver Anzeigezustand",
+    "ui.displayStates": "Anzeigezustände",
+    "ui.displayUpdate": "Auf aktuelle Anzeige aktualisieren"
+  },
+  "en": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "es": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "fr": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "gl": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "he": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "hu": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "id": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "it": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "ja": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "ko": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "ms": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "nl": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "pl": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "pt-BR": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "ro": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "ru": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "sv": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "tr": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "uk": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "vi": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "zh": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  },
+  "zh-TW": {
+    "cmd.display_apply": "Apply Display State",
+    "cmd.display_delete": "Delete Display State",
+    "cmd.display_list": "List Display States",
+    "cmd.display_rename": "Rename Display State",
+    "cmd.display_save": "New Display State",
+    "ui.displayStateActive": "Active display state",
+    "ui.displayStates": "Display States",
+    "ui.displayUpdate": "Update to What Is Shown Now"
+  }
+}
