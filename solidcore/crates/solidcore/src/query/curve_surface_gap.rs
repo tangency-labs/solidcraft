@@ -3596,23 +3596,141 @@ pub fn trim_image_gap_bound_within(
     [enough, over]: [f64; 2],
     budget: Option<usize>,
 ) -> Result<Option<f64>> {
+    trim_gap_bound_with(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [enough, over],
+        budget,
+        Correspondence::Fitted,
+    )
+}
+
+/// Not upstream (WR-450, #18923): a proved upper bound on the same-parameter gap
+/// `sup |C(t) - S(W(t))|` over `t` in `range`, for the curve `curve` (`C`), its UV trim `uv`
+/// (`W`) and `surface` (`S`): how far the trim's image at each parameter is from the curve's
+/// point at that same parameter. It is [`trim_image_gap_bound_within`]'s bisection with `ψ`
+/// the identity (degree 1 from `(lo, lo)` to `(hi, hi)`, its evaluation enclosed as any `ψ`'s),
+/// so it also counts how far the two parameters slip along the curve: the bound for a trim
+/// that is to stand where the edge's parameter pairs it with its other trims (both faces'
+/// trims evaluated at one edge parameter, as a volume enclosure's strips and a vertex's
+/// sectors take them), which a Hausdorff bound does not give (fillet1019's corner round
+/// extended for a defeature: a trim within 4.2e-4 of its edge as a curve, 5.9e-3 from it at
+/// equal parameters). The gap it bounds is at least the one [`trim_image_gap_bound_within`]
+/// bounds (the computed bounds need not be ordered). `floor`,
+/// `enough`, `over` and `budget` mean what they mean there. `None` only where the pair has no
+/// exact data (as there: a surface without an exact net, a curve without exact data, a UV
+/// line, whose rounding moves its parameters, or a range outside either curve's domain);
+/// a pair with exact data whose gap it does not enclose gets `Some(f64::INFINITY)`, since
+/// nothing proves that gap.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn trim_same_parameter_gap_bound_within(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+) -> Result<Option<f64>> {
+    trim_gap_bound_with(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [enough, over],
+        budget,
+        Correspondence::SameParameter,
+    )
+}
+
+/// How [`trim_gap_bound_with`] pairs the curve's parameter with the trim's.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Correspondence {
+    /// The fitted reparametrisation [`reparametrisation`] (a Hausdorff bound: the parameters
+    /// may slip along the curve), with the structured bound tried as well, and the identity
+    /// for a pair of degree 1.
+    Fitted,
+    /// The identity: the gap at equal parameters.
+    SameParameter,
+}
+
+/// The bound of [`trim_image_gap_bound_within`] (`Correspondence::Fitted`) or
+/// [`trim_same_parameter_gap_bound_within`] (`Correspondence::SameParameter`).
+fn trim_gap_bound_with(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+    correspondence: Correspondence,
+) -> Result<Option<f64>> {
+    let fitted = correspondence == Correspondence::Fitted;
     if !(floor.is_finite() && floor >= 0.0) {
         return Ok(None);
     }
-    let Some(TrimPair {
+    let Some(pair) = TrimPair::of(k, surface, curve, uv, range)? else {
+        return Ok(None);
+    };
+    let bound = bound_trim_pair(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [enough, over],
+        budget,
+        fitted,
+        pair,
+    )?;
+    // (a same-parameter bound is asked of a pair with exact data: one it does not enclose is
+    // not proved within any bound, which `Some(INFINITY)` tells from a pair with none)
+    Ok(if fitted {
+        bound
+    } else {
+        Some(bound.unwrap_or(f64::INFINITY))
+    })
+}
+
+/// [`trim_gap_bound_with`] once the pair's exact data are made: `fitted` for
+/// `Correspondence::Fitted`.
+fn bound_trim_pair(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+    fitted: bool,
+    pair: TrimPair,
+) -> Result<Option<f64>> {
+    let TrimPair {
         cn,
         c_slack,
         wn,
         net,
-    }) = TrimPair::of(k, surface, curve, uv, range)?
-    else {
-        return Ok(None);
-    };
+    } = pair;
     // (#20373: a trim whose image has the curve's own structure is bounded by their control
     // points at once, the curve's slack added ([`structured_pair_bound`]); where that is
     // at most `enough` (and `over`) it is the answer, otherwise the bisection runs as without
-    // it)
-    if enough.is_finite() {
+    // it; its second case pairs the parameters by a map of its own, so it is not a
+    // same-parameter bound)
+    if fitted && enough.is_finite() {
         if let Some(bound) = structured_pair_bound(surface, &cn, c_slack, &wn, &net, range) {
             if bound <= enough && bound <= over {
                 return Ok(Some(bound));
@@ -3635,11 +3753,22 @@ pub fn trim_image_gap_bound_within(
     if !c_slack.is_finite() {
         return Ok(None);
     }
-    let knots: Vec<f64> = cn.u.iter().chain(wn.u.iter()).copied().collect();
-    let Some(psi) = reparametrisation(k, surface, curve, uv, range, &knots, floor)? else {
-        return Ok(None);
-    };
     let [r0, r1] = range;
+    let psi = if fitted {
+        let knots: Vec<f64> = cn.u.iter().chain(wn.u.iter()).copied().collect();
+        let Some(psi) = reparametrisation(k, surface, curve, uv, range, &knots, floor)? else {
+            return Ok(None);
+        };
+        psi
+    } else {
+        // (the identity: degree 1, its two control points the range's ends)
+        NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![r0, r0, r1, r1],
+            pw: vec![r0, 0.0, 0.0, 1.0, r1, 0.0, 0.0, 1.0],
+        }
+    };
     if !kinks(&psi, r0, r1).is_empty() {
         return Ok(None);
     }
@@ -3733,7 +3862,7 @@ pub fn trim_image_gap_bound_within(
     // the fitted `psi` only adds its own steps, each as long as the curve's speed makes it:
     // `primitive.api_primitives` gen1108, a line 5.5e8 long bounded at 1.4e-3 and 1e4 against
     // its trims, 1e-7 by samples. The identity is tried there too, the smaller bound kept.
-    if cn.p == 1 && wn.p == 1 && !bound.is_some_and(|g| g <= enough) {
+    if fitted && cn.p == 1 && wn.p == 1 && !bound.is_some_and(|g| g <= enough) {
         if let Some(identity) = hermite_psi(&[(r0, r0), (r1, r1)], range) {
             if let Some(g) = with_psi(&identity)? {
                 bound = Some(bound.map_or(g, |b| b.min(g)));

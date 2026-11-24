@@ -432,8 +432,9 @@ impl WorkCounters {
     }
 
     /// Certified bounds on a new UV trim's distance from its edge
-    /// (`topology::edgeuse::p3::trim_deviation_bound`): each bisection the bound starts, the
-    /// costly part of building a trim. Not the fork's (#21105).
+    /// (`topology::edgeuse::p3::trim_deviation_bound`, and its same-parameter form
+    /// `trim_same_parameter_deviation_bound` that gates a boolean's carried trims): each
+    /// bisection the bound starts, the costly part of building a trim. Not the fork's (#21105).
     #[must_use]
     pub fn trim_deviation_bounds(&self) -> u64 {
         self.trim_deviation_bounds.get()

@@ -1002,6 +1002,14 @@ pub fn make_faceuse_attempt_with(
     })
 }
 
+/// Not upstream (WR-450, #18923): the bisection pieces the same-parameter bound of a carried
+/// trim may take ([`copy_uv_trim_curves_of_other_face`]): the bisection's own cap
+/// (`query::curve_surface_gap`'s `MAX_PIECES`), passed as a budget so that the bisection
+/// stops as soon as an evaluated point of the trim lies farther from the edge than its
+/// tolerance (a trim that slips is turned away at once, not after the whole bisection on
+/// a dense net) without capping a gap that is within it.
+const CARRY_PIECES: usize = 1 << 15;
+
 /// Not upstream (tangency-labs/solidcore#488, the fork's
 /// `sm_CopyUVTrimCurvesOfOtherFace`; WR-361): gives the
 /// edge uses of `new_face`, just made in `brep` from the other operand's face use
@@ -1155,6 +1163,43 @@ fn copy_uv_trim_curves_of_other_face(
         // tolerance 2.6 times what the trims need)
         if plane && matches!(new_curve.kind(), CurveKind::Line(_)) {
             continue;
+        }
+        // Not upstream (WR-450, #18923): on the other operand's own edge, which MergeEdge
+        // copied, the trim stands for MakeFace's, which is dropped from the edge's curve at
+        // the edge's own parameters, and every reader pairs it with the edge's other trims at
+        // one edge parameter (a volume enclosure's strips, a vertex's sectors). Nothing proves
+        // the other operand's trim does: an edge's tolerance covers its trims' distance from
+        // it as curves, not how far their parameters slip along it, and the other operand's
+        // trims come from its own operations (fillet1019's corner round extended for a
+        // defeature, kept as its B-spline: a trim within 4.2e-4 of its edge, tolerance
+        // 4.3e-4, but 5.9e-3 from it at equal parameters, which held the volume enclosure's
+        // strips there 5.9e-3 wide). So where the pair's exact data bound it, it is carried
+        // only where its same-parameter gap is proved within the new edge's tolerance
+        // (`trim_same_parameter_deviation_bound`, enclosed over the whole interval: no sample
+        // decides it); elsewhere the edge keeps MakeFace's trim. An edge the intersection made is not gated: its curve was fitted
+        // from the intersector's trace at the trace's own parameters, so the trace is the
+        // curve's source rather than a stand-in for it (solidcraft#2992's traces lie up to
+        // 1.07e-5 from their edges at equal parameters, at the fit's tolerance 1e-5, and
+        // MakeFace's re-fit of them is the cusped trim the carry is there to avoid)
+        if relations.copied_edges.contains(&new_edge) {
+            let tol = new_record.tolerance;
+            let gap = crate::topology::edgeuse::p3::trim_same_parameter_deviation_bound(
+                k,
+                &*brep,
+                new_eu,
+                trim,
+                tol,
+                [tol, tol],
+                Some(CARRY_PIECES),
+            )?;
+            // (`None` is a pair with no exact data to bound it from (a UV line, whose
+            // rounding moves its parameters; a surface without an exact net; a curve on a
+            // surface): it is carried as before, unproved either way. A pair with exact data
+            // is carried only on a bound within the tolerance: one not enclosed is
+            // `Some(INFINITY)`, and a NaN bound proves nothing)
+            if gap.is_some_and(|g| g.is_nan() || g > tol) {
+                continue;
+            }
         }
         let copy = trim.copy(k)?;
         // TRUE = delete a trim MakeFace made for sectoring
