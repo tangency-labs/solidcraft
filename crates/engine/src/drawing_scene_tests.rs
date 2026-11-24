@@ -1568,6 +1568,25 @@ fn overlays_share_their_copies() {
     assert_eq!(sessions.copies(), 1);
 }
 
+/// A detail view of an overlaid view draws the overlay too, cut to its window like its own lines: a
+/// circle of 5 mm round the hinge's corner, (40, 20) on the top view's plane, at twice the view's 1:1.
+/// Uncut, the turned-up leaf's phantom lines would run 80 mm across the sheet.
+#[test]
+fn a_detail_of_an_overlaid_view_cuts_the_overlay_to_its_window() {
+    let (mut s, sheet, view) = overlaid_hinge();
+    let p = json!({"parent": ids::encode(view), "boundary": {"circle": {"centre": [40.0, 20.0], "radius": 5.0}}, "place": {"at": [300.0, 100.0]}});
+    let made = run(&mut s, "drawing.view.detail", p);
+    let detail = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    assert_eq!(made["scale"]["text"].as_str(), Some("2:1"), "{made}");
+    let built = built(&s, sheet);
+    assert_eq!(built.views.iter().find(|v| v.view == detail).map(|v| v.status.clone()), Some(Status::Drawn));
+    let phantom: Vec<_> = strokes_of(&built.scene, detail).into_iter().filter(|(.., dashes)| dashes.is_some()).collect();
+    assert!(!phantom.is_empty(), "the overlay's leaf crosses the region");
+    let centre = Vec2::new(300.0, 100.0);
+    let points = phantom.iter().flat_map(|(path, ..)| path.iter().flat_map(|seg| [seg.start(), seg.end()]));
+    assert!(points.into_iter().all(|p| (p - centre).len() <= 10.0 + 1e-6), "inside the window: {phantom:?}");
+}
+
 /// How wide view `id` is on sheet `sheet` built at once, round what it draws, in paper millimetres.
 fn drawn_width(s: &Session, sheet: u64, id: u64) -> f64 {
     built(s, sheet).objects.iter().find(|o| o.object == id).map_or(f64::NAN, |o| o.bounds_mm.size().x)
