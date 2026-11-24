@@ -43,6 +43,7 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         offset_xy: [3.0, -4.0],
         captured: None,
         constraint: None,
+        old_placement: false,
     }
 }
 

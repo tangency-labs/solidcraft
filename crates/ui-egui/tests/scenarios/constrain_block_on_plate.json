@@ -14,10 +14,10 @@
   {"click":{"world":[140,50,50]}},
   {"click":{"handle":"dialog:Apply"}},
   {"expect":{"errors":0,"query":{"command":"joint.list","path":["joints",0,"constraint"],"value":"mate"}}},
-  {"expect":{"bbox":{"body":"Body2","min":[130,40,10],"max":[150,60,30]}}},
+  {"expect":{"bbox":{"body":"Body2","min":[40,40,10],"max":[60,60,30]}}},
   {"call":"ui.camera","params":{"target":[50,50,25],"yaw":-0.785398,"pitch":0.61548,"distance":320}},
   {"click":{"world":[100,50,5]}},
-  {"click":{"world":[150,50,20]}},
+  {"click":{"world":[60,50,20]}},
   {"click":{"handle":"dialog:ok"}},
   {"expect":{"dialog":null,"errors":0,"query":{"command":"joint.list","path":["joints",1,"constraint"],"value":"mate"}}},
   {"shot":"constrain_block_on_plate"}
