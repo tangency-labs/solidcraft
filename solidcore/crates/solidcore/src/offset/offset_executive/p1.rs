@@ -5624,12 +5624,13 @@ mod tests {
         let r = uv_curve_bounding_box(&kernel, &mut curve);
         assert!(
             matches!(
-                r,
-                Err(SolidError::Upstream {
-                    operation: "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb",
-                    code: 1001,
-                    ..
-                })
+                &r,
+                Err(e) if e.operation() == "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb"
+                    && e.upstream_status() == Some(1001)
+                    && e.nurbs_failure()
+                        == Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                            crate::error::nurbs::BSplineFailure::NoNurbsForm
+                        ))
             ),
             "{r:?}"
         );

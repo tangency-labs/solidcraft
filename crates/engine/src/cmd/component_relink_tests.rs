@@ -351,6 +351,33 @@ fn linked_design_properties_do_not_replace_conflicting_custom_materials() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// #21182: every body that brings the same conflicting custom material shares one `(linked N)`
+/// copy, rather than each adding its own until the design runs out of custom materials.
+#[test]
+fn linked_bodies_with_one_conflicting_material_share_its_copy() {
+    let dir = folder("properties-custom-shared");
+    let file = dir.join("source.solidcraft");
+    properties_part(&file, "Custom alloy", Some(4.2), [12, 34, 56]);
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let mut assigned = Vec::new();
+    for _ in 0..3 {
+        let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+        let p = run(&mut s, "component.properties", json!({"component": c}));
+        assert!((p["total"]["mass_g"].as_f64().unwrap() - 4.2).abs() < 1e-6, "{p}");
+        assigned.push(p["bodies"][0]["material"].as_str().unwrap().to_string());
+    }
+    assert_eq!(s.doc.user_materials.len(), 2, "{assigned:?}");
+    assert!(assigned.iter().all(|m| *m == assigned[0] && m != "Custom alloy"), "{assigned:?}");
+    assert_eq!(s.doc.material_density("Custom alloy"), Some(9.0));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn linked_design_properties_keep_distinct_names_for_equal_material_properties() {
     let dir = folder("properties-equal-density");
