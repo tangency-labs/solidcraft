@@ -1620,12 +1620,14 @@ fn main() -> eframe::Result {
     } else {
         wgpu_options(cpu_renderer, backend_launch.backend.as_deref(), skipped, backend_guard.as_ref())
     };
-    // Named on disk before the window loads the drivers; cleared once the
-    // first frame is presented (`App::backend_guard`) or startup returns.
+    // Named on disk when egui-wgpu creates the instance that loads the drivers (`startup_step`),
+    // not before: the window system's event loop comes first, and a panic there (a missing
+    // libxkbcommon-x11, #19643) is no driver's crash. Cleared once the first frame is presented
+    // (`App::backend_guard`) or startup returns.
     if let Some(guard) = &backend_guard
         && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &wgpu_options.wgpu_setup
     {
-        guard.attempt(setup.instance_descriptor.backends);
+        guard.attempt_when_the_instance_starts(setup.instance_descriptor.backends);
     }
     // A tracked full launch notes the API it starts, for the safe launch after a failure.
     if !safe
@@ -2101,6 +2103,10 @@ fn gpu_ready(a: &mut App, gpu: &GpuSetup, built: solidcraft_ui_egui::WgpuBuilt) 
 /// the crash journal keeps it until the app runs (a window opened later goes through the same
 /// steps), and the adapter once it is picked.
 fn startup_step(step: &'static str, detail: &str) {
+    // The graphics API's driver is loaded from here on: the crash guard names it on disk.
+    if step == eframe::egui_wgpu::STEP_INSTANCE {
+        startup::instance_starting();
+    }
     if step == eframe::egui_wgpu::STEP_ADAPTER_CHOSEN {
         solidcraft_engine::crash::set_environment(&format!("Renderer: {detail}"));
     }
@@ -2127,12 +2133,11 @@ fn wgpu_options(
         // A retry applies only to this launch. WGPU_BACKEND always has priority.
         let retry = std::env::var(startup::RETRY_BACKEND_ENV).ok();
         let preference = if cpu { preference } else { retry.as_deref().or(preference) };
-        // Each API probed is named on disk first: a driver that crashes in the probe is caught too.
-        let probe = |backends| {
-            if let Some(guard) = guard {
-                guard.attempt(backends);
-            }
-            startup::has_hardware_adapter(backends)
+        // Each API probed is named on disk while it is probed: a driver that crashes in the probe is
+        // caught too.
+        let probe = |backends| match guard {
+            Some(guard) => guard.probe(backends, || startup::has_hardware_adapter(backends)),
+            None => startup::has_hardware_adapter(backends),
         };
         if let Some(backends) =
             startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed, skipped.failed, probe)

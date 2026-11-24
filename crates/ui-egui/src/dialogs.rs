@@ -283,7 +283,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 percentage: String,
             },
             /// A construction axis, point or plane made from picks alone (#2474): input `i` is the
-            /// command's parameter `keys[i]`, and `t` (along a path) when it takes one.
+            /// command's parameter `keys[i]` (a list parameter takes everything picked into it),
+            /// and `t` (along a path) when it takes one.
             Construct {
                 command: &'static str,
                 title: &'static str,
@@ -1100,8 +1101,8 @@ impl Dialog {
             ),
             id if construct_picks(id).is_some() => {
                 let (command, title, picks) = construct_picks(id)?;
-                let inputs = picks.iter().map(|(label, accept, _)| SelInput::new(label, *accept, false)).collect();
-                let keys = picks.iter().map(|(_, _, key)| *key).collect();
+                let inputs = picks.iter().map(|(label, accept, _, many)| SelInput::new(label, *accept, *many)).collect();
+                let keys = picks.iter().map(|(_, _, key, _)| *key).collect();
                 let t = (command == "construct.point.along_path").then(|| "0.5".to_string());
                 Dialog::new(Kind::Construct { command, title, keys, t }, inputs)
             }
@@ -6849,6 +6850,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = serde_json::Map::new();
             for (i, key) in keys.iter().enumerate() {
                 let input = d.inputs.get(i).map_or("", |inp| inp.label);
+                if d.inputs.get(i).is_some_and(|inp| inp.multi) {
+                    // A list parameter takes everything picked: two points or twenty, in any order.
+                    let picked = sels(d, i);
+                    if picked.len() < 2 {
+                        return Err(format!("pick two or more {}", input.to_lowercase()));
+                    }
+                    let refs = picked.iter().map(|sel| construct_ref(app, sel)).collect::<Result<Vec<_>, _>>()?;
+                    p.insert((*key).to_string(), Value::Array(refs));
+                    continue;
+                }
                 let sel = sels(d, i).first().ok_or_else(|| format!("pick the {}", input.to_lowercase()))?;
                 p.insert(
                     (*key).to_string(),
@@ -8066,56 +8077,64 @@ fn emboss_face_sel(s: &Session, component: u64, face: &solidcraft_engine::doc::E
 }
 
 /// The construct tools that take only picks (#2474, #2494): their command, dialog title and
-/// inputs as (label, what it accepts, parameter). Offset Plane, Midplane, Plane Along Path and
-/// Plane At Angle have dialogs of their own.
-fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&'static str, Accept, &'static str)])> {
+/// inputs as (label, what it accepts, parameter, whether it takes any number of picks). Offset
+/// Plane, Midplane, Plane Along Path and Plane At Angle have dialogs of their own.
+///
+/// An input that takes any number of picks fills a list parameter: everything picked goes into
+/// it, in the order it was picked. Only the average of points does, and its order means nothing.
+fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&'static str, Accept, &'static str, bool)])> {
     const PLANE: Accept = PLANES | PLANAR_FACES;
     const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::SNAP_POINTS | selection::CLOUD_POINTS;
     const LINE: Accept = EDGES | AXES;
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
-        "construct.axis.through_cylinder" => ("construct.axis.through_cylinder", "AXIS THROUGH CYLINDER", &[("Face", FACES | EDGES, "face")]),
+        "construct.axis.through_cylinder" => ("construct.axis.through_cylinder", "AXIS THROUGH CYLINDER", &[("Face", FACES | EDGES, "face", false)]),
         "construct.axis.normal_to_face" => {
-            ("construct.axis.normal_to_face", "AXIS PERPENDICULAR TO FACE", &[("Face", FACES, "face"), ("Point", POINT, "point")])
+            ("construct.axis.normal_to_face", "AXIS PERPENDICULAR TO FACE", &[("Face", FACES, "face", false), ("Point", POINT, "point", false)])
         }
         "construct.axis.two_planes" => {
-            ("construct.axis.two_planes", "AXIS THROUGH TWO PLANES", &[("First plane", PLANE, "a"), ("Second plane", PLANE, "b")])
+            ("construct.axis.two_planes", "AXIS THROUGH TWO PLANES", &[("First plane", PLANE, "a", false), ("Second plane", PLANE, "b", false)])
         }
         "construct.axis.two_points" => {
-            ("construct.axis.two_points", "AXIS THROUGH TWO POINTS", &[("First point", POINT, "a"), ("Second point", POINT, "b")])
+            ("construct.axis.two_points", "AXIS THROUGH TWO POINTS", &[("First point", POINT, "a", false), ("Second point", POINT, "b", false)])
         }
-        "construct.axis.edge" => ("construct.axis.edge", "AXIS THROUGH EDGE", &[("Edge", LINE, "edge")]),
-        "construct.point.vertex" => ("construct.point.vertex", "POINT AT VERTEX", &[("Point", POINT, "point")]),
+        "construct.axis.edge" => ("construct.axis.edge", "AXIS THROUGH EDGE", &[("Edge", LINE, "edge", false)]),
+        "construct.point.vertex" => ("construct.point.vertex", "POINT AT VERTEX", &[("Point", POINT, "point", false)]),
         "construct.point.two_edges" => {
-            ("construct.point.two_edges", "POINT THROUGH TWO EDGES", &[("First edge", CURVE, "a"), ("Second edge", CURVE, "b")])
+            ("construct.point.two_edges", "POINT THROUGH TWO EDGES", &[("First edge", CURVE, "a", false), ("Second edge", CURVE, "b", false)])
         }
         "construct.point.three_planes" => (
             "construct.point.three_planes",
             "POINT THROUGH THREE PLANES",
-            &[("First plane", PLANE, "a"), ("Second plane", PLANE, "b"), ("Third plane", PLANE, "c")],
+            &[("First plane", PLANE, "a", false), ("Second plane", PLANE, "b", false), ("Third plane", PLANE, "c", false)],
         ),
-        "construct.point.center" => ("construct.point.center", "POINT AT CENTER", &[("Circle or sphere", FACES | CURVE, "of")]),
+        "construct.point.center" => ("construct.point.center", "POINT AT CENTER", &[("Circle or sphere", FACES | CURVE, "of", false)]),
         "construct.point.edge_plane" => {
-            ("construct.point.edge_plane", "POINT AT EDGE AND PLANE", &[("Edge", CURVE | AXES, "edge"), ("Plane", PLANE, "plane")])
+            ("construct.point.edge_plane", "POINT AT EDGE AND PLANE", &[("Edge", CURVE | AXES, "edge", false), ("Plane", PLANE, "plane", false)])
         }
-        "construct.point.along_path" => ("construct.point.along_path", "POINT ALONG PATH", &[("Path", CURVE, "path")]),
-        "construct.plane.axis_point" => {
-            ("construct.plane.axis_point", "cmd.construct.plane.axis_point", &[("Axis", LINE | CURVES, "axis"), ("Point", POINT, "point")])
-        }
+        "construct.point.along_path" => ("construct.point.along_path", "POINT ALONG PATH", &[("Path", CURVE, "path", false)]),
+        "construct.point.average" => ("construct.point.average", "POINT AT AVERAGE OF POINTS", &[("Points", POINT, "points", true)]),
+        "construct.plane.axis_point" => (
+            "construct.plane.axis_point",
+            "cmd.construct.plane.axis_point",
+            &[("Axis", LINE | CURVES, "axis", false), ("Point", POINT, "point", false)],
+        ),
         "construct.plane.two_edges" => {
-            ("construct.plane.two_edges", "PLANE THROUGH TWO EDGES", &[("First edge", LINE, "a"), ("Second edge", LINE, "b")])
+            ("construct.plane.two_edges", "PLANE THROUGH TWO EDGES", &[("First edge", LINE, "a", false), ("Second edge", LINE, "b", false)])
         }
         "construct.plane.three_points" => (
             "construct.plane.three_points",
             "PLANE THROUGH THREE POINTS",
-            &[("First point", POINT, "a"), ("Second point", POINT, "b"), ("Third point", POINT, "c")],
+            &[("First point", POINT, "a", false), ("Second point", POINT, "b", false), ("Third point", POINT, "c", false)],
         ),
         "construct.plane.perpendicular" => {
-            ("construct.plane.perpendicular", "PERPENDICULAR PLANE", &[("Plane", PLANE, "plane"), ("Line", LINE, "line")])
+            ("construct.plane.perpendicular", "PERPENDICULAR PLANE", &[("Plane", PLANE, "plane", false), ("Line", LINE, "line", false)])
         }
-        "construct.plane.square_to_line" => {
-            ("construct.plane.square_to_line", "cmd.construct.plane.square_to_line", &[("Line", LINE | CURVES, "line"), ("Point", POINT, "point")])
-        }
+        "construct.plane.square_to_line" => (
+            "construct.plane.square_to_line",
+            "cmd.construct.plane.square_to_line",
+            &[("Line", LINE | CURVES, "line", false), ("Point", POINT, "point", false)],
+        ),
         _ => return None,
     })
 }
@@ -10629,6 +10648,7 @@ mod construct_ask_tests {
         "construct.point.center",
         "construct.point.edge_plane",
         "construct.point.along_path",
+        "construct.point.average",
         "construct.plane.axis_point",
         "construct.plane.two_edges",
         "construct.plane.three_points",
