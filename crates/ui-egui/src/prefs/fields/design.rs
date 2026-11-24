@@ -22,6 +22,9 @@ macro_rules! design_preferences {
             default_projection: Projection = Projection::Third, PAGE_DESIGN;
             /// Units of new designs.
             default_units: String = "mm".into(), PAGE_DESIGN;
+            /// The folder Save and Save As open in for a design that has never been saved (#5522). Empty:
+            /// the folder last used, as before. The desktop app reads it; the web app has no folders.
+            designs_folder: String = String::new(), PAGE_DESIGN;
             /// A double-click on a component, in the browser or on its face in the view, opens a linked
             /// one's design with the assembly around it (`edit_in_place`) and activates any other. Off:
             /// a double-click in the browser activates every component and one in the view does nothing,
@@ -43,6 +46,9 @@ macro_rules! design_preferences {
             /// design's and the exported body's names (`export_name`). Empty: each export offers the name
             /// it did before (the design's, or the first body's for a mesh).
             export_name: String = String::new(), PAGE_DESIGN;
+            /// The folder export dialogs (File › Export, Save As Mesh, drawings and other saved files)
+            /// open in, until another folder is chosen in one (#5522). Empty: the folder last used.
+            exports_folder: String = String::new(), PAGE_DESIGN;
             /// GLB export writes each component occurrence as a named node holding its part's bodies, so a
             /// viewer can move each part on its own (#5296). Off: every body under the root in world
             /// coordinates, named as the model names it, as SolidCraft 0.40 wrote it.

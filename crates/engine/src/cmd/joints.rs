@@ -434,10 +434,15 @@ pub(crate) fn effective_values(s: &Session, id: u64) -> Option<Vec<Value>> {
     effective_value_list(s, id).map(|list| list.into_iter().map(|v| serde_json::to_value(v).unwrap_or_default()).collect())
 }
 
+/// Values placed by the solver, including only motion links in the active assembly.
+pub(super) fn active_joint_values(doc: &Document) -> BTreeMap<u64, Vec<f64>> {
+    joints::joint_values(&doc.active_assembly().assembly)
+}
+
 /// [`effective_values`], typed.
 fn effective_value_list(s: &Session, id: u64) -> Option<Vec<NamedValue>> {
     let j = s.doc.assembly.joints.iter().find(|j| j.id == id)?;
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = active_joint_values(&s.doc);
     Some(named_value_list(j, vals.get(&id).map(Vec::as_slice).unwrap_or(&j.values)))
 }
 
@@ -446,8 +451,8 @@ fn effective_value_list(s: &Session, id: u64) -> Option<Vec<NamedValue>> {
 /// as the solver placed them, after motion links and limits, as `joint.inspect` and
 /// `joint.drive` give them.
 pub fn posed_joints(before: &Document, after: &Document, driven: impl IntoIterator<Item = u64>) -> Vec<ReachedJoint> {
-    let was = joints::joint_values(&before.assembly);
-    let now = joints::joint_values(&after.assembly);
+    let was = active_joint_values(before);
+    let now = active_joint_values(after);
     let mut ids: std::collections::BTreeSet<u64> = driven.into_iter().collect();
     ids.extend(after.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
     after
@@ -555,7 +560,7 @@ pub(crate) fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result
     if key == "0" || key.eq_ignore_ascii_case("root") {
         return Ok(0);
     }
-    if let Some(o) = s.doc.occurrences.iter().find(|o| o.id.to_string() == key || o.name == key) {
+    if let Some(o) = s.doc.active_occurrences().find(|o| o.id.to_string() == key || o.name == key) {
         return Ok(o.id);
     }
     // A component name: its first occurrence.
@@ -1733,7 +1738,12 @@ fn rigid_group(s: &mut Session, p: &Value) -> Result<Value> {
 fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.drive";
     let id = joint_id(s, p.get("joint"), cmd)?;
-    let kind = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.kind).ok_or_else(|| bad(cmd, "joint"))?;
+    let joint = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
+    if joint.uses_any_occurrence(&s.doc.inactive_pattern_occurrences()) {
+        return Err(bad(cmd, "the joint refers to an inactive pattern occurrence"));
+    }
+    let active = s.doc.active_assembly();
+    let kind = joint.kind;
     if kind == JointKind::Rigid {
         return Err(bad(cmd, "a rigid joint does not move: joint.edit can make it revolute (turns), slider (slides) or cylindrical (both)"));
     }
@@ -1750,7 +1760,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         if p.get("values").is_some() {
             return Err(bad(cmd, "index goes with value, not values"));
         }
-        let mut q = joints::joint_values(&s.doc.assembly).remove(&id).unwrap_or_else(|| vec![0.0; kind.dofs().len()]);
+        let mut q = joints::joint_values(&active.assembly).remove(&id).unwrap_or_else(|| vec![0.0; kind.dofs().len()]);
         if let Some(slot) = q.get_mut(index) {
             *slot = value(s, p.get("value").ok_or_else(|| bad(cmd, "give value"))?, kind.is_angle(index), cmd)?;
         }
@@ -1766,7 +1776,6 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Array(a)) => a.len(),
         _ => 1,
     };
-    let joint = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
     if index.is_none() {
         for (i, v) in q.iter_mut().enumerate().skip(given) {
             *v = joint.values.get(i).copied().unwrap_or(*v);
@@ -1781,7 +1790,8 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     // A suppressed joint places nothing: a value stored now would move the part only when the
     // joint is unsuppressed, and leave an undo step for a drive whose reply says nothing moved
     // (#9742). A joint in a motion link still carries its value to the joints it drives.
-    let hold = joint.suppressed && !s.doc.assembly.links.iter().any(|l| l.a == id || l.b == id);
+    let hold = joint.suppressed && !active.assembly.links.iter().any(|l| l.a == id || l.b == id);
+    drop(active);
     let before = super::motion::positions(s);
     let r = if hold {
         json!({"stopped_by_contact": null, "stopped_by_loop": null})
@@ -1848,7 +1858,8 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
 /// sets it from another coordinate (a screw's travel follows its turn), a limit holds it, or
 /// contact or a closed loop stopped the motion short. Degrees and mm, as `values` (#9742).
 fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &Value) -> Vec<HeldValue> {
-    let now = joints::joint_values(&s.doc.assembly).remove(&j.id).unwrap_or_else(|| j.values.clone());
+    let active = s.doc.active_assembly();
+    let now = joints::joint_values(&active.assembly).remove(&j.id).unwrap_or_else(|| j.values.clone());
     let names = j.kind.dofs();
     let mut out = Vec::new();
     for &i in driven {
@@ -1859,7 +1870,7 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
         let angle = j.kind.is_angle(i);
         let shown = |v: f64| expr::round_reported(if angle { v.to_degrees() } else { v });
         let name = names.get(i).copied().unwrap_or("value");
-        let why = if let Some(l) = s.doc.assembly.links.iter().find(|l| l.b == j.id && l.ib == i) {
+        let why = if let Some(l) = active.assembly.links.iter().find(|l| l.b == j.id && l.ib == i) {
             let coupling = match &l.coupling {
                 Some(joints::Coupling::Gear { .. }) => " (gears)",
                 Some(joints::Coupling::RackPinion { .. }) => " (rack and pinion)",
@@ -2003,7 +2014,7 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let name = |id: u64| s.doc.assembly.joints.iter().find(|j| j.id == id);
     // As joint.list gives them: with what motion links set.
-    let effective = joints::joint_values(&s.doc.assembly);
+    let effective = active_joint_values(&s.doc);
     // The joints the reach moved, and those `from` set elsewhere first.
     let values = reached
         .values
@@ -2463,8 +2474,10 @@ fn couple(s: &mut Session, p: &Value, cmd: &str, mut l: MotionLink) -> Result<Co
     }
     (l.ratio, l.lift) =
         joints::coupling_values(&s.doc, &s.model.state(), &l).unwrap_or(Ok((l.ratio, Vec::new()))).map_err(|e| bad(cmd, e.to_string()))?;
-    let vals = joints::joint_values(&s.doc.assembly);
-    let value = |id: u64, i: usize| vals.get(&id).and_then(|q| q.get(i)).copied().unwrap_or(0.0);
+    let vals = active_joint_values(&s.doc);
+    let value = |id: u64, i: usize| {
+        vals.get(&id).or_else(|| s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| &j.values)).and_then(|q| q.get(i)).copied().unwrap_or(0.0)
+    };
     // New or put in place of another (turned the other way, a ring gear now), b keeps where it
     // is: the gears stay in mesh at the pose they are in. (A radius edited in the design keeps
     // the offset instead, so the gears turn from where they meshed when they were coupled.)
@@ -2800,7 +2813,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     let mut omitted = Omitted::default();
     let st = s.model.state();
     let sol = joints::solve(&s.doc, &st);
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = active_joint_values(&s.doc);
     let js: Vec<ListedJoint> = s
         .doc
         .assembly
@@ -2829,7 +2842,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
                 kind: j.kind,
                 a: j.a.occurrence,
                 b: j.b.occurrence,
-                values: named_value_list(j, vals.get(&j.id).map(Vec::as_slice).unwrap_or_default()),
+                values: named_value_list(j, vals.get(&j.id).map(Vec::as_slice).unwrap_or(&j.values)),
                 flip: j.flip,
                 offset: j.offset,
                 offset_xy: j.offset_xy,
@@ -2964,7 +2977,7 @@ mod relations_tests;
 /// Capture Position: every moving joint keeps its current values (as the solver places them) as
 /// its captured position. Returns how many joints were captured.
 pub(in crate::cmd) fn capture_values(s: &mut Session) -> usize {
-    let current = joints::joint_values(&s.doc.assembly);
+    let current = active_joint_values(&s.doc);
     if s.doc.assembly.joints.iter().all(|j| j.kind == JointKind::Rigid) {
         return 0;
     }

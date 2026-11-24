@@ -113,6 +113,8 @@ use crate::topology::face::p3::{FaceBreps, FaceIntersectOptions, IntersectObject
 use crate::topology::topology_traverser::{self as traverser, Entity, Marks};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, LoopId, VertexId};
 
+mod annular;
+
 const OP: &str = "blend::feature_executive";
 
 /// A defect ([`BlendFailure::Defect`]) of the executive, with the status `SM_ERR` of the
@@ -458,6 +460,21 @@ impl<'a> FeatureExecutive<'a> {
         &self.features
     }
 
+    /// The two retained supports whose surfaces can span a feature's circular
+    /// boundary loops. Call after adding the feature, before partitioning the base.
+    /// [`Self::do_defeature`] checks the extension lengths and the other retained faces.
+    ///
+    /// # Errors
+    ///
+    /// An invalid feature index, or failure to read its boundary geometry.
+    pub fn annular_supports(&self, k: &Kernel, feature: usize) -> Result<Option<[FaceId; 2]>> {
+        let feature = self
+            .features
+            .get(feature)
+            .ok_or_else(|| SolidError::invalid_input(OP, "the feature index is out of range"))?;
+        Ok(annular::Closure::of(k, self.base, feature)?.map(|c| c.supports()))
+    }
+
     /// `GetFeatures`, mutably (for the per-feature setters).
     pub fn features_mut(&mut self) -> &mut [Feature] {
         &mut self.features
@@ -654,8 +671,9 @@ impl<'a> FeatureExecutive<'a> {
     ///
     /// Not upstream (WR-656): a feature that was not partitioned, or whose base patch could
     /// not be built, is not taken off. Upstream leaves its hole open, with success, for the
-    /// caller to put back with `RestoreFeatures`; here it is put back at once
-    /// (`RestoreFeature`), so no base is handed back open. The features kept are returned,
+    /// caller to put back with `RestoreFeatures`. A batch containing an annular closure
+    /// puts a refused partition back immediately so subsequent closures see a closed
+    /// body. Other batches restore their kept features at the end. The kept features are returned,
     /// each naming the base loop edge of its open hole and, when its patch's construction
     /// said, why it was not built ([`KeptFeature::limit`], #3218), and the executive drops
     /// them, as `RestoreFeatures` does. When no feature comes off, the call is refused at the
@@ -699,11 +717,44 @@ impl<'a> FeatureExecutive<'a> {
     /// [`Self::do_defeature`]'s work on the base, which the caller puts back on any error.
     fn take_off(&mut self, k: &mut Kernel) -> Result<Vec<KeptFeature>> {
         let mut kept: Vec<KeptFeature> = Vec::new();
+        let mut untouched = Vec::new();
         let mut off = 0;
+        // A joint patch needs a closed base. Find out before any partition can open
+        // it, but compute each closure on the current body when its turn comes.
+        let mut batch_has_annular_closure = false;
+        if self.features.len() > 1 {
+            for feature in &self.features {
+                if annular::Closure::of(k, self.base, feature)?.is_some() {
+                    batch_has_annular_closure = true;
+                    break;
+                }
+            }
+        }
         for i in 0..self.features.len() {
             let Some(feature) = self.features.get_mut(i) else {
                 continue;
             };
+            if let Some(closure) = annular::Closure::of(k, self.base, feature)? {
+                if let Some(limit) = closure.remove(k, self.base, feature, &mut self.patches)? {
+                    untouched.push(i);
+                    kept.push(KeptFeature {
+                        feature: i,
+                        open_loop: open_loop_edge(feature),
+                        limit: Some(limit),
+                    });
+                } else {
+                    off += 1;
+                }
+                continue;
+            }
+            // Partition cuts the selected faces out even when no patch can be built.
+            // Only a batch with a joint patch needs the original arena ids put back here.
+            let before = if batch_has_annular_closure {
+                Some(self.base.snapshot()?)
+            } else {
+                None
+            };
+            let first_patch = self.patches.len();
             keep_unported(partition_feature(k, self.base, feature))?;
             keep_unported(build_patches(k, self.base, feature, &mut self.patches))?;
             // `build_patches` marks the feature rebuilt before it refuses an unpartitioned
@@ -712,8 +763,6 @@ impl<'a> FeatureExecutive<'a> {
                 keep_unported(apply_patches(k, self.base, feature, &mut self.patches))?;
                 off += 1;
             } else {
-                // its hole stays open until it is put back, after the others, as upstream's
-                // caller's RestoreFeatures would
                 kept.push(KeptFeature {
                     feature: i,
                     open_loop: open_loop_edge(feature),
@@ -721,6 +770,15 @@ impl<'a> FeatureExecutive<'a> {
                         .and_then(|l| l.limit)
                         .or_else(|| feature.loops.iter().find_map(|l| l.limit)),
                 });
+                // Only a completed partition with the separated body could have been
+                // restored. A failure during partition still refuses the batch below.
+                if let Some(before) = before.filter(|_| {
+                    feature.is_partitioned && feature.can_restore && feature.fbrep.is_some()
+                }) {
+                    self.base.restore(before);
+                    self.patches.truncate(first_patch);
+                    untouched.push(i);
+                }
             }
         }
         if kept.is_empty() {
@@ -762,13 +820,15 @@ impl<'a> FeatureExecutive<'a> {
             let Some(feature) = self.features.get_mut(f.feature) else {
                 return Err(refusal);
             };
-            match restore_feature(k, self.base, feature) {
-                Ok(true) => {
-                    self.features.remove(f.feature);
+            // A refused joint patch or a rolled-back partition left the feature intact.
+            if !untouched.contains(&f.feature) {
+                match restore_feature(k, self.base, feature) {
+                    Ok(true) => {}
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Ok(false) | Err(_) => return Err(refusal),
                 }
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Ok(false) | Err(_) => return Err(refusal),
             }
+            self.features.remove(f.feature);
         }
         Ok(kept)
     }
@@ -1933,6 +1993,19 @@ fn planar_cap_rebuild(k: &mut Kernel, patch: &mut Brep, loop_curves: &[LoopCurve
     Ok(())
 }
 
+/// The requested extension, or twice the loop's box size for the automatic distance.
+fn extension_distance(k: &Kernel, source: &Brep, loop_edges: &[EdgeId], requested: f64) -> f64 {
+    if requested < 0.0 {
+        let mut bounds = Extent3d::new();
+        for &e in loop_edges {
+            bounds = edge_box(k, source, e).union(&bounds);
+        }
+        2.0 * bounds.max_length()
+    } else {
+        requested
+    }
+}
+
 /// `SmFeatureExecutive::ExtSurfaceRebuild`: for each source face along the loop edges
 /// a patch face: the face itself with its loop-edge inner loop as outer loop when the
 /// loop edges are not on its outer loop, else its surface extended by `ext_dist` (or
@@ -1963,17 +2036,7 @@ fn ext_surface_rebuild(
     }
 
     // Set the distance to extend surfaces
-    let ext = if ext_dist < 0.0 {
-        // Estimate void size to set surface extensions.
-        let mut void_box = Extent3d::new();
-        for &e in loop_edges {
-            let this_box = edge_box(k, source, e);
-            void_box = this_box.union(&void_box);
-        }
-        2. * void_box.max_length()
-    } else {
-        ext_dist
-    };
+    let ext = extension_distance(k, source, loop_edges, ext_dist);
 
     for (&face, &pe) in faces.iter().zip(&face_loop_edge) {
         // make a brep for the new face

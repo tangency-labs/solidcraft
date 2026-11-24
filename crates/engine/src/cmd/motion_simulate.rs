@@ -16,7 +16,7 @@ use std::f64::consts::TAU;
 use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, Coupling, JointKind};
-use solidcraft_doc::{Document, Mat, mat_inverse, mat_mul};
+use solidcraft_doc::{Mat, mat_inverse, mat_mul};
 use solidcraft_dynamics as dyn_;
 use solidcraft_dynamics::{Body, Coord, Link, Marker, Mat3, Model, Quat, STANDARD_GRAVITY, Settings};
 
@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Simulate Motion",
     )];
 
 fn enabled(s: &Session) -> std::result::Result<(), String> {
-    if s.doc.occurrences.iter().any(|o| !o.grounded) { Ok(()) } else { Err("needs a component that is not grounded".into()) }
+    if s.doc.active_occurrences().any(|o| !o.grounded) { Ok(()) } else { Err("needs a component that is not grounded".into()) }
 }
 
 /// A frame (column-major `Mat`) as origin and axes.
@@ -93,7 +93,7 @@ fn arr(v: [f64; 3]) -> Vec3 {
 
 /// The design (pending moves applied) as a dynamics model with the given gravity (mm/s²).
 pub(crate) fn model_of(s: &Session, gravity: Vec3) -> Result<(Model, Mapping)> {
-    let mut doc: Document = (*s.doc).clone();
+    let mut doc = s.doc.active_assembly().into_owned();
     for occurrence in &mut doc.occurrences {
         if let Some(transform) = s.pending_moves.get(&occurrence.id) {
             occurrence.transform = *transform;
@@ -192,7 +192,11 @@ pub(crate) fn model_of(s: &Session, gravity: Vec3) -> Result<(Model, Mapping)> {
         model.joints.push(dyn_::Joint { kind, a: marker(ga, &wa), b: marker(gb, &wb) });
         map.joints.push((j.id, j.kind));
     }
-    for (i, l) in doc.assembly.links.iter().enumerate() {
+    // Keep the indices from the saved assembly, omitting links to inactive joints.
+    for (i, l) in s.doc.assembly.links.iter().enumerate() {
+        if !map.initial_values.contains_key(&l.a) || !map.initial_values.contains_key(&l.b) {
+            continue;
+        }
         if matches!(l.coupling, Some(Coupling::Cam(_))) {
             return Err(bad(CMD, format!("not supported yet: motion link {i} is a cam")));
         }
