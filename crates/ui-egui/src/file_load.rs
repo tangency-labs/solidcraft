@@ -56,7 +56,7 @@ pub enum Kind {
     Recover { id: String, dir: Option<String> },
     /// Export a snapshot of the current design without adopting the worker's session.
     ExportDxf,
-    /// Write a sheet of the open drawing to a file (`drawing.export` with a path), the same way.
+    /// Export a sheet of the open drawing to a file or a control-channel reply.
     ExportSheet,
     /// Read the active design's linked designs again (`component.update_links`, with the
     /// request's options: `component` or `components` reads only those links).
@@ -149,6 +149,9 @@ impl Request {
     /// It reads files the active design already names, and changes that design in place.
     fn reads_again(&self) -> bool {
         matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud)
+    }
+    fn sheet_in_reply(&self) -> bool {
+        self.kind == Kind::ExportSheet && self.path.is_empty()
     }
     /// The command's parameters: the path and the caller's import options.
     fn params(&self) -> Value {
@@ -700,8 +703,8 @@ fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
     }
 }
 
-/// A control-channel (MCP) `doc.open` or STEP/mesh import runs like File > Open: off the window
-/// thread, answered when the file is in. Other requests come back to be handled now.
+/// Run control-channel file operations and sheet exports off the window thread.
+/// Other requests come back to be handled now.
 pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Option<crate::control::ControlRequest> {
     if cfg!(target_arch = "wasm32") || !matches!(req.method.as_str(), "engine.execute" | "command") {
         return Some(req);
@@ -716,7 +719,6 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         "doc.open" | "file.import" => Kind::Open,
         "file.insert_step" | "file.insert_mesh" | "pointcloud.insert" => Kind::Insert,
         "file.export_view_dxf" => Kind::ExportDxf,
-        // Without a path the reply holds the document, which is quick: it runs at once.
         "drawing.export" => Kind::ExportSheet,
         "pointcloud.reload" => Kind::ReloadCloud,
         _ => return Some(req),
@@ -724,7 +726,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     let params = req.params.get("params");
     let path = match params.and_then(|p| p.get("path")).and_then(Value::as_str) {
         Some(path) => path,
-        None if matches!(kind, Kind::ExportDxf | Kind::ReloadCloud) => "",
+        None if kind.exports() || kind == Kind::ReloadCloud => "",
         None => return Some(req),
     };
     // This never reaches `control::handle`, so the request's own `param_check` is taken here. The
@@ -1604,8 +1606,8 @@ fn quiet(app: &SolveApp, r: &Running) -> bool {
 
 fn landing(app: &SolveApp, r: &Running) -> Land {
     let Some(job) = r.ready.as_ref() else { return Land::Wait };
-    // As it always was: the design waited for it.
-    if app.preferences.file_operations_wait || r.cancelled() || job.is_err() || r.request.kind == Kind::ExportDxf {
+    // An in-memory sheet reply is for the snapshot the worker started with.
+    if app.preferences.file_operations_wait || r.cancelled() || job.is_err() || r.request.kind == Kind::ExportDxf || r.request.sheet_in_reply() {
         return Land::Now;
     }
     // The tab list is being edited (a close prompt, a quit, Close Other/All Tabs): landing a
@@ -1720,7 +1722,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 crate::drawing_workspace::print::written(app, &request.path);
                 request.answer(Ok(made.result));
             }
-            Ok(made) if request.kind.exports() => {
+            Ok(made) if request.kind.exports() && (!request.sheet_in_reply() || !running.cancelled()) => {
                 if !request.path.is_empty() {
                     app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
                 }
@@ -2041,7 +2043,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .placed(egui::Align2::CENTER_TOP, top)
         .actions("", solidcraft_ui_text::tr("ui.cancel"), None)
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, &format!("{name}…"), ui_kit::Text::Report("name", false));
+            if !name.is_empty() {
+                ui_kit::text(ui, &format!("{name}…"), ui_kit::Text::Report("name", false));
+            }
             if let Some(preview) = r.preview.as_ref().filter(|_| !cancelled) {
                 let w = ui.available_width();
                 ui.image((preview.id(), egui::vec2(w, w * 200.0 / 320.0)));
@@ -2624,32 +2628,49 @@ M30
         }
     }
 
-    /// A control-channel sheet export to a file goes to the worker as an export, as the view DXF does,
-    /// with its path among its options; one without a path holds its document in the reply and runs at
-    /// once.
     #[test]
-    fn a_sheet_export_to_a_file_runs_off_the_window_thread() {
-        let mut app = SolveApp::new(Session::default(), Default::default());
-        let request = |path: Value| json!({"command": "drawing.export", "params": {"sheet": "Sheet 1", "format": "png", "path": path}});
-        let (now, _now) = crate::control::ControlRequest::new("engine.execute", request(Value::Null));
-        assert!(control(&mut app, now).is_some());
-        assert!(app.file_load.idle());
-        let (later, _later) = crate::control::ControlRequest::new("engine.execute", request(json!("sheet.png")));
-        assert!(control(&mut app, later).is_none());
-        let running = app.file_load.running.as_ref().map(|r| (r.request.kind.clone(), r.request.options.get("path").cloned()));
-        assert_eq!(running, Some((Kind::ExportSheet, Some(json!("sheet.png")))));
+    fn sheet_exports_to_a_file_or_reply_run_off_the_window_thread() {
+        for (options, expected_path) in
+            [(json!({"sheet": "Sheet 1", "format": "svg"}), ""), (json!({"sheet": "Sheet 1", "format": "dxf", "path": "sheet.dxf"}), "sheet.dxf")]
+        {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            let (request, _reply) = crate::control::ControlRequest::new("engine.execute", json!({"command": "drawing.export", "params": options}));
+            assert!(control(&mut app, request).is_none());
+            let running = app.file_load.running.as_ref().expect("sheet export worker");
+            assert_eq!(running.request.kind, Kind::ExportSheet);
+            assert_eq!(running.request.path, expected_path);
+            assert_eq!(running.request.command(), ("drawing.export", options));
+        }
     }
 
-    /// A deferred drawing held since its last update (the model changed after it), written to a file
-    /// beside the window, is the sheet an export at once gives: its views' last lines, not a sheet
-    /// without them.
     #[test]
-    fn a_held_deferred_sheet_written_beside_the_window_is_the_one_exported_at_once() {
+    fn cancelling_a_sheet_export_discards_an_inline_result_that_is_ready() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let (request, reply) = crate::control::ControlRequest::new(
+            "engine.execute",
+            json!({"command": "drawing.export", "params": {"sheet": "Sheet 1", "format": "svg"}}),
+        );
+        assert!(control(&mut app, request).is_none());
+        let running = app.file_load.running.as_mut().unwrap();
+        let key = format!("file:{}", running.request.serial);
+        let (worker, result) = std::sync::mpsc::channel();
+        running.rx = result;
+        worker.send(Ok(Made { session: Session::default(), result: json!({"svg": "<svg/>"}), thumbnail: false })).unwrap();
+        crate::operations::control(&mut app, &json!({"cancel": key})).unwrap();
+        tick(&mut app, &crate::fonts::test_context());
+        assert_eq!(reply.try_recv().unwrap(), json!({"ok": false, "error": "file operation cancelled"}));
+        assert!(app.file_load.idle());
+    }
+
+    /// A deferred drawing exported by the worker keeps the lines from its last update.
+    #[test]
+    fn a_held_deferred_sheet_exports_the_same_lines_to_a_file_and_reply() {
         let dir = std::env::temp_dir().join(format!("solidcraft-held-sheet-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("sheet.svg").to_string_lossy().into_owned();
         let ctx = crate::fonts::test_context();
         let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.file_operations_wait = false;
         let run = |app: &mut SolveApp, id: &str, p: Value| app.session.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
         run(&mut app, "solid.box", json!({"length": 100, "width": 50, "height": 20}));
         let drawing = run(&mut app, "drawing.create", json!({}))["id"].clone();
@@ -2665,17 +2686,29 @@ M30
         run(&mut app, "drawing.open", json!({"drawing": drawing}));
         let at_once = run(&mut app, "drawing.export", svg);
         assert_eq!(at_once["out_of_date"].as_array().map(Vec::len), Some(2), "held: {at_once}");
-        let request = json!({"command": "drawing.export", "params": {"sheet": "Sheet 1", "format": "svg", "path": path}});
-        let (request, _reply) = crate::control::ControlRequest::new("engine.execute", request);
-        assert!(control(&mut app, request).is_none(), "written beside the window");
-        for _ in 0..5000 {
-            if app.file_load.running.is_none() {
-                break;
+        for options in [json!({"sheet": "Sheet 1", "format": "svg", "path": path}), json!({"sheet": "Sheet 1", "format": "svg"})] {
+            let request = json!({"command": "drawing.export", "params": options});
+            let (request, reply) = crate::control::ControlRequest::new("engine.execute", request);
+            assert!(control(&mut app, request).is_none());
+            if options.get("path").is_none() {
+                // A newer revision must not restart an export that already has its snapshot.
+                app.session.revision += 1;
             }
-            tick(&mut app, &ctx);
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            for _ in 0..5000 {
+                if app.file_load.running.is_none() {
+                    break;
+                }
+                tick(&mut app, &ctx);
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            let reply = reply.try_recv().expect("the export finished");
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert_eq!(reply["result"]["out_of_date"], at_once["out_of_date"]);
+            assert!(app.file_load.idle());
+            if options.get("path").is_none() {
+                assert_eq!(reply["result"]["svg"], at_once["svg"]);
+            }
         }
-        assert!(app.file_load.running.is_none(), "the export finished");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), at_once["svg"].as_str().unwrap());
         let _ = std::fs::remove_dir_all(&dir);
     }

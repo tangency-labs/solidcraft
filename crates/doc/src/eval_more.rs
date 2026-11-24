@@ -1560,6 +1560,42 @@ pub(super) fn sheet_eval(
                 _ => no_sheet(body),
             })
         }
+        FeatureKind::SheetTab { sketch, profiles, body } => {
+            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
+            let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
+            // The named sheet, else the one sheet with a face that takes the profile: which is never
+            // a matter of the sheets' order, so a tab two sheets would take is refused.
+            let candidates: Vec<usize> = match body {
+                Some(n) => vec![
+                    st.surface_sheets
+                        .iter()
+                        .position(|s| &s.body == n)
+                        .ok_or_else(|| DocError::Invalid(format!("`{n}` is not a sheet metal body")))?,
+                ],
+                None => (0..st.surface_sheets.len()).collect(),
+            };
+            let mut first_error = None;
+            let mut took = Vec::new();
+            for i in candidates {
+                let Some(mut sk) = st.surface_sheets.get(i).cloned() else { continue };
+                match sk.add_tab(&ss.plane, &regions) {
+                    Ok(_) => took.push((i, sk)),
+                    Err(e) => {
+                        first_error.get_or_insert(e);
+                    }
+                }
+            }
+            match <[(usize, crate::SurfaceSheet); 1]>::try_from(took) {
+                Ok([(i, sk)]) => {
+                    if let Some(slot) = st.surface_sheets.get_mut(i) {
+                        *slot = sk;
+                    }
+                    rebuild_surface_sheet(st, i)
+                }
+                Err(took) if !took.is_empty() => Err(DocError::Invalid(sheet::TAB_SEVERAL.into())),
+                Err(_) => Err(first_error.unwrap_or_else(|| DocError::Invalid(sheet::TAB_OFF_SHEET.into()))),
+            }
+        }
         FeatureKind::SheetUnfold { body, refold, fixed } => {
             let i = surface_sheet_for(st, body, |s| s.unfolded == *refold).ok_or_else(|| match body {
                 Some(_) => no_sheet(body),

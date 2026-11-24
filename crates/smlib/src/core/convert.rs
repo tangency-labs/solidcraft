@@ -61,7 +61,7 @@ use crate::flat::*;
 use crate::import::Arrays;
 use crate::{Error, Result};
 
-use super::{Body, answer, run, with_body};
+use super::{Body, answer, run, with_body, with_own_body};
 
 // ---- shared ------------------------------------------------------------------------------------
 
@@ -298,8 +298,11 @@ pub(crate) fn to_arrays(body: &Body) -> Result<Arrays> {
 /// edges by upstream's sampled distance, not a proved one, through
 /// [`solidcore::Kernel::with_sampled_trim_raise`], which restores the proved raise after the
 /// call: proving every trim of every face a file translates cost many times the translation.
+/// The body is a sheet made only for this call ([`crate::pcurves`]), so the token over this
+/// thread's work stops it ([`with_own_body`]): a work limit there stops a trim whose edge never
+/// drops onto its surface within the tolerance (#20575).
 pub(crate) fn to_arrays_sampled_trims(body: &Body) -> Result<Arrays> {
-    with_body("FlatFromBrep", body, |k, b| Ok(k.with_sampled_trim_raise(|k| flat_from_brep(k, b))))?
+    with_own_body("FlatFromBrep", body, |k, b| Ok(k.with_sampled_trim_raise(|k| flat_from_brep(k, b))))?
 }
 
 /// One NURBS curve's arrays (`smu_AddSmBSplineCurve3d`, `smu_AddSmBSplineCurve2d`): counts and

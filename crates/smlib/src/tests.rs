@@ -150,7 +150,7 @@ const NO_KERNEL: [&str; 16] = [
     "start",
 ];
 
-const ANSWERING: [&str; 70] = [
+const ANSWERING: &[&str] = &[
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -186,6 +186,7 @@ const ANSWERING: [&str; 70] = [
     "untrim_face",
     "extend_sheet",
     "face_points",
+    "trim_by_dropped_curves",
     "stitch",
     "offset_sheet",
     "classify_point",
@@ -218,6 +219,7 @@ const ANSWERING: [&str; 70] = [
     "loft",
     "sweep_stations",
     "loft_to_point",
+    "loft_to_point_through",
     "screw_sweep",
     "screw_sweep_radial",
     "screw_sweep_with_options",
@@ -327,6 +329,7 @@ fn every_entry_point_answers() {
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());
+    says("trim_by_dropped_curves", sheet.trim_by_dropped_curves(std::slice::from_ref(&lines), &[p(5.0, 5.0, 5.0)], 1e-6));
     says("stitch", sheet.stitch(0.1));
     says("offset_sheet", sheet.offset_sheet(1.0));
     says("classify_point", a.classify_point([1.0; 3]));
@@ -363,6 +366,8 @@ fn every_entry_point_answers() {
     let i3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     says("sweep_stations", Brep::sweep_stations(&lines, &[Affine { m: i3, t: [0.0; 3] }, Affine { m: i3, t: [0.0, 0.0, 2.0] }], Ends::Capped));
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
+    // The base twice, at one height: its own refusal.
+    says("loft_to_point_through", Brep::loft_to_point_through(&[lines.clone(), lines.clone()], p(5.0, 5.0, 12.0), &[0.0, 0.5, 1.0]));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
     says(
@@ -796,6 +801,40 @@ fn a_token_under_another_stops_when_either_does() {
     dialog.stop();
     assert!(design.within(|| dialog.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err());
     assert!(dialog.within(|| design.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err(), "either way round");
+}
+
+/// A limit on a call's work (#20575) stops it at the check that makes the count, the same on every
+/// machine, and says it was the limit: a call that stays under it, and one stopped from outside,
+/// do not.
+#[test]
+fn a_work_limit_stops_a_call_at_its_count_and_says_so() {
+    let checks = std::cell::Cell::new(0_u32);
+    let (result, spent) = stop::within_polls(500, || {
+        let result: Result<()> = core::run("limited_call", |k| {
+            loop {
+                checks.set(checks.get() + 1);
+                k.check_cancelled("limited_call")?;
+            }
+        });
+        result
+    });
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(spent);
+    // The call's own check before it starts counts too, and nothing else does.
+    assert!((490..=499).contains(&checks.get()), "{}", checks.get());
+
+    let (result, spent) = stop::within_polls(500, || -> Result<()> { core::run("short_call", |k| k.check_cancelled("short_call")) });
+    assert!(result.is_ok() && !spent);
+
+    let outer = stop::Stop::new();
+    let (result, spent) = outer.within(|| {
+        stop::within_polls(u64::MAX, || {
+            outer.stop();
+            let result: Result<()> = core::run("stopped_call", |k| k.check_cancelled("stopped_call"));
+            result
+        })
+    });
+    assert!(result.is_err() && !spent, "stopped from outside, not by the limit");
 }
 
 /// Every call samples the same random points, whatever its kernel did before: what depends on

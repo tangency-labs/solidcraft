@@ -436,13 +436,24 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
     // the edge uses' gap caches as it found them; a failed calculation, ignored as
     // `GetMaxEdgeFaceGap` ignores it, adds no gap)
     let mut gap = 0.0_f64;
+    let mut measured_faces = std::collections::BTreeSet::new();
     for eu in b.edge(e)?.edgeuses.clone() {
         let g = if !eu1::has_edge_face_gap(b, eu)? {
             None
         } else if eu1::is_max_edge_face_gap_init(b, eu)? {
             eu1::cached_max_edge_face_gap(b, eu)?
         } else {
-            ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?
+            // Uncached uses of this edge on one face measure the same curve over
+            // the same interval against the same surface, including at a seam.
+            let face = eu1::face(b, eu)?;
+            if measured_faces.contains(&face) {
+                continue;
+            }
+            let measured = ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?;
+            if measured.is_some() {
+                measured_faces.insert(face);
+            }
+            measured
         };
         if let Some(g) = g {
             if g.gap_3d > gap {

@@ -1042,6 +1042,10 @@ pub struct JointExpressions {
     /// The expression of each value by index, `null` for a value that is a number.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Option<String>>,
+    /// The expressions of each value's limits by index, as `[minimum, maximum]`, `null` for an
+    /// end that is a number.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits: Vec<[Option<String>; 2]>,
 }
 
 /// A joint origin's snap as saved, in the component's coordinates.

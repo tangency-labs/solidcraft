@@ -234,6 +234,12 @@ screw: a socket head (ISO 4762) or a button head (ISO 7380-1) of the bolt's size
 side and below; change either to use your own. Scripts use `head: "ISO 4762"` with `clearance`
 on `solid.hole`.
 
+With **Hole Type** Countersink and Clearance, **Screw head** offers a countersunk socket head
+(ISO 10642). It fills **Countersink Ø** with the head's diameter plus 0.5 mm each side and
+**Countersink angle** with 90°, so the head sits 0.5 mm below the face; change either to use your
+own. Scripts use `head: "ISO 10642"` with `clearance` on `solid.hole`: the hole type then
+defaults to countersink.
+
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
 `"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.

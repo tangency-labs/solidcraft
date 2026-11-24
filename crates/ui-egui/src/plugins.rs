@@ -283,14 +283,14 @@ pub(crate) fn share_grants(app: &mut SolveApp) {
         log::warn!("plugins: approvals could not be shared with the command line: {e}");
     }
     app.preferences.plugin_grants.retain(|id, grants| valid_id(id) && valid_grants(grants));
-    app.plugin_grant_store = Some(synced);
+    app.plugins.grant_store = Some(synced);
     sync_policy(app);
 }
 
 /// Write the grants changed here to the shared store, then take in what the command line or
 /// headless MCP changed there. Nothing to do unless the app shares its grants.
 fn sync_store(app: &mut SolveApp) -> Result<(), String> {
-    let Some(synced) = app.plugin_grant_store.as_mut() else { return Ok(()) };
+    let Some(synced) = app.plugins.grant_store.as_mut() else { return Ok(()) };
     let Some(dir) = app.session.plugin_state.plugins_dir() else { return Ok(()) };
     let saved = synced.persist(&dir, &app.preferences.plugin_grants);
     // A record that could not be written or deleted reads back as last seen: no change here.

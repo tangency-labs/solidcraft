@@ -191,6 +191,7 @@ file.trash                       file guards and isolated trash: tested in crate
 file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.multi_trim                  sets one corner of a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
+frame.plate                       tested in crates/engine/src/cmd/frame_tests.rs and crates/ui-egui/src/dialogs_frame_tests.rs
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
 frame.remove_member               removes a tube from a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
@@ -373,6 +374,7 @@ sheet.convert                     every face a panel: crates/engine/src/cmd/shee
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
 sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
 sheet.rules                       a listing of sheet metal rules
+sheet.tab                         a sketch region joined to a panel: crates/engine/src/cmd/sheet_surface_tab_tests.rs
 sketch.arc.tangent                2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.auto_constrain             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.auto_constrain_from_datum  2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -522,6 +524,7 @@ view.angle_readout                the view: camera, layout, display
 view.apply                        the view: camera, layout, display
 view.back                         the view: camera, layout, display
 view.bottom                       the view: camera, layout, display
+view.browser                      the view: camera, layout, display
 view.delete                       the view: camera, layout, display
 view.fit                          the view: camera, layout, display
 view.front                        the view: camera, layout, display

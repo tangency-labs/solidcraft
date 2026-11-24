@@ -7,7 +7,7 @@
 
 #[cfg(doc)]
 use super::{BlendFailure, FilletSetUp, SolverFailure};
-use crate::error::{ErrorKind, SM_ERR, SM_ERR_NULL_POINTER};
+use crate::error::{ErrorKind, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
 
 /// A shape of the edges at a filleted vertex that the fillet corner topology
 /// (`crate::blend::fillet_corner::topology`) does not build
@@ -42,6 +42,10 @@ pub enum CornerShape {
     /// the ring keeps one use of each edge, so an edge that meets the vertex twice stands
     /// between edges that are not on one face.
     RingEdgesShareNoFace,
+    /// A Roll-over's cap across the cliff's tangent seam whose end face cannot take the side
+    /// face's extended surface (the other side edge does not lie on it): the cap is closed
+    /// only by that end patch.
+    SeamCapEndFaceNotExtended,
     /// A Join whose one edge between the blends on a side does not meet the first blended
     /// edge in a loop of either of its faces.
     SideEdgeNotBesideBlend,
@@ -66,6 +70,7 @@ impl CornerShape {
             Self::NoConvexSideEdge => SM_ERR_NULL_POINTER,
             Self::RingEdgeOffClosedBlendFaces => SM_ERR,
             Self::RingEdgesShareNoFace => SM_ERR_NULL_POINTER,
+            Self::SeamCapEndFaceNotExtended => SM_ERR,
             Self::SideEdgeNotBesideBlend => SM_ERR_NULL_POINTER,
         }
     }
@@ -404,6 +409,175 @@ impl MixedStep {
             Self::TrimlineStalls => "a trimline has no tangent at the rails' crossing",
             Self::TwistsIncompatible => "the corner's twists are not compatible",
             Self::WallRailMissesSeamLine => "a rail on its wall does not cross the seam's line on its side of the vertex",
+        }
+    }
+}
+
+/// What a fillet corner's surface, patch or face step (`crate::blend::fillet_corner`) did not
+/// make ([`BlendFailure::CornerPatchNotMade`]). The variable-radius misses stop the corner's
+/// conversion to a variable-radius fillet (`MakeVariableRadiusFillet`), which the analytic
+/// corner surface reads as no surface made, so the corner gets its patch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CornerPatchMiss {
+    /// An end of a cross section of the variable-radius corner drops onto its blend's centre
+    /// line at other than one point.
+    CentreLineFootNotUnique,
+    /// A cross section of the variable-radius corner whose ends point the same or opposite
+    /// ways from the centre line: its arc has no axis.
+    CrossSectionEndsAligned,
+    /// A cross section of the variable-radius corner whose ends lie at different distances
+    /// from its blend's centre line: not a circular arc about it.
+    CrossSectionRadiusVaries,
+    /// A cross section of the variable-radius corner whose blend has no centre line (a
+    /// section that is not an arc about one).
+    CrossSectionWithoutCentreLine,
+    /// A corner edge's curve of kind `kind` has no B-spline form.
+    CurveNotBSpline {
+        /// The curve's kind.
+        kind: &'static str,
+    },
+    /// The mixed corner's extended edge does not drop onto its original face as one curve.
+    ExtendedEdgeDropNotOneCurve {
+        /// The curves the drop gave.
+        curves: usize,
+    },
+    /// The corner's face could not be made on its surface (its error is kept as the cause
+    /// where the step reports one).
+    FaceNotMade,
+    /// The patch of a mitre's gap (WR-644) does not have four edges.
+    GapPatchNotFourEdges {
+        /// The edges the gap's patch has.
+        edges: usize,
+    },
+    /// The opposite fillet is a chamfer (a linear generator): no variable-radius law is made
+    /// against it.
+    LinearOppositeFillet,
+    /// A corner of mixed convexity (3x2) that does not have four edges when its patch is made.
+    MixedCornerNotFourEdges {
+        /// The edges the corner has.
+        edges: usize,
+    },
+    /// No rail meets the interpolating edge's start vertex.
+    NoRailAtInterpolationStart,
+    /// The edge opposite the variable-radius corner's interpolating edge is not a cross
+    /// section.
+    OppositeEdgeNotCrossSection,
+    /// The opposite edge's ends do not lie across the opposite fillet's parameter domain.
+    OppositeEndsNotAcrossFillet,
+    /// An end of the opposite edge drops onto the opposite fillet's surface at other than one
+    /// point.
+    OppositeFootNotUnique,
+    /// The opposite fillet's normal vanishes at the opposite edge's end.
+    OppositeNormalVanished,
+    /// The opposite fillet's radius is not larger than both cross sections' radii.
+    OppositeRadiusNotLarger,
+    /// The variable-radius fillet's rail that replaces the opposite edge leaves the opposite
+    /// fillet's surface.
+    RailLeavesOppositeFillet,
+    /// A rail at the interpolating edge's vertex that its fillet geometry does not name as
+    /// either of its rails.
+    RailNotNamedByItsGeometry,
+    /// The variable-radius fillet's rail-rail curve crosses the concave corner.
+    RailRailCurveCrossesCorner,
+    /// The corner's patch has fewer than four boundary curves.
+    TooFewBoundaryCurves {
+        /// The boundary curves the patch has.
+        curves: usize,
+    },
+    /// The variable-radius corner's two cross sections come from blend-curve generators with
+    /// different thumbweights or continuities.
+    VariableRadiusBlendCurvesDiffer,
+    /// The variable-radius corner's two cross sections come from surface generators of
+    /// different kinds.
+    VariableRadiusGeneratorsDiffer,
+    /// A corner for the variable-radius fillet that does not have four edges.
+    VariableRadiusNotFourSides,
+    /// The re-solve of the variable-radius fillet failed (its error is kept as the cause).
+    VariableRadiusReSolveFailed,
+    /// An edge beside the variable-radius corner's interpolating edge that is not a cross
+    /// section.
+    VariableRadiusSideNotCrossSection,
+    /// A corner for the variable-radius fillet with no rail-rail interpolating edge.
+    VariableRadiusWithoutInterpolation,
+}
+
+impl CornerPatchMiss {
+    /// The miss's class: [`ErrorKind::NotFound`] for a search that found no single answer,
+    /// [`ErrorKind::Degenerate`] for a vanished direction, [`ErrorKind::Failed`] for a step
+    /// that failed, else [`ErrorKind::Unsupported`] (a corner the step does not make).
+    #[must_use]
+    #[allow(
+        clippy::match_same_arms,
+        reason = "one arm per variant, sorted by name, so causes added in parallel touch disjoint lines"
+    )]
+    pub const fn class(self) -> ErrorKind {
+        match self {
+            Self::CentreLineFootNotUnique => ErrorKind::NotFound,
+            Self::CrossSectionEndsAligned => ErrorKind::Degenerate,
+            Self::CrossSectionRadiusVaries => ErrorKind::Unsupported,
+            Self::CrossSectionWithoutCentreLine => ErrorKind::Unsupported,
+            Self::CurveNotBSpline { .. } => ErrorKind::Unsupported,
+            Self::ExtendedEdgeDropNotOneCurve { .. } => ErrorKind::NotFound,
+            Self::FaceNotMade => ErrorKind::Failed,
+            Self::GapPatchNotFourEdges { .. } => ErrorKind::Unsupported,
+            Self::LinearOppositeFillet => ErrorKind::Unsupported,
+            Self::MixedCornerNotFourEdges { .. } => ErrorKind::Unsupported,
+            Self::NoRailAtInterpolationStart => ErrorKind::NotFound,
+            Self::OppositeEdgeNotCrossSection => ErrorKind::Unsupported,
+            Self::OppositeEndsNotAcrossFillet => ErrorKind::Unsupported,
+            Self::OppositeFootNotUnique => ErrorKind::NotFound,
+            Self::OppositeNormalVanished => ErrorKind::Degenerate,
+            Self::OppositeRadiusNotLarger => ErrorKind::Unsupported,
+            Self::RailLeavesOppositeFillet => ErrorKind::Unsupported,
+            Self::RailNotNamedByItsGeometry => ErrorKind::Unsupported,
+            Self::RailRailCurveCrossesCorner => ErrorKind::Unsupported,
+            Self::TooFewBoundaryCurves { .. } => ErrorKind::Unsupported,
+            Self::VariableRadiusBlendCurvesDiffer => ErrorKind::Unsupported,
+            Self::VariableRadiusGeneratorsDiffer => ErrorKind::Unsupported,
+            Self::VariableRadiusNotFourSides => ErrorKind::Unsupported,
+            Self::VariableRadiusReSolveFailed => ErrorKind::Failed,
+            Self::VariableRadiusSideNotCrossSection => ErrorKind::Unsupported,
+            Self::VariableRadiusWithoutInterpolation => ErrorKind::Unsupported,
+        }
+    }
+
+    /// The status the site the miss replaces returned unless the site says otherwise:
+    /// `SM_ERR_NULL_POINTER` for a centre line the C++ does not find (`NER`),
+    /// `SM_ERR_INVALID_INPUT` for a vanished direction (`SER(v.Unitize())`), else `SM_ERR`.
+    #[must_use]
+    #[allow(
+        clippy::match_same_arms,
+        reason = "one arm per variant, sorted by name, so causes added in parallel touch disjoint lines"
+    )]
+    pub const fn upstream_status(self) -> i32 {
+        match self {
+            Self::CentreLineFootNotUnique => SM_ERR,
+            Self::CrossSectionEndsAligned => SM_ERR_INVALID_INPUT,
+            Self::CrossSectionRadiusVaries => SM_ERR,
+            Self::CrossSectionWithoutCentreLine => SM_ERR_NULL_POINTER,
+            Self::CurveNotBSpline { .. } => SM_ERR,
+            Self::ExtendedEdgeDropNotOneCurve { .. } => SM_ERR,
+            Self::FaceNotMade => SM_ERR,
+            Self::GapPatchNotFourEdges { .. } => SM_ERR,
+            Self::LinearOppositeFillet => SM_ERR,
+            Self::MixedCornerNotFourEdges { .. } => SM_ERR,
+            Self::NoRailAtInterpolationStart => SM_ERR,
+            Self::OppositeEdgeNotCrossSection => SM_ERR,
+            Self::OppositeEndsNotAcrossFillet => SM_ERR,
+            Self::OppositeFootNotUnique => SM_ERR,
+            Self::OppositeNormalVanished => SM_ERR_INVALID_INPUT,
+            Self::OppositeRadiusNotLarger => SM_ERR,
+            Self::RailLeavesOppositeFillet => SM_ERR,
+            Self::RailNotNamedByItsGeometry => SM_ERR,
+            Self::RailRailCurveCrossesCorner => SM_ERR,
+            Self::TooFewBoundaryCurves { .. } => SM_ERR,
+            Self::VariableRadiusBlendCurvesDiffer => SM_ERR,
+            Self::VariableRadiusGeneratorsDiffer => SM_ERR,
+            Self::VariableRadiusNotFourSides => SM_ERR,
+            Self::VariableRadiusReSolveFailed => SM_ERR,
+            Self::VariableRadiusSideNotCrossSection => SM_ERR,
+            Self::VariableRadiusWithoutInterpolation => SM_ERR,
         }
     }
 }

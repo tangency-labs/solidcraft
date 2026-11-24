@@ -88,6 +88,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
+        Kind::FramePlate(_) => Some("frame.plate"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -757,7 +758,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
         }
-        Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } => {
+        Kind::Hole { kind, opts, cb_diameter, cb_depth, cs_diameter, cs_angle, .. } => {
             let doc = &app.session.doc;
             let eval = |e: &str, k| doc.eval(e, k).ok();
             // Each option shows the hole it makes while hovered (dialogs_hole::preview).
@@ -798,9 +799,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             // A clearance hole for a bolt: its size and fit set the diameter (ISO 273).
             if opts.clearance {
                 enter |= crate::dialogs_hole::clearance_rows(ui, opts);
-                // A counterbore for a cap screw: its head sets the counterbore (#12321).
-                if *kind == 1 {
-                    crate::dialogs_hole::head_row(ui, opts, cb_diameter, cb_depth);
+                // A counterbore for a cap screw, a countersink for a countersunk one: the screw's
+                // head sets the recess (#12321, #17728).
+                match *kind {
+                    1 => crate::dialogs_hole::head_row(ui, opts, 1, cb_diameter, cb_depth),
+                    2 => crate::dialogs_hole::head_row(ui, opts, 2, cs_diameter, cs_angle),
+                    _ => {}
                 }
             }
             if opts.tapped {
@@ -1123,9 +1127,33 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             choice_row(ui, "Operation", "bf_op", operation, &OP_LABELS);
             extra_options(ui, "boundary_options", &mut d.extra, &[("Remove Tools", "remove_tools")]);
         }
-        Kind::PathPattern { count, spacing } => {
+        Kind::PathPattern { count, spacing, start, fraction } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, if d.extra.contains_key("distance") { "Distance" } else { "Spacing" }, spacing);
+            // Where along the path the original sits: a distance, or a fraction of the path's
+            // length that keeps its place as the path changes. Empty: the path's start.
+            form_row(ui, "pattern.start_point", |ui| {
+                let mut i = usize::from(*fraction);
+                if ui_kit::segmented(ui, &mut i, &["pattern.start_distance", "pattern.start_fraction"], Default::default()) && (i == 1) != *fraction {
+                    *fraction = i == 1;
+                    start.clear();
+                }
+            });
+            // Both labels about as wide as the dialog's others: switching keeps the label column
+            // where it is, so the rows don't shift and Start point's choice stays two buttons.
+            enter |= hint_row(ui, if *fraction { "  Position" } else { "  Distance" }, start, "0");
+            // Identical: copies keep the original's orientation; Path direction: they turn with
+            // the path, keeping the original's relation to it.
+            form_row(ui, "Orientation", |ui| {
+                extra_choice(
+                    ui,
+                    &mut d.extra,
+                    "pp_orientation",
+                    "orientation",
+                    &[("pattern.orientation_identical", "identical"), ("pattern.orientation_path", "path")],
+                );
+            });
+            extra_options(ui, "feature_options", &mut d.extra, &[("Flip direction", "flip")]);
         }
         Kind::Pipe { diameter, wall, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);
@@ -1262,6 +1290,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
+        Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch, add, edit } => {
@@ -1540,6 +1569,61 @@ mod tests {
         h.step(&json!({"start":"solid.fillet"})).unwrap();
         h.frames(4);
         h
+    }
+
+    /// #10863: a round's joins are smooth and Fillet refuses them, so picking the top face of a
+    /// plate whose outer top edges are rounded rounds the hole's rim alone.
+    #[test]
+    fn a_face_pick_leaves_out_the_edges_a_round_already_meets() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        sample(&mut h);
+        h.app.run("solid.hole", json!({"position":[5,5,5],"diameter":2})).unwrap();
+        h.app.run("solid.fillet", json!({"edges":[[5,0,5],[5,10,5],[0,5,5],[10,5,5]],"radius":1})).unwrap();
+        let face = face_sel(&h.app.session, Vec3::new(2.0, 2.0, 5.0)).unwrap();
+        h.app.session.selection = vec![face];
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        let p = parameters(&h);
+        let edges = p["edges"].as_array().unwrap();
+        assert!(!edges.is_empty(), "{p}");
+        for e in edges {
+            let (x, y) = (e[0].as_f64().unwrap(), e[1].as_f64().unwrap());
+            assert!(((x - 5.0).hypot(y - 5.0) - 1.0).abs() < 1e-3, "an edge off the hole's rim: {e}");
+        }
+        // The edges the dialog's corners and bodies are read from leave them out too.
+        let items = h.app.dialog.as_ref().unwrap().items();
+        let ids = super::super::fillet_edge_ids(&h.app.session, &items);
+        let world = crate::open_meshing::session_world(&h.app.session);
+        assert_eq!(ids.len(), edges.len(), "{ids:?}");
+        for (body, i) in &ids {
+            let mid = polyline_mid(&world.body(body).unwrap().mesh().edges[*i]);
+            assert!(((mid.x - 5.0).hypot(mid.y - 5.0) - 1.0).abs() < 1e-3, "an edge off the hole's rim: {mid:?}");
+        }
+        h.app.run("solid.fillet", p).unwrap();
+    }
+
+    /// A 1° crease is not a smooth join: Fillet rounds it, so a face pick keeps it.
+    #[test]
+    fn a_face_pick_keeps_a_one_degree_crease() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        let rise = 10.0 * 1f64.to_radians().tan();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"Crease"})).unwrap();
+        let outline = [[0.0, 0.0], [20.0, 0.0], [20.0, 5.0 + rise], [10.0, 5.0], [0.0, 5.0]];
+        for (i, a) in outline.iter().enumerate() {
+            h.app.run("sketch.line", json!({"points":[a, outline[(i + 1) % outline.len()]]})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance":"5 mm"})).unwrap();
+        let face = face_sel(&h.app.session, Vec3::new(5.0, 5.0, 2.5)).unwrap();
+        h.app.session.selection = vec![face];
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        let p = parameters(&h);
+        let edges = p["edges"].as_array().unwrap();
+        let crease = |e: &Value| (e[0].as_f64().unwrap() - 10.0).abs() < 1e-6 && (e[1].as_f64().unwrap() - 5.0).abs() < 1e-6;
+        assert!(edges.iter().any(crease), "the 1° crease at x = 10 left out: {p}");
     }
 
     fn parameters(h: &Harness) -> Value {

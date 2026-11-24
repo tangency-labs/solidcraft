@@ -1000,6 +1000,41 @@ impl On {
             let inside = |by: f64| low - by >= lo - room && high - by <= hi + room;
             if low.is_finite() && !inside(base) && inside(base + period) {
                 base += period;
+            } else if low.is_finite() && high.is_finite() && !inside(base) {
+                // Within neither: a period lower, where the loop runs past the range by less than
+                // where its lowest point puts it, and by a step that moves the surface within
+                // `tol`: each point past an end moves along `d` by at most that end's overrun,
+                // within the strip from the end to the overrun and across the loop's span, which
+                // a certified bound on the surface's speed there encloses
+                // (`SurfaceEval::strip_shift_bound`); where no bound is decided it stays. A loop
+                // that starts on the range's start, its lowest point a writer's rounding below
+                // it, stays on the range rather than moving a whole period on; one farther below
+                // stays where its lowest point puts it.
+                let spill = |by: f64| (lo - (low - by)).max(0.0) + ((high - by) - hi).max(0.0);
+                let lower = base + period;
+                if spill(lower) < spill(base) {
+                    let (below, above) = (
+                        (lo - (low - lower)).max(0.0),
+                        ((high - lower) - hi).max(0.0),
+                    );
+                    let across = uses
+                        .iter()
+                        .flat_map(|(c, _)| points(c).into_iter().map(|q| at(q, 1 - d)))
+                        .fold([f64::INFINITY, f64::NEG_INFINITY], |[a, b], x| {
+                            [a.min(x), b.max(x)]
+                        });
+                    let shift = |along: [f64; 2], o: f64| -> Option<f64> {
+                        if o > 0.0 {
+                            self.surface.strip_shift_bound(d, along, across, o).ok()
+                        } else {
+                            Some(0.0)
+                        }
+                    };
+                    let moved = shift([lo - below, lo], below).zip(shift([hi, hi + above], above));
+                    if moved.is_some_and(|(x, y)| x.max(y) <= tol) {
+                        base = lower;
+                    }
+                }
             }
             for (((c, _), s), (st, en)) in uses.iter_mut().zip(&shift).zip(ends.iter_mut()) {
                 let by = s - base;

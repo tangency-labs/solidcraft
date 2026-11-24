@@ -24,6 +24,16 @@ pub enum SolverFailure {
     /// called on a solver that does not override it: a kind the routine cannot handle
     /// ([`ErrorKind::Unsupported`]).
     BaseSolverMethod(BaseSolverMethod),
+    /// Offset surface `side`'s base is neither of a B-spline class nor an offset of one: a
+    /// kind the routine cannot handle ([`ErrorKind::Unsupported`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    BaseSurfaceNotBSpline {
+        /// The offset surface, 0 or 1.
+        side: usize,
+        /// The kind (type string) of the surface found not of a B-spline class: the base,
+        /// or, when the base is an offset surface, the base's own base.
+        kind: &'static str,
+    },
     /// The fillet geometry's centre line is of a curve kind with no B-spline form: a kind
     /// the routine cannot handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
     CenterLineNotBSpline {
@@ -46,10 +56,25 @@ pub enum SolverFailure {
     /// found no section: an empty search ([`ErrorKind::NotFound`]).
     CrossSectionNotFound,
     /// The solve for the fillet's cross-section point on the plane through a rail's point
+    /// at parameter `t` returned an error: that error is the failure's cause, and decides
+    /// whether it is a defect or a refusal ([`ErrorKind::Failed`]); status `SM_ERR`.
+    CrossSectionPointFailed {
+        /// The parameter of the curve the plane is taken on.
+        t: f64,
+    },
+    /// The solve for the fillet's cross-section point on the plane through a rail's point
     /// at parameter `t` found no point: an empty search ([`ErrorKind::NotFound`]).
     CrossSectionPointNotFound {
         /// The parameter of the curve the plane is taken on.
         t: f64,
+    },
+    /// The edge to fillet has a curve not of a B-spline class: a kind the routine cannot
+    /// handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
+    EdgeCurveNotBSpline {
+        /// The edge.
+        edge: crate::topology::EdgeId,
+        /// The curve's kind (its type string).
+        kind: &'static str,
     },
     /// An end of the filleted edge lies on cylinder `side`'s axis, so the ball's contact
     /// there has no direction from the axis ([`ErrorKind::Degenerate`]).
@@ -67,6 +92,12 @@ pub enum SolverFailure {
     /// standalone entry point): the caller's input ([`ErrorKind::InvalidInput`]); status
     /// `SM_ERR_NULL_POINTER`.
     ExtensionCornerMissing,
+    /// The caller's fillet geometry has no centre line: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutCenterLine {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
     /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     FilletGeomWithoutRail {
@@ -113,12 +144,22 @@ pub enum SolverFailure {
     /// failure's cause, and decides whether it is a defect or a refusal
     /// ([`ErrorKind::Failed`]).
     JacobianNotLoaded,
+    /// The intersection point has no stepped neighbour on either side to take its
+    /// curve's tangent from: an empty search ([`ErrorKind::NotFound`]).
+    NeighbourPointsNotFound,
+    /// The trace stepped no part of the last fillet geometry's centre line, so the cusp
+    /// recovery has no end to start from: an empty search ([`ErrorKind::NotFound`]);
+    /// status `SM_ERR_NULL_POINTER`.
+    NoCenterLineTraced,
     /// The nearest-point search on a curve found `count` nearest points where one is
     /// needed: an empty or ambiguous search ([`ErrorKind::NotFound`]).
     NoSingleCurveFoot {
         /// The number of nearest points found.
         count: usize,
     },
+    /// The trace left no cross-section points to clean at its ends: an empty search
+    /// ([`ErrorKind::NotFound`]).
+    NoTracePoints,
     /// Offset surface `side` has no normal at `(u, v)`: its partial derivatives and its
     /// evaluated normal both vanish there ([`ErrorKind::Degenerate`]).
     OffsetNormalVanishes {
@@ -129,6 +170,9 @@ pub enum SolverFailure {
         /// The surface parameter v.
         v: f64,
     },
+    /// The two offset surfaces' normals at a tangent intersection point are parallel, so
+    /// their cross product gives the curve no direction ([`ErrorKind::Degenerate`]).
+    OffsetNormalsParallel,
     /// The solver has not got both offset surfaces set: the caller's solver state
     /// ([`ErrorKind::InvalidInput`]).
     OffsetSurfaceMissing,
@@ -161,6 +205,25 @@ pub enum SolverFailure {
     RadiusVanishes {
         /// The radius.
         radius: f64,
+    },
+    /// Rail `side` of the caller's fillet geometry has `count` edge uses where two are
+    /// needed: the caller's solver set-up ([`ErrorKind::InvalidInput`]).
+    RailEdgeUseCount {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+        /// The rail side, 0 or 1.
+        side: usize,
+        /// The rail's edge uses.
+        count: usize,
+    },
+    /// The mate edge use of rail `side` of the caller's fillet geometry has no uv trim
+    /// curve: the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    RailMateWithoutUvCurve {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+        /// The rail side, 0 or 1.
+        side: usize,
     },
     /// The rail does not cross the side edge from any guess: an empty search
     /// ([`ErrorKind::NotFound`]).
@@ -212,6 +275,12 @@ pub enum SolverFailure {
     /// on the axis, or the offsets' meridians do not cross there): an empty search
     /// ([`ErrorKind::NotFound`]).
     SpineStationNotFound,
+    /// The split point does not drop onto the rail's curve at the dropping tolerances
+    /// tried (1, 10 and 20 times `tol`): an empty search ([`ErrorKind::NotFound`]).
+    SplitPointDoesNotDropOnRail {
+        /// The trace's 3D approximation tolerance the dropping tolerances scale.
+        tol: f64,
+    },
     /// The support edge's curve does not meet the fillet surface that ends it: an empty
     /// search ([`ErrorKind::NotFound`]).
     SupportCurveMissesSurface,
@@ -260,6 +329,15 @@ pub enum SolverFailure {
         /// The tolerance.
         tol: f64,
     },
+    /// The trace ran more than `limit` passes (too many self-intersections or other
+    /// restarts) without finishing ([`ErrorKind::NotConverged`]).
+    TraceLoopLimit {
+        /// The passes allowed.
+        limit: u32,
+    },
+    /// The trace touched a base surface's boundary again after tracing on past it once, a
+    /// case the trace does not handle ([`ErrorKind::Unsupported`]).
+    TraceTouchesBoundaryAgain,
 }
 
 /// The analytic shape a fillet solver routine builds
@@ -302,16 +380,20 @@ impl SolverFailure {
         match self {
             Self::AnalyticShapeDoesNotApply { .. } => ErrorKind::Unsupported,
             Self::BaseSolverMethod(_) => ErrorKind::Unsupported,
+            Self::BaseSurfaceNotBSpline { .. } => ErrorKind::Unsupported,
             Self::CenterLineNotBSpline { .. } => ErrorKind::Unsupported,
             Self::ClippedIsoMissesSurface { .. } => ErrorKind::NotFound,
             Self::CornerDoesNotDropOnSideCurve => ErrorKind::NotFound,
             Self::CrossSectionMissesSideSurface => ErrorKind::NotFound,
             Self::CrossSectionNotFound => ErrorKind::NotFound,
+            Self::CrossSectionPointFailed { .. } => ErrorKind::Failed,
             Self::CrossSectionPointNotFound { .. } => ErrorKind::NotFound,
+            Self::EdgeCurveNotBSpline { .. } => ErrorKind::Unsupported,
             Self::EdgeEndOnAxis { .. } => ErrorKind::Degenerate,
             Self::EdgeUseWithoutFace => ErrorKind::InvalidInput,
             Self::EdgeUseWithoutMate => ErrorKind::InvalidInput,
             Self::ExtensionCornerMissing => ErrorKind::InvalidInput,
+            Self::FilletGeomWithoutCenterLine { .. } => ErrorKind::InvalidInput,
             Self::FilletGeomWithoutRail { .. } => ErrorKind::InvalidInput,
             Self::FilletGeomWithoutSolver { .. } => ErrorKind::InvalidInput,
             Self::FilletGeomWithoutSurface { .. } => ErrorKind::InvalidInput,
@@ -320,13 +402,19 @@ impl SolverFailure {
             Self::GnSideInputMissing { .. } => ErrorKind::InvalidInput,
             Self::GuessDoesNotDropOnSideEdge => ErrorKind::NotFound,
             Self::JacobianNotLoaded => ErrorKind::Failed,
+            Self::NeighbourPointsNotFound => ErrorKind::NotFound,
+            Self::NoCenterLineTraced => ErrorKind::NotFound,
             Self::NoSingleCurveFoot { .. } => ErrorKind::NotFound,
+            Self::NoTracePoints => ErrorKind::NotFound,
             Self::OffsetNormalVanishes { .. } => ErrorKind::Degenerate,
+            Self::OffsetNormalsParallel => ErrorKind::Degenerate,
             Self::OffsetSurfaceMissing => ErrorKind::InvalidInput,
             Self::PiecesTooFarApart { .. } => ErrorKind::NotWithinTolerance,
             Self::PointDoesNotDropOnSurface { .. } => ErrorKind::NotFound,
             Self::RadiusNotConstant { .. } => ErrorKind::Unsupported,
             Self::RadiusVanishes { .. } => ErrorKind::Degenerate,
+            Self::RailEdgeUseCount { .. } => ErrorKind::InvalidInput,
+            Self::RailMateWithoutUvCurve { .. } => ErrorKind::InvalidInput,
             Self::RailMissesSideEdge => ErrorKind::NotFound,
             Self::RailNotBSpline { .. } => ErrorKind::Unsupported,
             Self::RailTangentZero { .. } => ErrorKind::Degenerate,
@@ -336,6 +424,7 @@ impl SolverFailure {
             Self::SideSurfaceMissesEndPlane => ErrorKind::NotFound,
             Self::SolverEdgeUseMissing { .. } => ErrorKind::InvalidInput,
             Self::SpineStationNotFound => ErrorKind::NotFound,
+            Self::SplitPointDoesNotDropOnRail { .. } => ErrorKind::NotFound,
             Self::SupportCurveMissesSurface => ErrorKind::NotFound,
             Self::SupportEndOffCurve { .. } => ErrorKind::NotFound,
             Self::SupportIntersectionFailed => ErrorKind::Failed,
@@ -346,6 +435,8 @@ impl SolverFailure {
             Self::TangentRolloverUnhandled => ErrorKind::Unsupported,
             Self::TooManySolverValues { .. } => ErrorKind::InvalidInput,
             Self::TraceEndOffBall { .. } => ErrorKind::NotWithinTolerance,
+            Self::TraceLoopLimit { .. } => ErrorKind::NotConverged,
+            Self::TraceTouchesBoundaryAgain => ErrorKind::Unsupported,
         }
     }
 
@@ -358,16 +449,20 @@ impl SolverFailure {
         match self {
             Self::AnalyticShapeDoesNotApply { .. } => SM_ERR,
             Self::BaseSolverMethod(_) => SM_ERR,
+            Self::BaseSurfaceNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::CenterLineNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::ClippedIsoMissesSurface { .. } => SM_ERR,
             Self::CornerDoesNotDropOnSideCurve => SM_ERR,
             Self::CrossSectionMissesSideSurface => SM_ERR,
             Self::CrossSectionNotFound => SM_ERR,
+            Self::CrossSectionPointFailed { .. } => SM_ERR,
             Self::CrossSectionPointNotFound { .. } => SM_ERR,
+            Self::EdgeCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::EdgeEndOnAxis { .. } => SM_ERR,
             Self::EdgeUseWithoutFace => SM_ERR_NULL_POINTER,
             Self::EdgeUseWithoutMate => SM_ERR_NULL_POINTER,
             Self::ExtensionCornerMissing => SM_ERR_NULL_POINTER,
+            Self::FilletGeomWithoutCenterLine { .. } => SM_ERR_NULL_POINTER,
             Self::FilletGeomWithoutRail { .. } => SM_ERR_NULL_POINTER,
             Self::FilletGeomWithoutSolver { .. } => SM_ERR_NULL_POINTER,
             Self::FilletGeomWithoutSurface { .. } => SM_ERR_NULL_POINTER,
@@ -376,13 +471,19 @@ impl SolverFailure {
             Self::GnSideInputMissing { .. } => SM_ERR_NULL_POINTER,
             Self::GuessDoesNotDropOnSideEdge => SM_ERR,
             Self::JacobianNotLoaded => SM_ERR,
+            Self::NeighbourPointsNotFound => SM_ERR,
+            Self::NoCenterLineTraced => SM_ERR_NULL_POINTER,
             Self::NoSingleCurveFoot { .. } => SM_ERR,
+            Self::NoTracePoints => SM_ERR,
             Self::OffsetNormalVanishes { .. } => SM_ERR,
+            Self::OffsetNormalsParallel => SM_ERR,
             Self::OffsetSurfaceMissing => SM_ERR,
             Self::PiecesTooFarApart { .. } => SM_ERR,
             Self::PointDoesNotDropOnSurface { .. } => SM_ERR,
             Self::RadiusNotConstant { .. } => SM_ERR,
             Self::RadiusVanishes { .. } => SM_ERR,
+            Self::RailEdgeUseCount { .. } => SM_ERR,
+            Self::RailMateWithoutUvCurve { .. } => SM_ERR_NULL_POINTER,
             Self::RailMissesSideEdge => SM_ERR,
             Self::RailNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::RailTangentZero { .. } => SM_ERR,
@@ -392,6 +493,7 @@ impl SolverFailure {
             Self::SideSurfaceMissesEndPlane => SM_ERR_NULL_POINTER,
             Self::SolverEdgeUseMissing { .. } => SM_ERR_NULL_POINTER,
             Self::SpineStationNotFound => SM_ERR,
+            Self::SplitPointDoesNotDropOnRail { .. } => SM_ERR,
             Self::SupportCurveMissesSurface => SM_ERR,
             Self::SupportEndOffCurve { .. } => SM_ERR,
             Self::SupportIntersectionFailed => SM_ERR,
@@ -402,6 +504,8 @@ impl SolverFailure {
             Self::TangentRolloverUnhandled => SM_ERR,
             Self::TooManySolverValues { .. } => SM_ERR,
             Self::TraceEndOffBall { .. } => SM_ERR,
+            Self::TraceLoopLimit { .. } => SM_ERR,
+            Self::TraceTouchesBoundaryAgain => SM_ERR,
         }
     }
 }
@@ -416,6 +520,11 @@ impl core::fmt::Display for SolverFailure {
             Self::BaseSolverMethod(method) => {
                 write!(f, "the base fillet solver does not implement {method:?}")
             }
+            Self::BaseSurfaceNotBSpline { side, kind } => write!(
+                f,
+                "offset surface {side}'s base (or, for an offset base, its base) is a {kind} \
+                 surface, not of a B-spline class"
+            ),
             Self::CenterLineNotBSpline { fillet_geom } => write!(
                 f,
                 "the centre line of fillet geometry {} has no B-spline form",
@@ -434,9 +543,17 @@ impl core::fmt::Display for SolverFailure {
             Self::CrossSectionNotFound => {
                 f.write_str("no cross section of the fillet was found on the plane")
             }
+            Self::CrossSectionPointFailed { t } => write!(
+                f,
+                "the solve for the fillet's cross-section point on the plane at t = {t} failed"
+            ),
             Self::CrossSectionPointNotFound { t } => write!(
                 f,
                 "no cross-section point of the fillet was found on the plane at t = {t}"
+            ),
+            Self::EdgeCurveNotBSpline { edge, kind } => write!(
+                f,
+                "the {kind} curve of edge {edge:?} to fillet is not of a B-spline class"
             ),
             Self::EdgeEndOnAxis { side } => {
                 write!(
@@ -448,6 +565,9 @@ impl core::fmt::Display for SolverFailure {
             Self::EdgeUseWithoutMate => f.write_str("an edge use of the body has no mate"),
             Self::ExtensionCornerMissing => {
                 f.write_str("the extension flags need a vertex's corner and no corners were given")
+            }
+            Self::FilletGeomWithoutCenterLine { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} has no centre line")
             }
             Self::FilletGeomWithoutRail { fillet_geom, side } => {
                 write!(
@@ -476,13 +596,23 @@ impl core::fmt::Display for SolverFailure {
                 f.write_str("the guess point does not drop onto the side edge")
             }
             Self::JacobianNotLoaded => f.write_str("the solver's equations could not be loaded"),
+            Self::NeighbourPointsNotFound => {
+                f.write_str("the intersection point has no stepped neighbour on either side")
+            }
+            Self::NoCenterLineTraced => {
+                f.write_str("the trace stepped no part of the fillet's centre line")
+            }
             Self::NoSingleCurveFoot { count } => write!(
                 f,
                 "the nearest-point search on the curve found {count} points where one is needed"
             ),
+            Self::NoTracePoints => f.write_str("the trace left no cross-section points"),
             Self::OffsetNormalVanishes { side, u, v } => write!(
                 f,
                 "offset surface {side} has no normal at (u, v) = ({u}, {v})"
+            ),
+            Self::OffsetNormalsParallel => f.write_str(
+                "the offset surfaces' normals are parallel at the tangent intersection point",
             ),
             Self::OffsetSurfaceMissing => {
                 f.write_str("the solver has not got both offset surfaces set")
@@ -504,6 +634,19 @@ impl core::fmt::Display for SolverFailure {
                     "the fillet's radius {radius} is below the zero tolerance"
                 )
             }
+            Self::RailEdgeUseCount {
+                fillet_geom,
+                side,
+                count,
+            } => write!(
+                f,
+                "rail {side} of fillet geometry {fillet_geom:?} has {count} edge uses, not two"
+            ),
+            Self::RailMateWithoutUvCurve { fillet_geom, side } => write!(
+                f,
+                "the mate edge use of rail {side} of fillet geometry {fillet_geom:?} has no uv \
+                 trim curve"
+            ),
             Self::RailMissesSideEdge => f.write_str("the rail does not cross the side edge"),
             Self::RailNotBSpline {
                 fillet_geom,
@@ -540,6 +683,10 @@ impl core::fmt::Display for SolverFailure {
             Self::SpineStationNotFound => {
                 f.write_str("the circular spine has no station in the point's half-plane")
             }
+            Self::SplitPointDoesNotDropOnRail { tol } => write!(
+                f,
+                "the split point does not drop onto the rail at 1, 10 or 20 times {tol}"
+            ),
             Self::SupportCurveMissesSurface => {
                 f.write_str("the support edge's curve does not meet the fillet surface ending it")
             }
@@ -573,6 +720,12 @@ impl core::fmt::Display for SolverFailure {
                 f,
                 "an end of the trace lies {deviation} off the ball, farther than {tol}"
             ),
+            Self::TraceLoopLimit { limit } => {
+                write!(f, "the trace did not finish within {limit} passes")
+            }
+            Self::TraceTouchesBoundaryAgain => {
+                f.write_str("the trace touched a base surface's boundary a second time")
+            }
         }
     }
 }

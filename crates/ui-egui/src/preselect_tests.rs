@@ -614,6 +614,33 @@ fn a_face_extrude_keeps_the_picked_body_when_faces_coincide() {
     assert_eq!(after.body("Wall").unwrap().body.classify_point(Vec3::new(49.0, 15.0, 10.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
 }
 
+/// #14456: the Sweep tool takes a planar face of a body as its profile, as Extrude and Revolve
+/// do. The dialog sends the face and the body it is on, and the sweep runs from that face.
+#[test]
+fn a_sweep_takes_a_body_face_as_its_profile() {
+    let mut app = app_with(json!([
+        {"command":"solid.box","params":{"corner":[-5,-5,0],"length":10,"width":10,"height":10,"body_name":"Block"}},
+        {"command":"sketch.create","params":{"plane":"XZ","name":"P"}},
+        {"command":"sketch.line","params":{"points":[[0,-10],[0,-50]]}},
+        {"command":"sketch.finish","params":{}}
+    ]));
+    let face = crate::dialogs::face_sel(&app.session, Vec3::new(0.0, 0.0, 10.0)).unwrap();
+    let curve = app.session.world_state().unwrap().sketches.last().unwrap().sketch.curves.first().unwrap().id.clone();
+    let d = start(&mut app, vec![face, Sel::SketchCurve { id: curve, sketch: None }], "solid.sweep");
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(command, "solid.sweep");
+    assert_eq!(params["face_body"], json!("Block"));
+    assert_eq!(params["face"], json!([0.0, 0.0, 10.0]));
+    app.session.execute(&command, &params).unwrap();
+    let state = app.session.world_state().unwrap();
+    // The design has a body, so the sweep joins: the column stands on the face it was swept
+    // from, and the block it stands on grows into it.
+    assert_eq!(state.bodies.len(), 1);
+    let block = state.body("Block").unwrap();
+    assert_eq!(block.body.classify_point(Vec3::new(0.0, 0.0, 30.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+    assert_eq!(block.body.classify_point(Vec3::new(0.0, 0.0, 5.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+}
+
 #[test]
 fn path_plane_click_retains_source_and_previews_then_edits_in_place() {
     let mut h = crate::scenario::Harness::new();
@@ -1498,7 +1525,7 @@ fn path_pattern_editor_restores_sources_path_expressions_and_options() {
             h.frames(8);
             assert!(!h.app.ui.palette_open, "Edit Feature must open the existing pattern dialog");
             let d = h.app.dialog.as_mut().expect("path pattern editor");
-            assert!(matches!(&d.kind, Kind::PathPattern { count, spacing } if count == "copies" && spacing == "pitch"));
+            assert!(matches!(&d.kind, Kind::PathPattern { count, spacing, .. } if count == "copies" && spacing == "pitch"));
             assert_eq!(d.inputs[0].accept, if as_features { crate::selection::FEATURES } else { crate::selection::BODIES });
             assert_eq!(d.inputs[0].items, if as_features { vec![Sel::Feature { id: seed }] } else { vec![Sel::Body { name: "Pin".into() }] });
             assert_eq!(
@@ -1530,7 +1557,7 @@ fn path_pattern_editor_applies_in_place_cancels_and_undoes() {
             h.step(&json!({"call":"ui.editFeature","params":{"feature":"Copies"}})).unwrap();
             h.frames(8);
             let d = h.app.dialog.as_mut().expect("path pattern editor");
-            let Kind::PathPattern { count, spacing } = &mut d.kind else { panic!("path pattern") };
+            let Kind::PathPattern { count, spacing, .. } = &mut d.kind else { panic!("path pattern") };
             *count = "5".into();
             *spacing = "12 mm".into();
             h.frames(4);
@@ -3067,9 +3094,38 @@ fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     assert!((area(&app, "Floor") - 200.0).abs() < 1e-6 && app.session.world_state().unwrap().body("Wall").is_none());
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
-    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { stitch: true, extend: false, direction: None })));
+    assert!(matches!(
+        back.kind,
+        Kind::Surface(crate::dialogs_surface::Surf::Trim { stitch: true, extend: false, direction: None, face_normal: false })
+    ));
     let counts: Vec<usize> = back.inputs.iter().map(|i| i.items.len()).collect();
     assert_eq!(counts, [1, 0, 1, 1, 1]);
+}
+
+/// A trim whose curves are projected along the surface's normal is made by a script (the
+/// dialog has no control for it). Edit Feature keeps the choice: the dialog sends
+/// `direction: "face_normal"` again, so OK does not turn the trim into a sweep along the
+/// sketch's normal.
+#[test]
+fn trim_dialog_keeps_a_projection_along_the_surface_normal_through_edit_feature() {
+    // A 20 × 10 sheet on XY cut along the sketch line x = 3, keeping x > 3: 7 × 10.
+    let app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "F"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [-10, 0], "p1": [10, 10]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "surface.patch", "params": {"sketch": "F", "body_name": "Floor"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Cut"}},
+        {"command": "sketch.line", "params": {"points": [[3, -5], [3, 15]], "ids": ["c1"]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "surface.trim", "params": {"body": "Floor", "curves": {"sketch": "Cut", "direction": "face_normal"}, "keep": [5, 5, 0]}}
+    ]));
+    let area = app.session.world_state().unwrap().body("Floor").unwrap().mesh().measure().area;
+    assert!((area - 70.0).abs() < 1e-6, "{area}");
+    let fid = app.session.doc.features.last().unwrap().id;
+    let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
+    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { face_normal: true, direction: None, .. })));
+    let (_, p) = apply_commands(&app, &back).unwrap().remove(0);
+    assert_eq!(p["params"]["curves"]["direction"], json!("face_normal"), "{p}");
 }
 
 #[test]

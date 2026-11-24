@@ -1081,6 +1081,7 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     // Finished sketches are drawn over the bodies when the preference says so.
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
     app.preferences.sketch_halo.hash(&mut h);
+    app.preferences.dimension_rim.hash(&mut h);
     // The grid previews the plane Create Sketch would take (#6975).
     previewed_sketch_plane(app).map(|p| [p.origin, p.x, p.y].map(|v| [v.x, v.y, v.z].map(f64::to_bits))).hash(&mut h);
     // Conflicting curves in their own colour, or as before (#7244).
@@ -3320,7 +3321,8 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         for (k, (pts, col, cons)) in lines.into_iter().enumerate() {
             let conflicting = owners.get(k).is_some_and(|&curve| conflict.curve(curve));
             let segs = sketch_segments(&pts, sketch_line_mode(col, cons), unit);
-            let haloed = app.preferences.sketch_halo && !active && col != colors::SKETCH_PROJECTED && col != colors::SKETCH_LOST;
+            let haloed = (app.preferences.sketch_halo && !active && col != colors::SKETCH_PROJECTED && col != colors::SKETCH_LOST)
+                || (app.preferences.dimension_rim && col == colors::SKETCH_FIXED);
             let colour = if conflicting { c4(tk.sketch_conflict) } else { sketch_color(&tk, col) };
             strokes.push((segs, sc.color(colour), if cons { 1.2 } else { 2.0 }, haloed));
         }

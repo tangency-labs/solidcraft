@@ -1572,6 +1572,124 @@ fn looking_bodies_up_once_keeps_every_placement_digest() {
     }
 }
 
+/// #19451: a mirror of a cut that names a further placement's body (`Plate (Part:2)`, not in the
+/// model) reads every placement, as the cut does (#20040): moving that placement evaluates both
+/// again.
+#[test]
+fn a_mirror_of_a_cut_naming_a_further_placements_body_reads_every_placement() {
+    let mut doc = Document::new("mirror");
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    let plate = plate_with_holes(&mut doc, part, 0, 1);
+    let cut = doc.features.last().unwrap().id;
+    doc.feature_mut(cut).unwrap().participants = vec![format!("{plate} (Part:2)")];
+    let second = doc.add_occurrence(part, 0, rigid(Vec3::new(50.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    let mirror = mirror_of(&mut doc, &[cut], PlaneRef::Origin { name: "YZ".into() });
+    let digests = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        [cut, mirror].map(|id| placement_digest(doc, doc.feature(id).unwrap(), Some(&model.state_before(id))))
+    };
+    let before = digests(&doc);
+    doc.occurrences.iter_mut().find(|o| o.id == second).unwrap().transform = rigid(Vec3::new(80.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let after = digests(&doc);
+    assert_ne!(after[0], before[0], "the cut reads the moved placement");
+    assert_ne!(after[1], before[1], "so does its mirror");
+}
+
+/// #19451: a mirror of a root cut into a placed part cuts the part where it is placed, so it is
+/// evaluated again when that part moves, not when another does.
+#[test]
+fn a_mirror_of_a_cut_reads_where_the_cuts_target_is_placed() {
+    let mut doc = Document::new("mirror");
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    plate_with_holes(&mut doc, part, 0, 1);
+    let cut = doc.features.last().unwrap().id;
+    let mirror = mirror_of(&mut doc, &[cut], PlaneRef::Origin { name: "YZ".into() });
+    let digest = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        placement_digest(doc, doc.feature(mirror).unwrap(), Some(&model.state_before(mirror)))
+    };
+    let before = digest(&doc);
+    assert_ne!(before, 0);
+    place(&mut doc, other, rigid(Vec3::new(0.0, 0.0, 50.0), Vec3::ZERO, Vec3::Z, 0.0));
+    assert_eq!(digest(&doc), before, "another part moved");
+    place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::PI));
+    assert_ne!(digest(&doc), before, "the cut's target moved");
+}
+
+/// A mirror of `features` across `plane`, in the root.
+fn mirror_of(doc: &mut Document, features: &[u64], plane: PlaneRef) -> u64 {
+    let kind = FeatureKind::Mirror {
+        features: features.iter().map(|id| FeatureId(*id)).collect(),
+        plane,
+        bodies: Vec::new(),
+        combine: false,
+        placements: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// #19451: a mirror of a mirror made in another part reads where that part is placed, though
+/// what it copies is the root's: the inner mirror's copies are composed in the outer one's frame
+/// through the part's placement. Another part moved changes nothing it reads.
+#[test]
+fn a_mirror_of_a_mirror_in_another_part_reads_where_that_part_is_placed() {
+    let mut doc = Document::new("mirror");
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    plate_with_holes(&mut doc, 0, 0, 1);
+    let cut = doc.features.last().unwrap().id;
+    let plane = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "3 mm".into() };
+    let inner = mirror_of(&mut doc, &[cut], plane);
+    doc.feature_mut(inner).unwrap().component = part;
+    let outer = mirror_of(&mut doc, &[inner], PlaneRef::Origin { name: "XZ".into() });
+    let digest = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        placement_digest(doc, doc.feature(outer).unwrap(), Some(&model.state_before(outer)))
+    };
+    place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::PI));
+    let before = digest(&doc);
+    assert_ne!(before, 0);
+    place(&mut doc, other, rigid(Vec3::new(0.0, 0.0, 50.0), Vec3::ZERO, Vec3::Z, 0.0));
+    assert_eq!(digest(&doc), before, "another part moved");
+    place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2));
+    assert_ne!(digest(&doc), before, "the inner mirror's part turned");
+}
+
+/// #19451: a mirror of a round in a design with nothing placed copies it as before, without the
+/// exact box of any body: those found the frame the round's edges are kept in, which is the
+/// mirror's own when nothing is placed.
+#[test]
+fn a_mirror_of_a_round_with_nothing_placed_measures_no_box() {
+    let mut doc = Document::new("blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(10.0, 5.0, 5.0))],
+        radius: "1".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: false,
+        edge_radii: Vec::new(),
+    };
+    let round = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let rounded = volume(&model, "A");
+    let mirror = mirror_of(&mut doc, &[round], PlaneRef::Origin { name: "YZ".into() });
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(model.result(mirror).and_then(|r| r.error.clone()), None);
+    assert!(volume(&model, "A") < rounded - 1e-3, "the copy rounds A's other edge");
+    assert_eq!(work.tight_boxes, 0, "{work:?}");
+}
+
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`
 /// times: a design and its state, made without evaluating it.
 fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copies: usize) -> (Document, ModelState) {

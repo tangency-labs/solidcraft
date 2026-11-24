@@ -806,26 +806,6 @@ fn crosses_surface(
     Ok(found.map(|(_, p)| p))
 }
 
-/// `piece`'s curve kind, as a crease end refusal names it.
-fn kind_name(piece: &Curve) -> &'static str {
-    match piece.kind() {
-        CurveKind::Line(_) => "line",
-        CurveKind::BSpline(_) => "B-spline",
-        CurveKind::Ellipse(_) => "ellipse",
-        CurveKind::Hyperbola(_) => "hyperbola",
-        CurveKind::Parabola(_) => "parabola",
-        CurveKind::Hermite(_) => "Hermite",
-        CurveKind::Projected(_) => "projected",
-        CurveKind::Iso(_) => "iso-parametric",
-        CurveKind::Offset(_) => "offset",
-        CurveKind::Conic(_) => "conic",
-        CurveKind::CrvInVolume(_) => "curve-in-volume",
-        CurveKind::CrvOnSurf(_) => "curve-on-surface",
-        CurveKind::TangentField(_) => "tangent-field",
-        CurveKind::Composite(_) => "composite",
-    }
-}
-
 /// The refusal of a crease piece (its kind `kind`) whose first end with a meet (the start
 /// at `start.0` where it has one, else the end at `end.0`) has no construction to put it on
 /// its meet: a curve kind with no control polygon, or a B-spline not clamped there, whose
@@ -1281,7 +1261,7 @@ fn piece_ending_at(
         | CurveKind::CrvInVolume(_)
         | CurveKind::CrvOnSurf(_)
         | CurveKind::TangentField(_)
-        | CurveKind::Composite(_) => Err(piece_end_unbuildable(kind_name(&piece), start, end)),
+        | CurveKind::Composite(_) => Err(piece_end_unbuildable(piece.kind().name(), start, end)),
     }
 }
 

@@ -1155,9 +1155,9 @@ impl Reason {
             | Self::Query(_)
             | Self::Topology(_)
             | Self::Surface(_)
-            | Self::Blend(_)
             | Self::FootPastDomainEnd { .. }
             | Self::EdgeOffItsFaces { .. } => None,
+            Self::Blend(b) => b.entity(),
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
