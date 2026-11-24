@@ -32,7 +32,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::surface::ball_patch::BallPatch;
-use crate::surface::from_parameters::{from_parameters, plane_axes_square, square_plane_axis};
+use crate::surface::from_parameters::{from_parameters, square_plane_axis};
 use crate::surface::implicit::{AnalyticSupport, SupportKind};
 use crate::surface::surface::{Surface, SurfaceKind};
 
