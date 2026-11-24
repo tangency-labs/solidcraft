@@ -348,8 +348,8 @@ impl MixedCorner {
 
 /// `sm_MixedRing`: the ring's parts, `None` where the vertex is not a Mixed one's shape
 /// (not two solver edge uses of opposite convexity among three or four, a blended edge
-/// that bounds no material (a sheet's, not the fork's, whose convexity test fails there,
-/// #19829), no common face,
+/// that bounds no material as a sheet's does (not the fork's: its convexity test fails
+/// there; #19829), no common face,
 /// no other face of each blend at the seam, or a blend without a solver). `solver_of` is
 /// `GetFilletSolverOfEdgeuse` (`None`: `NULL`); the blends' solvers are returned with
 /// the ring (B1, B2), each of its edge use or else of its mate. Of four edges (not the

@@ -341,3 +341,19 @@ fn a_blended_edge_use_without_an_edge_is_a_failure() {
         assert!(classify(&k, &mut c, true).unwrap());
     }
 }
+
+/// A classification that fails is a failure of `FilletCorner::create` too, not "no
+/// corner": a blended edge without a curve at the three-edge peg fails the classification's
+/// continuity test, and `create` returns that same error. Before #19829 it returned
+/// `Ok(None)` (Corner Case Not Implemented).
+#[test]
+fn create_passes_a_classification_failure_on() {
+    let mut k = kernel();
+    let mut c = tangent_peg(&mut k);
+    let e = eu1::edge(&c.b, c.solver_eus[1]).unwrap().unwrap();
+    c.b.edge_mut(e).unwrap().curve = None;
+    let classified = classify(&k, &mut c, true).unwrap_err();
+    let created = create(&k, &mut c).unwrap_err();
+    assert_eq!(format!("{created:?}"), format!("{classified:?}"));
+    assert_eq!(created.kind(), ErrorKind::InvalidInput, "{created}");
+}
