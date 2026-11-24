@@ -1659,6 +1659,32 @@ fn a_failed_batch_with_file_new_restores_the_original_design() {
     assert_eq!(d["name"], name, "{d}");
 }
 
+#[test]
+fn a_failed_headless_batch_can_restore_its_design_after_opening_another() {
+    let folder = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-batch-open-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("replacement.sc");
+    solidcraft_engine::Session::default().execute("file.save_as", &json!({"path": path, "overwrite": true})).unwrap();
+
+    let mut s = server();
+    tool(&mut s, "set_parameter", json!({"name": "width", "value": 5}));
+    let before = tool(&mut s, "execute", json!({"command": "parameters.list"}));
+    let r = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "open", "params": {"path": path}},
+            {"command": "parameters.delete", "params": {"name": "width"}},
+        ]}),
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["failed"]["index"], &body["completed"], &body["rolled_back"]), (&json!(1), &json!(1), &json!(true)), "{body}");
+    assert_eq!(tool(&mut s, "execute", json!({"command": "parameters.list"})), before);
+    drop(s);
+    let _ = std::fs::remove_dir_all(folder);
+}
+
 /// `expect` on a batch: the volume, body count and bounding box the agent computed beforehand
 /// are measured and compared by the server once the batch went through, so no separate
 /// `measure` call and no comparison by hand follow every stage.
@@ -3619,20 +3645,102 @@ fn a_batch_the_app_could_not_roll_back_reports_it() {
 
 #[test]
 fn batch_falls_back_when_the_app_lacks_engine_batch() {
-    let (b, body, is_error) =
-        recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "a.one"}, {"command": "a.two"}]}));
+    let (b, body, is_error) = recorded_batch(
+        Err("unknown method `engine.batch`".into()),
+        json!({"commands": [{"command": "parameters.add"}, {"command": "parameters.list"}]}),
+    );
     assert!(!is_error, "{body}");
     let ran: Vec<&str> = b.calls.iter().filter(|(m, _)| m == "engine.execute").map(|(_, p)| p["command"].as_str().unwrap_or("")).collect();
-    assert!(ran.contains(&"a.one") && ran.contains(&"a.two"), "{ran:?}");
-    assert_eq!(body["results"], json!([{"ran": "a.one"}, {"ran": "a.two"}]));
+    assert!(ran.contains(&"parameters.add") && ran.contains(&"parameters.list"), "{ran:?}");
+    assert_eq!(body["results"], json!([{"ran": "parameters.add"}, {"ran": "parameters.list"}]));
+}
+
+#[test]
+fn bridged_rollback_batch_refuses_commands_that_can_switch_design_tabs() {
+    for (step, command) in [
+        (json!({"command": "view.next_tab"}), "view.next_tab"),
+        (json!({"command": "execute", "params": {"command": " View.Previous_Tab "}}), "view.previous_tab"),
+        (json!({"command": "open", "params": {"path": "another.sc"}}), "doc.open"),
+        (json!({"command": "open", "params": {"path": "another.sc", "new_tab": true}}), "doc.open"),
+        (json!({"id": "file.import", "params": {"path": "another.part"}}), "file.import"),
+        (json!({"command": "document.activate", "params": {"document_id": "another"}}), "document.activate"),
+        (json!({"id": "file.new", "params": {"new_tab": true}}), "file.new"),
+        (json!({"command": "new_design", "params": {"new_tab": true}}), "file.new"),
+    ] {
+        let steps = json!([{"command": "parameters.add", "params": {"name": "width", "expression": "5 mm"}}, step]);
+        let unavailable = Err("unknown method `engine.batch`".into());
+        let (b, body, is_error) = recorded_batch(unavailable.clone(), json!({"commands": steps}));
+        assert!(is_error && b.calls.is_empty(), "{body}");
+        assert_eq!((&body["completed"], &body["failed"]["index"], &body["not_run"]), (&json!(0), &json!(1), &json!([0, 1])), "{body}");
+        assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains(command) && e.contains("active design tab")), "{body}");
+
+        let (b, body, is_error) = recorded_batch(unavailable, json!({"commands": steps, "rollback": false}));
+        assert!(!is_error, "{body}");
+        assert_eq!(methods(&b), ["engine.batch", "engine.execute", "engine.execute"]);
+        assert_eq!(body["results"][1]["ran"].as_str().unwrap().trim().to_ascii_lowercase(), command, "{body}");
+    }
+
+    let (_, body, is_error) =
+        recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "new_design", "params": {"new_tab": false}}]}));
+    assert!(!is_error, "{body}");
+    assert_eq!(body["results"][0]["ran"], "file.new", "{body}");
+}
+
+#[test]
+fn rollback_batch_does_not_retry_a_tab_switch_refused_by_a_newer_app() {
+    let e = "engine.batch unavailable: step 1 (view.future_tab) switches to another design";
+    let (b, body, is_error) = recorded_batch(Err(e.into()), json!({"commands": [{"command": "solid.box"}, {"command": "view.future_tab"}]}));
+    assert!(is_error, "{body}");
+    assert_eq!(methods(&b), ["engine.batch"]);
+    assert_eq!(body, e);
+}
+
+#[test]
+fn bridged_rollback_batch_checks_command_ids_before_sequential_execution() {
+    let large_text = "x".repeat(solidcraft_engine::MAX_LINE / 2);
+    let mut oversized = json!([
+        {"command": "parameters.import", "params": {"text": large_text}},
+        {"command": "parameters.import", "params": {"text": large_text}},
+        {"command": "view.future_tab"},
+    ]);
+    let steps = json!([{"command": "parameters.add"}, {"command": "parameters.list"}, {"command": "view.future_tab"}]);
+    for (commands, calls) in [(&oversized, &[][..]), (&steps, &["engine.batch"][..])] {
+        let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": commands}));
+        assert!(is_error, "{body}");
+        assert_eq!(methods(&b), calls);
+        assert_eq!(body["completed"], 0, "{body}");
+        assert_eq!(body["failed"]["index"], 2, "{body}");
+        assert_eq!(body["failed"]["command"], "view.future_tab", "{body}");
+        assert_eq!(body["not_run"], json!([0, 1, 2]), "{body}");
+        assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("rollback: false")), "{body}");
+    }
+    oversized[2]["command"] = json!("view.next_tab");
+    let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": oversized}));
+    assert!(crate::Backend::has_ui(&b) && is_error && b.calls.is_empty(), "{body}");
+    assert_eq!(body["completed"], 0, "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("active design tab")), "{body}");
+
+    let (b, body, is_error) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": steps, "rollback": false}));
+    assert!(!is_error, "{body}");
+    assert_eq!(methods(&b), ["engine.batch", "engine.execute", "engine.execute", "engine.execute"]);
+    assert_eq!(body["results"][2]["ran"], "view.future_tab", "{body}");
+}
+
+#[test]
+fn rollback_batch_can_still_fall_back_for_a_loader_in_the_same_design() {
+    let e = "engine.batch unavailable: step 0 (file.insert_step) loads a file";
+    let (b, body, is_error) = recorded_batch(Err(e.into()), json!({"commands": [{"command": "file.insert_step", "params": {"path": "part.step"}}]}));
+    assert!(!is_error, "{body}");
+    let ran: Vec<_> = b.calls.iter().filter_map(|(_, p)| p["command"].as_str()).collect();
+    assert_eq!(ran, ["edit.checkpoint", "file.insert_step", "edit.restore_checkpoint"]);
 }
 
 #[test]
 fn batch_falls_back_while_the_agent_cursor_is_shown() {
     let (b, body, is_error) =
-        recorded_batch(Err("engine.batch unavailable: the agent cursor is shown".into()), json!({"commands": [{"command": "a.one"}]}));
+        recorded_batch(Err("engine.batch unavailable: the agent cursor is shown".into()), json!({"commands": [{"command": "parameters.list"}]}));
     assert!(!is_error, "{body}");
-    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "a.one"), "{:?}", b.calls);
+    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "parameters.list"), "{:?}", b.calls);
 }
 
 /// The app may have run the batch: sending the steps again would apply them twice.
@@ -3649,10 +3757,10 @@ fn batch_does_not_resend_after_a_transport_error() {
 #[test]
 fn batch_too_large_for_one_control_line_goes_per_step() {
     let big = "x".repeat(solidcraft_engine::MAX_LINE);
-    let (b, body, is_error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "a.one", "params": {"text": big}}]}));
+    let (b, body, is_error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "parameters.import", "params": {"text": big}}]}));
     assert!(!is_error, "{body}");
     assert!(!methods(&b).contains(&"engine.batch"), "{:?}", methods(&b));
-    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "a.one"));
+    assert!(b.calls.iter().any(|(m, p)| m == "engine.execute" && p["command"] == "parameters.import"));
 }
 
 /// A fake app on a loopback port: counts connections and `engine.batch` lines, never replies to
@@ -3947,8 +4055,9 @@ fn batch_reports_timings_and_profile() {
     assert_eq!(b.calls[0].1["profile"], true);
     assert_eq!((body["timings"][0]["ms"].as_f64(), body["total_ms"].as_f64()), (Some(2.5), Some(2.6)), "{body}");
     // An app without engine.batch is timed step by step here, without a kernel split it can't measure.
-    let (_, body, _) = recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "a.one"}], "profile": true}));
-    assert_eq!(body["timings"][0]["command"], "a.one", "{body}");
+    let (_, body, _) =
+        recorded_batch(Err("unknown method `engine.batch`".into()), json!({"commands": [{"command": "parameters.list"}], "profile": true}));
+    assert_eq!(body["timings"][0]["command"], "parameters.list", "{body}");
     assert!(body["timings"][0].get("profile").is_none(), "{body}");
 }
 
@@ -4275,7 +4384,8 @@ impl crate::backend::Backend for Stub {
 
 fn stub_batch(fail: Vec<(&'static str, String)>, restore_ok: bool, rollback: bool) -> (Stub, Value) {
     let mut b = Stub { calls: Vec::new(), fail, restore_ok };
-    let args = json!({"commands": [{"command": "a.one"}, {"command": "a.two"}, {"command": "a.three"}], "rollback": rollback});
+    let args =
+        json!({"commands": [{"command": "parameters.add"}, {"command": "parameters.change"}, {"command": "parameters.list"}], "rollback": rollback});
     let r = crate::tools::call_tool(&mut b, "batch", &args);
     assert_eq!(r["isError"], true, "{r}");
     let body = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -4287,23 +4397,23 @@ fn stub_batch(fail: Vec<(&'static str, String)>, restore_ok: bool, rollback: boo
 /// step still running in the app counts as applied unless the rollback took it back.
 #[test]
 fn a_failed_batch_reports_what_really_happened() {
-    let still = format!("{} `engine.execute` (a.two) is still running in the app", crate::backend::STILL_RUNNING);
+    let still = format!("{} `engine.execute` (parameters.change) is still running in the app", crate::backend::STILL_RUNNING);
     // Still running, and the rollback could not restore the checkpoint.
-    let (b, body) = stub_batch(vec![("a.two", still.clone())], false, true);
+    let (b, body) = stub_batch(vec![("parameters.change", still.clone())], false, true);
     assert_eq!((&body["rolled_back"], &body["undone"]), (&json!(false), &json!(0)), "{body}");
     assert_eq!((&body["applied"], &body["not_run"]), (&json!([0, 1]), &json!([2])), "{body}");
     assert_eq!(body["failed"]["still_running"], true, "{body}");
-    assert!(!b.calls.iter().any(|(_, p)| p["command"] == "a.three"), "a step after the failure is never sent");
+    assert!(!b.calls.iter().any(|(_, p)| p["command"] == "parameters.list"), "a step after the failure is never sent");
     // Still running, and the rollback (after the backend waited for it) restored the checkpoint.
-    let (_, body) = stub_batch(vec![("a.two", still)], true, true);
+    let (_, body) = stub_batch(vec![("parameters.change", still)], true, true);
     assert_eq!((&body["rolled_back"], &body["undone"]), (&json!(true), &json!(1)), "{body}");
     assert_eq!((&body["applied"], &body["not_run"]), (&json!([]), &json!([2])), "{body}");
     assert!(body["failed"].get("still_running").is_none(), "{body}");
     // An ordinary failure whose rollback failed.
-    let (_, body) = stub_batch(vec![("a.two", "boom".into())], false, true);
+    let (_, body) = stub_batch(vec![("parameters.change", "boom".into())], false, true);
     assert_eq!((&body["rolled_back"], &body["applied"]), (&json!(false), &json!([0])), "{body}");
     // No rollback asked for: nothing is restored, and the reply does not say it was.
-    let (b, body) = stub_batch(vec![("a.two", "boom".into())], true, false);
+    let (b, body) = stub_batch(vec![("parameters.change", "boom".into())], true, false);
     assert_eq!((&body["rolled_back"], &body["applied"], &body["not_run"]), (&json!(false), &json!([0]), &json!([2])), "{body}");
     assert!(!b.calls.iter().any(|(_, p)| p["command"] == "edit.restore_checkpoint"), "{:?}", b.calls);
 
@@ -4654,6 +4764,23 @@ fn auto_session_bridges_to_a_late_app_only_while_empty() {
     let r = raw_tool(&mut s, "inspect_design", json!({}));
     assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
     assert!(!s.backend().has_ui());
+}
+
+#[test]
+fn batch_keeps_the_auto_session_it_was_checked_in() {
+    use crate::Backend;
+    let mut ready = false;
+    let mut backend = crate::Auto::new(Headless::default(), Box::new(move || std::mem::replace(&mut ready, true).then_some(1)), None);
+    let r = crate::tools::call_tool(
+        &mut backend,
+        "batch",
+        &json!({"commands": [{"command": "set_parameter", "params": {"name": "width", "value": 5}}], "expect": {"bodies": 0}}),
+    );
+    assert_ne!(r["isError"], true, "{r}");
+    assert!(!backend.has_ui(), "preflight, execution and expectation used the same session");
+    let body: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["results"][0]["name"], "width", "{body}");
+    assert_eq!(body["expectation"]["ok"], true, "{body}");
 }
 
 /// A server with no `Auto` backend (`--headless`, `--in`) adds no notice.
@@ -5236,6 +5363,53 @@ fn plugin_tool_arguments_must_be_objects_before_any_backend_call() {
     let reply = crate::call_tool(&mut backend, "running", &Value::Null);
     assert_ne!(reply["isError"], true, "{reply}");
     assert_eq!(backend.calls.last().unwrap().0, "control.running");
+}
+
+/// A docked panel and an MCP caller use the same entry and typed event payload.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn plugin_panel_row_action_runs_the_same_entry_over_mcp() {
+    let root = std::env::temp_dir().join(format!("solidcraft-mcp-panel-{}", std::process::id()));
+    let folder = root.join("sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read","input_schema":{
+            "type":"object","properties":{"panel":{"type":"string"},"event":{"type":"string"},"path":{"type":"string"},
+                "row":{"type":["string","null"]},"value":{"type":["object","string","null"]}}
+        }}],"limits":{"fuel":1000000,"memory_mib":2,"deadline_ms":5000},
+        "ui":{"ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+            "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+        }}}]}}],"workspaces":[]}
+    }});
+    let (package, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let source = include_str!("../../craft-plugin-wasm/src/ui_fixture.wat")
+        .replace("__PACKAGE__", package)
+        .replace("__VERSION__", version)
+        .replace("__COMMAND__", "inspect.measure")
+        .replace("__COMMAND_LEN__", "15")
+        .replace("__ARGS__", "{}")
+        .replace("__ARGS_LEN__", "2");
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+    let mut session = solidcraft_engine::Session::default();
+    session.plugin_state.plugins_dir = Some(root.clone());
+    let mut backend = Headless::new(session);
+    let initial = crate::call_tool(&mut backend, "sample.make", &json!({"panel":"jobs","event":"refresh"}));
+    assert_ne!(initial["isError"], true, "{initial}");
+    backend.session.merge_plugin_panel_data();
+    assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("ready".into())));
+    let described = solidcraft_engine::plugin::describe_entry(&backend.session, "sample.make").unwrap().unwrap();
+    assert!(described.pointer("/input/properties/ui_event").is_some(), "the explicit event envelope is discoverable");
+    backend.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
+    let approval = solidcraft_engine::plugin::read_package(&folder.to_string_lossy()).unwrap().approval;
+    let posted =
+        crate::call_tool(&mut backend, "execute", &json!({"command":"sample.make","params":{"approval":approval,"params":event,"ui_event":event}}));
+    assert_ne!(posted["isError"], true, "{posted}");
+    backend.session.merge_plugin_panel_data();
+    assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("posted".into())));
+    assert!(backend.session.doc.features.is_empty(), "read entry updates panels without editing the design");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 /// Installed plugins are tools (RFC 0002 section 6c): listed with a `plugin` field and their

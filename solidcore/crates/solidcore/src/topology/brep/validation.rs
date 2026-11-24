@@ -135,6 +135,15 @@ impl Reports<'_> {
         self.record(b, index, passed, owner.into(), tol, value)
     }
 
+    /// Not upstream (#21105): a warning of list 1 ([`crate::geom::assert_array::labels::WARNINGS`]),
+    /// reported (`!m_bOK`) without failing the pass.
+    fn warning(&mut self, b: &Brep, index: u64, owner: impl Into<Object>) -> Result<()> {
+        let failed = self.failed;
+        self.record(b, index, false, owner.into(), UNDEF_DOUBLE, UNDEF_DOUBLE)?;
+        self.failed = failed;
+        Ok(())
+    }
+
     /// A report of list 1 (`SmBrep`'s pointer tests), which names no other object.
     fn record(
         &mut self,

@@ -1,5 +1,6 @@
 //! Contracts and result types for the commands in `cmd/frame.rs`: `frame.member`,
-//! `frame.profile.list`, `frame.profile.properties` and `frame.profile.insert` (#12500).
+//! `frame.profile.list`, `frame.profile.properties` and `frame.profile.insert` (#12500); and
+//! `frame.trim` (#4003).
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a sketch exists, a dimension evaluates
@@ -29,7 +30,10 @@ use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MAX_MEMBER
 use super::check::{keyed, located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{AngleExpr, GeoRefParam, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, not_blank_pattern, present};
+use super::types::{
+    AngleExpr, FeatureCommon, GeoRefParam, IdOrName, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, feature_common, not_blank_pattern,
+    present,
+};
 use crate::params;
 
 /// The words `Anchor` is spelled with, as the handlers' message lists them.
@@ -1119,7 +1123,7 @@ fn member_required(schema: &mut Schema) {
                 {"properties": {"groups": {"type": "null"}}},
                 {"required": ["sketch"], "properties": {
                     "lines": {"type": "null"}, "anchor": {"type": "null"}, "locate": {"type": "null"}, "angle": {"type": "null"},
-                    "mirror": {"type": "null"}, "body_name": {"type": "null"}
+                    "mirror": {"type": "null"}, "body_name": {"type": "null"}, "continuous": {"type": "null"}
                 }}
             ]},
             // One group is canonical flat form. Several currently stay independent and square-ended.
@@ -1148,7 +1152,7 @@ pub struct FrameMemberKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
-    /// The lines to lay members along, by curve id, one member each. Default: every straight
+    /// The lines or arcs to lay members along, by curve id. One member each, unless continuous. Default: every straight
     /// line drawn in the sketch that isn't construction, projected or otherwise linked, or of no
     /// length.
     #[serde(default)]
@@ -1157,6 +1161,10 @@ pub struct FrameMemberKeys {
     /// sketch lines with corner none and no corner overrides, point pairs or finishing options.
     #[serde(default)]
     pub groups: Option<MemberGroups>,
+    /// One member along explicit, ordered tangent lines and circular arcs. Default: false.
+    /// Requires corner None without overrides, fitting, coping, Flip, gap or point pairs.
+    #[serde(default)]
+    pub continuous: Option<bool>,
     /// Members between two points, one each, after the lines' members; each point is found
     /// again whenever the design changes, so the member follows it. Give it, `sketch` or both.
     #[serde(default)]
@@ -1289,6 +1297,80 @@ impl JsonSchema for FrameMemberParams {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         FrameMemberKeys::json_schema(generator)
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Trim/Extend (`frame.trim`)
+
+/// A frame member body name, or its creating feature and sketch line.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Member {
+    Body(String),
+    Line { feature: IdOrName, line: String },
+}
+
+/// One member or a list of members.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Members {
+    Body(String),
+    List(Vec<Member>),
+}
+
+/// A profile side of a target member.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Side {
+    Right,
+    Left,
+    Top,
+    Bottom,
+}
+
+/// A member, its profile side, or a plane/planar face.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Target {
+    Side { member: Member, side: Option<Side> },
+    Plane { plane: Value },
+    SavedPlane { plane_ref: Value },
+    Member(Member),
+}
+
+/// One target or a list of targets.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Targets {
+    List(Vec<Target>),
+    One(Target),
+}
+
+/// The end to move.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum End {
+    Auto,
+    Start,
+    End,
+}
+
+/// Trim or extend frame members to member sides, planes or planar faces.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TrimParams {
+    /// Members to rebuild, by body name or {feature, line}. Between 1 and 1000 members.
+    pub members: Members,
+    /// One or more member sides, {plane} picks or persisted {plane_ref} attachments.
+    pub to: Targets,
+    /// Which end moves. Default: auto, the end nearer each target.
+    #[serde(default)]
+    pub end: Option<End>,
+    /// Weld gap in design length units or a length expression. Default: 0; at most 1 m.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 #[cfg(test)]

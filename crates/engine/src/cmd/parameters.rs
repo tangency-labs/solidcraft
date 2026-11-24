@@ -262,32 +262,48 @@ fn normalize_negative_dimension(s: &mut Session, name: &str, expr_text: &str) ->
     if w >= 0.0 {
         return None;
     }
-    let targets: Vec<(u64, ConstraintKind)> = s
+    let targets: Vec<(u64, Vec<ConstraintKind>)> = s
         .doc
         .features
         .iter()
         .filter_map(|f| match &f.kind {
-            FeatureKind::Sketch { sketch, .. } => sketch
-                .constraints
-                .iter()
-                .find(|c| !c.driven && c.param.as_deref() == Some(name) && !c.kind.is_angle())
-                .map(|c| (f.id, c.kind.clone())),
+            FeatureKind::Sketch { sketch, .. } => {
+                let matched: Vec<ConstraintKind> = sketch
+                    .constraints
+                    .iter()
+                    .filter(|c| !c.driven && c.param.as_deref() == Some(name) && !c.kind.is_angle())
+                    .map(|c| c.kind.clone())
+                    .collect();
+                (!matched.is_empty()).then_some((f.id, matched))
+            }
             _ => None,
         })
         .collect();
     if targets.is_empty() {
         return None;
     }
-    let mut flipped = false;
-    for (id, kind) in targets {
-        let Ok(stored) = sketch_store::read(&s.doc, id) else { continue };
+    let mut updated = Vec::with_capacity(targets.len());
+    for (id, kinds) in targets {
+        let Ok(stored) = sketch_store::read(&s.doc, id) else { return None };
         let mut sk = stored.clone();
-        if sk.flip_for_negative_dimension(&kind, -w) && sketch_store::write(s.doc_mut(), id, sk).is_ok() {
-            flipped = true;
+        let mut has_offset = false;
+        for kind in &kinds {
+            if !sk.flip_for_negative_dimension(kind, -w) {
+                return None;
+            }
+            if matches!(kind, ConstraintKind::OffsetDistance { .. }) {
+                has_offset = true;
+            }
         }
+        if has_offset {
+            let _ = sk.refresh_offsets();
+        }
+        updated.push((id, sk));
     }
-    if !flipped {
-        return None;
+    for (id, sk) in updated {
+        if sketch_store::write(s.doc_mut(), id, sk).is_err() {
+            return None;
+        }
     }
     let flipped_expr = if expr::references(expr_text).is_empty() { s.doc.design_length(-w).1 } else { format!("-({expr_text})") };
     if s.doc_mut().change_param(name, &flipped_expr, None, None).is_ok() { Some(flipped_expr) } else { None }
