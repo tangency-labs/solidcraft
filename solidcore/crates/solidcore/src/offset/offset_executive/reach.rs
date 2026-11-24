@@ -4641,7 +4641,6 @@ mod tests {
         use crate::primitive::api_primitives as ap;
         // Revolve the two cap endpoints and the bore seam together. The later slab
         // cut cannot touch the full bore, whose radius is strictly less than 2.
-        k.fixes.revolve_analytic_profile_faces = true;
         let angle = (1.0_f64 / 3.0).acos().to_degrees();
         let arc = Curve::from(
             BSplineCurve::create_circle_segment(
