@@ -1306,16 +1306,14 @@ fn holds_case() -> Case {
 /// balls, passes `Level2`, has the volume of its balls' envelope ([`HOLDS_VOLUME`]), and is G1
 /// along both seams; its exact circles take one arc count and its end point their weights
 /// (WR-711). Its exact circles are skinned between the trace's stations, so the round stays
-/// on its balls only where the stations follow the law (`fillet_variable_span_follows_fillet`,
-/// the fork's 4438859): without it the default kernel's round is 5.0e-4 off them and its volume
-/// 1.2e-7 over the envelope's (upstream's approximated arcs, which a round no longer takes,
-/// were within the grade there).
+/// on its balls only where the stations follow the law (WR-646, the fork's 4438859, now the
+/// only path): without it the round was 5.0e-4 off them and its volume 1.2e-7 over the
+/// envelope's (upstream's approximated arcs, which a round no longer takes, were within the
+/// grade there).
 #[test]
 fn the_progressive_cubic_variable_round_lies_on_its_balls_union_and_is_g1() {
     let case = holds_case();
-    let mut k = Kernel::default();
-    k.fixes.fillet_variable_span_follows_fillet = true;
-    assert_passes(&case, &mut k);
+    assert_passes(&case, &mut Kernel::default());
     assert_passes(&case, &mut solidcraft_kernel());
 }
 
