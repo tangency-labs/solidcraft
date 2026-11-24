@@ -164,7 +164,8 @@ pub enum EnclosureStop {
     Settled,
     /// The width asked is below what any refinement can give ([`VolumeEnclosure::least`]),
     /// and the enclosure is within the width asked of that least width: no refinement could
-    /// narrow it by more than the width asked.
+    /// narrow it by more than the width asked. A looser width can therefore be answered
+    /// narrower, by at most the width asked ([`enclose_volume`]).
     Floor,
     /// [`CELL_BUDGET`] refinement cells are spent.
     Budget,
@@ -190,7 +191,8 @@ pub struct VolumeEnclosure {
     /// A lower bound, rounded down, of the width of every enclosure refining can still give (the
     /// fixed terms and each strip cell's least width however it is cut): no width below it is
     /// reached, and the result is at least this wide. Asked a width below it, refining ends at
-    /// [`EnclosureStop::Floor`] once the enclosure is at most this plus the width asked.
+    /// [`EnclosureStop::Floor`] at the first check where the enclosure is at most this (as it is
+    /// then) plus the width asked.
     pub least: f64,
     /// Why refinement ended.
     pub stop: EnclosureStop,
@@ -223,12 +225,26 @@ pub enum VolumeSign {
 /// ([`EnclosureStop::Reached`]), or else the narrowest refinement gives within [`CELL_BUDGET`]
 /// refinement cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
 /// ([`EnclosureStop::Exhausted`]). A width below the enclosure's [`VolumeEnclosure::least`] is not
-/// reached: refining ends at [`EnclosureStop::Floor`] once the enclosure is at most that least
-/// width plus `width`, so no refinement could narrow it by more than `width` (the answer is as
+/// reached: refining ends at [`EnclosureStop::Floor`] at the first check where the enclosure is
+/// at most that least width plus `width`, so no refinement could narrow it by more than `width` (the answer is as
 /// close to the narrowest any refinement gives as `width` asks of the volume). A width below the
 /// [`VolumeEnclosure::floor`] alone is still refined toward. The result is the intersection of
-/// every enclosure summed along the way (each holds the volume), so a tighter `width` is never
-/// answered wider by further refinement. Missing UV trim curves are made on `b`, as
+/// every enclosure summed along the way (each holds the volume), so within one call further
+/// refinement never widens it.
+///
+/// Across calls a [`EnclosureStop::Floor`] answer can be wider than the answer to a looser
+/// `width`, but by at most its own `width`. The cells are cut in the same order whatever is
+/// asked (only when the enclosure is summed and checked depends on `width`), so the answer to
+/// any `width` is the intersection of some of the enclosures of one sequence, and
+/// every enclosure of that sequence, before or after the Floor stop, is at least the Floor
+/// answer's [`VolumeEnclosure::least`] wide. A looser `width` between that least width and the
+/// Floor answer may be reached further on, and the answer is not monotone in `width` there. No
+/// rule closes that gap and still stops early: telling whether a looser `width` is reached
+/// takes refining until it is, so it would have to refine every width below the least that far
+/// (on to the cell budget, the cost the Floor stop saves), or end the looser widths at the same
+/// point as unreached although refinement reaches them.
+///
+/// Missing UV trim curves are made on `b`, as
 /// [`super::integrator::properties::brep_volume_default`] makes them.
 ///
 /// # Errors

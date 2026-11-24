@@ -3269,7 +3269,8 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
 /// refinement reaches it, and the enclosure is within 2.5e-4 of that least width, so no refinement
 /// narrows it by more than the width asked. It still holds the operand's closed-form volume, and it
 /// takes well under a quarter of the cell budget: before, it spent all of [`CELL_BUDGET`] (131,375
-/// cells, 129,094 of them strip cells) for 7.43e-4.
+/// cells, 129,094 of them strip cells) for 7.43e-4. A looser ask on the other side of the least
+/// width is still reached, and its answer bounds how much wider the Floor answer can be.
 #[test]
 fn the_ledge_operand_asked_below_its_strips_ends_at_its_floor() {
     use solidcore::mass::enclosure::{enclose_volume, EnclosureStop, CELL_BUDGET};
@@ -3288,6 +3289,25 @@ fn the_ledge_operand_asked_below_its_strips_ends_at_its_floor() {
     assert!(e.width() <= 1e-3, "{e:?}");
     assert!(e.lo <= v0 && v0 <= e.hi, "{e:?} {v0}");
     assert!(e.counts.cells < CELL_BUDGET / 4, "{e:?}");
+
+    // #21588 review: asked just below the Floor answer (7.456e-4, against 7.4638e-4 at least
+    // 5.09e-4), past that least width, refinement goes on and reaches it (in 23,191 cells), so
+    // the looser ask is answered narrower. That is the contract ([`enclose_volume`]): a rule that
+    // kept the answers monotone would have to end this reachable ask unreached as well, or refine
+    // 2.5e-4 on to the whole budget. The last two asserts hold by construction whatever the cells
+    // become: the looser answer, as every answer, is at least the Floor answer's least width wide,
+    // so the Floor answer is at most the width it asked wider. The Floor stop above and the reach
+    // here depend on the measured numbers (the Floor answer is 2.37e-4 off its least width against
+    // the 2.5e-4 asked, and the strips settle at 7.43e-4 given the whole budget).
+    let a = e.width() * (1.0 - 1e-3);
+    assert!(e.least <= a && a < e.width(), "{e:?}");
+    let (k, mut brep) = kernel_copy(&b);
+    let loose = enclose_volume(&k, &mut brep, a).unwrap();
+    assert_eq!(loose.stop, EnclosureStop::Reached, "{loose:?}");
+    assert!(loose.width() <= a, "{loose:?}");
+    assert!(loose.lo <= v0 && v0 <= loose.hi, "{loose:?} {v0}");
+    assert!(loose.width() >= e.least, "{loose:?} {e:?}");
+    assert!(e.width() - loose.width() <= 2.5e-4, "{loose:?} {e:?}");
 }
 
 /// The ledge's planar twin (#10876): the slab [0, 10] x [-10, 10] x [-10, 0] with the riser
