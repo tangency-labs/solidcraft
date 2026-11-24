@@ -130,6 +130,8 @@ impl SheetRule {
 /// The design parameters a rule's `field` expression `e` reads: outside the rule's own
 /// `thickness`, `Thickness` is the rule's thickness (sheet metal and plastic rules alike).
 pub fn rule_references(field: &str, e: &str) -> Vec<String> {
+    #[cfg(test)]
+    crate::params::param_rows_tests::count_rule_read();
     let mut names = expr::references(e);
     if field != "thickness" {
         names.retain(|n| n != "Thickness");

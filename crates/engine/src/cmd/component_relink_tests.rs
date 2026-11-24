@@ -351,6 +351,56 @@ fn volume(s: &mut Session) -> f64 {
     run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }
 
+/// #16829: a design open in the session that has no file yet can be inserted in another
+/// design. The body comes in with the names of its faces, its material and its properties,
+/// and the link is recorded with no file: `component.links` reports it as a link with no
+/// file, and `component.update_links` leaves it alone (it keeps its bodies).
+#[test]
+fn a_design_held_in_the_session_is_inserted_without_being_saved_first() {
+    // The design the caller holds: a part with a material, a look and a property, never saved.
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    run(&mut source, "material.assign", json!({"bodies": ["Cube"], "material": "Steel"}));
+    source.doc_mut().appearances.bodies.insert("Cube".into(), solidcraft_doc::appearance::Look::custom([12, 34, 56], 0.4));
+    run(&mut source, "document.metadata.set", json!({"values": {"part_number": "P-1", "revision": "A"}}));
+    assert!(source.path.is_none(), "the design has no file yet");
+    let faces: Vec<String> = {
+        let state = source.world_state().unwrap();
+        let body = state.bodies.iter().find(|b| b.name == "Cube").expect("the design has its body");
+        solidcraft_doc::naming::face_names(body).as_ref().clone()
+    };
+
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"document": source.doc.to_json()}));
+    let component = inserted["component"].as_u64().unwrap();
+    let feature = inserted["feature"].as_u64().unwrap();
+    // The body comes in as the design has it: its name, its faces, its material and its look.
+    assert_eq!(inserted["bodies"], json!(["Cube"]), "{inserted}");
+    let mut carried: Vec<String> = s.doc.feature(feature).unwrap().link_faces[0].iter().filter(|n| !n.is_empty()).cloned().collect();
+    let mut want: Vec<String> = faces.iter().filter(|n| !n.is_empty()).cloned().collect();
+    carried.sort();
+    want.sort();
+    assert!(!carried.is_empty(), "the faces come in named");
+    assert_eq!(carried, want, "the faces keep the names the design gives them");
+    assert_link_properties(&mut s, component, "Steel", 7.85, [12, 34, 56]);
+    // The design's properties come in too.
+    assert_eq!(part_property(&s, component, "part_number").as_deref(), Some("P-1"));
+    assert_eq!(part_property(&s, component, "revision").as_deref(), Some("A"));
+
+    // The link names no file: there is none.
+    assert_eq!(s.doc.links[&component].path, "");
+    let links = run(&mut s, "component.links", json!({}));
+    assert_eq!(links["links"][0]["path"], "", "{links}");
+    assert_eq!(links["links"][0]["file"], "", "{links}");
+    assert!(links["links"][0]["found"].is_null(), "{links}");
+    // Update Links leaves it alone: it has no file to read, and keeps its bodies.
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!([]), "{updated}");
+    assert_eq!(updated["unchanged"], json!([]), "{updated}");
+    assert_eq!(updated["failed"], json!([]), "{updated}");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"].as_array().map(Vec::len), Some(1));
+}
+
 fn properties_part(path: &Path, material: &str, density: Option<f64>, color: [u8; 3]) -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
@@ -440,6 +490,33 @@ fn linked_design_properties_do_not_replace_conflicting_custom_materials() {
     assert!((p["total"]["mass_g"].as_f64().unwrap() - 4.2).abs() < 1e-6, "{p}");
     assert_eq!(s.doc.material_density("Custom alloy"), Some(9.0));
     assert_eq!(s.doc.user_materials.len(), 2);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21182: every body that brings the same conflicting custom material shares one `(linked N)`
+/// copy, rather than each adding its own until the design runs out of custom materials.
+#[test]
+fn linked_bodies_with_one_conflicting_material_share_its_copy() {
+    let dir = folder("properties-custom-shared");
+    let file = dir.join("source.solidcraft");
+    properties_part(&file, "Custom alloy", Some(4.2), [12, 34, 56]);
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let mut assigned = Vec::new();
+    for _ in 0..3 {
+        let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+        let p = run(&mut s, "component.properties", json!({"component": c}));
+        assert!((p["total"]["mass_g"].as_f64().unwrap() - 4.2).abs() < 1e-6, "{p}");
+        assigned.push(p["bodies"][0]["material"].as_str().unwrap().to_string());
+    }
+    assert_eq!(s.doc.user_materials.len(), 2, "{assigned:?}");
+    assert!(assigned.iter().all(|m| *m == assigned[0] && m != "Custom alloy"), "{assigned:?}");
+    assert_eq!(s.doc.material_density("Custom alloy"), Some(9.0));
     let _ = std::fs::remove_dir_all(dir);
 }
 
