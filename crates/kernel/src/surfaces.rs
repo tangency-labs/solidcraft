@@ -20,7 +20,7 @@ use std::collections::BTreeSet;
 
 use solidcore_record::brep::{self as b, Brep, Curve2};
 use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::bspline::{HPoint, NurbsSurface};
 
 use crate::body::Body;
@@ -984,34 +984,14 @@ fn faced_by_curves(r: Brep, start: &Plane, pieces: &[Numbered]) -> Result<Brep> 
     if r.edges.iter().all(|e| e.uses.len() >= 2) {
         return Ok(r);
     }
-    let n = start.normal();
-    let sides = face_sides(&r);
-    let mut votes = vec![0.0f64; r.faces.len()];
-    for e in &r.edges {
-        let Some(mid) = CurveEval::new(e.parameters()).ok().and_then(|c| c.point(0.5 * (e.interval[0] + e.interval[1]))) else { continue };
-        let near = 4.0 * e.tolerance.max(r.tolerance);
-        if start.height(mid).abs() > near {
-            continue;
-        }
-        let o = mid - start.origin;
-        let q = Vec2::new(o.dot(start.x), o.dot(start.y));
-        let on = pieces.iter().map(|(s, _)| (s, s.closest_param(q))).find(|(s, t)| s.point_at(*t).dist(q) <= near);
-        let Some(want) = on.and_then(|(s, t)| start.dir_to_world(s.derivative(t)).normalized()).map(|d| d.cross(n)) else { continue };
-        for u in &e.uses {
-            let f = u.face as usize;
-            let Some(surface) = r.faces.get(f).and_then(|face| SurfaceEval::new(face.parameters()).ok()) else { continue };
-            let Some(uv) = surface.project(mid, None, near.max(1e-6)) else { continue };
-            let Some(normal) = surface.derivs(uv[0], uv[1]).and_then(|(_, su, sv)| su.cross(sv).normalized()) else { continue };
-            let side = if sides.get(f).copied().unwrap_or(true) { 1.0 } else { -1.0 };
-            if let Some(v) = votes.get_mut(f) {
-                *v += side * normal.dot(want);
-            }
-        }
-    }
-    if votes.iter().all(|v| *v >= 0.0) {
+    // each curve at its middle, with its direction there
+    let samples: Vec<(Vec3, Vec3)> = pieces.iter().map(|(s, _)| (start.to_world(s.point_at(0.5)), start.dir_to_world(s.derivative(0.5)))).collect();
+    let accept = 4.0 * r.edges.iter().map(|e| e.tolerance).fold(r.tolerance, f64::max).max(1e-6);
+    let against = solidcore_ops::query::Query::new(&r).faces_against(start.normal(), &samples, accept);
+    if against.is_empty() {
         return Ok(r);
     }
-    let picked: Vec<(usize, bool)> = votes.iter().enumerate().map(|(f, v)| (f, *v < 0.0)).collect();
+    let picked: Vec<(usize, bool)> = (0..r.faces.len()).map(|f| (f, against.contains(&f))).collect();
     Ok(Parts::of(&r, &picked)?.canonical()?.brep)
 }
 
@@ -1737,6 +1717,7 @@ mod tests {
     use super::*;
     use crate::{box_solid, cylinder, measure, trim};
     use solidcore_record::Loop2;
+    use solidcraft_geom::brep::eval::SurfaceEval;
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)

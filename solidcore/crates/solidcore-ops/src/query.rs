@@ -182,6 +182,15 @@ impl<'a> Query<'a> {
         self.inner.faces_at(vec3(p), accept)
     }
 
+    /// The faces that face against the curves `samples` lie on, ascending: each sample a point on
+    /// a curve and its direction there, a face through it meant to face along that direction
+    /// crossed with `normal` ([`k::Query::faces_against`]).
+    #[must_use]
+    pub fn faces_against(&self, normal: Vec3, samples: &[(Vec3, Vec3)], accept: f64) -> Vec<usize> {
+        let samples: Vec<_> = samples.iter().map(|(p, d)| (vec3(*p), vec3(*d))).collect();
+        self.inner.faces_against(vec3(normal), &samples, accept)
+    }
+
     /// Where the ray from `o` along `d` meets the faces ahead of `o`: each meeting's distance,
     /// face and point, nearest first.
     ///
