@@ -3,7 +3,7 @@
 //! the high top's plane, or its high top moved down 10 onto the low top's plane
 //! (SolidCraft's replace face, rig case shell/cov-replace-face-step-onto-the-higher-face).
 //! The move closes the step's wall to nothing: its edges along the sides close to points.
-//! With `local_operation_step_walls` `CloseLoopGap` squeezes those edges out (before
+//! With the step walls (WR-530 addendum, always on) `CloseLoopGap` squeezes those edges out (before
 //! ccbf77a it refused them, `SM_ERR_OFFSET_EDGE_VANISHES`), the wall is deleted, and the
 //! result is the plain 40 x 30 x 20 box (24000) or 40 x 30 x 10 box (12000).
 #![allow(
@@ -24,12 +24,6 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::local_operation::local_operation;
 use solidcore::topology::FaceId;
 use solidcore::{Brep, Kernel};
-
-fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.local_operation_step_walls = true;
-    k
-}
 
 fn stepped(k: &mut Kernel) -> Brep {
     let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
@@ -60,7 +54,7 @@ fn tops_at(k: &Kernel, b: &Brep, z: f64) -> Vec<FaceId> {
 /// keeps the face's parameterization; the local operation lifts the face's edges onto the
 /// new surface by their UV.
 fn move_top(z: f64, to: f64) -> (Kernel, solidcore::Result<Brep>) {
-    let mut k = kernel();
+    let mut k = Kernel::default();
     let mut b = stepped(&mut k);
     let tops = tops_at(&k, &b, z);
     assert_eq!(tops.len(), 1, "the top at z = {z}");

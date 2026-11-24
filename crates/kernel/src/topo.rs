@@ -208,7 +208,7 @@ fn same_pair(faces: &Faces, a: &[usize], b: &[usize]) -> bool {
 /// The exact area of face `f` (SMLib's integration); infinite when the kernel cannot tell, so
 /// such a face is counted rather than dropped.
 fn face_area_exact(b: &Body, f: usize) -> f64 {
-    b.ops_body().and_then(|(ops, order)| ops.face_area(order, f, 1e-2).ok()).unwrap_or(f64::INFINITY)
+    b.ops_body().and_then(|form| form.0.face_area(&form.1, f, 1e-2).ok()).unwrap_or(f64::INFINITY)
 }
 
 /// The area of the polygon through face `f`'s record vertices: cheap, and a face whose corners
@@ -422,6 +422,21 @@ fn cylinder_of(faces: &Faces, face: usize) -> Option<(UnitVec3, Vec3, f64, bool)
     let a = a.unit()?;
     let a = if a.x + a.y * 1e-3 + a.z * 1e-6 < 0.0 { -a } else { a };
     Some((a, *o, *r, !*convex))
+}
+
+/// The cylinder at an indexed face bounded by circular rims normal to its axis.
+pub fn cylinder_between_rims(b: &Body, face: usize) -> Option<CylinderFace> {
+    let Surf::Cylinder { o, a, r, convex } = surf_of(b.record(), face)? else { return None };
+    let axis = a.unit()?;
+    let (mut start, mut end) = (f64::INFINITY, f64::NEG_INFINITY);
+    for rim in crate::face_edge_indices(b, face).into_iter().filter_map(|edge| crate::edge_circle(b, edge)) {
+        if axis.dot(rim.axis).abs() > 1.0 - 1e-9 {
+            let along = (rim.center - o).dot(axis);
+            start = start.min(along);
+            end = end.max(along);
+        }
+    }
+    (end > start).then_some(CylinderFace { axis_point: o, axis, radius: r, start, end, internal: !convex })
 }
 
 pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {

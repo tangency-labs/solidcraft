@@ -33,9 +33,8 @@
 //! curve where it meets the axis inside itself ([`split_curves_on_axis`], the fork's
 //! `sm_SplitCurvesOnAxis`), which `CheckCurveSweep` otherwise refuses
 //! (`SM_SC_ROT_ON_CURVE`); a closed curve's last piece is joined back onto its first.
-//! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
-//! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
-//! are returned instead (`SER`).
+//! **Statuses pass on** (WR-662; SolidCraft change, tangency-labs/smlib c8f6a31): the
+//! statuses upstream drops here are returned (`SER`).
 
 use super::{construct::target, geometry::bspline_with_nurb, PrimitiveAccess};
 use crate::curve::curve::Curve;
@@ -43,7 +42,7 @@ use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
 use crate::error::primitive::PrimitiveFailure;
-use crate::error::{ignore_status, ignored, passed_on, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, ignored, EntityRef, Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::geom_utility::{
     p1::{line_closest_point, line_point_distance},
@@ -66,6 +65,20 @@ use crate::sweep::trans_sweep_geometry::TranslationalSweepGeometry;
 use crate::topology::{BrepId, FaceId};
 const OP: &str = "primitive::primitive_creation::p3::sweeps";
 const OP_SPLIT_ON_AXIS: &str = "primitive::primitive_creation::p3::sweeps::split_curves_on_axis";
+
+/// A profile curve that makes no wire edge ([`PrimitiveFailure::ProfileMakesNoWire`]),
+/// keeping the wire's error as its cause; what `ignored` passes on (unported, cancelled,
+/// a preparation the caller must do) passes on unchanged.
+#[track_caller]
+fn no_wire(e: SolidError) -> SolidError {
+    if e.is_unported_or_cancelled() || matches!(e, SolidError::PreparationRequired { .. }) {
+        e
+    } else {
+        Failure::new(OP, PrimitiveFailure::ProfileMakesNoWire)
+            .caused_by(e)
+            .into_error()
+    }
+}
 
 /// Flags shared by the repeated linear and partial rotational sweeps.
 #[derive(Debug, Clone, Copy)]
@@ -93,7 +106,7 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
     while let Some(slot) = curves.get(index) {
         let curve = slot
             .as_ref()
-            .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
+            .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::NoCurveGiven))?;
         let k = a.kernel(b)?;
         // `((SmBSplineCurve *)cr3DCurves[ii])->SubdivideAtDiscontinuity(..)`: the curve with
         // the NURB its own `GetOrCreateGwNurbPointer` makes (a line's lazy NURB), not a copy
@@ -101,11 +114,7 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         let curve = bspline_with_nurb(k, curve)?
             .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline continuity input"))?;
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
-        let pieces = ignored(passed_on(
-            curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5),
-            k.fixes.sweep_statuses_pass_on,
-        )?)?
-        .unwrap_or_default();
+        let pieces = curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
         if pieces.len() > 1 {
             let count = pieces.len();
             curves.splice(
@@ -171,36 +180,33 @@ pub fn split_curves_on_axis(
                 at.push(param);
             }
         }
-        if at.is_empty() {
+        at.sort_by(f64::total_cmp);
+        let Some((&first, rest)) = at.split_first() else {
             out.push(Some(curve));
             continue;
-        }
-        at.sort_by(f64::total_cmp);
+        };
         let closed = curve.is_closed(k, &ivl, tol)?;
-        let mut pieces = Vec::new();
-        for &param in &at {
-            let next = curve.create_by_split_curve(k, param)?;
-            pieces.push(curve);
-            curve = next;
+        // the split leaves the first piece in `curve`; `last` runs on from each split
+        let mut last = curve.create_by_split_curve(k, first)?;
+        let head = curve;
+        let mut middle = Vec::new();
+        for &param in rest {
+            let next = last.create_by_split_curve(k, param)?;
+            middle.push(last);
+            last = next;
         }
-        pieces.push(curve);
         if closed {
             // the last piece runs on to the curve's start: it and the first are one piece
-            let mut rest = pieces.into_iter();
-            let head = rest.next().ok_or_else(|| {
-                SolidError::primitive_missing(OP_SPLIT_ON_AXIS, "the first split piece")
-            })?;
-            let mut middle: Vec<Curve> = rest.collect();
-            let last = middle.pop().ok_or_else(|| {
-                SolidError::primitive_missing(OP_SPLIT_ON_AXIS, "the last split piece")
-            })?;
             let mut join = [piece_as_bspline(last)?, piece_as_bspline(head)?];
-            let joined = Curve::from(BSplineCurve::create_by_joining(&mut join, None)?);
-            pieces = Vec::with_capacity(middle.len() + 1);
-            pieces.push(joined);
-            pieces.extend(middle);
+            out.push(Some(Curve::from(BSplineCurve::create_by_joining(
+                &mut join, None,
+            )?)));
+            out.extend(middle.into_iter().map(Some));
+        } else {
+            out.push(Some(head));
+            out.extend(middle.into_iter().map(Some));
+            out.push(Some(last));
         }
-        out.extend(pieces.into_iter().map(Some));
     }
     *curves = out;
     Ok(())
@@ -315,9 +321,9 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         self.init_entity_maps();
         if options.cap_ends && options.repetitions == 0 {
-            return Err(SolidError::primitive_failed(
+            return Err(SolidError::primitive(
                 OP,
-                "a capped repeated sweep needs at least one repetition",
+                PrimitiveFailure::CappedSweepNoRepetition,
             ));
         }
         let region = target(self, brep)?;
@@ -351,16 +357,14 @@ impl PrimitiveCreation {
             } else {
                 for slot in curves.iter_mut() {
                     if slot.is_none() {
-                        return Err(SolidError::primitive_failed(
+                        return Err(SolidError::primitive(
                             OP,
-                            "a profile curve slot is empty",
+                            PrimitiveFailure::ProfileSlotEmpty,
                         ));
                     }
-                    let Some(edge) = ignored(a.wire(brep, slot))? else {
-                        return Err(SolidError::primitive_failed(
-                            OP,
-                            "a profile curve makes no wire",
-                        ));
+                    let edge = match a.wire(brep, slot) {
+                        Ok(edge) => edge,
+                        Err(e) => return Err(no_wire(e)),
                     };
                     edges.push(edge);
                 }
@@ -401,8 +405,7 @@ impl PrimitiveCreation {
                     for _ in 0..options.repetitions {
                         // fork c8f6a31 (WR-662): SER_DELETE(pEndCurve->Transform(sStep)).
                         let k = a.kernel(brep)?;
-                        let p = k.fixes.sweep_statuses_pass_on;
-                        ignore_status(passed_on(end_curve.transform(k, &step, None), p)?)?;
+                        end_curve.transform(k, &step, None)?;
                     }
                     end_curves.push(Some(end_curve));
                 }
@@ -420,9 +423,8 @@ impl PrimitiveCreation {
             } else {
                 // unrelated clean up - we didn't use the tmp faces (if any - delete them)
                 // fork c8f6a31 (WR-662): SER(pBrep->DeleteFace(..)).
-                let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
                 for face in faces {
-                    ignore_status(passed_on(a.delete_primitive_face((brep, face)), p)?)?;
+                    a.delete_primitive_face((brep, face))?;
                 }
             }
             copy_maps(self, brep, &mut sweep)?;
@@ -466,15 +468,10 @@ impl PrimitiveCreation {
         for slot in curves.iter_mut() {
             let curve = slot
                 .as_ref()
-                .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
+                .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::NoCurveGiven))?;
             // fork c8f6a31 (WR-662): SER(Length(..)), SER(SetCanonical(..)).
             let k = a.kernel(brep)?;
-            let p = k.fixes.sweep_statuses_pass_on;
-            let length = ignored(passed_on(
-                curve.length(k, &curve.natural_interval(), 0.001),
-                p,
-            )?)?
-            .unwrap_or(0.0);
+            let length = curve.length(k, &curve.natural_interval(), 0.001)?;
             if length < EFF_ZERO {
                 return Err(SolidError::invalid_input(OP, "degenerate revolved curve"));
             }
@@ -495,10 +492,7 @@ impl PrimitiveCreation {
                         tangent *= -1.0;
                     }
                     let mut frame = Axis2Placement::IDENTITY;
-                    ignore_status(passed_on(
-                        frame.set_canonical(origin, tangent, axis.cross(tangent)),
-                        p,
-                    )?)?;
+                    frame.set_canonical(origin, tangent, axis.cross(tangent))?;
                     let mut circles = Vec::new();
                     if start_dist > zero {
                         circles.push(Curve::from(Ellipse::create_canonical_circle(
@@ -518,9 +512,10 @@ impl PrimitiveCreation {
                             None,
                         )?));
                     }
-                    let infinite = a.brep(brep)?.infinite_region().ok_or_else(|| {
-                        SolidError::primitive_missing(OP, "the B-rep's infinite region")
-                    })?;
+                    let infinite = a
+                        .brep(brep)?
+                        .infinite_region()
+                        .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::NoRegion))?;
                     let tolerance = a.brep(brep)?.tolerance();
                     ignore_status(a.planar_face((brep, infinite), circles, tolerance, &mut face))?;
                     *slot = None;
@@ -588,8 +583,7 @@ impl PrimitiveCreation {
             }
         }
         // fork c8f6a31 (WR-662): SER(pBrep->StitchAndOrient()).
-        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-        ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
+        a.stitch_and_orient(brep)?;
         // not upstream (WR-442, #478): a closed shell inside another is its cavity
         a.with_brep_mut(brep, |k, b, _, env| {
             crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
@@ -622,9 +616,11 @@ impl PrimitiveCreation {
                 return self.create_rotational_sweep(a, brep, curves, axis_base, axis);
             }
             if options.cap_ends && options.repetitions != 1 {
-                return Err(SolidError::primitive_failed(
+                return Err(SolidError::primitive(
                     OP,
-                    "a capped revolution repeats once",
+                    PrimitiveFailure::CappedRevolutionRepeats {
+                        repetitions: options.repetitions,
+                    },
                 ));
             }
             let tolerance = a.brep(brep)?.tolerance();
@@ -636,11 +632,9 @@ impl PrimitiveCreation {
             let mut edges = Vec::new();
             if ignored(a.planar_faces(region, curves, tolerance, &mut faces))?.is_none() {
                 for slot in curves.iter_mut() {
-                    let Some(edge) = ignored(a.wire(brep, slot))? else {
-                        return Err(SolidError::primitive_failed(
-                            OP,
-                            "a profile curve makes no wire",
-                        ));
+                    let edge = match a.wire(brep, slot) {
+                        Ok(edge) => edge,
+                        Err(e) => return Err(no_wire(e)),
                     };
                     edges.push(edge);
                 }
@@ -686,8 +680,7 @@ impl PrimitiveCreation {
                 sweep.do_stitching = false;
                 sweep.do_sweep(a, &geometry, Some(brep), Some(region), &mut selected)?;
                 // fork c8f6a31 (WR-662): SER(sTI.DeleteFaces(aFaces)).
-                let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-                ignore_status(passed_on(a.delete_primitive_faces(brep, &faces), p)?)?;
+                a.delete_primitive_faces(brep, &faces)?;
                 a.stitch(brep, &mut sweep, tolerance, false)?;
             }
             copy_maps(self, brep, &mut sweep)?;
@@ -1014,7 +1007,6 @@ mod tests {
         let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
 
         let mut k = Kernel::default();
-        k.fixes.revolve_holed_profile_void = true;
         let mut ring = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
         let store = AttributeStore::default();
         let key_of = |_| ObjectKey(0);

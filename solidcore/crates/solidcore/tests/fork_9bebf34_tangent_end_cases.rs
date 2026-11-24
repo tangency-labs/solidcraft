@@ -23,7 +23,7 @@
 //! mark, the case says so ([`Mark::here`]).
 //!
 //! The marks run under [`solidcraft_kernel`], the fork's profile at cd47efd as far as solidcore
-//! models it: every fix SolidCraft turns on but `geometric_g2_continuity` (as
+//! models it: every fix SolidCraft turns on (as
 //! `issue_2174_cap_rim_two_edges.rs`), with WR-710's refusal, not the fork's at cd47efd. The G^n
 //! section and the generic blend's regularity and fit checks (WR-685, WR-696; the fork's
 //! later 11ea2d9 and smlib#79) are on, as solidcore builds them always. At 9bebf34 the fork had neither the
@@ -80,16 +80,14 @@ use solidcore::{Brep, Kernel};
 
 const PI: f64 = core::f64::consts::PI;
 
-/// Every fix SolidCraft turns on: all but `geometric_g2_continuity`. The fork's profile at
+/// Every fix SolidCraft turns on: all of them. The fork's profile at
 /// cd47efd, but for WR-710's refusal (not the fork's: it refuses the rounds together where
 /// no Mixed corner takes the corner), which solidcore always makes.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k

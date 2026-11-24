@@ -272,6 +272,11 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
+        if let FeatureKind::Sketch { plane, sketch } = &mut feature.kind {
+            let source = |id| transforms.get(&id).copied().unwrap_or(solidcraft_doc::IDENTITY);
+            solidcraft_doc::project::reframe_link_sketch_placements(sketch, transform, source)?;
+            solidcraft_doc::reframe_plane_placements(plane, transform, source)?;
+        }
         feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped, &BTreeMap::new(), &copy.doc)?;
         if let FeatureKind::Sketch { plane, sketch } = &mut feature.kind {
             // 3D wires carry their own coordinate space, independently of the sketch plane.
@@ -409,7 +414,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     scratch.selection = ids.values().map(|id| Sel::Feature { id: *id }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     serde_json::to_value(PasteResult { pasted: made, errors: Vec::new(), notices: Vec::new(), param_warnings: Vec::new() })
         .map_err(|e| bad(CMD, e.to_string()))
 }

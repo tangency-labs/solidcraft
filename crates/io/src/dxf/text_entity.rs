@@ -1,15 +1,12 @@
-//! Nine-alignment TEXT adapter over the real parsed Ent. No parser or glyph layout.
+//! TEXT and MTEXT adapter over the real parsed Ent. No parser or glyph layout.
 //! Registration and the production call remain with the parent dxf module owner.
 
 use solidcore_record::Vec2;
 
-use super::text_value::decode_text_value;
+use super::text_value::{decode_mtext_values, decode_text_value};
 use super::{Ent, MAX_WORK, layered_array_budget, layered_number, layered_required, layered_text};
 use crate::dxf_out::{DxfTextHorizontalAlignment, DxfTextVerticalAlignment};
 use crate::{DxfShape, IoError, MAX_DRAWING_BYTES, Result};
-
-const MAX_TEXT_ENCODED_BYTES: usize = 250 * 7;
-const MAX_TEXT_DECODED_BYTES: usize = 250 * 3;
 
 fn invalid(reason: &str) -> IoError {
     IoError::Invalid(format!("layered DXF TEXT: {reason}"))
@@ -31,46 +28,22 @@ fn required(entity: &Ent, code: i32) -> Result<f64> {
     Ok(value)
 }
 
-/// Read nine-alignment model-space TEXT; return an error for MTEXT and any
-/// unrepresented alignment/style/OCS. Input is raw Ent.s, decoded exactly once.
-/// Both counters belong to the whole file; callers must not reset them per TEXT.
-/// Decoded text is restricted to the current writer's faithful plain BMP subset.
-pub(super) fn read_text_entity(
-    entity: &Ent,
-    k: f64,
-    max_encoded_bytes: usize,
-    max_decoded_bytes: usize,
-    bytes: &mut usize,
-    work: &mut usize,
-) -> Result<DxfShape> {
-    if entity.kind != "TEXT" {
-        return Err(invalid("not supported yet: MTEXT attachment/wrapping or a non-TEXT entity"));
-    }
-    if !k.is_finite() || k <= 0.0 {
-        return Err(invalid("unit scale must be finite and positive"));
-    }
-    if max_encoded_bytes > MAX_DRAWING_BYTES || max_decoded_bytes > MAX_DRAWING_BYTES {
-        return Err(invalid("decoder byte caps exceed the file ceiling"));
-    }
-    let remaining_bytes = MAX_DRAWING_BYTES.checked_sub(*bytes).ok_or_else(|| invalid("invalid shared byte counter"))?;
-    let remaining_work = MAX_WORK.checked_sub(*work).ok_or_else(|| invalid("invalid shared work counter"))?;
+/// The fields each entity may hold. Anything else (a style 7, colour, linetype, extension data)
+/// can't silently vanish, so it is refused.
+fn represented(mtext: bool, code: i32) -> bool {
+    let shared = matches!(code, 1 | 5 | 8 | 10 | 11 | 20 | 21 | 30 | 31 | 40 | 41 | 50 | 67 | 71 | 72 | 73 | 100 | 210 | 220 | 230 | 330 | 370);
+    shared || if mtext { matches!(code, 3 | 42 | 43 | 44) } else { matches!(code, 39 | 51) }
+}
 
-    // Known envelope fields retain the parent's layer/weight/space semantics.
-    // Unknown geometry, explicit style7, MTEXT chunks3,
-    // entity color/visibility/linetype and extension data cannot silently vanish.
-    for code in entity.f.iter().map(|(code, _)| *code).chain(entity.s.iter().map(|(code, _)| *code)) {
-        if !matches!(code, 1 | 5 | 8 | 10 | 11 | 20 | 21 | 30 | 31 | 39 | 40 | 41 | 50 | 51 | 67 | 71 | 72 | 73 | 100 | 210 | 220 | 230 | 330 | 370) {
-            return Err(invalid("not supported yet: unrepresented field or style"));
-        }
-    }
-    for code in [5, 8, 330] {
-        let _ = layered_text(entity, code)?;
-    }
-    // Repeated subclass markers100 are ordinary TEXT framing, not scalar fields.
-    let _ = super::layered_entity_weight(entity)?;
-    if number(entity, 67)?.unwrap_or(0.0) != 0.0 {
-        return Err(invalid("expected model-space TEXT after caller space filtering"));
-    }
+/// Where a text sits: its anchor before scaling, its alignment and its angle in degrees.
+struct Placement {
+    source: Vec2,
+    horizontal: DxfTextHorizontalAlignment,
+    vertical: DxfTextVerticalAlignment,
+    angle_deg: f64,
+}
+
+fn text_placement(entity: &Ent) -> Result<Placement> {
     for (code, neutral) in [(30, 0.0), (31, 0.0), (39, 0.0), (41, 1.0), (51, 0.0), (71, 0.0), (210, 0.0), (220, 0.0), (230, 1.0)] {
         if number(entity, code)?.is_some_and(|value| value != neutral) {
             return Err(invalid("not supported yet: nondefault alignment, width, oblique angle, generation flags or OCS"));
@@ -100,6 +73,80 @@ pub(super) fn read_text_entity(
     } else {
         Vec2::new(required(entity, 11)?, required(entity, 21)?)
     };
+    Ok(Placement { source, horizontal, vertical, angle_deg: number(entity, 50)?.unwrap_or(0.0) })
+}
+
+/// MTEXT's attachment point 71 and its direction: the vector 11/21 or the rotation 50 in
+/// radians, the later one in the record winning, as the DXF reference says.
+fn mtext_placement(entity: &Ent) -> Result<Placement> {
+    for (code, neutral) in [(30, 0.0), (31, 0.0), (41, 0.0), (44, 1.0), (72, 1.0), (73, 1.0), (210, 0.0), (220, 0.0), (230, 1.0)] {
+        if number(entity, code)?.is_some_and(|value| value != neutral) {
+            return Err(invalid("not supported yet: MTEXT wrapping width, line spacing, drawing direction or OCS"));
+        }
+    }
+    let (horizontal, vertical) = crate::dxf_out::alignment_from_mtext_attachment(number(entity, 71)?.unwrap_or(1.0))
+        .ok_or_else(|| invalid("not supported yet: MTEXT attachment point"))?;
+    let vector = match (number(entity, 11)?, number(entity, 21)?) {
+        (Some(x), Some(y)) if x != 0.0 || y != 0.0 => Some(y.atan2(x).to_degrees()),
+        (None, None) => None,
+        _ => return Err(invalid("MTEXT direction vector must have two components, not both zero")),
+    };
+    let rotation = number(entity, 50)?.map(f64::to_degrees);
+    let position = |code| entity.f.iter().position(|(field, _)| *field == code);
+    let angle_deg = match (vector, rotation) {
+        (Some(vector), Some(rotation)) => {
+            if position(50) > position(11) {
+                rotation
+            } else {
+                vector
+            }
+        }
+        (vector, rotation) => vector.or(rotation).unwrap_or(0.0),
+    };
+    Ok(Placement { source: Vec2::new(required(entity, 10)?, required(entity, 20)?), horizontal, vertical, angle_deg })
+}
+
+/// Read model-space TEXT or MTEXT, refusing any unrepresented alignment, style or OCS. Input
+/// is raw Ent.s; MTEXT's chunks are joined in order and decoded exactly once. Both counters
+/// belong to the whole file; callers must not reset them per text. Decoded text is what the
+/// owned writer can write back: characters through U+FFFF.
+pub(super) fn read_text_entity(
+    entity: &Ent,
+    k: f64,
+    max_encoded_bytes: usize,
+    max_decoded_bytes: usize,
+    bytes: &mut usize,
+    work: &mut usize,
+) -> Result<DxfShape> {
+    let mtext = match entity.kind.as_str() {
+        "TEXT" => false,
+        "MTEXT" => true,
+        _ => return Err(invalid("not a TEXT or MTEXT entity")),
+    };
+    if !k.is_finite() || k <= 0.0 {
+        return Err(invalid("unit scale must be finite and positive"));
+    }
+    if max_encoded_bytes > MAX_DRAWING_BYTES || max_decoded_bytes > MAX_DRAWING_BYTES {
+        return Err(invalid("decoder byte caps exceed the file ceiling"));
+    }
+    let remaining_bytes = MAX_DRAWING_BYTES.checked_sub(*bytes).ok_or_else(|| invalid("invalid shared byte counter"))?;
+    let remaining_work = MAX_WORK.checked_sub(*work).ok_or_else(|| invalid("invalid shared work counter"))?;
+
+    // Known envelope fields retain the parent's layer/weight/space semantics.
+    for code in entity.f.iter().map(|(code, _)| *code).chain(entity.s.iter().map(|(code, _)| *code)) {
+        if !represented(mtext, code) {
+            return Err(invalid("not supported yet: unrepresented field or style"));
+        }
+    }
+    for code in [5, 8, 330] {
+        let _ = layered_text(entity, code)?;
+    }
+    // Repeated subclass markers100 are ordinary TEXT framing, not scalar fields.
+    let _ = super::layered_entity_weight(entity)?;
+    if number(entity, 67)?.unwrap_or(0.0) != 0.0 {
+        return Err(invalid("expected model-space TEXT after caller space filtering"));
+    }
+    let Placement { source, horizontal, vertical, angle_deg } = if mtext { mtext_placement(entity)? } else { text_placement(entity)? };
     let at = super::scale_point(source, k);
     if !at.is_finite() || solidcore_ops::import_geometry::collapsed_coordinate(source, at) {
         return Err(invalid("nonfinite or collapsed scaled insertion point"));
@@ -109,23 +156,29 @@ pub(super) fn read_text_entity(
     if raw_height <= 0.0 || !height.is_finite() || height <= 0.0 {
         return Err(invalid("height must remain finite and positive after scaling"));
     }
-    let angle_deg = number(entity, 50)?.unwrap_or(0.0);
     if !solidcore_ops::export_geometry::finite_degrees(angle_deg) {
         return Err(invalid("invalid rotation angle"));
     }
-    let value = layered_text(entity, 1)?.ok_or_else(|| invalid("missing raw group1 value"))?;
+    // TEXT holds its value in group 1; MTEXT in group 3 chunks, then a group 1 tail.
+    let values: Vec<(i32, &str)> = if mtext {
+        entity.s.iter().filter(|(code, _)| matches!(code, 1 | 3)).map(|(code, value)| (*code, value.as_str())).collect()
+    } else {
+        vec![(1, layered_text(entity, 1)?.ok_or_else(|| invalid("missing raw group1 value"))?)]
+    };
     // Check input before allocation/scanning. Decoded output cannot allocate past
     // remaining shared payload/work even when its UTF8 representation expands.
-    let encoded_limit = max_encoded_bytes.min(MAX_TEXT_ENCODED_BYTES);
-    if value.len() > encoded_limit || value.len() > remaining_work {
+    let encoded = values.iter().try_fold(0_usize, |sum, (_, value)| sum.checked_add(value.len())).ok_or_else(|| invalid("encoded size overflow"))?;
+    if encoded > max_encoded_bytes || encoded > remaining_work {
         return Err(invalid("encoded byte or shared work budget exceeded"));
     }
-    *work = work.checked_add(value.len()).ok_or_else(|| invalid("work counter overflow"))?;
-    // Current owned writer accepts at most250 BMP scalars: at most750 UTF8 bytes.
-    let decoded_limit = max_decoded_bytes.min(remaining_bytes).min(remaining_work - value.len()).min(MAX_TEXT_DECODED_BYTES);
-    let text = decode_text_value(value, encoded_limit, decoded_limit)?;
-    if text.chars().count() > 250 || text.chars().any(|ch| u32::from(ch) > 0xffff || ch.is_control() || matches!(ch, '%' | '\\')) {
-        return Err(invalid("not supported yet: decoded text exceeds the current writer's plain BMP subset"));
+    *work = work.checked_add(encoded).ok_or_else(|| invalid("work counter overflow"))?;
+    let decoded_limit = max_decoded_bytes.min(remaining_bytes).min(remaining_work - encoded);
+    let text = match values.as_slice() {
+        [(_, value)] if !mtext => decode_text_value(value, max_encoded_bytes, decoded_limit)?,
+        _ => decode_mtext_values(values, max_encoded_bytes, decoded_limit, remaining_work)?,
+    };
+    if text.chars().any(|ch| u32::from(ch) > 0xffff) {
+        return Err(invalid("not supported yet: a character beyond U+FFFF, which the writer cannot write back"));
     }
     layered_array_budget::<u8>(text.len(), bytes, work)?;
     if horizontal == DxfTextHorizontalAlignment::Centre && vertical == DxfTextVerticalAlignment::Baseline {
@@ -226,18 +279,98 @@ mod tests {
             assert!(read(&parsed(&format!("{FIELDS}{extra}"))).is_err(), "{extra}");
         }
         let mut entity = basic("A");
-        entity.kind = "MTEXT".into();
-        assert!(read(&entity).unwrap_err().to_string().contains("MTEXT attachment/wrapping"));
+        entity.kind = "ATTRIB".into();
+        assert!(read(&entity).unwrap_err().to_string().contains("not a TEXT or MTEXT entity"));
     }
 
     #[test]
-    fn nonrepresentable_literals_are_refused_after_exactly_one_decode() {
-        for value in ["%", "%%%", "\\U+0025\\U+0025d", "\\U+005CU+0041", "\\P", "a\tb", "中𠀋", "\\U+D800", "\\U+0000", "%%q"] {
+    fn text_literals_decode_exactly_once_and_only_unwritable_values_refuse() {
+        for (value, typed) in [("%", "%"), ("%%%", "%"), ("\\U+0025\\U+0025d", "%%d"), ("\\U+005CU+0041", "\\U+0041"), ("\\P", "\\P"), ("{x}", "{x}")]
+        {
+            assert!(matches!(read(&basic(value)).unwrap(), DxfShape::Text { text, .. } if text == typed), "{value}");
+        }
+        for value in ["a\tb", "中𠀋", "\\U+D800", "\\U+0000", "%%q"] {
             assert!(read(&basic(value)).is_err(), "{value}");
         }
-        assert!(read(&basic(&"中".repeat(250))).is_ok());
-        assert!(read(&basic(&"A".repeat(251))).is_err());
-        assert!(read(&basic(&"中".repeat(251))).is_err());
+        for n in [250, 251, 500] {
+            assert!(matches!(read(&basic(&"中".repeat(n))).unwrap(), DxfShape::Text { text, .. } if text.chars().count() == n), "{n}");
+        }
+    }
+
+    const MTEXT: &str = "10\n5\n20\n6\n40\n2\n71\n8\n";
+
+    fn mtext(fields: &str) -> Ent {
+        let input = format!("0\nSECTION\n2\nENTITIES\n0\nMTEXT\n{fields}0\nENDSEC\n0\nEOF\n");
+        super::super::section(&super::super::pairs(&input), 1).unwrap().remove(0)
+    }
+
+    #[test]
+    fn mtext_joins_its_chunks_before_decoding_once_and_a_bottom_centre_is_plain_text() {
+        let chunk = format!("{}\\U", "a".repeat(248));
+        let entity = mtext(&format!("{MTEXT}3\n{chunk}\n1\n+4E2D% \\{{x\\}}\\Pend\n11\n0\n21\n1\n31\n0\n"));
+        let text = format!("{}中% {{x}}\nend", "a".repeat(248));
+        assert_eq!(read(&entity).unwrap(), DxfShape::Text { at: Vec2::new(5.0, 6.0), height: 2.0, angle_deg: 90.0, text });
+        // An empty tail after a full chunk, and the spaces at both ends, stay.
+        let full = format!(" {} ", "x".repeat(248));
+        let entity = mtext(&format!("{MTEXT}3\n{full}\n1\n\n"));
+        assert!(matches!(read(&entity).unwrap(), DxfShape::Text { text, .. } if text == full));
+    }
+
+    #[test]
+    fn mtext_attachment_points_map_to_the_nine_alignments() {
+        use DxfTextHorizontalAlignment::{Centre, Left, Right};
+        use DxfTextVerticalAlignment::{Baseline, Middle, Top};
+        let rows = [Top, Middle, Baseline];
+        for (index, (vertical, horizontal)) in rows.iter().flat_map(|v| [Left, Centre, Right].map(|h| (*v, h))).enumerate() {
+            let shape = read(&mtext(&format!("10\n5\n20\n6\n40\n2\n71\n{}\n1\nA\n", index + 1))).unwrap();
+            let found = match shape {
+                DxfShape::Text { .. } => (Centre, Baseline),
+                DxfShape::AlignedText { horizontal, vertical, .. } => (horizontal, vertical),
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(found, (horizontal, vertical), "attachment {}", index + 1);
+        }
+        assert!(matches!(read(&mtext("10\n5\n20\n6\n40\n2\n1\nA\n")).unwrap(), DxfShape::AlignedText { horizontal: Left, vertical: Top, .. }));
+        for attachment in ["0", "10", "-1"] {
+            assert!(read(&mtext(&format!("10\n5\n20\n6\n40\n2\n71\n{attachment}\n1\nA\n"))).is_err(), "{attachment}");
+        }
+    }
+
+    #[test]
+    fn mtext_direction_is_its_vector_or_its_radians_the_later_one_winning() {
+        let angle = |fields: &str| match read(&mtext(&format!("{MTEXT}1\nA\n{fields}"))).unwrap() {
+            DxfShape::Text { angle_deg, .. } => angle_deg,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(angle(""), 0.0);
+        assert_eq!(angle("50\n0.5\n"), 0.5_f64.to_degrees());
+        assert_eq!(angle("11\n-1\n21\n0\n"), 180.0);
+        assert_eq!(angle("50\n0.5\n11\n0\n21\n1\n"), 90.0);
+        assert_eq!(angle("11\n0\n21\n1\n50\n0.5\n"), 0.5_f64.to_degrees());
+    }
+
+    #[test]
+    fn mtext_formatting_wrapping_and_malformed_chunks_are_refused() {
+        for fields in [
+            "1\nA\n41\n10\n",
+            "1\nA\n44\n2\n",
+            "1\nA\n72\n5\n",
+            "1\nA\n73\n2\n",
+            "1\nA\n7\nSTANDARD\n",
+            "1\nA\n11\n1\n",
+            "1\nA\n11\n0\n21\n0\n",
+            "1\nA\n31\n1\n",
+            "1\nA\n50\n0\n50\n0\n",
+            "3\nA\n",
+            "1\nA\n3\nB\n",
+            "1\nA\n1\nB\n",
+            "1\n\\H2x;A\n",
+            "1\n{\\fArial;A}\n",
+            "1\nA%%%\n",
+            "1\n𠀋\n",
+        ] {
+            assert!(read(&mtext(&format!("{MTEXT}{fields}"))).is_err(), "{fields}");
+        }
     }
 
     #[test]
@@ -377,7 +510,7 @@ mod tests {
         assert!(read_text_entity(&entity, 1.0, 1750, 749, &mut 0, &mut 0).is_err());
         assert!(read_text_entity(&entity, 1.0, 1750, 750, &mut (MAX_DRAWING_BYTES - 749), &mut 0).is_err());
         assert!(read_text_entity(&entity, 1.0, 1750, 750, &mut 0, &mut (MAX_WORK - 2499)).is_err());
-        assert!(read(&basic(&"\\U+4E2D".repeat(251))).is_err());
-        assert!(read(&basic(&"A".repeat(251))).is_err());
+        // The caps are the caller's; the reader has no character count of its own.
+        assert!(read(&basic(&"\\U+4E2D".repeat(251))).is_ok());
     }
 }

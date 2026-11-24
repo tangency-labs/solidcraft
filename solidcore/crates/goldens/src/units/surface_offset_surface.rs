@@ -2197,3 +2197,190 @@ mod swap_uv_tests {
         assert_eq!(checked.len(), MOVED.len(), "{checked:?}");
     }
 }
+
+#[cfg(test)]
+mod reverse_refusal_tests {
+    use super::*;
+    use crate::compare::REL_TOL;
+    use solidcore::surface::surf_of_revolution::SurfOfRevolution;
+
+    /// Scripts whose output moved when a reversal whose analytic rebuild is refused stopped
+    /// reporting success (#17244): each reverses an offset of a surface of revolution whose
+    /// generator leaves the planes through the axis. `gen1572` moved with them, but is a
+    /// listed known failure for an earlier step (#13770) and has no golden row.
+    const MOVED: [&str; 14] = [
+        "gen0070", "gen0445", "gen0574", "gen0623", "gen0628", "gen0938", "gen1572", "gen1983",
+        "gen2264", "gen2498", "gen2599", "gen2644", "gen2763", "gen2939",
+    ];
+
+    /// `SM_ERR`, the status of a refused reversal.
+    const SM_ERR: f64 = 1001.0;
+
+    /// The base under every nested offset.
+    fn innermost(base: &SrfIn) -> &SrfIn {
+        match base {
+            SrfIn::Offset(o) => innermost(&o.base),
+            b => b,
+        }
+    }
+
+    /// The surface of revolution an offset, or an offset of offsets, is built on.
+    fn revolution_under(s: &Surface) -> Option<&SurfOfRevolution> {
+        match s.kind() {
+            SurfaceKind::SurfOfRevolution(r) => Some(r),
+            SurfaceKind::OffsetSurface(o) => revolution_under(o.base_surface()),
+            _ => None,
+        }
+    }
+
+    /// The largest distance between the NURB of `r` and its definition at parameters that
+    /// are the same point in both, then the extent of the compared points. The ends and the
+    /// middle of the sweep and of the generator correspond (the rational arcs are symmetric
+    /// about their middle, a B-spline or line generator keeps its parameter), and so do the
+    /// quarters of a full turn (four quarter-circle segments).
+    fn nurb_definition_gap(k: &Kernel, r: &SurfOfRevolution) -> (f64, f64) {
+        let nurb = r.base().natural_uv_domain();
+        let step = r.step_uv_domain();
+        let full_turn = (step.u_interval().length() - 360.0).abs() < 1e-9;
+        let sweep: &[f64] = if full_turn {
+            &[0.0, 0.25, 0.5, 0.75, 1.0]
+        } else {
+            &[0.0, 0.5, 1.0]
+        };
+        let (mut gap, mut extent) = (0.0f64, 0.0f64);
+        let mut first = None;
+        for &a in sweep {
+            for b in [0.0, 0.5, 1.0] {
+                let uv = if r.swap_uv() {
+                    nurb.evaluate(b, a)
+                } else {
+                    nurb.evaluate(a, b)
+                };
+                let on_nurb = r.base().evaluate_point(uv).unwrap();
+                let on_definition = r.evaluate_step_point(k, step.evaluate(a, b)).unwrap();
+                gap = gap.max((on_nurb - on_definition).length());
+                extent = extent.max((on_nurb - *first.get_or_insert(on_nurb)).length());
+            }
+        }
+        (gap, extent)
+    }
+
+    /// The largest sine of the angle about the axis between two points of the generator:
+    /// zero for a generator in a half plane through the axis, the only kind
+    /// `rebuild_step_from_nurb_parameters` recognises (its sweep arcs must start and end on
+    /// common planes).
+    fn generator_spread(k: &Kernel, r: &SurfOfRevolution) -> f64 {
+        let step = r.step_uv_domain();
+        let (origin, axis) = (r.position().origin(), r.position().z_axis());
+        let radial: Vec<Vec3> = (0..=8)
+            .map(|i| {
+                let p = r
+                    .evaluate_step_point(k, step.evaluate(0.0, f64::from(i) / 8.0))
+                    .unwrap();
+                let a = p - origin;
+                a - a.dot(axis) * axis
+            })
+            .collect();
+        let mut spread = 0.0f64;
+        for a in &radial {
+            for b in &radial {
+                let scale = a.length() * b.length();
+                if scale > 0.0 {
+                    spread = spread.max(axis.dot(a.cross(*b)).abs() / scale);
+                }
+            }
+        }
+        spread
+    }
+
+    /// Runs every script of the unit that reverses an offset of a surface of revolution and
+    /// checks each reversal against the surface it is asked of, without the golden.
+    ///
+    /// Upstream reverses the base's NURB, rebuilds the definition (generator, axis, angles)
+    /// from the reversed NURB and ignores the rebuild's status. Here that is replayed on an
+    /// exact copy of the base taken just before the step, so each step is one of two kinds:
+    ///
+    /// * The rebuild succeeds. The generator lies in a half plane through the axis, the
+    ///   step returns `0`, and the NURB and the definition are one surface before and
+    ///   after it.
+    /// * The rebuild refuses. The generator leaves every plane through the axis, which the
+    ///   rebuild does not recognise, so upstream's success leaves a reversed NURB under the
+    ///   definition of the surface before the reversal: the two are one surface before
+    ///   the step (within `REL_TOL` of the compared points' extent) and more than a
+    ///   hundredth of that extent apart after it. The step now returns `SM_ERR` and must
+    ///   change nothing: every later output is bit-identical to the same script run
+    ///   without the step.
+    ///
+    /// The scripts with a refused reversal are exactly `MOVED`.
+    #[test]
+    fn a_reversal_of_a_revolution_base_is_whole_or_refused_unchanged() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let k = Kernel::default();
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        let mut moved = Vec::new();
+        let mut accepted = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            let Ok(Inputs::Script { off, steps }) = c.parse::<Inputs>() else {
+                continue;
+            };
+            if !matches!(innermost(&off.base), SrfIn::Revolution(_))
+                || !steps.iter().any(|s| matches!(s, StepIn::Reverse { .. }))
+            {
+                continue;
+            }
+            // (a base whose construction is refused has no steps to run)
+            let (Ok(mut s), Ok(mut twin)) =
+                (rust_off(&k, &off).unwrap(), rust_off(&k, &off).unwrap())
+            else {
+                continue;
+            };
+            let (mut got, mut want) = (vec![0.0], vec![0.0]);
+            let mut refused = false;
+            for st in &steps {
+                let StepIn::Reverse { param } = st else {
+                    assert!(run_step(&k, &mut s, st, &mut got).is_ok(), "{}", c.name);
+                    assert!(run_step(&k, &mut twin, st, &mut want).is_ok(), "{}", c.name);
+                    continue;
+                };
+                let base = revolution_under(s.base_surface()).unwrap();
+                let (before, extent) = nurb_definition_gap(&k, base);
+                assert!(before <= REL_TOL * extent, "{}: {before} before", c.name);
+                let spread = generator_spread(&k, base);
+                let mut upstream = base.clone_exact();
+                upstream
+                    .base_mut()
+                    .reverse(param_of(*param).unwrap())
+                    .unwrap();
+                let rebuilt = upstream.rebuild_step_from_nurb_parameters(&k);
+                let start = got.len();
+                assert!(run_step(&k, &mut s, st, &mut got).is_ok(), "{}", c.name);
+                if rebuilt.is_ok() {
+                    assert!(spread <= REL_TOL, "{}: spread {spread}", c.name);
+                    assert_eq!(got[start..], [0.0], "{}", c.name);
+                    let after = revolution_under(s.base_surface()).unwrap();
+                    let (gap, extent) = nurb_definition_gap(&k, after);
+                    assert!(gap <= REL_TOL * extent, "{}: {gap} after", c.name);
+                    assert!(run_step(&k, &mut twin, st, &mut want).is_ok(), "{}", c.name);
+                    accepted += 1;
+                } else {
+                    assert!(spread > 1e-2, "{}: spread {spread}", c.name);
+                    let (apart, _) = nurb_definition_gap(&k, &upstream);
+                    assert!(apart > 1e-2 * extent, "{}: {apart} of {extent}", c.name);
+                    assert_eq!(got[start..], [SM_ERR], "{}", c.name);
+                    // the twin skips the refused step
+                    want.push(SM_ERR);
+                    refused = true;
+                }
+            }
+            assert_eq!(bits(&got), bits(&want), "{}", c.name);
+            if refused {
+                moved.push(c.name);
+            }
+        }
+        assert_eq!(moved, MOVED);
+        assert!(accepted > 0, "no accepted reversal was checked");
+    }
+}

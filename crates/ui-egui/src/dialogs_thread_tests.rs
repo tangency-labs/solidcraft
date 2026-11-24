@@ -1,5 +1,6 @@
 use serde_json::json;
 use solidcore_record::Vec3;
+use solidcraft_engine::geom::MeshGeom as _;
 
 use super::*;
 use crate::dialogs::{Kind, apply_commands, edge_sel};
@@ -383,7 +384,7 @@ fn patterned_shafts() -> (Harness, Vec<Sel>) {
     (h, picks)
 }
 
-/// Every new Thread keeps the first preselected face and the original viewport replacement behavior.
+/// Ordinary clicks replace the previous face when Thread starts with zero or one selected face.
 #[test]
 fn ordinary_thread_face_clicks_replace_the_previous_face() {
     let mut h = Harness::new();
@@ -391,7 +392,7 @@ fn ordinary_thread_face_clicks_replace_the_previous_face() {
     h.app.run("solid.cylinder", json!({"base":[30,0,0],"radius":10,"height":10,"body_name":"Second"})).unwrap();
     let first = thread_face(&h.app, "First");
     let second = thread_face(&h.app, "Second");
-    for selection in [vec![], vec![first.clone()], vec![first.clone(), second.clone()], vec![second.clone(), first.clone()]] {
+    for selection in [vec![], vec![first.clone()]] {
         let expected: Vec<_> = selection.first().cloned().into_iter().collect();
         h.app.session.selection = selection;
         h.app.start("solid.thread");
@@ -414,6 +415,45 @@ fn ordinary_thread_face_clicks_replace_the_previous_face() {
         assert_eq!(commands[0].1["single_face_selection"], true);
         crate::dialogs::cancel(&mut h.app);
     }
+}
+
+/// A size filled in for a Ø150 shaft is replaced by the next face's automatic size, while a typed one stays.
+#[test]
+fn a_filled_in_large_size_gives_way_to_the_next_faces_automatic_size_but_a_typed_one_stays() {
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"radius":75,"height":10,"body_name":"Big"})).unwrap();
+    h.app.run("solid.cylinder", json!({"base":[200,0,0],"radius":10,"height":10,"body_name":"Small"})).unwrap();
+    let big = thread_face(&h.app, "Big");
+    let small = thread_face(&h.app, "Small");
+    let designation = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Thread { designation, suggested, .. } => (designation.clone(), suggested.clone()),
+        _ => panic!("Thread"),
+    };
+    let pick = |h: &mut Harness, sel: &Sel| {
+        let Sel::Face { body, index, point } = sel else { panic!("face") };
+        let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: *point };
+        crate::viewport::dialog_pick(&mut h.app, &hit, sel.clone());
+    };
+    h.app.session.selection = vec![big.clone()];
+    h.app.start("solid.thread");
+    assert_eq!(designation(&h), ("M150x4".to_string(), None));
+    pick(&mut h, &small);
+    assert_eq!(designation(&h), ("M20".to_string(), Some("M20".to_string())));
+    pick(&mut h, &big);
+    assert_eq!(designation(&h).0, "M150x4");
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["designation"], "M150x4");
+    pick(&mut h, &small);
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(commands[0].1.get("designation").is_none());
+    if let Kind::Thread { designation, suggested, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *designation = "M12".into();
+        *suggested = None;
+    }
+    pick(&mut h, &big);
+    pick(&mut h, &small);
+    assert_eq!(designation(&h).0, "M12");
+    crate::dialogs::cancel(&mut h.app);
 }
 
 /// Marquee replacement keeps one face until an explicit add enables grouped selection.
@@ -486,13 +526,12 @@ fn a_legacy_multi_face_thread_reopens_in_group_selection_mode() {
     assert!(h.app.session.model.state().threads.iter().all(|thread| thread.feature == id));
 }
 
-/// Explicitly adding the selected bosses sends their shared options in one command.
+/// Opening Thread keeps every preselected boss and sends their shared options in one command.
 #[test]
-fn all_explicitly_added_pattern_faces_receive_the_threads_options() {
+fn all_preselected_pattern_faces_receive_the_threads_options() {
     let (mut h, picks) = patterned_shafts();
     h.app.session.selection = picks.clone();
     h.app.start("solid.thread");
-    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, picks.clone(), true);
     let d = h.app.dialog.as_mut().unwrap();
     assert!(d.inputs[0].multi);
     assert_eq!(d.inputs[0].items.len(), 4);
@@ -524,43 +563,62 @@ fn all_explicitly_added_pattern_faces_receive_the_threads_options() {
 /// One OK creates one saved feature for four threads, undone and redone together.
 #[test]
 fn a_thread_on_four_pattern_faces_applies_and_undoes_as_one_operation() {
-    let (mut h, picks) = patterned_shafts();
-    h.app.session.selection = picks.clone();
-    h.app.start("solid.thread");
-    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, picks.clone(), true);
-    let mut d = h.app.dialog.take().unwrap();
-    let Kind::Thread { designation, suggested, .. } = &mut d.kind else { panic!("Thread") };
-    *designation = "M6x0.75".into();
-    *suggested = None;
-    let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
-    let features = h.app.session.doc.features.len();
-    crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
-    assert_eq!(h.app.session.doc.features.len(), features + 1);
-    let feature = h.app.session.doc.features.last().unwrap();
-    let id = feature.id;
-    let FeatureKind::Thread { additional_faces, target_bodies, .. } = &feature.kind else { panic!("Thread") };
-    assert_eq!(additional_faces.len(), 3);
-    assert_eq!(target_bodies.iter().map(|n| n.as_ref()).collect::<Vec<&str>>(), ["Plate"; 4]);
-    let threads = h.app.session.model.state().threads.clone();
-    assert_eq!(threads.len(), 4);
-    for thread in &threads {
-        assert_eq!(thread.designation, "M6x0.75");
-        assert_eq!(thread.feature, id, "all markings belong to one timeline feature");
+    let volume = |app: &crate::SolveApp| app.session.model.state().body("Plate").unwrap().mesh().measure().volume;
+    for modeled in [false, true] {
+        let (mut h, picks) = patterned_shafts();
+        h.app.session.selection = picks.clone();
+        h.app.start("solid.thread");
+        let mut d = h.app.dialog.take().unwrap();
+        let Kind::Thread { designation, suggested, .. } = &mut d.kind else { panic!("Thread") };
+        *designation = "M6x0.75".into();
+        *suggested = None;
+        if modeled {
+            d.extra.insert("modeled".into(), json!(true));
+        }
+        let before = h.app.session.doc.to_json();
+        let smooth_volume = volume(&h.app);
+        let markings = if modeled { 0 } else { 4 };
+        let undo = h.app.session.undo.len();
+        let features = h.app.session.doc.features.len();
+        crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features + 1);
+        let feature = h.app.session.doc.features.last().unwrap();
+        let id = feature.id;
+        let saved_kind = feature.kind.clone();
+        let FeatureKind::Thread { additional_faces, target_bodies, modeled: saved_modeled, .. } = &feature.kind else { panic!("Thread") };
+        assert_eq!(*saved_modeled, modeled);
+        assert_eq!(additional_faces.len(), 3);
+        assert_eq!(target_bodies.iter().map(|n| n.as_ref()).collect::<Vec<&str>>(), ["Plate"; 4]);
+        let threads = h.app.session.model.state().threads.clone();
+        assert_eq!(threads.len(), markings);
+        let threaded_volume = volume(&h.app);
+        if modeled {
+            assert!(smooth_volume - threaded_volume > 1.0, "modeled threads remove material");
+        } else {
+            assert!((smooth_volume - threaded_volume).abs() < 1e-6, "cosmetic threads keep the solid");
+        }
+        for thread in &threads {
+            assert_eq!(thread.designation, "M6x0.75");
+            assert_eq!(thread.feature, id, "all markings belong to one timeline feature");
+        }
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        let saved = h.app.session.doc.to_json();
+        let reopened = Session::new(Document::from_json(&saved).unwrap());
+        assert_eq!(reopened.model.state().threads.len(), markings);
+        assert_eq!(reopened.doc.features.len(), features + 1);
+        let reopened_app = crate::SolveApp::new(reopened, crate::Services::default());
+        assert!((volume(&reopened_app) - threaded_volume).abs() < 1e-6, "saving preserves the threaded shape");
+        let reopened_dialog = crate::dialogs::for_feature(&reopened_app, id, None).unwrap();
+        assert_eq!(reopened_dialog.inputs[0].items.len(), 4);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(h.app.session.model.state().threads.is_empty());
+        assert!((volume(&h.app) - smooth_volume).abs() < 1e-6, "one undo restores the smooth shafts");
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.session.model.state().threads.len(), markings);
+        assert_eq!(h.app.session.doc.feature(id).unwrap().kind, saved_kind);
+        assert!((volume(&h.app) - threaded_volume).abs() < 1e-6, "one redo restores the threaded shape");
     }
-    assert_eq!(h.app.session.undo.len(), undo + 1);
-    let saved = h.app.session.doc.to_json();
-    let reopened = Session::new(Document::from_json(&saved).unwrap());
-    assert_eq!(reopened.model.state().threads.len(), 4);
-    assert_eq!(reopened.doc.features.len(), features + 1);
-    let reopened_app = crate::SolveApp::new(reopened, crate::Services::default());
-    let reopened_dialog = crate::dialogs::for_feature(&reopened_app, id, None).unwrap();
-    assert_eq!(reopened_dialog.inputs[0].items.len(), 4);
-    h.app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(h.app.session.doc.to_json(), before);
-    assert!(h.app.session.model.state().threads.is_empty());
-    h.app.run("edit.redo", json!({})).unwrap();
-    assert_eq!(h.app.session.model.state().threads.len(), 4);
 }
 
 /// A later invalid face leaves none of the preceding cosmetic threads in the document.

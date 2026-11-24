@@ -1,6 +1,6 @@
 # Design containers, version 1
 
-New designs use `.sc`; `.solidcraft` and `.solvecraft` remain supported legacy extensions. Opening detects the ZIP
+New designs use `.sc`; `.solidcraft` remains a supported legacy extension. Opening detects the ZIP
 local-header signature (`50 4b 03 04`) independently of the name; otherwise it uses
 the existing JSON design reader and migrations. Plain JSON remains a fully supported,
 self-contained input/output format. `io::write_design` keeps its JSON contract;
@@ -108,8 +108,10 @@ either retain that document or fail required-part CRC/hash validation. Optional
 preview success never validates source blobs or makes a document editable. An invalid required blob still
 fails the later document read. ZIP directory scans can touch a bounded suffix of a
 stored blob; deferral means not loading or decoding the complete payload, not zero
-physical reads of its byte range. Optional cache metadata is capped at 16 MiB;
-larger metadata misses the cache and uses the normal authoritative part-size budget.
+physical reads of its byte range. Standalone previews cap `document.json` at 16 MiB.
+When opening a design with a model cache, Open can check the cache against the full
+`document.json` within the authoritative part-size budget. Open reuses those bytes
+for document validation and loading.
 
 ## Model cache
 
@@ -126,8 +128,9 @@ the final state fits.
 
 The model is the whole evaluation: every feature's result (warning, boolean
 diagnostics, whether it was skipped, its fingerprint) and the state after it
-(bodies, solved sketches, construction geometry, sheet metal bodies, threads and
-the blend records later features read), and the body check mode it was evaluated
+(bodies, solved sketches, construction geometry, sheet metal bodies, threads,
+the blend records later features read, and the bodies each body pattern left out,
+whose copies keep their stored names), and the body check mode it was evaluated
 under (`each_step`, `each_feature` or `off`): a design opened under another mode is
 evaluated again. A body made by constant-radius rounds is recorded with the edges they
 rounded and their radii, and the body they were made on (stored like any other body,
@@ -181,8 +184,9 @@ without the application's version, `.cargo/config.toml`, and the cache's own rea
 that changed none of it (the interface, the commands, other file formats, a new
 version number) opens designs from the caches the build before it wrote (#7168);
 one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
-again, once, and the next save writes a cache of its own. A build of unknown source
-(a tarball without git) never reads a cache.
+again, once, and the next save writes a cache of its own. Without `git` (Docker,
+Nix, or a source archive), `build.rs` hashes those same inputs from disk; a build
+whose source cannot be read (`"unknown"`) never reads a cache.
 
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
@@ -198,7 +202,9 @@ repeat for longest), each while what it adds still fits: the bodies no state kep
 so far holds (a body is stored once however many states hold it) and the records
 of the state, those bodies, their names and sketches. Sheet bodies, like sketches, are
 written once and named by place in the states (most features leave the sheets as they were); a
-thinned cache keeps all of them. So are the tap markings (cosmetic threads): a state lists the
+thinned cache keeps all of them. Sheets made from surfaces are written the same way, in a
+list of their own (`surface_sheets`; format 9 wrote them out again in every state). So are the
+tap markings (cosmetic threads): a state lists the
 markings of every feature before it, so writing them with each state grew with the square of the
 features (400 marked cylinders: 34 of a 37 MB manifest); each marking is written once and a state
 names its markings as runs of places, and a thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each
@@ -313,8 +319,17 @@ PNG size/header and hashes without resolving source blobs. The Home/Recent Files
 reader tries its local picture cache, then this portable picture, then its existing
 background reconstruction. PNG decoding also has dimension and allocation limits.
 Missing, mismatched, truncated or malformed pictures are misses and never prevent
-authoritative document opening. Embedding a PNG does not install an operating-system
-file-browser thumbnail provider.
+authoritative document opening.
+
+On macOS, SolidCraft.app carries two Quick Look extensions (`apps/solidcraft-quicklook`): Finder
+shows this picture as the design's icon, and Space shows the design's saved display meshes
+(see "Provisional saved display") in a 3D view turned by dragging and zoomed by scrolling or
+pinching, or this picture when the design has none. They read the container with
+`crates/design-preview`, which has no kernel and bounds every read as the writers do; they check
+the container format, the PNG header and size and every mesh blob, but not the caches' keys or
+build: a stale picture or mesh there only shows an older look. Core Graphics scales the PNG, and
+Metal draws the meshes only when the view changes; nothing evaluates or tessellates the model.
+A design with neither cache keeps the generic icon and card.
 
 Desktop thumbnail reads seek within the file. The browser VFS supplies a bounded
 in-memory buffer instead; it avoids geometry reconstruction but does not provide

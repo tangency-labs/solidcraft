@@ -23,7 +23,7 @@ use crate::boolean::topology_intersector::p1::IntersectorBrep;
 use crate::boolean::topology_intersector::p2::IntersectorBrepP2;
 use crate::boolean::topology_intersector::p3::IntersectorBrepP3;
 use crate::curve::curve::Curve as SmCurve;
-use crate::error::boolean::BooleanStage;
+use crate::error::boolean::BooleanFailure;
 use crate::geom::a_object::BREP_TYPE;
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::Context;
@@ -44,7 +44,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::{BrepQuery, FaceCaches};
+use crate::query::brep::BrepQuery;
 use crate::query::face::p2::{
     curve_on_classify, curve_on_classify_mut, point_classify, CurveOnClassifyBrep,
     CurveOnClassifyObjects, FaceBrep, PointClassifyOptions,
@@ -59,7 +59,7 @@ use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::face::p2 as fp2;
 use crate::topology::face::p3 as fp3;
-use crate::topology::face::p3::{FaceIntersectOptions, IntersectObject};
+use crate::topology::face::p3::{FaceIntersectCaches, FaceIntersectOptions, IntersectObject};
 use crate::topology::loopuse as lu;
 use crate::topology::proto_topology::p1::ProtoTopology;
 use crate::topology::proto_topology::{ProtoBrep, ProtoGeometry};
@@ -197,11 +197,11 @@ pub(super) struct ArenaPair<'a> {
     identities: Identities<'a>,
     cache_kernels: [Kernel; 2],
     caches: [std::cell::OnceCell<BrepCache<H>>; 2],
-    /// The trimmed surface caches of each B-rep's faces that face intersections made
-    /// (upstream keeps them on the surfaces). Any mutable use of a B-rep other than
-    /// a face intersection or a classification query
+    /// What face intersections learnt of each B-rep's faces: their trimmed surface caches
+    /// (upstream keeps them on the surfaces) and whether each has a seam edge. Any mutable
+    /// use of a B-rep other than a face intersection or a classification query
     /// ([`ClassGeometryMut::topology_entity_for_query`]) empties them.
-    face_caches: [FaceCaches; 2],
+    face_caches: [FaceIntersectCaches; 2],
 }
 
 /// The identity callbacks of each operand's edits that a [`MergeContext`] borrows for as
@@ -285,7 +285,7 @@ impl ArenaPair<'_> {
             identities: Identities::new(keys),
             cache_kernels,
             caches: [std::cell::OnceCell::new(), std::cell::OnceCell::new()],
-            face_caches: [FaceCaches::new(), FaceCaches::new()],
+            face_caches: [FaceIntersectCaches::new(), FaceIntersectCaches::new()],
         }
     }
 
@@ -917,6 +917,47 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             .map(|e| hd(v1.b, K_EDGE, e.index()))
             .collect())
     }
+    fn face_edge_proved_along(
+        &self,
+        k: &Kernel,
+        face: H,
+        start: H,
+        end: H,
+        curve: &SmCurve,
+        interval: Extent1d,
+        tolerance: f64,
+        crossing: Option<H>,
+    ) -> crate::Result<Option<H>> {
+        if face.kind != K_FACE
+            || start.kind != K_VERTEX
+            || end.kind != K_VERTEX
+            || start.b != face.b
+            || end.b != face.b
+        {
+            return Err(invalid("not a face and two of its B-rep's vertices"));
+        }
+        let b = self.brep_r(face)?;
+        let crossing = match crossing {
+            Some(other) if other.kind == K_FACE => {
+                crate::topology::face::p2::surface(self.brep_r(other)?, fid(other))?
+            }
+            _ => None,
+        };
+        let edges = crate::topology::face::p4::edges(b, fid(face), None, false, None)?;
+        let query = crate::geom::tools::CoincidentEdgeQuery {
+            start_vertex: vid(start),
+            end_vertex: vid(end),
+            curve,
+            curve_owner: None,
+            interval,
+            tolerance,
+        };
+        Ok(
+            crate::geom::tools::find_edge_proved_along(k, b, fid(face), &query, &edges, crossing)?
+                .and_then(|found| edges.get(found))
+                .map(|e| hd(face.b, K_EDGE, e.index())),
+        )
+    }
     fn raise_edge_tolerance(&mut self, k: &Kernel, edge: H, tolerance: f64) -> crate::Result<()> {
         if edge.kind != K_EDGE {
             return Err(invalid("not an edge handle"));
@@ -1287,10 +1328,9 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             identity,
         )?;
         if !out.split {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 "boolean::merge::p4::arena_pair::split",
-                BooleanStage::Split,
-                "the edge was not split",
+                BooleanFailure::EdgeNotSplit,
             ));
         }
         let [a, z] = out
@@ -1701,10 +1741,9 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             return Err(invalid("not a face handle"));
         }
         let b = face.b;
-        let surface = self
-            .face_surface_h(face)
-            .flatten()
-            .ok_or_else(|| SolidError::entity_missing(OP_FACE_CACHE, "the face has no surface"))?;
+        let surface = self.face_surface_h(face).flatten().ok_or_else(|| {
+            SolidError::boolean(OP_FACE_CACHE, BooleanFailure::FaceWithoutSurface)
+        })?;
         Ok(ti::FaceCacheTarget {
             brep: self.brep_m(face)?,
             face: fid(face),
@@ -1969,9 +2008,9 @@ impl TopologyObjects<H> for ArenaPair<'_> {
     }
     fn face_surface(&self, face: H) -> crate::Result<H> {
         self.face_surface_h(face).flatten().ok_or_else(|| {
-            SolidError::entity_missing(
+            SolidError::boolean(
                 "boolean::merge::p4::arena_pair::face_surface",
-                "the face has no surface",
+                BooleanFailure::FaceWithoutSurface,
             )
         })
     }

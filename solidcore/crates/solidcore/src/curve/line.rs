@@ -114,6 +114,7 @@
 use crate::curve::curve::Curve;
 use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
+use crate::error::curve::{CurveFailure, FastDropBlock, JoinCheck};
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::assert_array::labels::{self, SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
 use crate::geom::assert_array::{AssertArray, ObjectKey, ReportSpec};
@@ -489,6 +490,21 @@ impl Line {
         self.clone()
     }
 
+    /// Not upstream: the same line by definition, exactly (IEEE `==`; a NaN refuses):
+    /// the same B-spline part
+    /// ([`BSplineCurve::same_definition`](crate::nurbs::b_spline_curve::BSplineCurve::same_definition))
+    /// and point, vector,
+    /// domain, scale and `inside_out` equal.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.base.same_definition(&other.base)
+            && self.point == other.point
+            && self.vector == other.vector
+            && self.anal_domain == other.anal_domain
+            && self.scale == other.scale
+            && self.inside_out == other.inside_out
+    }
+
     /// `operator==`: same B-spline part (dimension and NURB within `SM_EFF_ZERO`), and
     /// point, vector, domain, scale (within the scaled zero) and `inside_out` equal.
     #[must_use]
@@ -844,17 +860,44 @@ impl Line {
     /// rounding. `None` for numbers not finite.
     #[must_use]
     pub(crate) fn segment_over(&self, interval: &Extent1d) -> Option<[(Point3, f64); 2]> {
-        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
         let end = |t: f64| {
-            let (s, ds) = self.step_param_enclosure(t)?;
             let q = self.evaluate_point(t);
-            let e = (gamma(3) * (size(self.point) + (s * self.scale).abs() * size(self.vector))
-                + ds * self.scale.abs() * size(self.vector))
-                * (1.0 + gamma(3));
-            (q.x.is_finite() && q.y.is_finite() && q.z.is_finite() && e.is_finite())
-                .then_some((q, e))
+            let e = self.point_error(t)?;
+            (q.x.is_finite() && q.y.is_finite() && q.z.is_finite()).then_some((q, e))
         };
         Some([end(interval.min())?, end(interval.max())?])
+    }
+
+    /// Not upstream: the error bound of each coordinate of [`Self::evaluate_point`] at
+    /// NURB parameter `t`, as derived for [`Self::segment_over`]. `None` for numbers not
+    /// finite.
+    #[must_use]
+    pub(crate) fn point_error(&self, t: f64) -> Option<f64> {
+        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let (s, ds) = self.step_param_enclosure(t)?;
+        let e = (gamma(3) * (size(self.point) + (s * self.scale).abs() * size(self.vector))
+            + ds * self.scale.abs() * size(self.vector))
+            * (1.0 + gamma(3));
+        e.is_finite().then_some(e)
+    }
+
+    /// Not upstream: an upper bound on the speed of [`Self::evaluate_point`] in its NURB
+    /// parameter. The point is `P + s(t) scale V` with `s` affine in `t`
+    /// ([`Self::convert_t_from_nurbs_to_step`]): slope `A / L` (analytic over NURB domain
+    /// length) on a bounded line with `L` not zero, otherwise `±1`. So the speed is
+    /// `|scale| |V| |A / L|` exactly; the computed lengths, quotient, norm and products
+    /// are each within a few roundings, covered by widening by `1 + γ_8`. `None` for
+    /// numbers not finite.
+    #[must_use]
+    pub(crate) fn speed_bound(&self) -> Option<f64> {
+        let nurb_ivl = self.natural_interval();
+        let slope = if self.is_bounded() && !is_zero(nurb_ivl.length()) {
+            (self.anal_domain.length() / nurb_ivl.length()).abs()
+        } else {
+            1.0
+        };
+        let b = self.scale.abs() * self.vector.length() * slope * (1.0 + gamma(8));
+        b.is_finite().then_some(b)
     }
 
     /// The point at the analytic domain start and the line vector over the domain
@@ -1151,9 +1194,11 @@ impl Line {
     ) -> Result<Vec<Solution<O>>> {
         // only good for MINIMIZE and INTERSECT operations
         if operation != SolverOperation::Minimize && operation != SolverOperation::Intersect {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_DROP,
-                "the operation is neither minimize nor intersect",
+                CurveFailure::FastDropUnavailable {
+                    reason: FastDropBlock::Operation,
+                },
             ));
         }
 
@@ -1810,17 +1855,21 @@ impl Line {
 
         // Check join-point distance.
         if this_common.distance(other_common) > tol {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_JOIN,
-                "the join points are farther apart than the tolerance",
+                CurveFailure::JoinMismatch {
+                    check: JoinCheck::JoinPoint,
+                    off: this_common.distance(other_common),
+                    tolerance: tol,
+                },
             ));
         }
 
         // Other curve must be linear.
         if !other_is_line(other, 5, tol)? {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_JOIN,
-                "the other curve is not linear",
+                CurveFailure::JoinOtherNotStraight { tolerance: tol },
             ));
         }
 
@@ -1828,9 +1877,13 @@ impl Line {
         let whole_line_vec = other_end - this_end;
         let (dist, _) = line_point_distance(this_end, whole_line_vec, this_common);
         if dist > tol {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_JOIN,
-                "the other curve is not collinear",
+                CurveFailure::JoinMismatch {
+                    check: JoinCheck::Collinear,
+                    off: dist,
+                    tolerance: tol,
+                },
             ));
         }
 
@@ -2532,6 +2585,61 @@ mod tests {
     }
 
     #[test]
+    fn line_join_refusals_name_the_check() {
+        // seg() runs from (4, 0, 0) to (14, 0, 0); its end 1 is joined
+        let x = |a: f64, b: f64| Vec3::new(a, b, 0.0);
+        // a line that starts 1 past the end
+        let apart = Curve::from(Line::from_points(x(15.0, 0.0), x(20.0, 0.0), 3));
+        let err = seg().join_with(1, &apart, 0, Some(1e-7)).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::JoinMismatch {
+                check: JoinCheck::JoinPoint,
+                off: 1.0,
+                tolerance: 1e-7
+            })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        // a line from the end that turns off the line through both
+        let bent = Curve::from(Line::from_points(x(14.0, 0.0), x(20.0, 1.0), 3));
+        let err = seg().join_with(1, &bent, 0, Some(1e-7)).unwrap_err();
+        // the join point's distance from the line from (4, 0, 0) to (20, 1, 0)
+        let off = 10.0 / 257f64.sqrt();
+        match err.curve_failure() {
+            Some(&CurveFailure::JoinMismatch {
+                check: JoinCheck::Collinear,
+                off: o,
+                tolerance,
+            }) => {
+                assert!((o - off).abs() < 1e-12, "{o} {off}");
+                assert_eq!(tolerance, 1e-7);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        // a quarter circle from the end
+        let k = Kernel::default();
+        let arc = Ellipse::new_circle(
+            &k,
+            x(14.0, 1.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Extent1d::from_min_max(0.0, 90.0),
+            1.0,
+            &crate::curve::ellipse::EllipseOptions::default(),
+        )
+        .unwrap();
+        let err = seg()
+            .join_with(1, &Curve::from(arc), 0, Some(1e-7))
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::JoinOtherNotStraight { tolerance: 1e-7 })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+    }
+
+    #[test]
     fn drop_and_solve() {
         let l = seg();
         let s = l
@@ -2546,6 +2654,23 @@ mod tests {
             .unwrap();
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].start.parameters[0], 7.0);
+        let err = l
+            .drop_point_fast::<u8>(
+                &l.natural_interval(),
+                SolverOperation::Maximize,
+                Vec3::new(20.0, 1.0, 0.0),
+                1e-6,
+                None,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::FastDropUnavailable {
+                reason: FastDropBlock::Operation
+            })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
         let g = l.global_point_solve_step::<u8>(
             &l.step_interval(),
             SolverOperation::Maximize,

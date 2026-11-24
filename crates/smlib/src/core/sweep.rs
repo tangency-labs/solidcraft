@@ -434,7 +434,7 @@ fn one_wall_per_circle(k: &Kernel, given: &[Profile], curves: Vec<Curve>, tol: f
 
 /// Runs a call that makes a new body: the kernel locked, its own status as the capi passes it.
 fn making(call: &'static str, f: impl FnOnce(&mut Kernel) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
-    run(call, f)?.map(Body::new)
+    run(call, f)?.map(Body::from_kernel)
 }
 
 /// `smlib_planar_faces`: a sheet of planar faces bounded by the closed `loops`
@@ -951,7 +951,9 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
             if closed {
                 let tol = b.tolerance();
                 match stitch_faces(k, &mut b, tol, None, false) {
-                    Ok(s) if s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
+                    // A solid asked for has no free edge left; a sheet (an open profile, or one
+                    // not capped) keeps the profile's own ends free (#17828).
+                    Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
                     Ok(_) => b.refresh_cached_topology(),
                     Err(e) => return Ok(Err(status(e))),
                 }
@@ -1184,6 +1186,28 @@ pub(crate) fn loft_to_point(section: &[Profile], apex: [f64; 3]) -> Result<Body>
         b.refresh_cached_topology();
         finish(b, true)
     })
+}
+
+/// The planar first section of `sections` lofted through the rest (stations) to `apex`: a loft
+/// to a point that follows guide rails (#20985). solidcore-ops builds it
+/// ([`solidcore_ops::sweep::loft_to_point_through`]).
+pub(crate) fn loft_to_point_through(sections: &[Vec<Profile>], apex: [f64; 3], params: &[f64]) -> Result<Body> {
+    use solidcore_ops::sweep::Curve as Ops;
+    let ops: Vec<Vec<Ops>> = sections
+        .iter()
+        .map(|s| {
+            s.iter()
+                .map(|c| match c {
+                    Profile::Line { start, end } => Ops::Line { start: *start, end: *end },
+                    Profile::Arc { center, axis, reference, radius, start, end } => {
+                        Ops::Arc { center: *center, axis: *axis, reference: *reference, radius: *radius, start: *start, end: *end }
+                    }
+                    Profile::Nurbs { degree, points, knots } => Ops::Nurbs { degree: *degree, points: points.clone(), knots: knots.clone() },
+                })
+                .collect()
+        })
+        .collect();
+    super::call::ops("smlib_loft_to_point_through", || solidcore_ops::sweep::loft_to_point_through(&ops, apex, params))
 }
 
 /// `maps_ok`: each station map finite, of bounded size and far from singular, its translation

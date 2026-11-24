@@ -90,6 +90,135 @@ fn the_board_stands_with_its_lower_left_corner_at_the_origin() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// A folder holding `board.kicad_pcb`, whose one footprint (U1) names `model`, and the model
+/// files given beside it.
+fn board_with_model_files(tag: &str, model: &str, files: &[(&str, Vec<u8>)]) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, bytes) in files {
+        std::fs::write(dir.join(name), bytes).unwrap();
+    }
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &path,
+        format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+    (model "${{KIPRJMOD}}/{model}")))"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+/// KiCad 10's `….stpZ`: a zip archive holding one STEP file.
+fn stpz() -> Vec<u8> {
+    use std::io::Write;
+    let mut out = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(&mut out);
+    zip.start_file("part.step", zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)).unwrap();
+    zip.write_all(include_bytes!("../../../../tests/step-conformance/cylinder.step")).unwrap();
+    zip.finish().unwrap();
+    out.into_inner()
+}
+
+/// Open the board and check that U1's model came in with no warning about it.
+fn assert_the_model_comes_in(path: &std::path::Path) {
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    assert_eq!(r["subcomponents"], json!(1), "{r}");
+    let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
+    assert!(warnings.iter().all(|w| !w.as_str().unwrap_or("").contains("part.")), "{r}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// KiCad 10's 3D library has each model only as a zipped `….stpZ`, while a board drawn with older
+/// footprints names `….wrl` or `….step`: the reference is answered by the `….stpZ` beside it.
+#[test]
+fn a_model_named_in_another_format_is_read_from_the_stpz_beside_it() {
+    assert_the_model_comes_in(&board_with_model_files("stpz", "part.wrl", &[("part.stpZ", stpz())]));
+}
+
+/// A file system that tells `….stpZ` from `….stpz` still finds a lower-case `….stpz`.
+#[test]
+fn a_lower_case_stpz_answers_a_missing_model() {
+    assert_the_model_comes_in(&board_with_model_files("stpz-lower", "part.wrl", &[("part.stpz", stpz())]));
+}
+
+/// A missing `….step` is answered by the `….wrl` beside it before a `….stpZ`: a damaged `….stpZ`
+/// does not take a model away from a board that found its VRML model before.
+#[test]
+fn a_damaged_stpz_does_not_hide_the_wrl_beside_it() {
+    let wrl = b"#VRML V2.0 utf8\nShape { geometry Box { size 2 2 2 } }".to_vec();
+    assert_the_model_comes_in(&board_with_model_files("stpz-damaged", "part.step", &[("part.wrl", wrl), ("part.stpZ", b"not a zip".to_vec())]));
+}
+
+/// Three footprints share one model: one component named after the model, and each placement
+/// is named after its own footprint's reference. Two footprints that both say `R1` keep apart.
+#[test]
+fn each_part_is_named_after_its_own_reference() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-references-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("R_0603.wrl"), b"#VRML V2.0 utf8\nShape { geometry Box { size 2 2 2 } }").unwrap();
+    let footprint = |x: u32, reference: &str| {
+        format!(r#"(footprint "R" (at {x} 5) (layer "F.Cu") (property "Reference" "{reference}") (model "${{KIPRJMOD}}/R_0603.wrl"))"#)
+    };
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &path,
+        format!(
+            "(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 30 10) (layer \"Edge.Cuts\")) {} {} {})",
+            footprint(5, "R1"),
+            footprint(12, "R33"),
+            footprint(19, "R1")
+        ),
+    )
+    .unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    assert_eq!(r["subcomponents"], json!(1), "one model, one component: {r}");
+    let part = s.doc.components.iter().find(|c| c.name == "R_0603").map(|c| c.id).expect("the model's component");
+    let mut names: Vec<&str> = s.doc.occurrences.iter().filter(|o| o.component == part).map(|o| o.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["R1", "R1 (2)", "R33"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file can give thousands of footprints one reference: each still gets its own name, and
+/// naming them does not search every name again for each suffix.
+#[test]
+fn thousands_of_footprints_sharing_a_reference_are_numbered() {
+    const COUNT: u32 = 3000;
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-same-reference-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("R_0603.wrl"), b"#VRML V2.0 utf8\nShape { geometry Box { size 0.5 0.5 0.5 } }").unwrap();
+    let footprints: String = (0..COUNT)
+        .map(|i| {
+            format!(
+                r#"(footprint "R" (at {} {} ) (layer "F.Cu") (property "Reference" "R1") (model "${{KIPRJMOD}}/R_0603.wrl"))"#,
+                1 + i % 60,
+                1 + i / 60
+            )
+        })
+        .collect();
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(&path, format!("(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 62 52) (layer \"Edge.Cuts\")) {footprints})"))
+        .unwrap();
+    let mut s = Session::default();
+    let started = std::time::Instant::now();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy(), "copper": "none", "silkscreen": false}));
+    eprintln!("{COUNT} footprints sharing a reference opened in {:?}", started.elapsed());
+    let part = s.doc.components.iter().find(|c| c.name == "R_0603").map(|c| c.id).expect("the model's component");
+    let names: std::collections::BTreeSet<&str> = s.doc.occurrences.iter().filter(|o| o.component == part).map(|o| o.name.as_str()).collect();
+    assert_eq!(names.len(), COUNT as usize, "every placement has a name of its own");
+    assert!(names.contains("R1") && names.contains("R1 (2)") && names.contains(format!("R1 ({COUNT})").as_str()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_bad_option_is_refused_before_the_board_is_read() {
     let path = board_file("bad", 2.0);

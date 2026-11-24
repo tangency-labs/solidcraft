@@ -34,6 +34,25 @@ reply carries its own profile while recording.
 
 # Design loading
 
+## Building for measurements: the `profiling` profile (2026-10-29, #8185)
+
+`cargo build --profile profiling -p solidcraft -p solidcraft-cli` builds `release` without
+its thin LTO and incrementally, into `target/profiling/` (run `target/profiling/solidcraft-cli`,
+not the one in `target/release/`). Iterate with it, and take the numbers a pull
+request reports with `--release`.
+
+Apple M4 Max, `main` at 9cba66c1, a private function added to one file, then the app rebuilt:
+
+| | edit in `ui-egui` | edit in `kernel` |
+|---|---:|---:|
+| `release` | 86–94 s | 127–128 s |
+| `profiling` | 3.3–3.5 s | 8.7–9.3 s |
+
+65–70 s of each `release` rebuild was the thin LTO link of the `solidcraft` binary. The cost
+when running, three alternating runs each: `bench-open` of a 1,280-body design without the
+model cache took 9.6 s of CPU time against 9.0 s (wall 3.94–5.08 s against 3.76–4.82 s), and
+`run examples/acceptance/sensor_enclosure.json` 3.4 s against 3.2–3.3 s (wall 1.40–1.42 s
+against 1.33–1.41 s): about 4–7% more CPU time.
 ## The stand-up offer waits beside the window (2026-11-12)
 
 After a STEP or IGES file opens, SolidCraft may offer to stand it up, after weighing how its
@@ -1266,3 +1285,40 @@ rounds per order, in milliseconds, the tree's time including building it:
 The order moves either walk by about 1%.
 
 Both walks return the same placements in the same order (the benchmark asserts it).
+
+## A camera move patches the model scene's changed blocks (2026-11-22)
+
+The model scene was built again after every camera move. `scene_key` hashed the display
+refinement's generation (`display_lod::Lod::generation`), and the planner bumps it whenever the
+set of drawn steps changes — its bodies' edge simplification steps, one per body, chosen from how
+many pixels per millimetre the view gives it. On an assembly, a camera move of any size flips
+some body's step, so the key changed and `publish_model_scene` built the scene again: every shown
+body's draw, its palette slots and its block, to throw away every block the block cache (#1148)
+kept. On grid100 (56,100 bodies, 276 M triangles, 3,600 blocks) the app's own frame log put
+168–180 ms of each camera move's 383 ms in "model scene"; the GPU frame is 9 ms.
+
+The published scene now keeps the draws of each of its blocks, and a change of the refinement's
+generation alone patches it: the bodies whose edge step changed have the blocks they are in
+rebuilt from those draws, keyed as a build keys them, and republished with a new patch number
+(as `publish_levels` already republishes levels) so the renderer uploads only the changed blocks.
+Nothing else in the key may have changed; a body drawn at another step draws other triangles and
+so a new block, which still builds the scene, as any other change does.
+
+`scene_rebuild_cost` (in `crates/ui-egui/src/viewport.rs`, ignored: a manual measurement on
+`SOLIDCRAFT_SCALE_DESIGN`) times the build and the patch on the same design, `ci` profile,
+Apple M2 Max, a load average of 5–18 from other work on the machine (the whole rebuild is the
+number that matters; the patch is two orders below it):
+
+| grid100 | ms |
+|---|---:|
+| whole scene, cold (first build after the open) | 2,784 |
+| whole scene, warm (what a camera move did) | 136 |
+| patch, one body's edge step changed, one block rebuilt | 1.1 |
+| patch, all 56,099 bodies' steps changed, every block rebuilt | 658 |
+
+The still picture is unchanged: the ORBIT harness on grid100 (40 frames orbiting 56,100 bodies)
+printed `painted=bf55f6f89fd7978a` both before and after, over the same 276,227,800 triangles.
+
+The harness never shows the rebuild itself (`scene_builds=0` either way): its pointer orbit does
+not let the camera rest for `REFINE_STILL_MS`, so the refinement, and with it the rebuild, only
+happens in the app when a person's camera move ends.

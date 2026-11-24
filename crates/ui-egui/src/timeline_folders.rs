@@ -391,14 +391,12 @@ mod tests {
         assert_eq!(depth, super::DEPTH_MAX, "nesting stops at the deepest allowed level");
     }
 
-    /// An inserted assembly's folder holds its whole rigid group, also the joints inside its
-    /// sub-assemblies, whose two ends meet in a component below the import's own; none is left
-    /// for the joints chip after the history.
+    /// An inserted assembly's one rigid group holds its sub-assemblies' contents too, at any
+    /// depth, so there are no joints for its folder or for the joints chip after the history.
     #[test]
-    fn an_import_folder_holds_the_joints_of_its_sub_assemblies() {
+    fn an_import_holds_its_sub_assemblies_with_one_rigid_group() {
         use serde_json::json;
         use solidcraft_engine::Session;
-        use solidcraft_engine::doc::joints::JointKind;
         let run = |s: &mut Session, command: &str, params: serde_json::Value| s.execute(command, &params).unwrap();
         // Outer holds a plate and Inner, placed twice: the file nests Inner in Outer.
         let mut s = Session::default();
@@ -416,12 +414,10 @@ mod tests {
         let mut s = Session::default();
         let folder = run(&mut s, "file.insert_step", json!({"path": path, "folder": true}))["group"].as_u64().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
-        let mut rigid: Vec<u64> = s.doc.assembly.joints.iter().filter(|j| j.kind == JointKind::Rigid).map(|j| j.id).collect();
-        rigid.sort_unstable();
-        let mut held = super::Folders::of(&s.doc).joints.get(&folder).cloned().unwrap_or_default();
-        held.sort_unstable();
-        assert!(rigid.len() >= 3, "the plate and both Inner placements are held: {rigid:?}");
-        assert_eq!(held, rigid, "every joint of the import is in its folder");
+        // One rigid group holds the plate and both Inner placements; the folder holds the feature.
+        let [group] = s.doc.assembly.rigid_groups.as_slice() else { panic!("one rigid group: {:?}", s.doc.assembly.rigid_groups) };
+        assert!(s.doc.rigid_group_members(group).len() >= 3, "the plate and both Inner placements are held");
+        assert!(super::Folders::of(&s.doc).joints.get(&folder).is_none_or(Vec::is_empty), "no joints to put in the folder");
     }
 
     /// A new folder goes in the innermost folder holding all the features grouped.
