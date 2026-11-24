@@ -173,6 +173,16 @@ pub fn canonical_axis_direction(direction: [f64; 3]) -> [f64; 3] {
     vec3(direction).canonical_axis_direction().to_array()
 }
 
+/// The unit direction of an undirected axis, oriented by its largest component as
+/// [`canonical_axis_direction`] orients it. `None` for a direction no longer than
+/// `min_length` or one that is not finite.
+#[must_use]
+pub fn unit_axis_direction(direction: [f64; 3], min_length: f64) -> Option<[f64; 3]> {
+    vec3(direction)
+        .unit_axis_direction(min_length)
+        .map(Vec3::to_array)
+}
+
 /// Carry a definition's axis into world coordinates, orient it there, and express it in the
 /// authoring frame using the supplied world-to-author map.
 /// # Errors
@@ -653,5 +663,25 @@ mod tests {
             span_along([0.0; 3], [f64::MAX; 3], o, d),
             Err(Error::Argument)
         );
+    }
+
+    /// An axis comes out unit and pointing its largest component positive, whichever way it
+    /// was given; a direction too short or not finite has none.
+    #[test]
+    fn unit_axis_direction_is_unit_and_oriented() {
+        assert_eq!(
+            unit_axis_direction([0.0, -2.0, 0.0], 1e-9),
+            Some([0.0, 1.0, 0.0])
+        );
+        assert_eq!(
+            unit_axis_direction([0.0, 0.0, 4.0], 1e-9),
+            Some([0.0, 0.0, 1.0])
+        );
+        let d = unit_axis_direction([-3.0, 4.0, 0.0], 1e-9).unwrap_or([0.0; 3]);
+        assert!(near(d, [-0.6, 0.8, 0.0], 1e-15), "{d:?}");
+        assert_eq!(unit_axis_direction([0.0; 3], 1e-9), None);
+        assert_eq!(unit_axis_direction([1e-10, 0.0, 0.0], 1e-9), None);
+        assert_eq!(unit_axis_direction([f64::NAN, 1.0, 0.0], 1e-9), None);
+        assert_eq!(unit_axis_direction([f64::INFINITY, 0.0, 0.0], 1e-9), None);
     }
 }

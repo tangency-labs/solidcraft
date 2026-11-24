@@ -811,8 +811,10 @@ pub fn coil_model_axis(st: &ModelState, geo: &GeoRef) -> Result<(Vec3, Vec3)> {
 }
 
 fn oriented_axis((origin, direction): (Vec3, Vec3)) -> Result<(Vec3, Vec3)> {
-    let direction = direction.normalized().filter(|_| origin.is_finite()).ok_or_else(|| bad("the axis has no direction"))?;
-    Ok((origin, canonical_dir(direction)))
+    let direction = solidcore_ops::affine::unit_axis_direction(direction.into(), solidcraft_geom::EPS)
+        .filter(|_| origin.is_finite())
+        .ok_or_else(|| bad("the axis has no direction"))?;
+    Ok((origin, direction.into()))
 }
 
 /// [`model_axis`] for references that may name a component's origin datum: the datum is placed

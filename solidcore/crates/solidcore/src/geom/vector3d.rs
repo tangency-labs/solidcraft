@@ -198,6 +198,16 @@ impl Vec3 {
         }
     }
 
+    /// The unit direction of an undirected axis, oriented as [`Vec3::canonical_axis_direction`]
+    /// orients it: the vector divided by its length. `None` for a vector no longer than
+    /// `min_length` or one whose length is not finite.
+    #[must_use]
+    pub fn unit_axis_direction(self, min_length: f64) -> Option<Self> {
+        let length = self.length();
+        (length > min_length && length.is_finite())
+            .then(|| (self / length).canonical_axis_direction())
+    }
+
     /// Creates a vector from its components (`SmVector3d(dX, dY, dZ)`, `Set`).
     #[must_use]
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
@@ -1312,6 +1322,20 @@ mod tests {
             }
         }
         assert_eq!(Vec3::ZERO.canonical_axis_direction(), Vec3::ZERO);
+    }
+
+    /// An axis comes out unit and pointing its largest component positive, whichever way it
+    /// was given; a vector too short or not finite has no direction.
+    #[test]
+    fn a_unit_axis_direction_is_unit_and_oriented() {
+        let unit = |x, y, z| Vec3::new(x, y, z).unit_axis_direction(1e-9);
+        assert_eq!(unit(0.0, -2.0, 0.0), Some(Vec3::Y));
+        assert_eq!(unit(0.0, 0.0, 4.0), Some(Vec3::Z));
+        assert_eq!(unit(-3.0, 4.0, 0.0), Some(Vec3::new(-0.6, 0.8, 0.0)));
+        assert_eq!(unit(0.0, 0.0, 0.0), None);
+        assert_eq!(unit(1e-10, 0.0, 0.0), None);
+        assert_eq!(unit(f64::NAN, 1.0, 0.0), None);
+        assert_eq!(unit(f64::INFINITY, 0.0, 0.0), None);
     }
 
     #[test]
