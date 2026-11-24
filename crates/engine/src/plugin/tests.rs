@@ -2782,6 +2782,45 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
     });
 }
 
+#[test]
+fn a_write_may_reach_a_missing_folder_exactly_when_its_nearest_existing_folder_is_in_scope() {
+    // #20493: under `--allow-path`, `New/Deep/x.json` in an allowed folder needs folders that do not exist yet.
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-new-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let outside = root.with_file_name(format!("solidcraft-plugin-new-outside-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut session = Session::default();
+    session.plugin_state.file_grants = vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }];
+    let host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.clone()])), || {
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), true).is_ok(), "two missing levels inside the scope");
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), false).is_err(), "a read still needs the path to exist");
+        assert!(host.authorize_file_path(&root.join("../elsewhere/New/x.json"), true).is_err(), "outside the scope");
+        assert!(host.authorize_file_path(&outside.join("New/Deep/x.json"), true).is_err(), "a missing folder under an out-of-scope one");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+            assert!(host.authorize_file_path(&root.join("link/New/Deep/x.json"), true).is_err(), "an existing link out of scope");
+        }
+    });
+    assert!(!root.join("New").exists() && !outside.join("New").exists(), "checking creates nothing");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&outside);
+}
+
 /// Importer plugins: an installed importer opens the files it claims as new, unsaved designs.
 #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod importers {
