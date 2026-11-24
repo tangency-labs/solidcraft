@@ -3483,6 +3483,7 @@ mod tests {
             (CornerStep::SetbackFacesMeetInNoPoint, ErrorKind::Degenerate),
             (CornerStep::SetbackFillNotCertified, ErrorKind::NotFound),
             (CornerStep::SetbackMarginInfeasible, ErrorKind::NotFound),
+            (CornerStep::SetbackMarginUnresolved, ErrorKind::NotFound),
             (CornerStep::SetbackRailEndsCoincide, ErrorKind::Degenerate),
             (
                 CornerStep::SetbackSpringEndsHalfTurnApart,
@@ -3603,6 +3604,81 @@ mod tests {
         ];
         assert_eq!(graph::faces_common_point(&faces), None);
         let err = corner_step(CornerStep::SetbackFacesMeetInNoPoint);
+        assert_eq!(err.kind(), crate::error::ErrorKind::Degenerate);
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// A bilinear patch over the unit square in the plane through `c` square to z; its
+    /// `(0, 0.5)` is `c + (0, 0.5, 0)`.
+    fn flat_patch(c: Point3) -> BSplineSurface {
+        let mut pts = Vec::new();
+        for x in [0.0, 1.0] {
+            for y in [0.0, 1.0] {
+                pts.push(Point3::new(c.x + x, c.y + y, c.z));
+            }
+        }
+        BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap()
+    }
+
+    /// A fill of three rounds whose first and third setback patches lie behind their faces
+    /// (convex) and whose second lies in front (concave): a corner of mixed convexity, so
+    /// [`containment_kept`] looks for the faces' common point. With the faces of a box corner
+    /// it has one and the saddle test runs; with three parallel planes it has none, and the
+    /// stop is the degenerate step [`CornerStep::SetbackFacesMeetInNoPoint`].
+    #[test]
+    fn a_mixed_convexity_fill_on_faces_with_no_common_point_is_a_degenerate_step() {
+        let mixed = |c: [Point3; 3]| Fill {
+            patches: (0..6).map(|m| flat_patch(c[m % 3])).collect(),
+            round: vec![0, 1, 2],
+            face: vec![0, 1, 2],
+            reversed: vec![false; 3],
+            degree: 2,
+        };
+        let k = Kernel::default();
+        let origin = Point3::new(0.0, 0.0, 0.0);
+
+        let corner = [
+            Face::plane(origin, Vec3::new(1.0, 0.0, 0.0)),
+            Face::plane(origin, Vec3::new(0.0, 1.0, 0.0)),
+            Face::plane(origin, Vec3::new(0.0, 0.0, 1.0)),
+        ];
+        let fill = mixed([
+            Point3::new(-1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, -1.0),
+        ]);
+        // the control: a common point exists, so the stop is not taken
+        assert!(containment_kept(&k, &fill, &corner, 1e-9).is_ok());
+
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let parallel = [
+            Face::plane(Point3::new(0.0, 0.0, 0.0), z),
+            Face::plane(Point3::new(0.0, 0.0, 1.0), z),
+            Face::plane(Point3::new(0.0, 0.0, 2.0), z),
+        ];
+        let fill = mixed([
+            Point3::new(0.0, 0.0, -1.0),
+            Point3::new(0.0, 0.0, 2.0),
+            Point3::new(0.0, 0.0, 1.0),
+        ]);
+        let err = containment_kept(&k, &fill, &parallel, 1e-9).unwrap_err();
+        assert_eq!(err, corner_step(CornerStep::SetbackFacesMeetInNoPoint));
         assert_eq!(err.kind(), crate::error::ErrorKind::Degenerate);
         assert_eq!(
             crate::error::upstream_status(&err),

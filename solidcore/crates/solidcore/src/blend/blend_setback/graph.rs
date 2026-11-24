@@ -946,8 +946,11 @@ pub(super) fn graph_gk(
                     "the margin's programme is not positive definite",
                 )
                 .into()),
-                QpOutcome::Infeasible { .. } => {
+                QpOutcome::Infeasible { proven: true } => {
                     Err(corner_step(CornerStep::SetbackMarginInfeasible).into())
+                }
+                QpOutcome::Infeasible { proven: false } => {
+                    Err(corner_step(CornerStep::SetbackMarginUnresolved).into())
                 }
             };
         }

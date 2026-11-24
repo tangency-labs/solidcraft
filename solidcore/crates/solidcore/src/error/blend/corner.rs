@@ -366,8 +366,11 @@ pub enum CornerStep {
     /// last positions). Not within tolerance.
     SetbackGrowthUnplaced,
     /// A setback fill's margin programme (the probe of how far its fill stands from
-    /// failing) has no solution. Not found.
+    /// failing) is shown to have no solution from its rows. Not found.
     SetbackMarginInfeasible,
+    /// A setback fill's margin programme stopped without a solution and without a proof that
+    /// there is none (its step limit, or no progress within it). Not found.
+    SetbackMarginUnresolved,
     /// No interior map of a setback fill up to degree 9 meets its setback patches'
     /// conditions. Not found.
     SetbackNoInteriorMap,
@@ -467,6 +470,7 @@ impl CornerStep {
             Self::SetbackG2NetTurnsBack => ErrorKind::Unsupported,
             Self::SetbackGrowthUnplaced => ErrorKind::NotWithinTolerance,
             Self::SetbackMarginInfeasible => ErrorKind::NotFound,
+            Self::SetbackMarginUnresolved => ErrorKind::NotFound,
             Self::SetbackNoInteriorMap => ErrorKind::NotFound,
             Self::SetbackPatchMissesInterior => ErrorKind::NotWithinTolerance,
             Self::SetbackPatchWeightNotPositive => ErrorKind::Degenerate,
@@ -526,6 +530,7 @@ impl CornerStep {
             Self::SetbackG2NetTurnsBack => "every G2 setback fill up to degree 9 has a patch whose control net turns back",
             Self::SetbackGrowthUnplaced => "a setback corner grown beside a curved face does not place its rounds' ends at the scale it certified",
             Self::SetbackMarginInfeasible => "a setback fill's margin programme has no solution",
+            Self::SetbackMarginUnresolved => "a setback fill's margin programme stopped without a solution or a proof that it has none",
             Self::SetbackNoInteriorMap => "no interior map of a setback fill up to degree 9 meets its setback patches' conditions",
             Self::SetbackPatchMissesInterior => "a setback patch does not meet the fill's interior within the tolerance",
             Self::SetbackPatchWeightNotPositive => "a patch of a setback fill has a weight that is not positive",
