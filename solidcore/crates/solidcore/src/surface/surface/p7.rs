@@ -1326,8 +1326,31 @@ impl Surface {
         // charge infinite), and keep the stationary test on the solve's own `F'`
         // (its charge zero): what they accept is upstream's stationary answer only.
         let certified = certified_alignment_evaluator(k, self)?;
+        // A search asks for the certified slopes at the same parameters more than once (the
+        // interval's ends, its chosen guess, the samples it re-examines as it brackets). The
+        // certified slopes depend on the surface, `uv` and the singular parameter alone, not on
+        // the solve's `f`/`f_prime`, so they are kept for the rest of this search and reused: the
+        // same numbers, the same answers, fewer evaluations.
+        let sloped: std::cell::RefCell<Vec<(u64, AlignmentSlopes)>> = std::cell::RefCell::new(Vec::new());
         let charges_at = |t: f64, f: f64, f_prime: f64| -> (f64, f64, f64) {
-            charges_or_unproven(certified.as_ref(), uv, s_dir, singular_dir, t, f, f_prime)
+            let Some(eval) = certified.as_ref() else {
+                return (f64::INFINITY, 0.0, f64::INFINITY);
+            };
+            let slopes = {
+                let mut kept = sloped.borrow_mut();
+                match kept.iter().find(|(at, _)| *at == t.to_bits()) {
+                    Some((_, slopes)) => *slopes,
+                    None => match alignment_slopes(eval, uv, s_dir, singular_dir, t) {
+                        Some(slopes) => {
+                            kept.push((t.to_bits(), slopes));
+                            slopes
+                        }
+                        None => return (f64::INFINITY, f64::INFINITY, f64::INFINITY),
+                    },
+                }
+            };
+            slope_charges_of(&slopes, f, f_prime)
+                .unwrap_or((f64::INFINITY, f64::INFINITY, f64::INFINITY))
         };
         let charges = |t: f64, f: f64, f_prime: f64| -> (f64, f64) {
             let (cf, cfp, _) = charges_at(t, f, f_prime);
@@ -3877,6 +3900,13 @@ fn slope_charges(
     f_prime: f64,
 ) -> Option<(f64, f64, f64)> {
     let e = alignment_slopes(eval, uv, dir, singular_dir, s)?;
+    slope_charges_of(&e, f, f_prime)
+}
+
+/// [`slope_charges`]'s arithmetic from an evaluated [`AlignmentSlopes`], so a search can
+/// reuse the certified slopes it already has at the same parameter (they depend on the
+/// surface, `uv` and the singular parameter alone, not on the solve's `f`/`f_prime`).
+fn slope_charges_of(e: &AlignmentSlopes, f: f64, f_prime: f64) -> Option<(f64, f64, f64)> {
     let scale = 1.0 + gamma(16);
     let cf = (e.f_error + (e.f - f).abs()) * scale;
     let cfp = (e.f_prime_error + (e.f_prime - f_prime).abs()) * scale;
