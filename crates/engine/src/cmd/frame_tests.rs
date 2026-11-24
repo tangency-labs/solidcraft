@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
+use solidcraft_doc::frame::Anchor;
 use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
@@ -408,6 +410,96 @@ fn anchor_angle_and_mirror_place_the_profile() {
     let m = place(json!({"mirror": true}));
     assert!(near3(m.2, [0.0, 0.0, 0.0]) && near3(m.3, [1000.0, 60.0, 40.0]), "{m:?}");
     assert!(plain.4[1] < 30.0 && m.4[1] > 30.0, "{plain:?} {m:?}");
+}
+
+#[test]
+fn the_section_view_shows_where_the_member_goes_and_its_anchors() {
+    let rail = || {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    let angle = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    let s = rail();
+    let v = super::member_section_view(&s, &json!({"sketch": "Rail", "profile": angle, "anchor": "bottom_left"})).unwrap();
+    let w = |p: Vec2| {
+        let q = v.world(p);
+        [q.x, q.y, q.z]
+    };
+    // The anchored point sits on the line's start; the section's x runs world +Y, its y +Z.
+    assert!(near3(w(v.at), [0.0, 0.0, 0.0]) && near3([v.end.x, v.end.y, v.end.z], [1000.0, 0.0, 0.0]), "{v:?}");
+    let anchors = v.anchors();
+    assert_eq!(anchors.len(), 11);
+    let at = |a: Anchor| anchors.iter().find(|(k, _)| *k == a).map(|(_, p)| *p).unwrap();
+    assert!(near3(w(at(Anchor::TopRight)), [0.0, 60.0, 40.0]), "{anchors:?}");
+    assert!(near3(w(at(Anchor::Top)), [0.0, 30.0, 40.0]), "{anchors:?}");
+    // A world point back to the section point it came from.
+    let p = at(Anchor::Right);
+    let back = v.section_point(v.world(p));
+    assert!((back.x - p.x).abs() < 1e-9 && (back.y - p.y).abs() < 1e-9);
+
+    // Mirrored, a picked section point turned into `locate` is the point the made member puts on
+    // the line: its top right on the line, the member runs to −Y and −Z of it.
+    let mut s = rail();
+    let mirrored = json!({"sketch": "Rail", "profile": angle, "mirror": true});
+    let v = super::member_section_view(&s, &mirrored).unwrap();
+    let top_right = v.anchors().into_iter().find(|(k, _)| *k == Anchor::TopRight).map(|(_, p)| p).unwrap();
+    let mut p = mirrored.clone();
+    p["locate"] = json!(v.locate_of(top_right));
+    let again = super::member_section_view(&s, &p).unwrap();
+    assert!((again.at.x - top_right.x).abs() < 1e-9 && (again.at.y - top_right.y).abs() < 1e-9, "{again:?}");
+    run(&mut s, "frame.member", p);
+    let b = bodies(&mut s).remove(0);
+    assert!(near3(b.2, [0.0, -60.0, -40.0]) && near3(b.3, [1000.0, 0.0, 0.0]), "{b:?}");
+
+    // What the command would refuse shows nothing, with the reason; nothing is added.
+    let s = rail();
+    for bad in [
+        json!({}),
+        json!({"sketch": "Rail"}),
+        json!({"sketch": "Nope", "profile": tube()}),
+        json!({"sketch": "Rail", "profile": {"kind": "angle", "width": -1}}),
+    ] {
+        assert!(super::member_section_view(&s, &bad).is_err(), "{bad}");
+    }
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })));
+}
+
+#[test]
+fn the_section_view_reads_bare_profile_numbers_in_the_design_units() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let v = super::member_section_view(&s, &json!({"sketch": "Rail", "profile": {"kind": "bar", "width": 2, "height": 1}})).unwrap();
+    let anchors = v.anchors();
+    let at = |a: Anchor| v.world(anchors.iter().find(|(k, _)| *k == a).map(|(_, p)| *p).unwrap());
+    // The member made from these values is 2 in across (world Y) and 1 in up (world Z).
+    let (lo, hi) = (at(Anchor::BottomLeft), at(Anchor::TopRight));
+    assert!((hi.y - lo.y - 50.8).abs() < 1e-6 && (hi.z - lo.z - 25.4).abs() < 1e-6, "{anchors:?}");
+}
+
+#[test]
+fn the_section_view_sits_at_the_active_occurrence_with_its_pending_move() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Frame parts"}));
+    let component = c["component"].as_u64().unwrap();
+    let first = c["occurrence"].as_u64().unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [20, 30, 40], "capture": true}));
+    run(&mut s, "component.activate", json!({"component": component, "occurrence": second, "path": [second]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Not captured: shown where it was dragged, not yet stored.
+    run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [5, 0, 0], "capture": false}));
+    let v = super::member_section_view(&s, &json!({"sketch": "Rail", "profile": tube()})).unwrap();
+    // The line as the second occurrence shows it: moved by [20, 30, 40] and then [5, 0, 0].
+    assert!(near3([v.start.x, v.start.y, v.start.z], [25.0, 30.0, 40.0]), "{v:?}");
+    assert!(near3([v.end.x, v.end.y, v.end.z], [1025.0, 30.0, 40.0]), "{v:?}");
 }
 
 #[test]

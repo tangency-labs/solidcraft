@@ -684,6 +684,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// A lock written on this computer by a process that has ended is ignored at once; one whose
+    /// process is still running, and one from another computer, still hold the design.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_from_a_process_that_has_ended_on_this_computer_is_ignored() {
+        use crate::design_lock as lock;
+        let d = dir("design-lock-dead-pid");
+        let design = d.join("Bracket.solidcraft");
+        std::fs::write(&design, b"one").unwrap();
+        let now = lock::now_secs();
+
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let held = lock::Lock { pid: child.id(), ..lock::Lock::mine(now) };
+        lock::write(&design, &held).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_some(), "a running process holds it");
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(lock::held_elsewhere(&design, now).is_none(), "an ended process no longer does");
+        // The same pid on another computer says nothing about that computer's process.
+        lock::write(&design, &lock::Lock { host: "WORKSHOP-PC".into(), ..held.clone() }).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_some());
+        // Nor does another user's: their processes may be hidden from this one.
+        lock::write(&design, &lock::Lock { user: "someone-else".into(), ..held }).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_some(), "another user's process may be hidden");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// A link at the lock's path is neither written through nor read through, and closing the
     /// design leaves it alone. A save still follows a link at the design's own path.
     #[cfg(unix)]

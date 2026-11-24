@@ -3,8 +3,9 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::ui;
 pub use craft_plugin::{
-    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES,
-    MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, dialog, swatches, valid_id,
+    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_APPROVED_FUEL,
+    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, dialog,
+    swatches, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -58,6 +59,10 @@ pub struct Grants {
     pub command_groups: BTreeSet<String>,
     #[serde(default)]
     pub folders: Vec<FileGrant>,
+    /// Fuel the user let this package use above Max plugin fuel: exactly its manifest request,
+    /// bound to `package_hash` like memory and never above `MAX_APPROVED_FUEL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel: Option<u64>,
     /// Memory, in MiB, the user let this package use above the app's ceiling for plugins: what
     /// its manifest asks for, approved at install. Bound to `package_hash` like the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -256,6 +261,7 @@ const FILE_COMMANDS: &[&str] = &[
     "sheet.export_bend_table",
     "sheet.export_dxf",
     "sketch.export_dxf",
+    "sketch.export_svg",
     "timeline.export_script",
 ];
 
@@ -340,10 +346,15 @@ pub fn with_installed<T>(session: &Session, folder: &str, read: impl FnOnce() ->
     if is_installed_folder(session, folder) { solidcraft_io::vfs::scoped(None, read) } else { read() }
 }
 
-/// The ceilings a package runs under: the app's, raised to the memory the user approved for this
-/// exact manifest and component at install. A grant for another package hash raises nothing.
+/// The ceilings a package runs under: the app's, raised to the fuel and memory the user approved
+/// for this exact manifest and component at install. A grant for another package hash raises nothing.
 pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimits {
     let mut limits = session.plugin_limits;
+    if let Some(fuel) =
+        session.plugin_state.grants.get(id).filter(|grants| grants.package_hash.as_deref() == Some(approval)).and_then(|grants| grants.fuel)
+    {
+        limits.max_fuel = limits.max_fuel.max(fuel.min(MAX_APPROVED_FUEL));
+    }
     if let Some(memory) =
         session.plugin_state.grants.get(id).filter(|grants| grants.package_hash.as_deref() == Some(approval)).and_then(|grants| grants.memory_mib)
     {
@@ -825,7 +836,10 @@ impl PluginHost for SolidCraftHost {
     }
     fn authorize_file_path(&self, path: &Path, write: bool) -> craft_plugin::Result<()> {
         if let Some(scope) = solidcraft_io::vfs::current_scope() {
-            return scope.check(&path.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
+            // A write may make folders that do not exist yet (`write-file`): its nearest existing
+            // ancestor must be in scope, as with `check_new`. A read needs the whole path to exist.
+            let allowed = if write { scope.check_new(&path.to_string_lossy()) } else { scope.check(&path.to_string_lossy()) };
+            return allowed.map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
         }
         grant_covers(&self.session.plugin_state.file_grants, path, write)
     }

@@ -60,6 +60,7 @@ Query replies contain no new host effects.
 | `panel.reset_pair` | `{first,second,expected_revision?}`. Resets adjacent sections to the registered default ratio within intersected bounds. |
 | `panel.native_close` | `{target:{type:"native_host",id:HostId},expected_revision?}`. Native window close redocks its whole section; it does not explicitly close/cancel content. |
 | `layout.save` | `{name,overwrite?:false,expected_revision?}` → `{name,overwritten,state}`. Saves the complete current envelope in the injected catalogue. |
+| `layout.delete` | `{name,expected_revision?}` → `{name,state}`. Deletes a user layout from the injected catalogue. Built-ins return a capability error, unknown names a missing-target error. The panels stay where they are, even when they match the deleted layout. |
 | `layout.apply` | `{name,expected_revision?}`. Applies a named preset to the **current** workspace, rebinding its known layout workspace ID. |
 | `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
 | `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
@@ -202,7 +203,7 @@ trailing data, invalid envelope identities and all existing aggregate/node/depth
 limits before a candidate can be published. This seam performs no disk storage.
 
 With application panel preferences enabled, the existing Layout preferences page
-uses these commands for workspace selection, named layout save/apply and reset.
+uses these commands for workspace selection, named layout save/apply/delete and reset.
 Reset changes only the current workspace and keeps the named layout library.
 Preferences Cancel restores the layout and catalogue through runtime admission;
 if restoration is refused, the dialog and its saved baseline stay open. Periodic
@@ -555,7 +556,11 @@ run, so nothing is queued to apply unseen behind it. `control.pending` belongs t
 connection: a new connection has nothing pending. The bridged MCP server does this itself
 ([mcp.md](mcp.md#long-running-requests)).
 
-`control.pending` answers only for its own connection. `control.running` answers for the whole
+`control.pending` answers only for its own connection, but both it and `control.running` add a
+`background` list while the app runs work no connection owns that holds others out: a plugin package
+job (`plugin.install`, `plugin.remove`) with its `command`, `subject` (the archive or plugin),
+`running_s` and `ends_by_itself_in_s`. Such a job is abandoned after five minutes and the next
+install or removal then runs. `control.running` answers for the whole
 app, the same on every connection, at once (it never waits behind a running request, and a
 connection may ask it while it is `busy`): every request the app has been sent and has not
 answered yet, oldest first, from any connection, including a timed-out one whose connection has
@@ -662,7 +667,7 @@ a menu (neither describes the open one).
 |---|---|---|
 | `engine.execute` | `command`: command id, `params`: JSON object | the command's result |
 | `engine.script` | `commands`: `[{command, params}, …]` | results. Each step runs as `engine.execute` runs it, so the window follows it as it does a batch step. The first error stops the script, and the steps before it stay |
-| `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: `true` only when a rollback was asked for and the design is where the batch started, `false` when `rollback: false` or when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `rolled_back` as after a rollback that went back (`true`, or `false` when `rollback: false`: the design is where the batch started), `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
+| `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: `true` only when a rollback was asked for and the design is where the batch started, `false` when `rollback: false` or when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, `document.activate`, and `file.new` or `doc.open` with `new_tab: true`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `rolled_back` as after a rollback that went back (`true`, or `false` when `rollback: false`: the design is where the batch started), `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
 | `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
@@ -675,6 +680,41 @@ a menu (neither describes the open one).
 The selection alone is the engine command `selection.get` (run it with `engine.execute`; read-only, no undo step, headless too): `{count, items}`, each item as `select.set` takes it (`type`, `body`, `index`, `point`, `id`, `sketch`, `path`…) with `kind` and, unless `detail: false`, what it resolves to: a face's persistent `name`, `surface` (`plane` with `normal`, `cylinder` with `origin`, `axis` and `radius`, `cone`, `sphere`, `torus`, or `other`) and `area_mm2`; an edge's persistent `name`, `curve` (`line`, `circle`, `arc`, `other`), `length_mm`, `start`, `end` and, when round, `center`, `axis` and `radius`; a body's `volume_mm3`, `feature` and `visible`; a body item's `component` and `occurrence_path` in an assembly; a sketch item's `sketch` (its id, so the item can go back to `select.set`), `sketch_name` and `entity` (a line's `sketch_midpoint` gives `midpoint` and its `position`). `ui.selection` (below) reports the window's view of it with the open dialog's inputs and the hovered item.
 
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
+
+### Design tabs and the active design
+
+The desktop window can hold several designs, one in each design tab, but only one is **active**:
+the one the window shows. Every `engine.execute`, `engine.script` and `engine.batch` call acts on
+the active design alone, whatever it runs (`plugin.run`, `file.save_as`, `solid.box`…). A command
+never names a design, so a client that works on several designs makes the one it wants active
+first, then sends the commands, then moves on:
+
+| Command | Parameters | Result |
+| --- | --- | --- |
+| `file.new` | `name?`, `new_tab?`: bool (default false) | `{name}`. With `new_tab: true` the design opens in a tab of its own, after the active one, and becomes active; the design that was open stays open as it was. The reply adds `document_id`, the new design's id. It always opens a tab, even where the active design is blank. Without `new_tab` the active design is replaced, as before |
+| `doc.open` | `path`, `new_tab?`: bool (default false), and its other parameters | The file opens in a tab of its own and becomes active, even where the active design is blank, which an ordinary open replaces. A file that is already open in a tab is shown instead, as for any open. Ask for the new design's id with `document.revision` once the reply has come. When the person at the window is in the middle of something (a dialog, a tool, a save prompt), the tab opens behind the active one and the active design does not change: `document.list` says which it is. A failed open opens no tab |
+| `document.list` | `{}` | `{documents: [{document_id, name, path, active, dirty}], active_document_id}`: the open designs in tab order, `path` null until the design is saved. Only reads |
+| `document.activate` | `document_id` (from `document.list`, `document.revision` or `file.new`) | `{document_id, name, path}`: shows that design's tab, so every later command acts on it. An id that no open design has is an error and changes nothing |
+
+`document_id` is the id `document.revision` gives: it belongs to an open design, stays through saves
+and renames, and is new for every design started or opened. `file.new` without `new_tab` and
+`doc.open` into a blank tab replace the design in the active tab, so they give it a new id.
+
+`new_tab` and `document.activate` change which design is active, so `engine.batch` and
+`engine.script` refuse them, as they refuse `component.edit_in_place` and `view.next_tab` (send
+them one by one): a rollback or a later step would otherwise land in the wrong design. The command
+line and the headless MCP server hold one design and have no tabs: `document.list` answers with that
+design, `document.activate` accepts its id, and `new_tab: true` is refused with an error saying so.
+
+Plugin approvals (`plugin.install`'s `approve`, the Plugins page of Preferences) belong to the
+plugin, not to a design: they are kept in the preferences and the plugins folder's grant store,
+and every design tab runs the plugin with them. Opening a design in a new tab asks for no
+approval again.
+
+A program that puts one sheet in each tab runs, for each sheet: `file.new {"name": "Sheet 1",
+"new_tab": true}`, then the plugin and `file.save_as`, which both act on the new design. A first
+design that is still blank when the program starts (a freshly launched window has one) keeps its
+tab; `document.close` closes it when it is not wanted.
 
 ### View windows
 
@@ -1032,7 +1072,7 @@ no box selection.
 | `ui.rename` | `text?`, `commit?` (default true) | finishes the rename box a Rename item opened; a refused name is the error and the box stays open |
 | `ui.selection` | | the selection, the open dialog's inputs, the hovered item, and the active sketch's drawn dimensions (`dimensions`: id and text centre, `dimension_selected`, `dimension_editing`), and finished sketches' dimensions shown in the model view (`shown_dimensions`: sketch, id and text centre; a double-click there edits the value) |
 | `ui.worldToScreen` | `points`: `[[x, y, z]…]` world points | their screen points |
-| `ui.triad` | | screen points of the 3D sketch move triad's handles (`x`, `y`, `z`, `plane`) |
+| `ui.triad` | | screen points of a clicked drawn 3D point's arrows (`x`, `y`, `z`, `plane`), there under the `sketch_move_classic` preference |
 | `ui.sketchToScreen` | `points`: `[[x, y]…]` in active-sketch coordinates | their screen points (null when behind the camera) |
 | `ui.dialogInput` | `index` | what clicking an input's Select chip does: picks go to that input |
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
@@ -1131,6 +1171,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `design_sub_tab_render` (default true: Render and Animate open as views of their design; false: they replace the current view)
 - `design_sub_tab_sheets` (default true: a drawing sheet opens as a view of its design; false: it replaces the current view)
 - `design_views_as_tabs` (default false: each design keeps one tab, with a view switcher menu while it has more than one view; true: a design's views are tabs inside its tab)
+- `designs_folder` (string, default empty: Save and Save As open in the folder last used; otherwise the folder they open in for a design that has never been saved. Save As for a saved design still opens beside it. Desktop app only; [default folders](book/src/guide/files.md#default-folders), #5522)
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dimension_colour` (`null` (default) or `[r, g, b]` numbers 0…255: the colour a sketch dimension draws its lines, arrows and value in; null uses the theme's dimension colours. Selection, hover and conflicts keep their own colours, #14121)
 - `dimension_rim` (default true: dimension lines and arrows, and fully constrained sketch lines, are drawn over a rim in the theme's halo colour so they read on a lit face in the Dark theme; false draws them bare, #17575)
@@ -1140,6 +1181,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `dimension_text_scale` (default 1, 0.5…2.5: how far a sketch dimension's text is scaled; it applies in the open sketch and to Show Dimensions, #14121)
 - `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
 - `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
+- `exports_folder` (string, default empty: export dialogs open in the folder last used; otherwise the folder File › Export, Save As Mesh and other saved files open in, until another folder is chosen in one of them. Desktop app only; [default folders](book/src/guide/files.md#default-folders), #5522)
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `extrude_custom_distance` (string, default `10 mm`: the length a new Extrude starts at when `extrude_start` is `custom`; any length expression, and one that doesn't read as a length gives the fixed 10)
@@ -1212,10 +1254,11 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `reuse_imports` (default true: reopen unchanged STEP and IGES files using the local saved-model cache; false imports each time). `doc.open {reuse_import: false}` bypasses reading and writing this cache for one open; its reply includes `import_reused` and `content_sha256`. `file.import_cache_clear {}` removes cached imports and returns `{removed}`, keeping stand-up answers. `SOLIDCRAFT_IMPORT_CACHE_DIR` overrides the default `imports` folder under SolidCraft's per-user data folder; `SOLIDCRAFT_NO_MODEL_CACHE` also bypasses import reuse.
 - `ribbon_menus_follow_hover` (default false). Click a ribbon panel label to open its menu. Hover another panel label to switch, or move outside the ribbon and open menu to close it.
 - `ribbon_reveal` (default false: hovering a result in Search commands switches the ribbon to the command's tab and marks its button, or opens the panel drop-down that holds it on its row, handle `ribbon:reveal`; leaving the results goes back to the tab before; a command started from the search blinks there, and a running command from a drop-down marks its panel label, `ribbon:running_section:<TAB>:<SECTION>`, #7287)
+- `legacy_surface_toolbar` (Layout, default false): restore the Surface tab's Convert section with Thicken and Convert Mesh. Off puts Thicken in Create and mesh commands in Mesh.
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
-- `nav_button_map` (default `{}`: every button follows the mouse mapping): what dragging a button does, by `left`, `middle`, `right`, `extra1` (side back) or `extra2` (side forward), as `orbit`, `pan`, `zoom` or `none`, after any keys held (`shift+`, `ctrl+`, `alt+`), e.g. `{"extra1": "orbit", "extra2": "shift+pan"}`. A mapped button replaces the preset's bindings for it; a plain click on a side button still goes Back
+- `nav_button_map` (default `{}`: every button follows the mouse mapping): what dragging a button does, by `left`, `middle`, `right`, `extra1` (side back), `extra2` (side forward) or `button6` to `button16` (the further buttons of a mouse with many), as `orbit`, `pan`, `zoom` or `none`, after any keys held (`shift+`, `ctrl+`, `alt+`), e.g. `{"extra1": "orbit", "extra2": "shift+pan"}`. A mapped button replaces the preset's bindings for it; a plain click on a side button still goes Back
 - `save_prompt_one_at_a_time` (default false: closing several tabs or quitting with more than one unsaved design asks once, in one "Save changes to N designs?" list; true restores one "Save changes?" prompt per design, #11680)
-- `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
+- `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in any visual style, including Fillet and Chamfer inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
 - `show_design_view_switcher` (default false: a design tab shows no view switcher until the design has a second view the user opened, and editing a sketch or opening Render stays in the view shown; true: every design tab shows its view switcher (handle `tab:switcher`), even with one view, and Render opens a view of its own as in 0.43.0; `design_views_as_tabs` true overrides it)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
@@ -1227,6 +1270,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_construction_lines` (default true: show the Construction Line tool family in Sketch CREATE; false restores the earlier menu)
 - `sketch_exit_view` (`keep` (default: the view stays where it is when a sketch ends), `previous` (back to the view from before the sketch), `unless_rotated` (back unless the sketch view was turned))
 - `sketch_mirror_auto_line` (default true: opening Sketch Mirror uses the only preselected straight construction line of the active sketch as its reference; unselected lines do not count; false keeps manual reference selection)
+- `sketch_move_classic` (default false: Move/Copy Sketch Entities shows its X/Y/Z triad, and a drawn 3D point drags freely; true: only its X Distance arrow, and a clicked drawn 3D point gets its own arrows, as before)
 - `sketch_open_look_at` (default true: creating or editing a sketch turns the view to face it; false leaves the view as it is, and Look At faces the sketch when asked)
 - `sketch_recent_snap` (default false: while drawing, the cursor snaps where the horizontal guide of one recent circle or arc centre or straight-edge midpoint meets the vertical guide of another; a free coordinate, with no constraint and no construction geometry. Off: those guides stay visual and the cursor does not move. The references come from `sketch_tracking_guides`, #8694)
 - `sketch_square_rectangles` (default false: Shift held while drawing a Two-Point or Center Rectangle prefers a line midpoint, as it always has. True: it makes the rectangle a square instead, the second corner going to the larger of the two distances from the first, and adds an Equal constraint between two sides so one dimension defines it, unless both a width and a height are typed, which then win; #18114)
@@ -1239,7 +1283,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `stand_up_unknown` (`note` (default: a file whose header names no program known to save Y up and whose bodies seem to lie on their back (their flat area across Y outweighs their flat area facing down Z) gets a small note over the view, "Did this part open the wrong way up?", with Stand it up and Don't ask again as the handles `stand_up:stand` and `stand_up:never`, and its close (×) as `toast:stand_up:close` (also `stand_up:dismiss`); it goes by itself after 10 seconds and never blocks input), `ask` (the "Stand this part up?" dialog for every file from another program, SolidWorks too, without looking at how it rests, as before #7717), `off` (no offer); otherwise a SolidWorks file gets the dialog, or the note when its bodies clearly stand on Z already)
 - `status_bar` (default false: a thin bar along the window's bottom edge, below History, handle `status:bar`: what is being edited (`status:editing`), the open sketch's state in its colour (`status:sketch`) and the design's units (`status:units`, a click opens the Units menu, whose rows run `document.units`); the sketch's state then leaves the view's top-left corner, #7243)
 - `step_values` (default false: Up/Down and the wheel step a plain number in a focused value field)
-- `tab_double_click_renames` (default true: a double-click on the selected design's tab edits its name in the tab, handle `tab:rename`; Enter or a click elsewhere keeps the name through `component.rename` with `component: 0`, Esc cancels, and a name left as it was or blank changes nothing; false: a double-click on a tab maximizes the window, as the bar's empty space does, as before)
+- `tab_double_click_renames` (default true: a double-click on the selected design's tab edits its name in the tab, handle `tab:rename`; Enter or a click elsewhere keeps the name through `component.rename` with `component: 0`, Esc cancels, and a name left as it was or blank changes nothing; false: a double-click on a tab maximizes the window, as the bar's empty space does, as before; either way a tab's right-click menu offers Rename, handle `tab_menu:ui.renameTab`, which shows that design and edits its name the same way)
 - `theme` (`dark`, `light`, `system` or a theme file's id: a built-in one such as `gruvbox-dark`, or an imported one; the reply's `theme_ids` lists them)
 - `theme_export: true` (the reply's `theme_file` is the active theme, including a followed file; themes with options retain their authored definitions, defaults and overlays, while older themes keep the complete snapshot shape; saved option values are excluded; see [colour themes](book/src/guide/ui-tour.md#colour-themes))
 - `theme_follow` (desktop only, default `""`: a `solidcraft-theme/1` file's path to follow as the theme, reloaded within about a second whenever it changes and when the window gains the focus; the file is read at once, and a file that doesn't read keeps the last good theme; `""` stops following, as does setting `theme`; in the browser it is an error; the launch flag `--theme-file PATH` follows a file for one run without saving it; the reply's `theme_followed` is the path followed now or null, and `theme_follow_error` why its last read was not applied, or null)
