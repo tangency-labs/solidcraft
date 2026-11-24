@@ -46,20 +46,20 @@
 )]
 
 use serde_json::Value;
-use solidcore::Kernel;
 use solidcore::curve::curve::CurveKind;
-use solidcore::mass::enclosure::{VolumeSign, enclose_mass_properties};
+use solidcore::mass::enclosure::{enclose_mass_properties, VolumeSign};
 use solidcore::offset::curve_on_surfaces::curve_on_surfaces;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::face::p2 as face_p2;
-use solidcore::topology::{Brep, edge};
+use solidcore::topology::{edge, Brep};
+use solidcore::Kernel;
 
-use crate::UnitDiff;
 use crate::case::regression_case;
 use crate::dump::Captured;
 use crate::golden::{default_dir, encode, read};
 use crate::soundness::Soundness;
+use crate::UnitDiff;
 
 /// What [`crate::soundness`] found of a row's body on main.
 struct Fact {
