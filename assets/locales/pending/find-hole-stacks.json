@@ -3,24 +3,24 @@
     "cmd.inspect.hole_stacks": "Find Hole Stacks"
   },
   "ar": {
-    "cmd.inspect.hole_stacks": "البحث عن الثقوب المتحاذية"
+    "cmd.inspect.hole_stacks": "العثور على تراصّات الثقوب"
   },
   "he": {
-    "cmd.inspect.hole_stacks": "חיפוש חורים מיושרים"
+    "cmd.inspect.hole_stacks": "מציאת ערימות חורים"
   },
   "ja": {
-    "cmd.inspect.hole_stacks": "整列する穴を検索"
+    "cmd.inspect.hole_stacks": "穴の重なりを検出"
   },
   "vi": {
-    "cmd.inspect.hole_stacks": "Tìm các lỗ thẳng hàng"
+    "cmd.inspect.hole_stacks": "Tìm chồng lỗ"
   },
   "zh": {
-    "cmd.inspect.hole_stacks": "查找对齐孔"
+    "cmd.inspect.hole_stacks": "查找孔叠"
   },
   "de": {
-    "cmd.inspect.hole_stacks": "Fluchtende Bohrungen finden"
+    "cmd.inspect.hole_stacks": "Bohrungsstapel finden"
   },
   "ko": {
-    "cmd.inspect.hole_stacks": "정렬된 구멍 찾기"
+    "cmd.inspect.hole_stacks": "구멍 스택 찾기"
   }
 }
