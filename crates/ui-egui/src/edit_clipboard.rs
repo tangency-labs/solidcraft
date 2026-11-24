@@ -77,9 +77,9 @@ fn placement_selection(app: &SolveApp) -> Vec<Vec<u64>> {
     app.session.selection.iter().filter_map(|s| if let Sel::Occurrence { path } = s { Some(path.clone()) } else { None }).collect()
 }
 
-/// The selected bodies.
+/// The selected bodies (every shown one after Select All).
 fn body_selection(app: &SolveApp) -> Vec<String> {
-    app.session.selection.iter().filter_map(|s| if let Sel::Body { name } = s { Some(name.clone()) } else { None }).collect()
+    app.session.selected_items().unwrap_or_default().into_iter().filter_map(|s| if let Sel::Body { name } = s { Some(name) } else { None }).collect()
 }
 
 /// Does Copy copy the whole design (its row picked in the browser)? Features, bodies or

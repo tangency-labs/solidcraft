@@ -288,7 +288,7 @@ fn rename_selected(app: &SolveApp, bodies: &[String]) -> Option<Vec<String>> {
 pub(crate) fn sel_bodies(app: &SolveApp) -> Vec<String> {
     // A whole-body selection names every shown body: resolve it here, once per menu build (about
     // 5 ms at 56,000 bodies), never per frame.
-    if app.session.selection_all_bodies {
+    if app.session.all_bodies_selected() {
         return app
             .session
             .selected_items()

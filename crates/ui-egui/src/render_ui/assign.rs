@@ -133,7 +133,7 @@ pub(crate) fn tile(app: &mut SolveApp, look: Value, drag: bool) -> Result<(), St
     } else if !app.session.has_selection() {
         arm(app, look)
     } else {
-        apply(app, &look, targets(app, &app.session.selection)?)
+        apply(app, &look, targets(app, &app.session.selected_items().map_err(|e| e.to_string())?)?)
     }
 }
 

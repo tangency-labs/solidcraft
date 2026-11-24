@@ -367,7 +367,8 @@ pub fn with_context(text: &str, context: &Context) -> String {
 
 /// Describe what the session has selected, as what was clicked: see [`clicked`].
 pub fn describe_selection(session: &mut Session) -> Context {
-    let groups = clicked(session, &session.selection.clone());
+    // A whole-body selection (Select All) is described as the bodies it covers.
+    let groups = clicked(session, &session.selected_items().unwrap_or_default());
     describe_groups(session, &groups)
 }
 

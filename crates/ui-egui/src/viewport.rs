@@ -7667,7 +7667,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let ao_samples = ao_samples(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let (clip, clip_hatch) = section_clip(app);
         let frame = Frame {
-            selection_all: app.session.selection_all_bodies,
+            selection_all: app.session.all_bodies_selected(),
             product_lights: None,
             ssaa,
             ao_samples,
@@ -9014,10 +9014,16 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
     match sel {
         Some(x) => {
             let items = picked_selection(&app.session, &x);
-            // Toggle-removal: all picked items are already selected and toggle is allowed.
-            if add && toggle && items.iter().all(|x| app.session.selection.iter().any(|y| crate::selection::same_item(x, y))) {
-                let rest: Vec<Sel> =
-                    app.session.selection.iter().filter(|y| !items.iter().any(|x| crate::selection::same_item(x, y))).cloned().collect();
+            // Toggle-removal: all picked items are already selected and toggle is allowed. After
+            // Select All, a Ctrl+click on a body leaves every other shown body selected, so the
+            // scope is named here, once, for that click.
+            let current = if add && toggle && app.session.all_bodies_selected() {
+                std::borrow::Cow::Owned(app.session.selected_items().unwrap_or_default())
+            } else {
+                std::borrow::Cow::Borrowed(&app.session.selection)
+            };
+            if add && toggle && items.iter().all(|x| current.iter().any(|y| crate::selection::same_item(x, y))) {
+                let rest: Vec<Sel> = current.iter().filter(|y| !items.iter().any(|x| crate::selection::same_item(x, y))).cloned().collect();
                 let _ = app.run("select.set", json!({ "items": rest }));
             } else {
                 let _ = app.run("select.set", json!({"items": items, "add": add}));

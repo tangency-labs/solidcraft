@@ -46,7 +46,7 @@ pub fn selection_params(app: &SolveApp) -> Value {
     // A whole-body selection is a scope: name it, not the 56,100 bodies it covers.
     let mut params = json!({
         "items": items,
-        "all_bodies": app.session.selection_all_bodies,
+        "all_bodies": app.session.all_bodies_selected(),
         "occurrences": occurrences,
         "canvases": canvases,
         "joints": app.tree.picked_joints,

@@ -3093,3 +3093,26 @@ fn select_all_preselects_every_shown_body_for_move() {
     let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert_eq!(d.inputs[0].items.body_names(), shown, "a whole-body selection preselects every shown body");
 }
+
+#[test]
+fn select_all_holds_every_shown_body_and_ctrl_click_takes_one_out() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    app.run("select.all", json!({})).unwrap();
+    // A right-click on a body the scope covers keeps the selection for the menu.
+    assert!(crate::selection::holds_body(&app.session, "Spare"), "Select All holds every shown body");
+    // Ctrl+click on one of them leaves the others selected.
+    crate::viewport::select(&mut app, Some(solidcraft_engine::Sel::Body { name: "Spare".into() }), true, true);
+    let others: Vec<solidcraft_engine::Sel> = app
+        .session
+        .world_state()
+        .unwrap()
+        .bodies
+        .iter()
+        .filter(|b| b.name != "Spare")
+        .map(|b| solidcraft_engine::Sel::Body { name: b.name.clone() })
+        .collect();
+    assert_eq!(app.session.selection, others);
+    assert!(!app.session.selection_all_bodies);
+}
