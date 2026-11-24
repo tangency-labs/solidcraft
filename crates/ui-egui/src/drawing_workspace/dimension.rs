@@ -168,11 +168,11 @@ impl Picked {
 
     /// The edge, or the outline's face: both are named by the body, the index and the path.
     fn edge(&self) -> Value {
-        json!({"body": self.body, "index": self.index(), "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()})
+        json!({"body": self.body, "index": self.index(), "path": self.path})
     }
 
     fn centre(&self) -> Value {
-        json!({"centre": {"body": self.body, "index": self.index()}, "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()})
+        json!({"centre": {"body": self.body, "index": self.index()}, "path": self.path})
     }
 
     fn is_outline(&self) -> bool {
@@ -189,7 +189,7 @@ impl Picked {
     fn end(&self, app: &SolveApp) -> Option<Value> {
         let pick = EdgePick::Index { body: self.body.clone(), index: self.index() };
         let [start, _]: [Vec3; 2] = app.session.doc.edge_line(&app.session.model, &pick, &self.path).ok()?;
-        Some(json!({"point": [start.x, start.y, start.z], "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()}))
+        Some(json!({"point": [start.x, start.y, start.z], "path": self.path}))
     }
 }
 

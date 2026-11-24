@@ -114,9 +114,11 @@ impl DesktopNativeAdapter {
         let registration = state.hosts.get(host)?;
         let min = egui::vec2(min.width, min.height);
         let max = egui::vec2(max.width, max.height);
-        let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size(min).with_max_inner_size(max).with_visible(true);
-        #[cfg(target_os = "windows")]
-        let builder = builder.with_windows_owned_by_root(true);
+        let builder = crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), ctx.viewport_id())
+            .with_title(title)
+            .with_min_inner_size(min)
+            .with_max_inner_size(max)
+            .with_visible(true);
         if registration.ready {
             return Some(builder);
         }

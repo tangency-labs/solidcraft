@@ -28,6 +28,7 @@ fn info(focused: bool) -> egui::ViewportInfo {
 fn install_renderer() {
     egui::Context::set_immediate_viewport_renderer(|ctx, viewport| {
         let id = viewport.ids.this;
+        assert_eq!(viewport.builder.native_owner, Some(egui::ViewportId::ROOT), "immediate view has the main window as its owner");
         SEEN.with(|seen| {
             if !seen.borrow().contains(&id) {
                 seen.borrow_mut().push(id);
@@ -96,7 +97,8 @@ fn frame(h: &mut Harness, root: Vec<egui::Event>) {
         crate::view_windows::show(app, ui.ctx(), None);
     });
     out.textures_delta.clear();
-    for id in out.viewport_output.keys().filter(|id| **id != egui::ViewportId::ROOT) {
+    for (id, viewport) in out.viewport_output.iter().filter(|(id, _)| **id != egui::ViewportId::ROOT) {
+        assert_eq!(viewport.builder.native_owner, Some(egui::ViewportId::ROOT), "deferred view has the main window as its owner");
         SEEN.with(|s| {
             if !s.borrow().contains(id) {
                 s.borrow_mut().push(*id);

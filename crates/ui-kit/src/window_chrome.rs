@@ -35,6 +35,11 @@ use solidcraft_theme::Tokens;
 
 pub mod native_menu;
 
+/// Associate a native pop-out with the SolidCraft viewport that opened it.
+pub fn popout_viewport(builder: ViewportBuilder, owner: egui::ViewportId) -> ViewportBuilder {
+    builder.with_native_owner(owner)
+}
+
 /// One caption button: as wide as the native Windows ones.
 pub const BUTTON_WIDTH: f32 = 46.0;
 /// The three caption buttons together.
@@ -232,7 +237,17 @@ pub fn mark_input_stale(ctx: &egui::Context) {
 /// (`release_lost_presses`). Otherwise egui keeps the button down and the canvas ignores every
 /// pick (#16460).
 pub fn release_stale_input(ctx: &egui::Context, raw: &mut egui::RawInput) {
-    recover_after_focus(ctx, raw);
+    recover_after_focus(ctx, raw, true);
+    release_lost_presses(ctx, raw);
+}
+
+/// [`release_stale_input`] for a platform that reports the buttons it holds itself and lets go of
+/// them when the window really loses focus: the web app's `mouse_buttons`, which runs first. The
+/// focus moving inside the page, from the canvas to eframe's hidden text input and back as a value
+/// box takes or gives up the keyboard, reaches egui as the window losing and regaining focus; that
+/// must not let go of a held button (#16209, #21283). Modifiers are still cleared.
+pub fn release_stale_input_with_tracked_buttons(ctx: &egui::Context, raw: &mut egui::RawInput) {
+    recover_after_focus(ctx, raw, false);
     release_lost_presses(ctx, raw);
 }
 
@@ -240,8 +255,9 @@ pub fn release_stale_input(ctx: &egui::Context, raw: &mut egui::RawInput) {
 /// focus: release each pointer button egui still holds down, at the last pointer position, before
 /// the frame's own events. On Wayland a file dialog takes the pointer and keyboard, so a release
 /// may never arrive, and egui would keep the button down and ignore canvas picks (#16460). A
-/// regained focus also clears the modifiers; the OS reports the real ones after.
-fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput) {
+/// regained focus also clears the modifiers; the OS reports the real ones after. With
+/// `release_buttons` false the platform keeps the buttons right itself, and only the modifiers go.
+fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput, release_buttons: bool) {
     let last_lost = raw.events.iter().rposition(|e| matches!(e, egui::Event::WindowFocused(false)));
     let regained = raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(true)));
     let marked = ctx.data(|d| d.get_temp::<bool>(stale_input_id())).unwrap_or(false);
@@ -266,7 +282,7 @@ fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput) {
     let (pos, modifiers) = ctx.input(|i| (i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(Pos2::ZERO), i.modifiers));
     let held: Vec<PointerButton> = [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle]
         .into_iter()
-        .filter(|b| ctx.input(|i| i.pointer.button_down(*b)))
+        .filter(|b| release_buttons && ctx.input(|i| i.pointer.button_down(*b)))
         .collect();
     let mut recovery = Vec::new();
     if !held.is_empty() {
@@ -584,6 +600,51 @@ mod tests {
         // A drag from a caption button doesn't move the window.
         let (cmds, _) = w.gesture(&[min, min + vec2(-30.0, 8.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "{cmds:?}");
+    }
+
+    /// #21283: in the web app the focus moving from the canvas to eframe's hidden text input (and
+    /// back) reaches egui as the window losing and regaining focus, in one batch or over two
+    /// frames. With the buttons tracked by the platform, a held button stays held and only the
+    /// modifiers are cleared; the native hook still lets go of it.
+    #[test]
+    fn a_focus_move_inside_the_page_keeps_a_tracked_button_held() {
+        type Hook = fn(&egui::Context, &mut RawInput);
+        let run = |hook: Hook, batches: &[(Vec<Event>, bool)]| {
+            let ctx = crate::test_support::context();
+            let at = pos2(200.0, 300.0);
+            let press = Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Default::default() };
+            let mut time = 0.0;
+            let mut frame = |events: Vec<Event>, focused: bool| {
+                time += 0.05;
+                let mut raw = RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+                    time: Some(time),
+                    focused,
+                    events,
+                    ..Default::default()
+                };
+                hook(&ctx, &mut raw);
+                let mut out = ctx.run_ui(raw, |_| {});
+                out.textures_delta.clear();
+            };
+            frame(vec![Event::WindowFocused(true), Event::PointerMoved(at)], true);
+            frame(vec![press], true);
+            for (events, focused) in batches {
+                frame(events.clone(), *focused);
+            }
+            frame(vec![], true);
+            ctx.input(|i| (i.pointer.button_down(PointerButton::Middle), i.modifiers))
+        };
+        let one_batch = vec![(vec![Event::WindowFocused(false), Event::WindowFocused(true)], true)];
+        let two_frames = vec![(vec![Event::WindowFocused(false)], false), (vec![Event::WindowFocused(true)], true)];
+        for batches in [&one_batch, &two_frames] {
+            assert_eq!(
+                run(release_stale_input_with_tracked_buttons, batches),
+                (true, egui::Modifiers::NONE),
+                "the platform's buttons are kept: {batches:?}"
+            );
+            assert!(!run(release_stale_input, batches).0, "the native hook lets go of a button it may not hear released: {batches:?}");
+        }
     }
 
     #[test]

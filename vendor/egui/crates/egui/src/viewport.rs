@@ -326,14 +326,14 @@ pub struct ViewportBuilder {
     // windows:
     pub drag_and_drop: Option<bool>,
     pub taskbar: Option<bool>,
-    /// Whether the native WGPU backend makes this an owned window of the root window on Windows.
-    pub windows_owned_by_root: Option<bool>,
 
     pub close_button: Option<bool>,
     pub minimize_button: Option<bool>,
     pub maximize_button: Option<bool>,
 
     pub window_level: Option<WindowLevel>,
+    /// The viewport whose native window should own this window in the WGPU backend.
+    pub native_owner: Option<ViewportId>,
 
     pub mouse_passthrough: Option<bool>,
 
@@ -529,10 +529,10 @@ impl ViewportBuilder {
         self
     }
 
-    /// On Windows, keep this native WGPU viewport with the root window as an owned window.
+    /// Set this viewport's owner in the native WGPU backend.
     #[inline]
-    pub fn with_windows_owned_by_root(mut self, owned: bool) -> Self {
-        self.windows_owned_by_root = Some(owned);
+    pub fn with_native_owner(mut self, owner: ViewportId) -> Self {
+        self.native_owner = Some(owner);
         self
     }
 
@@ -754,9 +754,9 @@ impl ViewportBuilder {
             minimize_button: new_minimize_button,
             maximize_button: new_maximize_button,
             window_level: new_window_level,
+            native_owner: new_native_owner,
             mouse_passthrough: new_mouse_passthrough,
             taskbar: new_taskbar,
-            windows_owned_by_root: new_windows_owned_by_root,
             window_type: new_window_type,
             override_redirect: new_override_redirect,
             monitor: new_monitor,
@@ -933,11 +933,9 @@ impl ViewportBuilder {
             recreate_window = true;
         }
 
-        if new_windows_owned_by_root.is_some()
-            && self.windows_owned_by_root != new_windows_owned_by_root
-        {
-            self.windows_owned_by_root = new_windows_owned_by_root;
-            recreate_window |= cfg!(target_os = "windows");
+        if new_native_owner.is_some() && self.native_owner != new_native_owner {
+            self.native_owner = new_native_owner;
+            recreate_window = true;
         }
 
         if new_fullsize_content_view.is_some()

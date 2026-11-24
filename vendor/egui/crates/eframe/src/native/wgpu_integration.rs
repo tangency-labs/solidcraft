@@ -168,16 +168,22 @@ impl<'app> WgpuWinitApp<'app> {
             ..
         } = &mut *shared;
 
-        let root_window = windows_root_window(viewports);
-        for viewport in viewports.values_mut() {
-            viewport.initialize_window(
-                event_loop,
-                &running.integration.egui_ctx,
-                viewport_from_window,
-                painter,
-                *clipboard_shortcuts,
-                root_window.as_deref(),
-            );
+        let pending: Vec<_> = viewports
+            .iter()
+            .filter(|(_, viewport)| viewport.window.is_none())
+            .map(|(&id, viewport)| (id, native_owner_window(viewports, &viewport.builder)))
+            .collect();
+        for (id, owner) in pending {
+            if let Some(viewport) = viewports.get_mut(&id) {
+                viewport.initialize_window(
+                    event_loop,
+                    &running.integration.egui_ctx,
+                    viewport_from_window,
+                    painter,
+                    *clipboard_shortcuts,
+                    owner.as_ref(),
+                );
+            }
         }
     }
 
@@ -1134,7 +1140,7 @@ impl Viewport {
         windows_id: &mut HashMap<WindowId, ViewportId>,
         painter: &mut egui_wgpu::winit::Painter,
         clipboard_shortcuts: bool,
-        root_window: Option<&Window>,
+        native_owner: Option<&Arc<Window>>,
     ) {
         if self.window.is_some() {
             return; // we already have one
@@ -1144,15 +1150,14 @@ impl Viewport {
 
         let viewport_id = self.ids.this;
 
-        let owner = if cfg!(target_os = "windows")
-            && viewport_id != ViewportId::ROOT
-            && self.builder.windows_owned_by_root == Some(true)
+        let owner = if viewport_id != ViewportId::ROOT
+            && self.builder.native_owner.is_some_and(|id| id != viewport_id)
         {
             // Keep this viewport pending until we can create it with its owner.
-            let Some(root_window) = root_window else {
+            let Some(owner) = native_owner else {
                 return;
             };
-            Some(root_window)
+            Some(owner)
         } else {
             None
         };
@@ -1231,12 +1236,8 @@ fn is_viewport_or_descendant_visible(viewports: &Viewports, viewport_id: Viewpor
     })
 }
 
-fn windows_root_window(viewports: &Viewports) -> Option<Arc<Window>> {
-    if cfg!(target_os = "windows") {
-        viewports.get(&ViewportId::ROOT)?.window.clone()
-    } else {
-        None
-    }
+fn native_owner_window(viewports: &Viewports, builder: &ViewportBuilder) -> Option<Arc<Window>> {
+    viewports.get(&builder.native_owner?)?.window.clone()
 }
 
 fn render_immediate_viewport(
@@ -1262,7 +1263,7 @@ fn render_immediate_viewport(
             ..
         } = &mut *shared.borrow_mut();
 
-        let root_window = windows_root_window(viewports);
+        let owner = native_owner_window(viewports, &builder);
         let viewport = initialize_or_update_viewport(
             viewports,
             ids,
@@ -1279,7 +1280,7 @@ fn render_immediate_viewport(
                     viewport_from_window,
                     painter,
                     *clipboard_shortcuts,
-                    root_window.as_deref(),
+                    owner.as_ref(),
                 );
             });
         }
