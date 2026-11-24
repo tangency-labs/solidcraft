@@ -3128,6 +3128,28 @@ pub(crate) mod tests {
         assert!(!WATCH.subscribed());
     }
 
+    /// #19886: a drawing created or opened over the control channel (MCP) is shown in Drawing,
+    /// as File › New Drawing shows it; during a sketch the window stays and the command still runs.
+    #[test]
+    fn a_drawing_opened_over_control_is_shown_in_drawing() {
+        let mut h = crate::scenario::Harness::new();
+        let workspace = |h: &mut crate::scenario::Harness| h.call("ui.workspace", json!({}))["result"]["workspace"].clone();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 20, "height": 3}}));
+        let created = h.call("engine.execute", json!({"command": "drawing.create", "params": {}}));
+        assert_eq!(created["ok"], true, "{created}");
+        assert_eq!(workspace(&mut h), "drawing", "drawing.create shows the drawing");
+        h.call("ui.workspace", json!({"workspace": "design"}));
+        let id = created["result"]["id"].clone();
+        let opened = h.call("engine.execute", json!({"command": "drawing.open", "params": {"drawing": id}}));
+        assert_eq!(opened["ok"], true, "{opened}");
+        assert_eq!(workspace(&mut h), "drawing", "drawing.open shows the drawing");
+        h.call("ui.workspace", json!({"workspace": "design"}));
+        h.call("engine.execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+        let opened = h.call("engine.execute", json!({"command": "drawing.open", "params": {"drawing": id}}));
+        assert_eq!(opened["ok"], true, "{opened}");
+        assert_eq!(workspace(&mut h), "design", "a sketch being edited keeps the window in Design");
+    }
+
     /// #3750: the "Recover unsaved design?" prompt is `ui.inspect`'s `dialog`, and `ui.recover`
     /// answers it without clicking: Discard deletes the autosave and closes the prompt.
     #[test]
