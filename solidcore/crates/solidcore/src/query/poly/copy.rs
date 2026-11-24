@@ -37,6 +37,7 @@
 //! - **`NULL` source.** [`poly_brep_copy`] takes a reference, so `SmApiPolyBrepCopy`'s
 //!   `SM_ERR_INVALID_INPUT` for a null pointer has no counterpart.
 
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::{AttributeStore, Behavior, ObjectKey};
 use crate::geom::tol;
@@ -188,7 +189,6 @@ impl PolyBrepData {
     /// `SmPolyBrepData::FromPolyBrep(crPolyBrep, rAttributes, NULL)`: the source's
     /// regions, shells, faces, loops, vertices and edges in list order, linked by index.
     fn from_poly_brep(k: &Kernel, src: &mut PolyBrep) -> Result<Self> {
-        const OP: &str = OP_COPY;
         let mut d = Self {
             zone_tol_3d: src.tolerance(),
             ..Self::default()
@@ -278,12 +278,10 @@ impl PolyBrepData {
 
         // Find radial ordering of edges
         let edge_map = index_map(&all_edges);
-        for (ii, &e) in all_edges.iter().enumerate() {
+        // (one record per edge, pushed in this order above)
+        for (ii, (rec, &e)) in d.edges.iter_mut().zip(&all_edges).enumerate() {
             let next_at_v = src.edge(e)?.next_at_v;
             let radial = src.edge_radial(e)?;
-            let rec = d.edges.get_mut(ii).ok_or_else(|| {
-                SolidError::query_failed(OP, "an edge record of the copy is out of range")
-            })?;
             // set NextRadialEdge index
             rec.next_radial_e = match radial {
                 Some(r) if r != e => get_map(&edge_map, &r),
@@ -298,11 +296,9 @@ impl PolyBrepData {
         }
 
         // set PolyVertex back Edge indices now that all PolyEdges have an index
-        for (ii, &v) in all_vertices.iter().enumerate() {
+        // (one record per vertex, pushed in this order above)
+        for (rec, &v) in d.vertices.iter_mut().zip(&all_vertices) {
             let head = src.vertex(v)?.edge_list;
-            let rec = d.vertices.get_mut(ii).ok_or_else(|| {
-                SolidError::query_failed(OP, "a vertex record of the copy is out of range")
-            })?;
             rec.edge_list = match head {
                 Some(h) => get_map(&edge_map, &h),
                 None => INVALID_KEY,
@@ -385,13 +381,13 @@ impl PolyBrep {
             for jj in 0..r.num_poly_shells {
                 let new_shell = self.add_shell(new_region)?;
                 let s = d.shells.get(r.start_poly_shell + jj).ok_or_else(|| {
-                    SolidError::query_failed(OP, "a shell record of the copy is out of range")
+                    SolidError::query(OP, QueryFailure::Defect { why: "a region's shell start and count point past the shell records, though from_poly_brep wrote them from the length of the shell list it then wrote" })
                 })?;
 
                 // Create SmPolyFaces
                 for kk in 0..s.num_poly_faces {
                     let f = d.faces.get(s.start_poly_face + kk).ok_or_else(|| {
-                        SolidError::query_failed(OP, "a face record of the copy is out of range")
+                        SolidError::query(OP, QueryFailure::Defect { why: "a shell's face start and count point past the face records, though from_poly_brep wrote them from the length of the face list it then wrote" })
                     })?;
                     let new_face = self.add_face(k, new_shell, f.zone_tol_3d, None)?;
                     {
@@ -403,10 +399,7 @@ impl PolyBrep {
                     // Create SmPolyLoops
                     for mm in 0..f.num_poly_loops {
                         let l = d.loops.get(f.start_poly_loop + mm).ok_or_else(|| {
-                            SolidError::query_failed(
-                                OP,
-                                "a loop record of the copy is out of range",
-                            )
+                            SolidError::query(OP, QueryFailure::Defect { why: "a face's loop start and count point past the loop records, though from_poly_brep wrote them from the length of the loop list it then wrote" })
                         })?;
                         let new_loop = self.start_poly_edge_loop(new_face)?;
                         {
@@ -422,10 +415,7 @@ impl PolyBrep {
                         // Create SmPolyEdges
                         for nn in 0..l.num_poly_edge {
                             let e = d.edges.get(l.start_poly_edge + nn).ok_or_else(|| {
-                                SolidError::query_failed(
-                                    OP,
-                                    "an edge record of the copy is out of range",
-                                )
+                                SolidError::query(OP, QueryFailure::Defect { why: "a loop's edge start and count point past the edge records, though from_poly_brep wrote them from the length of the edge list it then wrote" })
                             })?;
                             let edge_tol = tol::zone_tol3d(k, e.zone_tol_3d);
                             let new_edge = PolyEdgeId(push_slot(
@@ -453,18 +443,15 @@ impl PolyBrep {
         } // end for (ii) each Region
 
         // Link up vertices to edge list elements
-        for (m, v) in d.vertices.iter().enumerate() {
-            let new_vertex = *vertices
-                .get(m)
-                .ok_or_else(|| SolidError::query_failed(OP, "a copied vertex is out of range"))?;
-            let head =
-                if v.edge_list == INVALID_KEY {
-                    None
-                } else {
-                    Some(*all_edges.get(v.edge_list).ok_or_else(|| {
-                        SolidError::query_failed(OP, "a copied edge is out of range")
+        // (one vertex per record, added in this order above)
+        for (v, &new_vertex) in d.vertices.iter().zip(&vertices) {
+            let head = if v.edge_list == INVALID_KEY {
+                None
+            } else {
+                Some(*all_edges.get(v.edge_list).ok_or_else(|| {
+                        SolidError::query(OP, QueryFailure::Defect { why: "an edge index of a record has no copied edge, though the copy makes one edge per edge record, in the order from_poly_brep wrote them, and every such index is that of one of those records" })
                     })?)
-                };
+            };
             slot_mut(&mut self.vertex_slots, new_vertex.0, OP)?.edge_list = head;
         }
 
@@ -472,18 +459,18 @@ impl PolyBrep {
         for (m2, e) in d.edges.iter().enumerate() {
             let new_edge = *all_edges
                 .get(m2)
-                .ok_or_else(|| SolidError::query_failed(OP, "a copied edge is out of range"))?;
+                .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "an edge index of a record has no copied edge, though the copy makes one edge per edge record, in the order from_poly_brep wrote them, and every such index is that of one of those records" }))?;
             if e.next_radial_e != INVALID_KEY {
                 let next = *all_edges
                     .get(e.next_radial_e)
-                    .ok_or_else(|| SolidError::query_failed(OP, "a copied edge is out of range"))?;
+                    .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "an edge index of a record has no copied edge, though the copy makes one edge per edge record, in the order from_poly_brep wrote them, and every such index is that of one of those records" }))?;
                 slot_mut(&mut self.edge_slots, new_edge.0, OP)?.next_radial = next;
                 slot_mut(&mut self.edge_slots, next.0, OP)?.last_radial = new_edge;
             }
             if e.next_edge_at_v != INVALID_KEY {
                 let next = *all_edges
                     .get(e.next_edge_at_v)
-                    .ok_or_else(|| SolidError::query_failed(OP, "a copied edge is out of range"))?;
+                    .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "an edge index of a record has no copied edge, though the copy makes one edge per edge record, in the order from_poly_brep wrote them, and every such index is that of one of those records" }))?;
                 slot_mut(&mut self.edge_slots, new_edge.0, OP)?.next_at_v = Some(next);
                 slot_mut(&mut self.edge_slots, next.0, OP)?.prev_at_v = Some(new_edge);
             }
