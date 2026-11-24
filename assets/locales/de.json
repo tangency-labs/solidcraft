@@ -953,7 +953,7 @@
   "ai.prefs.control_listening": "Wartet auf 127.0.0.1:{port}",
   "ai.prefs.control_not_listening": "Nicht aktiv",
   "ai.prefs.control_port": "Port",
-  "ai.prefs.control_port_note": "Der Port, über den sich KI-Agenten auf diesem Computer verbinden (127.0.0.1). Standard ist 27878: Ist er belegt, wird der nächste freie Port genommen. Jeder andere Port wird genau so verwendet. Richte deinen MCP-Client auf denselben Port, zum Beispiel solidcraft-cli mcp --connect 127.0.0.1:7878.",
+  "ai.prefs.control_port_note": "Der Port, über den sich KI-Agenten auf diesem Computer verbinden (127.0.0.1). Standard ist 27878: Ist er belegt, wird der nächste freie Port genommen. Jeder andere Port wird genau so verwendet. Richte deinen MCP-Client auf denselben Port, zum Beispiel solidcraft-cli mcp --connect 127.0.0.1:27878.",
   "ai.prefs.control_port_taken": "Port {port} wird von einem anderen Programm (oder einem anderen SolidCraft-Fenster) verwendet. Wähle einen anderen Port.",
   "ai.prefs.follow_camera": "Der Kamera folgen",
   "ai.prefs.follow_camera_off": "Die automatische Kameraführung ist aus.",
