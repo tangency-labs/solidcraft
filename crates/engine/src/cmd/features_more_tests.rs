@@ -4014,6 +4014,31 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
     );
 }
 
+/// A taper that grows the profile reaches a wall that runs along the extrusion, which the
+/// profile itself does not cross: the wall is met and the tool is cut by the body (#10711). A
+/// post r 5 on top of a cylinder (r 10, 20 tall), with a 10° draft, extruded down to a point on
+/// the wall half way down: the draft takes the post past the wall (its radius is 5 + 30 tan 10° =
+/// 10.29 at z 10), so the post does not run through the wall and out the other side. It is cut
+/// by the cylinder, and stops at its top, at z 20, where its radius is 5 + 20 tan 10° = 8.5265;
+/// where the draft does not fit through the wall, the extent says so.
+#[test]
+fn a_taper_that_grows_the_profile_stops_at_a_wall_along_the_extrusion() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 10, "height": 20, "body_name": "Post"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 40.0, "name": "P"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    let (r40, r20) = (5.0, 5.0 + 20.0 * (10.0f64.to_radians().tan()));
+    let want = std::f64::consts::PI * 20.0 / 3.0 * (r20 * r20 + r20 * r40 + r40 * r40);
+    match s.execute("solid.extrude", &json!({"sketch": "P", "to": [10, 0, 10], "taper": "10 deg", "operation": "new", "body_name": "Tool"})) {
+        Ok(_) => {
+            let v = body_volume(&s, "Tool");
+            assert!((v - want).abs() < 1e-3 * want, "volume {v} vs {want}");
+        }
+        Err(e) => assert!(e.to_string().contains("To face"), "{e}"),
+    }
+}
+
 /// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the
 /// rounds following, or refuses and says what to do; never a bare kernel status. With sharp
 /// corners it builds; with the rounds it is "SMLib failed (status 1001)" today
