@@ -1180,6 +1180,17 @@ unsafe fn public_window_callback_inner(
                 if let Ok(monitor_info) = monitor::get_monitor_info(monitor) {
                     params.rgrc[0] = monitor_info.monitorInfo.rcWork;
                 }
+            } else if window_flags.contains(WindowFlags::MARKER_UNDECORATED_SHADOW)
+                && window_flags.contains(WindowFlags::RESIZABLE)
+            {
+                // SolidCraft: the system frame on the left, right and bottom (resize borders and
+                // shadow), none at the top: a non-client row at the top stops Windows 11 offering
+                // snap layouts on the restored window. `WindowFlags::adjust_rect` mirrors this.
+                // Only for a window that can be resized (one that cannot has no resize borders
+                // to keep); otherwise winit's own calculation below.
+                let top = params.rgrc[0].top;
+                unsafe { DefWindowProcW(window, msg, wparam, lparam) };
+                params.rgrc[0].top = top;
             } else if window_flags.contains(WindowFlags::MARKER_UNDECORATED_SHADOW) {
                 // Extend the client area to cover the whole non-client area.
                 // https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-nccalcsize#remarks

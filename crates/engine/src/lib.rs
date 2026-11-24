@@ -743,7 +743,7 @@ impl ComputedCommands {
     }
 
     fn selection_is_current(&self, session: &Session) -> bool {
-        if session.selection == self.source.selection {
+        if session.selection == self.source.selection && session.selection_all_bodies == self.source.selection_all_bodies {
             return true;
         }
         // A Model transaction keeps its captured picks when focus moves to the retained
@@ -829,6 +829,11 @@ pub struct Session {
     /// Sketch temporarily shown while editing a feature that consumes it. View state only.
     pub feature_edit_sketch: Option<u64>,
     pub selection: Vec<Sel>,
+    /// Every shown body of the design is selected: "select all" in the body scope is a *scope*
+    /// rather than a list of 56,100 names. [`Session::selected_items`] resolves it where an
+    /// operation needs the bodies; code that only asks whether anything is selected reads
+    /// [`Session::has_selection`]. Any explicit select replaces the scope.
+    pub selection_all_bodies: bool,
     pub path: Option<String>,
     /// The file of the design this session is a scratch copy of ([`Session::scratch`]): the copy's
     /// own `path` stays `None` so nothing run on it saves over that file. Read only by `doc.info`;
@@ -1406,6 +1411,7 @@ impl Session {
             sketch_entry: None,
             feature_edit_sketch: None,
             selection: Vec::new(),
+            selection_all_bodies: false,
             path: None,
             source_path: None,
             ids: solidcraft_doc::ids::IdSource::from_entropy(),
@@ -2034,6 +2040,47 @@ impl Session {
     }
 
     /// Re-evaluate the model after a document change.
+    /// Whether the whole-body scope is in force: Select All set it, no item has been named since
+    /// and no sketch is open. Anything that names items or clears the selection ends it, so a
+    /// stale flag never outlives the list it stood for.
+    pub fn all_bodies_selected(&self) -> bool {
+        self.selection_all_bodies && self.selection.is_empty() && self.active_sketch.is_none()
+    }
+
+    /// Clear the selection: the named items and the whole-body scope.
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
+        self.selection_all_bodies = false;
+    }
+
+    /// Whether anything is selected: a list of items or the whole-body scope.
+    pub fn has_selection(&self) -> bool {
+        !self.selection.is_empty() || self.all_bodies_selected()
+    }
+
+    /// The selection as the items an operation works on: the whole-body scope resolves to the
+    /// name of every shown body, in the world's order.
+    pub fn selected_items(&self) -> Result<Vec<Sel>> {
+        if !self.all_bodies_selected() {
+            return Ok(self.selection.clone());
+        }
+        Ok(self.shown_body_names()?.into_iter().map(|name| Sel::Body { name }).collect())
+    }
+
+    /// How many things are selected, resolving the whole-body scope against the world.
+    pub fn selected_count(&self) -> Result<usize> {
+        if !self.all_bodies_selected() {
+            return Ok(self.selection.len());
+        }
+        Ok(self.world_state()?.bodies.iter().filter(|b| self.body_visible(&b.name)).count())
+    }
+
+    /// The bodies the whole-body scope covers: every body the view shows (not hidden itself, nor
+    /// through its occurrence or folder), in the world's order.
+    pub(crate) fn shown_body_names(&self) -> Result<Vec<String>> {
+        Ok(self.world_state()?.bodies.iter().filter(|b| self.body_visible(&b.name)).map(|b| b.name.clone()).collect())
+    }
+
     /// The model placed in the world through component occurrences (and uncaptured moves): what
     /// to display, measure, pick and export. The same as `model.state()` without components.
     /// An error when the model cannot be placed (see [`solidcraft_doc::world_state`]).
@@ -3362,7 +3409,7 @@ impl Session {
         if self.section_state() != c.section {
             self.set_section_state(c.section);
         }
-        self.selection.clear();
+        self.clear_selection();
         self.prune_sheet_sketch_edit();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
@@ -3415,6 +3462,7 @@ impl Session {
             sketch_entry: self.sketch_entry.clone(),
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
+            selection_all_bodies: self.selection_all_bodies,
             path: None,
             source_path: self.path.clone().or_else(|| self.source_path.clone()),
             ids: self.ids.clone(),
@@ -3603,10 +3651,12 @@ impl Session {
                 let undo = std::mem::take(&mut computed.undo);
                 let redo = std::mem::take(&mut computed.redo);
                 let selection = computed.selection.clone();
+                let all_bodies = computed.selection_all_bodies;
                 let reply = computed.execute("timeline.roll_to", &params)?;
                 computed.undo = undo;
                 computed.redo = redo;
                 computed.selection = selection;
+                computed.selection_all_bodies = all_bodies;
                 reply
             };
             let changed = !Arc::ptr_eq(&before, &computed.doc);
@@ -3743,6 +3793,7 @@ impl Session {
         let undo = std::mem::take(&mut self.undo);
         let redo = std::mem::take(&mut self.redo);
         let selection = std::mem::take(&mut self.selection);
+        let all_bodies = self.selection_all_bodies;
         let redo_watch = self.redo_watch.clone();
         let ids = self.ids.clone();
         original.visibility.hidden_joints.clear();
@@ -3757,6 +3808,7 @@ impl Session {
         self.redo_watch = redo_watch;
         self.ids = ids;
         self.selection = selection;
+        self.selection_all_bodies = all_bodies;
         Ok(())
     }
 
@@ -3923,6 +3975,7 @@ impl Session {
         drawing_scene::forget_closed(self);
         if self.model_focus == computed.model_focus {
             self.selection = computed.selection;
+            self.selection_all_bodies = computed.selection_all_bodies;
         }
         self.revision = computed.revision;
         self.invalidate_view(previous_revision);
