@@ -90,6 +90,9 @@ pub enum PanelAction {
     /// Attach a picture pasted into the text box (desktop only).
     #[cfg(not(target_arch = "wasm32"))]
     AttachPicture(super::paste::Picture),
+    /// Continue the task the agent could not finish (the provider's usage limit, or any other
+    /// error): it goes again with a note that it was cut short (#16318).
+    Continue,
     /// The assistant's page in Preferences.
     OpenSettings,
     /// Preferences, adding an agent.
@@ -117,6 +120,7 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
             }
         }
         PanelAction::SendNow => send_now(app, ctx),
+        PanelAction::Continue => super::continue_task(app),
         PanelAction::Cancel => cancel(app),
         PanelAction::RemovePending(n) => remove_pending(app, n),
         PanelAction::UndoChanges(n) => undo_changes(app, n),
@@ -2265,6 +2269,18 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
         }
         took_line(ui, &stamp);
     }
+    // A task the agent could not finish (the provider's usage limit, or any other error) waits
+    // to be continued (#16318).
+    if chat.unfinished.is_some() && chat.state() == State::Ready {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("ui.agent_chat_interrupted")).color(t.text_dim).size(t.font_small));
+            let b = ui_kit::button(ui, tr("ui.agent_chat_continue"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_continue_tip"));
+            solidcraft_ui_registry::publish_handle("agent_chat:continue", b.rect.center());
+            if b.clicked() {
+                chat.actions.push(PanelAction::Continue);
+            }
+        });
+    }
     // While the agent works with no tool running, how long since it last said or did something
     // (a running tool's card counts for itself).
     if let Some(heard) = chat.heard_at()
@@ -3061,6 +3077,35 @@ mod tests {
         }
         assert_eq!(app.agent_chat.actions, [PanelAction::Send { text: "Make a plate".into(), steer: false }]);
         assert!(app.agent_chat.items.is_empty(), "the panel itself sends nothing");
+    }
+
+    /// The button that continues a task the agent could not finish asks the host to continue it
+    /// (#16318); the panel itself continues nothing.
+    #[test]
+    fn the_continue_button_records_the_task_to_continue() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.unfinished = Some(("make a gearbox".into(), false, None, Vec::new()));
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(440.0, 720.0));
+        let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+            solidcraft_ui_registry::clear_handles();
+            let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
+            let view = PanelView::of(app, &ctx);
+            // The conversation is drawn in the room it has before it scrolls (#17355).
+            let mut output = ctx.run_ui(input, |ui| {
+                let room = ui.available_height();
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui, room))
+            });
+            output.textures_delta.clear();
+        };
+        frame(&mut app, Vec::new());
+        let at = solidcraft_ui_registry::handle_at("agent_chat:continue").expect("the continue button is drawn");
+        for pressed in [true, false] {
+            frame(&mut app, crate::test_support::pointer(at, pressed));
+        }
+        assert_eq!(app.agent_chat.actions, [PanelAction::Continue]);
+        assert!(app.agent_chat.unfinished.is_some(), "the panel itself continues nothing");
     }
 
     /// The composer of `app` drawn once with `events`, as the host draws it, its actions left unrun.
