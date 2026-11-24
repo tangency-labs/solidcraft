@@ -20,7 +20,7 @@ fn remembered(app: &SolveApp) -> UrdfExport {
     UrdfExport { mimic: app.preferences.urdf_mimic, place_meshes: app.preferences.urdf_place_meshes, ..Default::default() }
 }
 
-/// File › Export URDF with Options… (`file.export_urdf_options`): the options dialog, with the
+/// Export URDF with Options (`file.export_urdf_options`, from command search): the options dialog, with the
 /// choices last made. File › Export URDF… goes straight to the save picker, as it always has.
 pub fn open(app: &mut SolveApp) {
     let form = remembered(app);

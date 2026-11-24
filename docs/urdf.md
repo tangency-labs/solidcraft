@@ -6,7 +6,7 @@ becomes a link with its mesh, mass and inertia. Each joint becomes a URDF joint,
 chain of them, that moves the parts the way SolidCraft does.
 
 - **Desktop:** **File → Export URDF…** goes straight to the save picker and writes the URDF older
-  versions wrote. **File → Export URDF with Options…** (`file.export_urdf_options`) asks for the
+  versions wrote. **Export URDF with Options** (`file.export_urdf_options`, from command search) asks for the
   options below first. Its dialog remembers **Couple motion links** and **Write meshes where the
   prefix points** for the next export; both are off by default.
 - **Commands:** `file.export {"path": "robot.urdf"}` (or `"format": "urdf"`)

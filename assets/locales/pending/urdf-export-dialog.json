@@ -8,7 +8,6 @@
     "urdf.fallback_help": "Effort and velocity apply to joints with no saved dynamics. Leave empty for 1000 and 10.",
     "urdf.positive_number": "enter a number above 0",
     "urdf.place_meshes": "Write meshes where the prefix points",
-    "Export URDF with Options…": "Export URDF with Options…",
     "cmd.file.export_urdf_options": "Export URDF with Options"
   },
   "ar": {
@@ -20,7 +19,6 @@
     "urdf.fallback_help": "تنطبق القوة والسرعة على المفاصل التي لا تحتوي على ديناميكيات محفوظة. اتركها فارغة لاستخدام 1000 و10.",
     "urdf.positive_number": "أدخل رقمًا أكبر من 0",
     "urdf.place_meshes": "اكتب الشبكات حيث تشير البادئة",
-    "Export URDF with Options…": "تصدير URDF مع الخيارات…",
     "cmd.file.export_urdf_options": "تصدير URDF مع الخيارات"
   },
   "he": {
@@ -32,7 +30,6 @@
     "urdf.fallback_help": "כוח ומהירות חלים על מפרקים ללא דינמיקה שמורה. השאירו ריק עבור 1000 ו-10.",
     "urdf.positive_number": "הזינו מספר גדול מ-0",
     "urdf.place_meshes": "כתיבת רשתות למקום שהקידומת מציינת",
-    "Export URDF with Options…": "ייצוא URDF עם אפשרויות…",
     "cmd.file.export_urdf_options": "ייצוא URDF עם אפשרויות"
   },
   "ja": {
@@ -44,7 +41,6 @@
     "urdf.fallback_help": "力と速度は、保存された動力学のないジョイントに適用されます。空欄の場合は 1000 と 10 です。",
     "urdf.positive_number": "0 より大きい数値を入力してください",
     "urdf.place_meshes": "接頭辞が示す場所にメッシュを書き出す",
-    "Export URDF with Options…": "オプションを指定して URDF をエクスポート…",
     "cmd.file.export_urdf_options": "オプションを指定して URDF をエクスポート"
   },
   "vi": {
@@ -56,7 +52,6 @@
     "urdf.fallback_help": "Lực và vận tốc áp dụng cho các khớp không có động lực học đã lưu. Để trống để dùng 1000 và 10.",
     "urdf.positive_number": "nhập một số lớn hơn 0",
     "urdf.place_meshes": "Ghi lưới vào nơi tiền tố chỉ đến",
-    "Export URDF with Options…": "Xuất URDF với tùy chọn…",
     "cmd.file.export_urdf_options": "Xuất URDF với tùy chọn"
   },
   "zh": {
@@ -68,7 +63,6 @@
     "urdf.fallback_help": "力和速度适用于未保存动力学的关节。留空则使用 1000 和 10。",
     "urdf.positive_number": "请输入大于 0 的数字",
     "urdf.place_meshes": "将网格写入前缀所指的位置",
-    "Export URDF with Options…": "带选项导出 URDF…",
     "cmd.file.export_urdf_options": "带选项导出 URDF"
   }
 }
