@@ -7920,6 +7920,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     refresh_layout(app, ui.ctx());
     let resp = ui.interact(rect, ui.scope_id().with("viewport"), Sense::click_and_drag());
+    let design_dragged = crate::library::drop_on_view(app, &resp);
     let flat = crate::dialogs_sheet::flat_active(app);
     if !flat {
         app.flat_view.fitted = false;
@@ -8028,6 +8029,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && !biarc_pointer
                 && !navigating
                 && !dragging_layer
+                // A design dragged in from the document browser lands in the design, not on a face.
+                && !design_dragged
         })
         .map(|p| {
             if primary_down || swatch_released || resp.clicked() || resp.secondary_clicked() {
@@ -8080,7 +8083,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !held
         && !flat
         && !corner_hovered
-        && !manipulator_dragging;
+        && !manipulator_dragging
+        && !design_dragged;
     app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
     // The picture may run past the view's own rectangle (the focused view of a tiled window).
     let paint = app.viewport.bleed.take().unwrap_or(rect);

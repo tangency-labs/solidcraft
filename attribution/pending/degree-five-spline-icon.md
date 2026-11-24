@@ -1,0 +1,1 @@
+| crates/look/icons/design/svg/model/spline_cv5.svg | SolidCraft contributors | original sketch icon master (64 grid): degree-five control spline with six-point control polygon | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |

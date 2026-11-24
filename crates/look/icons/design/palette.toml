@@ -195,7 +195,7 @@ sketch = [
   "project", "project_surface", "rect", "rect3", "rect_center", "rect_edge_center",
   "rect_rounded", "sketch", "sketch_chamfer", "sketch_chamfer_angle", "sketch_chamfer_two_distances",
   "sketch_fillet", "sketch_mirror", "slot", "slot_center", "slot_overall",
-  "snap", "spline", "spline_biarc", "spline_cv", "spun", "svg",
+  "snap", "spline", "spline_biarc", "spline_cv", "spline_cv5", "spun", "svg",
   "trim",
 ]
 constraint = [

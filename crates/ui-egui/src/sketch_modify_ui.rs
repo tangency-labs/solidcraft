@@ -413,6 +413,17 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
             sk.curve_index(id)?;
             d.active_input()?.accepts(hit, Some(active), |_, _| false)
         }
+        // Once the picked curves close a shape, Offset takes no curve that meets it at a corner:
+        // such a curve neither highlights nor picks. A picked curve still does, so clicking it
+        // opens the shape again, and so does a curve of a shape apart from the closed one.
+        Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Offset { .. })) => {
+            let follow = matches!(d.kind, Kind::SketchModify(Mod::Offset { chain: true, .. }));
+            let state = crate::open_meshing::session_world(session);
+            if solidcraft_engine::cmd::offset_leaves_out(&state.sketch(active)?.sketch, &curve_ids(&d.inputs, 0), id, follow) {
+                return None;
+            }
+            d.active_input()?.accepts(hit, Some(active), |_, _| false)
+        }
         _ => d.active_input()?.accepts(hit, Some(active), |_, _| false),
     }
 }

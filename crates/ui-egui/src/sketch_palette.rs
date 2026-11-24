@@ -492,7 +492,24 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                         enabled: spec.info(&app.session).enabled,
                     })
                     .collect();
-                let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
+                let section = ui.vertical(|ui| {
+                    if family.label == "Spline" {
+                        let segments: Vec<_> = choices
+                            .iter()
+                            .map(|choice| crate::ui_kit::IconSegment { key: choice.label, icon: choice.icon, tip: choice.label.to_string() })
+                            .collect();
+                        let mut selected = choices.iter().position(|choice| choice.key == current).unwrap_or_default();
+                        let clicked = crate::ui_kit::row(ui, family.label, |ui| crate::ui_kit::segmented_icons(ui, &mut selected, &segments, &[]));
+                        for (choice, segment) in choices.iter().zip(&segments) {
+                            if let Some(rect) = crate::scenario::rect_of(segment.key) {
+                                crate::scenario::publish_target(&format!("sketch_palette:feature:{}", choice.key), rect);
+                            }
+                        }
+                        if clicked { choices.get(selected).filter(|choice| choice.enabled).map(|choice| choice.key) } else { None }
+                    } else {
+                        crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices)
+                    }
+                });
                 crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
                 section.inner
             });
@@ -1061,6 +1078,102 @@ mod tests {
         assert_eq!(rect.commands.len(), 5);
         assert_eq!(pressed_modes(&h, rect), ["sketch.rectangle.two_point"]);
         assert!(crate::scenario::handle_at("sketch_palette:feature:sketch.circle.center").is_none(), "only the running family is shown");
+        // Spline uses the same segmented row as Line Type, beside its family label.
+        h.app.start("sketch.spline.fit_point");
+        h.settle();
+        let spline = crate::sketch_families::family("sketch.spline.fit_point").unwrap();
+        assert_eq!(spline.commands.len(), 4);
+        let row = crate::scenario::rect_of("dialog:row:Spline").unwrap();
+        let control = crate::scenario::rect_of("dialog:control:Spline").unwrap();
+        let line_type = crate::scenario::rect_of("dialog:control:Line Type").unwrap();
+        assert_eq!((control.left(), control.right()), (line_type.left(), line_type.right()));
+        assert!(row.bottom() <= line_type.top());
+        for id in spline.commands {
+            let target = format!("sketch_palette:feature:{id}");
+            let rect = crate::scenario::rect_of(&target).unwrap();
+            assert!(control.contains_rect(rect), "{id} stays in the Spline control column");
+            assert_eq!((rect.top(), rect.bottom()), (control.top(), control.bottom()), "all spline kinds share one row");
+            h.call("ui.click", json!({"x": rect.center().x, "y": rect.center().y}));
+            h.settle();
+            assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(*id));
+            assert_eq!(pressed_modes(&h, spline), [*id]);
+        }
+        // The final choice is Biarc. Switching away discards its pending point without changing the design.
+        h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(1));
+        let baseline = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        let at = crate::scenario::handle_at("sketch_palette:feature:sketch.spline.control_point_5").unwrap();
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.settle();
+        let tool = h.app.tool.as_ref().unwrap();
+        assert_eq!(tool.cmd, "sketch.spline.control_point_5");
+        assert!(tool.pts.is_empty());
+        assert_eq!(h.app.session.doc.to_json(), baseline);
+        assert_eq!(h.app.session.undo.len(), undo);
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(directory) = std::env::var_os("SOLIDCRAFT_SPLINE_SELECTOR_EVIDENCE") {
+            capture_spline_selector(&mut h, std::path::Path::new(&directory));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn capture_spline_selector(h: &mut crate::scenario::Harness, directory: &std::path::Path) {
+        std::fs::create_dir_all(directory).unwrap();
+        h.app.home.open = false;
+        h.app.set_origin_shown(false);
+        h.app.run("sketch.options", json!({"grid":false,"show_construction":true,"show_points":true,"show_constraints":false})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.camera", json!({"target":[6,0,0],"distance":125}));
+        h.step(&json!({"click":{"handle":"sketch_palette:feature:sketch.spline.biarc"}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.spline.biarc"));
+        for (index, point) in [[-36, -12], [-28, -12], [-10, 8], [-2, 8], [18, -4]].into_iter().enumerate() {
+            h.step(&json!({"click":{"sketch":point}})).unwrap();
+            assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), index + 1);
+        }
+        h.step(&json!({"click":{"sketch":[26,-4]}})).unwrap();
+        h.step(&json!({"click":{"sketch":[26,-4]},"button":"right"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        assert_eq!(h.app.session.doc.sketch(sid).unwrap().biarc_splines[0].spans.len(), 2);
+        h.app.start("sketch.spline.biarc");
+        for (width, height) in [(1280u32, 720u32), (960, 600)] {
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            h.call("ui.camera", json!({"target":[6,0,0],"distance":125}));
+            for theme in ["dark", "light"] {
+                h.call("ui.prefs", json!({"theme":theme}));
+                // A fresh context gives this renderer the complete font and icon uploads.
+                h.ctx = crate::fonts::test_context();
+                let mut gpu = crate::gpu::EguiFixture::new(&mut h.app, [width, height]).expect("spline evidence needs an admitted GPU device");
+                let ctx = h.ctx.clone();
+                let mut pixels = Vec::new();
+                for _ in 0..8 {
+                    pixels = gpu.frame(&ctx, Vec::new(), |ui| {
+                        h.app.logic(ui.ctx());
+                        h.app.ui(ui);
+                    });
+                }
+                let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
+                let control = crate::scenario::rect_of("dialog:control:Spline").unwrap();
+                let line_type = crate::scenario::rect_of("dialog:control:Line Type").unwrap();
+                assert!(bounds.contains_rect(control));
+                assert_eq!((control.left(), control.right()), (line_type.left(), line_type.right()));
+                let spline = crate::sketch_families::family("sketch.spline.biarc").unwrap();
+                for id in spline.commands {
+                    let target = crate::scenario::rect_of(&format!("sketch_palette:feature:{id}")).unwrap();
+                    assert!(control.contains_rect(target), "{id} is visible at {width} by {height}");
+                }
+                assert!(gpu.viewport_callbacks > 0, "the full capture includes the actual viewport renderer");
+                assert_eq!(pixels.len(), width as usize * height as usize * 4);
+                image::save_buffer(
+                    directory.join(format!("spline-selector-{width}x{height}-{theme}.png")),
+                    &pixels,
+                    width,
+                    height,
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
+        }
     }
 
     #[test]

@@ -186,7 +186,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", crate::checked!("sketch.spline.control_point_5", spline_cv5))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
-        .icon("spline_cv")
+        .icon("spline_cv5")
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
