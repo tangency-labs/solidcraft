@@ -1396,6 +1396,67 @@ fn a_sketch_point_picked_on_another_copy_of_a_part_holds_that_copy() {
     assert!(at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "{at:?}");
 }
 
+/// Snapping a joint origin to a sketch circle's centre in the UI stores a persistent
+/// `Snap::SketchPoint` reference rather than baking a static world point, so the joined
+/// component follows parameter changes (#21815).
+#[test]
+fn joint_snapped_to_sketch_circle_center_follows_parameter_change() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("parameters.add", json!({"name": "h", "expression": "100", "unit": "mm"})).unwrap();
+    app.run("component.create", json!({"name": "Post", "parent": "root", "activate": true, "grounded": true})).unwrap();
+    app.run(
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": "h", "corner": [0, 0, 0], "operation": "new", "body_name": "PostBody", "name": "PostBox"}),
+    )
+    .unwrap();
+    app.run("sketch.create", json!({"plane": "YZ", "offset": 20, "name": "HoleSketch"})).unwrap();
+    app.run("sketch.circle.center", json!({"center": [10, 90], "radius": 3})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["c1"], "type": "diameter", "value": "6"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "10"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "h - 10"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("component.create", json!({"name": "Beam", "parent": "root", "activate": true, "grounded": false})).unwrap();
+    app.run(
+        "solid.box",
+        json!({"length": 50, "width": 20, "height": 20, "corner": [20, 0, 80], "operation": "new", "body_name": "BeamBody", "name": "BeamBox"}),
+    )
+    .unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+
+    let sketch = app.session.doc.find_feature("HoleSketch").unwrap().id;
+    let snap = snap_of(&app.session, &Sel::SketchPoint { id: format!("{sketch}:c1.center") }).unwrap();
+    assert_eq!(snap.param["sketch"], json!(sketch));
+    assert_eq!(snap.param["point"], json!("c1.center"));
+
+    let beam_face = {
+        let st = app.session.world_state().unwrap();
+        let b = st.body("BeamBody").expect("BeamBody");
+        let faces = b.joint_faces().unwrap();
+        let f = faces.iter().find(|f| f.centroid.dist(Vec3::new(20.0, 10.0, 90.0)) < 1e-6).expect("Beam -X face");
+        Sel::Face { body: "BeamBody".into(), index: f.index, point: f.centroid }
+    };
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::SketchPoint { id: format!("{sketch}:c1.center") });
+    d.pick(&app.session, beam_face);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+    assert!(
+        matches!(&app.session.doc.assembly.joints[0].a.snap, solidcraft_engine::doc::joints::Snap::SketchPoint { sketch: s, point, .. } if *s == sketch && point == "c1.center"),
+        "{:?}",
+        app.session.doc.assembly.joints[0].a.snap
+    );
+
+    // Changing h from 100 mm to 60 mm moves c1.center to [20, 10, 50] and pulls Beam:1 down by 40 mm.
+    app.run("parameters.change", json!({"name": "h", "expression": "60"})).unwrap();
+    let beam_occ = app.session.doc.occurrences.iter().find(|o| o.name == "Beam:1").unwrap().id;
+    let t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let com = solidcraft_engine::doc::apply_point(&t, Vec3::new(45.0, 10.0, 90.0));
+    assert!(com.dist(Vec3::new(45.0, 10.0, 50.0)) < 1e-6, "Beam:1 COM should follow h -> 60 mm: {com:?}");
+}
+
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {
     let mut app = two_boxes();

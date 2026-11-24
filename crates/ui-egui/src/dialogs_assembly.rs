@@ -524,6 +524,14 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             };
             return Some(Sel::Axis { name });
         }
+        Snap::SketchPoint { sketch, point, .. } => {
+            let path = origin_placement(s, o)?;
+            let comp = s.doc.feature(*sketch).map_or(0, |f| f.component);
+            if comp != 0 && path != s.feature_path(comp) {
+                return Some(Sel::PlacedSketchPoint { sketch: *sketch, id: point.clone(), path });
+            }
+            return Some(Sel::SketchPoint { id: format!("{sketch}:{point}") });
+        }
         Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
     };
     // The pick is in its part's coordinates; the placed bodies are in the world.
@@ -637,14 +645,16 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
         if let Snap::FaceCenter { x: Some(XRef::Planar { planar_face, reverse }), .. }
         | Snap::CircleCenter { x: Some(XRef::Planar { planar_face, reverse }), .. }
         | Snap::Plane { x: Some(XRef::Planar { planar_face, reverse }), .. }
-        | Snap::Axis { x: Some(XRef::Planar { planar_face, reverse }), .. } = &origin.snap
+        | Snap::Axis { x: Some(XRef::Planar { planar_face, reverse }), .. }
+        | Snap::SketchPoint { x: Some(XRef::Planar { planar_face, reverse }), .. } = &origin.snap
         {
             f.alignment[i] = Some(json!({"face": planar_face, "occurrence": origin.occurrence}));
             f.reverse_alignment[i] = *reverse;
         } else if let Snap::FaceCenter { x: Some(XRef::Reference { reference, reverse }), .. }
         | Snap::CircleCenter { x: Some(XRef::Reference { reference, reverse }), .. }
         | Snap::Plane { x: Some(XRef::Reference { reference, reverse }), .. }
-        | Snap::Axis { x: Some(XRef::Reference { reference, reverse }), .. } = &origin.snap
+        | Snap::Axis { x: Some(XRef::Reference { reference, reverse }), .. }
+        | Snap::SketchPoint { x: Some(XRef::Reference { reference, reverse }), .. } = &origin.snap
         {
             f.alignment[i] = Some(json!({"reference":reference,"occurrence":origin.occurrence}));
             f.reverse_alignment[i] = *reverse;
@@ -1142,8 +1152,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         }
         Sel::SketchPoint { id } => {
             // A sketch point's world position, its plane's normal as the joint's z, kept by its
-            // sketch and id so it follows the sketch as the part changes. No body names it, so the
-            // engine finds the occurrence from the world point (its own body).
+            // sketch and id so it follows the sketch and parameter edits as the part changes.
             let (sketch, point) = match id.split_once(':') {
                 Some((sketch, point)) => (sketch.parse().ok()?, point),
                 None => (s.active_sketch?, id.as_str()),
@@ -1151,7 +1160,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             let ss = st.sketch(sketch)?;
             let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?);
             let z = ss.plane.normal();
-            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) };
+            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"sketch": sketch, "point": point}) };
             // On the copy of its part the sketch is drawn at: a copy placed on top of it has the
             // same bodies there, and the point alone would find the first.
             let component = s.doc.feature(sketch).map_or(0, |f| f.component);
@@ -1163,7 +1172,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         Sel::PlacedSketchPoint { sketch, id, path } => {
             // The same point on another copy of its part: where that copy has it, held by that copy.
             let (at, z) = st.placed_sketch_point(*sketch, path, id)?;
-            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) };
+            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"sketch": *sketch, "point": id}) };
             placed_on(&mut snap, path);
             return Some(snap);
         }
@@ -2134,8 +2143,9 @@ pub(crate) fn resolve_alignment_order(s: &Session, d: &mut Dialog, interaction: 
         f.alignment_primary_key = Some(key);
     }
     let supported = (0..2).all(|side| {
-        alignment_primary_origin(s, f, &d.inputs, side)
-            .is_none_or(|o| matches!(o.snap, Snap::FaceCenter { .. } | Snap::CircleCenter { .. } | Snap::Plane { .. } | Snap::Axis { .. }))
+        alignment_primary_origin(s, f, &d.inputs, side).is_none_or(|o| {
+            matches!(o.snap, Snap::FaceCenter { .. } | Snap::CircleCenter { .. } | Snap::Plane { .. } | Snap::Axis { .. } | Snap::SketchPoint { .. })
+        })
     });
     f.alignment_origin_problem = (!supported).then_some("dialog.secondary_alignment_origins_required");
     if !supported {
@@ -2313,7 +2323,9 @@ pub(crate) fn alignment_accepts(s: &Session, d: &Dialog, sel: &Sel) -> bool {
 fn primary_alignment_frame(s: &Session, d: &Dialog, side: usize) -> Option<(Vec3, Vec3)> {
     let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return None };
     let mut origin = alignment_primary_origin(s, f, &d.inputs, side)?;
-    if let Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } = &mut origin.snap {
+    if let Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } =
+        &mut origin.snap
+    {
         *x = None;
     }
     let frame = solidcraft_engine::doc::joints::resolve_origin(&s.doc, &s.model.state(), &origin).ok()?;
@@ -2583,6 +2595,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                                 | Snap::CircleCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                                 | Snap::Plane { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                                 | Snap::Axis { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                                | Snap::SketchPoint { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                         )
                     {
                         p[key] = alignment[i].clone().unwrap_or(Value::Null);

@@ -58,6 +58,7 @@ fn schemas_and_the_key_check_agree() {
             "body",
             "circle",
             "corner",
+            "curve",
             "edge",
             "end",
             "export_frame",
@@ -69,6 +70,7 @@ fn schemas_and_the_key_check_agree() {
             "path",
             "plane",
             "point",
+            "sketch",
             "x",
             "z",
         ],
@@ -1609,8 +1611,8 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
     let screw = input_schema_for::<ScrewParams>();
     assert_eq!(screw.as_value()["anyOf"], json!([{"required": ["joint"]}, {"required": ["a", "b"]}]));
     assert_eq!(input_schema_for::<ReachParams>().as_value()["dependentRequired"], json!({"axis": ["z"]}));
-    // face, circle, edge, point, plane, axis and frame: the forms the handler reads.
-    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(7));
+    // face, circle, edge, point, sketch, plane, axis and frame: the forms the handler reads.
+    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(8));
 }
 
 /// A design with the pieces the couplings join, and a tray with a hole for the joint origins by

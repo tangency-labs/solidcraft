@@ -1586,6 +1586,20 @@ pub struct EdgeReference {
     pub unverified: Option<bool>,
 }
 
+/// A persistent sketch-point reference held by a joint origin (`Snap::SketchPoint`).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SketchPointReference {
+    /// The sketch feature id.
+    pub sketch: u64,
+    /// The sketch feature name (empty if the sketch is gone).
+    pub sketch_name: String,
+    /// The point reference within the sketch (e.g. `c1.center`, `p1`, `origin`).
+    pub point: String,
+    /// Why the sketch is missing, when it is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// What a reference names.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
@@ -1594,11 +1608,13 @@ pub enum Referent {
     Face(FaceReference),
     /// An edge.
     Edge(EdgeReference),
+    /// A sketch point.
+    SketchPoint(SketchPointReference),
 }
 
 /// What part of the snap a reference is.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ReferenceRole {
     /// The face the origin is on.
     Face,
@@ -1610,6 +1626,8 @@ pub enum ReferenceRole {
     Edge,
     /// The edge that gives an edge origin's corner.
     Corner,
+    /// The sketch point the origin is on.
+    SketchPoint,
 }
 
 /// A persistent name a joint origin holds, with what it refers to.
@@ -2203,6 +2221,7 @@ fn secondary_axis_origin_schema() -> Value {
         {"allOf": [
             {"properties": {"x": secondary_axis_x_schema()}},
             {"anyOf": [
+                {"required": ["sketch"]},
                 {"required": ["plane"]},
                 {"required": ["axis"], "not": {"anyOf": [{"required": ["edge"]}, {"required": ["point"]}]}},
                 {"required": ["face"], "properties": {"face": point}},
@@ -2349,10 +2368,20 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WorldPoint")]
     pub edge: Option<Value>,
-    /// A point: the frame's origin there, z along `z` (default: the world's z), x along `x`.
+    /// A point: the frame's origin there, z along `z` (default: the world's z), x along `x`; or
+    /// with `sketch`, a sketch point id (e.g. `c1.center`, `p1`, `origin`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "WorldPoint")]
+    #[schemars(with = "OriginFace")]
     pub point: Option<Value>,
+    /// A sketch on the component, by id or name, paired with `point` (a point id or
+    /// `<curve>.center`) or `curve` (a circle, arc or ellipse id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<Value>,
+    /// With `sketch`: a circle, arc or ellipse curve id whose centre the origin snaps to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub curve: Option<Value>,
     /// The plane to sit on: `XY`, `XZ` or `YZ` (the design's own), `o:<ids>/origin/<item>` (a
     /// placement's origin plane), a construction plane's name, or a plane definition object. Read
     /// before the other keys: an origin with `plane` sits on the plane.
@@ -2406,7 +2435,7 @@ fn origin_required(schema: &mut Schema) {
     // The handler refuses a call with none of them.
     schema.insert(
         "anyOf".into(),
-        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["plane"]}, {"required": ["axis"]}, {"required": ["frame"]}]),
+        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["sketch"]}, {"required": ["plane"]}, {"required": ["axis"]}, {"required": ["frame"]}]),
     );
 }
 
@@ -2485,6 +2514,38 @@ impl MakeJointOriginParams {
         // Then the path, by the same rule `occurrence.move` uses; `null` is left out.
         if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
             OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
+        }
+        // A sketch-point origin: {sketch: id|name, point: "<id>" | curve: "<id>", occurrence?, path?, x?}.
+        if let Some(sk) = m.get("sketch") {
+            match sk {
+                Value::Number(n) if n.as_u64().is_some() => {}
+                Value::String(s) if !s.is_empty() => {}
+                _ => return Err("`sketch` must be a sketch id or name".into()),
+            }
+            if let Some(occ) = m.get("occurrence").filter(|o| !o.is_null()) {
+                OccurrenceKey::read(occ)?;
+            }
+            let has_point = m.get("point").is_some_and(|p| !p.is_null());
+            let has_curve = m.get("curve").is_some_and(|c| !c.is_null());
+            if has_point && has_curve {
+                return Err("a sketch origin takes `point` or `curve`, not both".into());
+            }
+            if has_point {
+                match m.get("point").and_then(Value::as_str) {
+                    Some(p) if !p.is_empty() && p.len() <= 512 => {}
+                    _ => return Err("`point` must be a sketch point id (1 to 512 characters)".into()),
+                }
+            } else if has_curve {
+                match m.get("curve").and_then(Value::as_str) {
+                    Some(c) if !c.is_empty() && c.len() <= 512 => {}
+                    _ => return Err("`curve` must be a sketch curve id (1 to 512 characters)".into()),
+                }
+            } else {
+                return Err("a sketch origin needs `point` (e.g. \"c1.center\", \"p1\") or `curve` (a circle, arc or ellipse id)".into());
+            }
+            origin_x(m)?;
+            origin_end(m, false)?;
+            return Ok(());
         }
         // A plane or axis origin, as plane_origin and axis_origin read them: a name or key, or
         // a definition object. `plane` wins; `axis` is read when no `edge` or `point` is given.
@@ -2585,6 +2646,8 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
             circle: raw("circle"),
             edge: raw("edge"),
             point: raw("point"),
+            sketch: raw("sketch"),
+            curve: raw("curve"),
             plane: raw("plane"),
             axis: raw("axis"),
             frame: raw("frame"),
