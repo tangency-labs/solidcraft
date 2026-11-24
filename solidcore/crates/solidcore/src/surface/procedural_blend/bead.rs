@@ -72,8 +72,14 @@ impl BeadDefinition {
         }
         let bead = Self { chamfer, sagitta };
         bead.check().map_err(|r| {
+            // the float below the open bound; bits, not next_down, for the 1.85 MSRV
+            let fit = if r.bound > 0.0 {
+                f64::from_bits(r.bound.to_bits() - 1)
+            } else {
+                0.0
+            };
             Failure::new(OP, BlendFailure::NoRoom(NoRoomReason::BeadCutsFace))
-                .with_fit(Fit::new(r.bound.next_down(), FitMeasure::Sagitta, None))
+                .with_fit(Fit::new(fit, FitMeasure::Sagitta, None))
                 .into_error()
         })?;
         Ok(bead)
