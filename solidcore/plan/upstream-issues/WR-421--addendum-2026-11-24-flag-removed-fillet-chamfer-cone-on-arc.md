@@ -1,0 +1,9 @@
+Updates: WR-421, WR-572
+
+#### WR-421 and WR-572 (update, 2026-11-24). `fillet_chamfer_cone_on_arc` is removed
+
+`CalcTorusFilletGeom` always revolves a linear section (a chamfer) round a circular edge, stored as the `SmCone` it is (WR-572 made that storage unconditional on 2026-11-14). The trace of the offset intersection, which collapsed to a point where a round's offset reaches its axis, is no longer taken for such a chamfer. Removed: the field `UpstreamFixes::fillet_chamfer_cone_on_arc`, the preset line, its `fixes` entries, and the circular-only guard's flag-off branch.
+
+- **Goldens:** the four flags are retired together (#18913), so their moved rows are proved together: 170 rows in six units (`blend.fillet_executive_p3` 131, `topology.brep_cutting` 19, `primitive.api_trim_ops` 9, `blend.fillet_solver_p2` 6, `topology.api_projection` 3, `topology.api_files` 2). Each is checked by `crates/goldens/tests/issue_18913_moved_rows_are_proven.rs`, which replays it and certifies the result: a Level 2 check of the body, every analytic face and every line or conic edge on its closed-form support, and the mass properties against a certified enclosure or a closed form. All other units pass unchanged.
+- **Defaults:** SolidCraft's preset already had the flag on, so the shipped result does not change. The comparison SMLib keeps upstream's path.
+- **Tests:** `issue_420_chamfer_on_arc`, `wr_572_chamfer_rim_stored_as_cone`, `issue_379_chamfer_hole_rim_closed` and `issue_398_shell_box_rounds_chamfer_fillet` run on the default kernel (their flag-off halves, which pinned the traced chamfer, are removed), and the attributed chamfered cylinder row of `blend.fillet_executive_p3` is checked against its closed-form face areas and edge lengths.
