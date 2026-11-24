@@ -332,11 +332,15 @@ fn horizontal_vertical_cursor_icon(app: &SolveApp, tool: &Tool, proj: &Proj, pos
     let state = crate::open_meshing::session_world(&app.session);
     let Some(ss) = state.sketch(sid) else { return "c_hv" };
     let hits = pick(app, proj, pos);
-    let midpoint = shift.then(|| midpoint_at(app, proj, pos, 12.0)).flatten();
-    let hit = hits.iter().find(|hit| match hit {
-        Hit::SketchPoint { sketch, .. } | Hit::SketchCurve { sketch, .. } => *sketch == sid,
-        _ => false,
-    });
+    let hit = active_hit(&hits, app);
+    let picked = !tool.point_picks.is_empty();
+    let midpoint = if shift {
+        midpoint_of(app, proj, &hits, pos, 12.0)
+    } else if picked && matches!(hit, Some(Hit::SketchCurve { straight: true, .. })) {
+        midpoint_of(app, proj, &hits, pos, LINE_MIDDLE_PX)
+    } else {
+        None
+    };
     let axis_icon = |mode: &str| if mode == "horizontal" { "c_horizontal" } else { "c_vertical" };
     if let Some(first) = tool.point_picks.first() {
         let first_pos = first
