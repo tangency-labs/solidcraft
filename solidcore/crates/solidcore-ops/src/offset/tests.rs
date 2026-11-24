@@ -326,6 +326,59 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
 }
 
+/// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
+/// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
+/// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its
+/// radius, 70, and collapses: the shell is refused for it, naming that radius. The retry
+/// with the boss taken off caps its footprint, a circle split where it touches the rim and at
+/// the boss's seam. The footprint's two arcs run between the cap and the top, on one plane,
+/// and at both vertices their offsets take the vertex's image as an end. Their extended UV
+/// curves, each wound round the circle many times, coincide: their thousands of crossings
+/// within the tolerance had some five thousand stretches certified for moving to a curve end
+/// (over 90 s). The base's shell is still refused, so the first refusal stands, unchanged.
+#[test]
+#[allow(clippy::disallowed_methods)] // the seams' turn places the test body, not ops geometry
+fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint() {
+    all_fixes();
+    // each circle's seam turned 0.6131 rad about its axis, as SolidCraft's cylinders have it
+    let (s, c) = 0.6131_f64.sin_cos();
+    let turned = |x: f64, z: f64| {
+        [
+            [c, s, 0.0, 0.0],
+            [-s, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [x, 0.0, z, 1.0],
+        ]
+    };
+    let base = make_cylinder([0.0; 3], 600.0, 2400.0).unwrap();
+    base.transform(&turned(0.0, 0.0)).unwrap();
+    let boss = make_cylinder([0.0; 3], 70.0, 140.0).unwrap();
+    boss.transform(&turned(530.0, 2400.0)).unwrap();
+    let b = crate::boolean::boolean(base, boss, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let o = order(&b);
+    let before = volume(&b);
+    let (r, certified) = session::counted(
+        solidcore::kernel::WorkCounters::contact_stretch_certifications,
+        || shell(&b, &o, &[], -72.0),
+    );
+    match r {
+        Err(Error::OffsetRefused {
+            why: crate::OffsetRefusal::Collapses { distance, radius },
+            ..
+        }) => {
+            assert!((distance.abs() - 72.0).abs() < 1e-9, "{distance}");
+            assert!((radius - 70.0).abs() < 1e-9, "{radius}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), before) < 1e-12);
+    // the shells' own intersections certify under a hundred stretches; the footprint's wound
+    // extensions certified thousands
+    assert!(certified < 1_000, "{certified} stretches certified");
+}
+
 /// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
 /// 20 at its floor 20 down), shelled open at its bottom, each wall moved in by t with sharp
 /// edges. The cavity is the slab shrunk by t (open at z = 0) less the pocket grown by t, each
