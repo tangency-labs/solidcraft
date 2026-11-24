@@ -1,6 +1,7 @@
-// Generated from the blessed `blend.fillet_executive_p3.jsonl` against #21353's (41246b78f2,
-// main's once #21353 lands): every row whose `mass_properties` moved, as (case, that row,
-// this branch's row).
+// Every row of the blessed `blend.fillet_executive_p3.jsonl` whose `mass_properties` the
+// retirement moves against main's (#21353 merged; the old rows are main's bit for bit), as
+// (case, main's row, this branch's row). `source-file-corner_box-edge9` moves within the
+// goldens' `1e-9`, so its blessed line stays main's; its run's move is classified too.
 static ROWS: [Row; 5] = [
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",

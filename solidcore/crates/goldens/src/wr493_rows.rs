@@ -1300,7 +1300,7 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
 /// accuracy, not a change of the body. The retirement of `uv_trim_corner_end_points_only`
 /// (#21272: the read closes its faces' trim corners by moving only the trims' end control
 /// points) moves both again, to 38235.9926957725 and 38235.99659480028 (by 3.3e-11 of
-/// themselves), the values this branch's run gives; the same enclosure holds them, and
+/// themselves), both within `ACCURACY` of the same certified enclosure (asserted below), and
 /// `tests/uvtc_corpus_row.rs` classifies that move against a certified enclosure.
 #[test]
 fn sphere_diff_3cylinders_corpus_area_is_within_its_accuracy() {
