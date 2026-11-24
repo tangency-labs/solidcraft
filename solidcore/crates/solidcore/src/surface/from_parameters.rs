@@ -78,6 +78,9 @@ pub fn from_parameters(
     domain: [[f64; 2]; 2],
 ) -> Result<(Surface, Extent2d)> {
     let [u, v] = domain;
+    // a plane a hair off square is read as its record squared, here and in every check below
+    let squared = square_record_plane(record);
+    let record = squared.as_ref().unwrap_or(record);
     let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
     let finite = |xs: &[f64]| xs.iter().all(|x| x.is_finite());
     let analytic = !matches!(
@@ -401,11 +404,9 @@ fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3, Vec3)> {
 /// The plane `origin + u du + v dv` over `u x v`: unit axes along `du`, `dv`, unit scales,
 /// the box scaled by their lengths ([`axis_scale`]); and its implicit surface.
 ///
-/// The kernel's plane cannot hold a skew parametrisation. Axes off square by no more than
-/// the kernel's placement keeps ([`plane_axes_near_square`]; records written before
-/// solidcore#3377 carry about 10⁻¹⁴) are read with `dv` made square to `du`
-/// ([`square_plane_axis`]): the plane's normal and point set stay, and its parameters shear
-/// by at most that angle times the face's size along `v`. Axes further off are refused.
+/// The axes must be square to rounding ([`plane_axes_square`]): the kernel's plane cannot
+/// hold a skew parametrisation. A `Plane` record a hair off square comes here squared
+/// ([`square_record_plane`]).
 fn plane(
     origin: Point3,
     du: Vec3,
@@ -417,17 +418,13 @@ fn plane(
     if !(a.is_finite() && b.is_finite() && a > 0.0 && b > 0.0) {
         return Err(SolidError::invalid_input(OP, "a plane axis has no length"));
     }
-    let skew = || {
-        SolidError::invalid_input(
+    if !plane_axes_square(du, dv) {
+        return Err(SolidError::invalid_input(
             OP,
-            "the plane's axes are further off square than a placement keeps: the kernel's plane cannot hold a skew parametrisation",
-        )
-    };
-    if !plane_axes_near_square(du, dv) {
-        return Err(skew());
+            "the plane's axes are not square: the kernel's plane cannot hold a skew parametrisation",
+        ));
     }
     let (a, b) = (axis_scale(du), axis_scale(dv));
-    let dv = square_plane_axis(du, dv).ok_or_else(skew)?;
     let dom = Extent2d::from_bounds(u[0] * a, v[0] * b, u[1] * a, v[1] * b);
     let p = Plane::new(origin, du, dv, Vec2::new(1.0, 1.0), &dom);
     // the record's own normal, du x dv made unit
@@ -436,8 +433,8 @@ fn plane(
     Ok((Surface::from(p), Implicit::Plane { origin, normal }, [a, b]))
 }
 
-/// Whether a record plane's axes are square to the rounding of their dot product, as the
-/// record writes them ([`square_plane_axis`]).
+/// Whether a record plane's axes are square to the rounding of their dot product, as
+/// [`plane`] requires and the record writes them ([`square_plane_axis`]).
 #[must_use]
 pub(crate) fn plane_axes_square(du: Vec3, dv: Vec3) -> bool {
     du.dot(dv).abs() <= gamma(3) * du.length() * dv.length()
@@ -445,7 +442,7 @@ pub(crate) fn plane_axes_square(du: Vec3, dv: Vec3) -> bool {
 
 /// Whether a record plane's axes are off square by no more than the kernel's placement keeps
 /// (`SetCanonical` keeps unit axes with `|x·y| ≤ EFF_ZERO`), to the rounding of their dot
-/// product: the axes [`plane`] reads, squaring them.
+/// product: the axes [`square_record_plane`] squares.
 #[must_use]
 fn plane_axes_near_square(du: Vec3, dv: Vec3) -> bool {
     du.dot(dv).abs() <= (EFF_ZERO + gamma(3)) * du.length() * dv.length()
@@ -455,7 +452,7 @@ fn plane_axes_near_square(du: Vec3, dv: Vec3) -> bool {
 /// the reader takes ([`plane_axes_square`]), else `y` with its part along `x` taken out and
 /// made unit again. A placement keeps axes up to 10⁻¹² off square (`SetCanonical`), and a
 /// plane fitted through far corners can be off by 10⁻¹⁴, which the record writes square and
-/// [`plane`] reads square (solidcore#3377); the move is that angle times the face's size.
+/// reads square (solidcore#3377, [`square_record_plane`]).
 /// `None` when two passes do not square it (axes parallel, or NaN); the reader refuses an axis
 /// that is not finite on its own.
 pub(crate) fn square_plane_axis(x: Vec3, y: Vec3) -> Option<Vec3> {
@@ -472,6 +469,43 @@ pub(crate) fn square_plane_axis(x: Vec3, y: Vec3) -> Option<Vec3> {
         y = off / len;
     }
     plane_axes_square(x, y).then_some(y)
+}
+
+/// A `Plane` record whose axes are off square, but by no more than the kernel's placement
+/// keeps ([`plane_axes_near_square`]; records written before solidcore#3377 carry about
+/// 10⁻¹⁴), as the record with its v axis made square to its u ([`square_plane_axis`]) at its
+/// own scale: unit where the kernel's placement takes it as unit ([`axis_scale`]), else its
+/// length. `None` for every other record, which is read as it is ([`plane`] refuses a plane
+/// further off square).
+///
+/// The plane's origin, u axis, normal and point set stay. A point at the record's `(u, v)`
+/// moves along u by at most the skew angle times its distance `|v dv|` from the origin along
+/// v, as the writer's squaring moves it ([`crate::surface::face_surface::record_face`]).
+fn square_record_plane(record: &Record) -> Option<Record> {
+    let Record::Plane {
+        origin,
+        u_axis,
+        v_axis,
+    } = record
+    else {
+        return None;
+    };
+    let v3 = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let (du, dv) = (v3(*u_axis), v3(*v_axis));
+    if plane_axes_square(du, dv) || !plane_axes_near_square(du, dv) {
+        return None;
+    }
+    let y = square_plane_axis(du, dv)?;
+    let y = if axis_scale(dv) == 1.0 {
+        y
+    } else {
+        y * dv.length()
+    };
+    plane_axes_square(du, y).then_some(Record::Plane {
+        origin: *origin,
+        u_axis: *u_axis,
+        v_axis: [y.x, y.y, y.z],
+    })
 }
 
 /// How far a plane's parameter runs along its unit axis for a unit of the record's along
@@ -686,6 +720,8 @@ mod tests {
         let far = Point3::new(10010.0, 9997.58, 10.0);
         for (o, skew, len) in [
             (Point3::ZERO, 1.36e-14, 1.0),
+            (Point3::ZERO, 0.5 * EFF_ZERO, 1.0),
+            (Point3::ZERO, -0.5 * EFF_ZERO, 3.0),
             (far, 1.36e-14, 1.0),
             (far, -0.5 * EFF_ZERO, 1.0),
             (far, 0.5 * EFF_ZERO, 3.0),
@@ -699,11 +735,14 @@ mod tests {
             assert!(plane_axes_square(x, y), "{skew} at {o:?}: {y:?}");
             // in the plane of the record's axes, on the same side: the normal stays +z
             assert!(y.z == 0.0 && y.y > 0.0, "{skew} at {o:?}: {y:?}");
+            // the box keeps the record's scales, to the rounding of the squared axis's length
             let d = s.natural_uv_domain_with_nurb(&k()).unwrap();
-            assert_eq!(
-                (d.min().x, d.max().x, d.min().y, d.max().y),
-                (0.0, 2.0, -len, len),
-                "{skew} at {o:?}"
+            let near = |a: f64, b: f64| (a - b).abs() <= gamma(4) * b.abs();
+            assert!(
+                (d.min().x, d.max().x) == (0.0, 2.0)
+                    && near(d.min().y, -len)
+                    && near(d.max().y, len),
+                "{skew} at {o:?}: {d:?}"
             );
         }
         for skew in [2.0 * EFF_ZERO, -1e-9, 1e-6] {

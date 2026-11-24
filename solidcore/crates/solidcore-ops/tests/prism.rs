@@ -1962,9 +1962,10 @@ fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
     close(tilted, 2.0 * 10.0 * sin, "ruled, tilted");
 }
 
-/// An extruded rectangle on a sketch plane that is not axis-aligned reads its own record back
-/// (tangency-labs/solidcraft#13737: two side walls' planes were written 1.2 times past the
-/// reader's squareness bound, and `from_record` refused them).
+/// An extruded rectangle on a sketch plane that is not axis-aligned reads its record back, also
+/// as saved before #21509 (tangency-labs/solidcraft#13737: two side walls' planes were written
+/// with `u·v` = -3.886e-16, 1.2 times past the reader's old squareness bound, and
+/// `from_record` refused them).
 #[test]
 fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
     // x = (584.394, 0, 385.337) made unit, the slot of tangency-labs/solidcraft#12365
@@ -1981,7 +1982,7 @@ fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
         holes: vec![],
     };
     let body = extrude_planar_regions(&plane, &[r], 0.0, 12.0).unwrap();
-    let (record, _) = body.to_record().unwrap();
+    let (mut record, _) = body.to_record().unwrap();
     assert_eq!(
         (
             record.faces.len(),
@@ -1992,4 +1993,17 @@ fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
     );
     let (back, _) = Body::from_record(&record, false).unwrap();
     assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    // the record as written before #21509: every plane's v leaning on its u past the reader's
+    // old bound (3e-16), as the -3.886e-16 measured there, by enough to stay past it rounded
+    for face in &mut record.faces {
+        if let solidcore_record::brep::Surface::Plane { u_axis, v_axis, .. } = &mut face.surface {
+            for i in 0..3 {
+                v_axis[i] -= 1e-15 * u_axis[i];
+            }
+        }
+    }
+    let (old, _) = Body::from_record(&record, false).unwrap();
+    assert!(old.check(CheckLevel::All).unwrap().is_valid());
+    let (v, w) = (body.volume(1e-9).unwrap(), old.volume(1e-9).unwrap());
+    assert!((v - w).abs() <= 1e-9 * v, "volume {w} vs {v}");
 }
