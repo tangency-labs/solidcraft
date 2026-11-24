@@ -3236,6 +3236,9 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
             if let Some(material) = s.doc.materials.get(source).cloned() {
                 s.doc_mut().materials.insert(copy.clone(), material);
             }
+            if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
+                s.doc_mut().collision_shapes.insert(copy.clone(), shape);
+            }
         }
     }
     Ok(())
@@ -4372,7 +4375,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             if single && (ids.len() != 1 || flip) {
                 return Err(bad(cmd, "a `single` hole takes one sketch point and no `flip`"));
             }
-            Some((solidcraft_doc::SketchPoints { sketch: SketchId(sketch), ids, flip, single }, first, -n))
+            Some((solidcraft_doc::SketchPoints { sketch: SketchId(sketch), ids, flip, single, legacy_face_roles: false }, first, -n))
         }
         _ => None,
     };

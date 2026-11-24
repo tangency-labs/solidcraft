@@ -421,6 +421,20 @@ fn command_dialog_value_memory_is_off_by_default_and_resets_each_time() {
     assert!(matches!(&recalled.kind, Kind::PatternRect { count, .. } if count == "3"));
 }
 
+#[test]
+fn new_fillet_opens_at_the_last_applied_radius_without_remember_dialog_values() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.remember_dialog_values);
+    let first = Dialog::for_command(&h.app, "solid.fillet").unwrap();
+    let Kind::Fillet { radius, chamfer: false, .. } = &first.kind else { panic!("a fillet dialog") };
+    let shipped = radius.clone();
+    h.app.last_fillet_radius = "5 mm".into();
+
+    let next = Dialog::for_command(&h.app, "solid.fillet").unwrap();
+    assert!(matches!(&next.kind, Kind::Fillet { radius, chamfer: false, .. } if radius == "5 mm"));
+    assert_ne!(shipped, "5 mm");
+}
+
 fn fixture() -> Harness {
     let mut h = Harness::new();
     for (name, x) in [("A", 0), ("B", 30), ("C", 60), ("D", 90)] {
