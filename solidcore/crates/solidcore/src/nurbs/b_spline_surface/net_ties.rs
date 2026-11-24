@@ -60,7 +60,7 @@ impl BSplineSurface {
     /// Whether the knots in `param`'s direction are clamped: the first and the last knot each
     /// of multiplicity above the degree, so the net's first and last lines in that direction
     /// are the surface's boundary curves.
-    pub(super) fn is_clamped_in(&self, param: SurfParamType) -> Result<bool> {
+    fn is_clamped_in(&self, param: SurfParamType) -> Result<bool> {
         let (_, multiplicities) = self.knots(param, None)?;
         let degree = self.degree(param);
         let ends = |m: Option<&usize>| m.is_some_and(|&m| m > degree);

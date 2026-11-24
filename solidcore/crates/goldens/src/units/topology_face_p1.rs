@@ -1886,7 +1886,10 @@ mod tests {
         assert_eq!(run.zone_tol, tol);
         assert!(!run.periodic_v, "the gap must be past IsPeriodic's scaled zero");
         let gap = run.gap_v.expect("a clamped, non-rational net certifies its gap");
-        assert!(gap >= tol / 2.0 && gap <= tol, "gap bound {gap}, tolerance {tol}");
+        assert!(
+            (tol / 2.0..=tol).contains(&gap),
+            "gap bound {gap}, tolerance {tol}"
+        );
         assert_eq!(run.result.u, fp1::FixSeamPlanType::NoChanges);
         assert_eq!(
             run.result.v,

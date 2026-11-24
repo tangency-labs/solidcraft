@@ -33,9 +33,9 @@
 //! - **A seam move needs a closed direction.** `move_seam` drops a crossed or near-miss
 //!   seam reported in a direction the surface does not close in: closed means the net
 //!   certifies its two boundary curves within the face's tolerance of each other
-//!   everywhere (`BSplineSurface::boundary_gap_bound`; a creased closure counts, an
-//!   unclamped net or a weight not positive certifies nothing), not a sampled test
-//!   (#21491). Upstream splits the surface there and joins the open ends, so the face's
+//!   everywhere, with equal boundary weights so the join's average stays within half
+//!   that gap (`BSplineSurface::closes_within`; a creased closure counts, an unclamped
+//!   net or a weight not positive certifies nothing), not a sampled test (#21491). Upstream splits the surface there and joins the open ends, so the face's
 //!   surface no longer passes through its edges (11.8 away on `vase_rev.smb`), and the
 //!   seam split that follows merges interval ends onto edge points up to 4.19 away,
 //!   growing the vertex tolerances to 1.18-2.59 (#21368).
@@ -2132,8 +2132,8 @@ fn vertexuse_uv(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<Point2> {
 ///
 /// `SM_ERR_INVALID_INPUT` for a surface that is not a B-spline kind; `SM_ERR` when the
 /// surface cannot be split; [`SolidError::InvalidInput`] as in the module docs; those
-/// of the surface join, the knot query, the closure bound
-/// ([`crate::nurbs::b_spline_surface::BSplineSurface::boundary_gap_bound`]: a boundary
+/// of the surface join, the knot query, the closure test
+/// ([`crate::nurbs::b_spline_surface::BSplineSurface::closes_within`]: a boundary
 /// control point not finite) and the classification state;
 /// [`SolidError::Unported`] (`GetUpwardLoopuses`, `IsCrossedByEdge`, `HasNearMisses`,
 /// `GetUpwardVertexuses`, `GetBrep`, `SmFace::Notify` (also through `ReplaceSurface`),
@@ -2264,11 +2264,13 @@ pub fn move_seam_notified<O: LoopObject>(
     // (upstream splits and rejoins the open ends there, gluing edges the surface no longer
     // passes through; UB-138's trigger). A direction is closed when its net certifies
     // that the two boundary curves lie within the face's tolerance of each other
-    // everywhere (`BSplineSurface::boundary_gap_bound`, #21491): the join below averages
-    // the two boundary lines, so it moves the surface by at most half that gap. A creased
-    // (C0) closure is closed: the surface still passes through its edges. No sample
-    // decides it (§7.6): `IsPeriodic`'s six samples and the healer's sampled closure
-    // grade prove nothing between their points.
+    // everywhere, with equal weights on the two boundary lines
+    // (`BSplineSurface::closes_within`, #21491): the join below then averages each pair of
+    // boundary points at their common weight, so it moves the surface by at most half the
+    // gap. `zone_tol` is the tolerance the join removes its knot to. A creased (C0)
+    // closure is closed: the surface still passes through its edges. No sample decides it
+    // (§7.6): `IsPeriodic`'s six samples and the healer's sampled closure grade prove
+    // nothing between their points.
     let closed = |dir: Sp| -> Result<bool> {
         let net = match surface0.kind_with_nurb(k)? {
             SurfaceKind::BSpline(b) => Some(b),
@@ -2285,11 +2287,10 @@ pub fn move_seam_notified<O: LoopObject>(
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => None,
         };
-        let gap = match net {
-            Some(net) => net.boundary_gap_bound(dir)?,
-            None => None,
-        };
-        Ok(gap.is_some_and(|gap| gap <= zone_tol))
+        match net {
+            Some(net) => net.closes_within(dir, zone_tol),
+            None => Ok(false),
+        }
     };
     let closed_u = !(crosses_u || near_miss_u) || closed(Sp::U)?;
     let closed_v = !(crosses_v || near_miss_v) || closed(Sp::V)?;
