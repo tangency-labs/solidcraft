@@ -4959,3 +4959,34 @@ fn align_refuses_a_face_of_a_mesh_body() {
     let e = s.execute("solid.align", &json!({"bodies": [mesh], "from_face": [10, 10, 20], "to_plane": "XY"}));
     assert!(e.as_ref().is_err_and(|e| e.to_string().contains("`from_face` must be on a planar face of a solid body")), "{e:?}");
 }
+
+/// Boxes `A` (10 x 10 x 10 at the origin) and `B` (the same at (50, 0, 0)), and `Pin`, a
+/// cylinder of radius 5 and height 10 standing at (-30, 5, 0).
+fn blocks_and_pin() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [50, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+    run(&mut s, "solid.cylinder", json!({"base": [-30, 5, 0], "radius": 5, "height": 10, "operation": "new", "body_name": "Pin"}));
+    s
+}
+
+fn align_error(s: &mut Session, p: Value) -> String {
+    match s.execute("solid.align", &p) {
+        Ok(r) => panic!("{p} was taken: {r}"),
+        Err(e) => e.to_string(),
+    }
+}
+
+/// The start of the move is on the bodies that move: a face or snap picked on another body is
+/// refused, naming it; a typed point is a coordinate, wherever it lies.
+#[test]
+fn align_refuses_a_start_on_a_body_that_stays() {
+    let mut s = blocks_and_pin();
+    for from in [json!({"from_face": [5, 5, 10]}), json!({"from": {"snap": "vertex", "at": [0.2, 0, 0]}})] {
+        let mut p = json!({"bodies": ["B"], "to": [0, 0, 100]});
+        p.as_object_mut().into_iter().for_each(|o| o.extend(from.as_object().cloned().unwrap_or_default()));
+        let e = align_error(&mut s, p);
+        assert!(e.contains("`A`") && e.contains("not moved"), "{from}: {e}");
+    }
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [10, 10, 10], "to": [0, 0, 100]}));
+}
