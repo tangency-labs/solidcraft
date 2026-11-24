@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&NEW_DESIGN_CONTRACT)
         .output(output_schema_for::<NewDesignResult>)
-        .params("name?"),
+        .params("name?; new_tab?: bool (true opens the design in a tab of its own after the active one and shows it, so the design that was open stays open and every later command acts on the new one; default false: the active design is replaced; the desktop window only) → name, document_id (with new_tab)"),
     CommandSpec::new("doc.open", "Open", crate::checked!("doc.open", open)).any_part()
         .icon("open")
         .key("Ctrl+O")
@@ -59,6 +59,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<OpenResult>)
         .params(concat!(
             "path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.prt/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, NX, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); ",
+            "new_tab?: bool (true opens the file in a tab of its own after the active one and shows it, even when the active design is empty, so the design that was open stays open; default false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced; a design already open in a tab is shown instead; a person in the middle of a dialog or tool at the window gets the tab behind the active one, so check document.list; the desktop window only); ",
             "up?: z|y for a STEP, IGES, FreeCAD, Rhino, NX or glTF file (see file.insert_step and file.insert_mesh); ",
             "names?: auto|solid|product|instance for a STEP, IGES, FreeCAD, Rhino or NX file (see file.insert_step); ",
             "units?: for an STL or OBJ file (see file.insert_mesh); ",
@@ -94,6 +95,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "reader?: solidcraft|cadmpeg for a .step/.stp, .igs/.iges, FreeCAD, Rhino or NX file (default solidcraft: SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file restated as STEP), a FreeCAD, Rhino or NX file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder, to compare the two; `flatten` works with either); ",
             "matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); ",
             "tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)",
+            "link?: bool (default true: keep a STEP source link for Update Links; false keeps an independent copy; without a disk path the web app keeps a copy); ",
         )),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh)).begins_edit()
         .at("SOLID", "INSERT")
@@ -174,16 +176,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params(concat!(
-            "path; ",
-            "format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); ",
-            "bodies?: [names] (JSON and URDF export the complete design); ",
-            "urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); ",
-            "quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); ",
-            "objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); ",
-            "lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); ",
-            "solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md)",
-        )),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); writer?: solidcraft|cadmpeg (STEP and IGES only, refused for the other formats; default solidcraft: SolidCraft's own writers; cadmpeg: written from the design by cadmpeg, STEP AP242 with the components and colours but no solid names, IGES 5.3 with each body where the design shows it, named and coloured; warnings say what the file leaves out); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (URDF and OpenUSD, default false, true for OpenUSD with purpose: distribution; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md); physics?: bool (OpenUSD only, default false: true also writes the joints, gears and racks as PhysX couplings of their joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader); purpose?: interchange|distribution (OpenUSD only, default interchange: each body's exact shape beside its mesh, for another CAD program; distribution: meshes only, with the pictures shown on the model, for a viewer or a game engine); exact_brep?: bool (OpenUSD only, default true for interchange, false for distribution: each body's exact shape beside its mesh); a given images or exact_brep overrides the purpose's default"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -204,7 +197,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "quality?: standard|fine|finest (default standard); ",
             "lay_on_print_faces?: bool (default false: as file.export); ",
             "ascii?: bool (default false: true writes ASCII STL); ",
-            "solids?: body|face (default body; face, with ascii: true only: one named solid per B-rep face, as file.export) → {path, bytes, format, print_faces?, warnings?}: STL (binary unless ascii), whatever the path's extension",
+            "solids?: body|face (default body; face, with ascii: true only: one named solid per B-rep face, as file.export) → {path, bytes, format, print_faces?, skipped?, warnings?}: STL (binary unless ascii), whatever the path's extension",
         )),
     CommandSpec::new("file.export_3mf", "Export 3MF", crate::checked!("file.export_3mf", export_3mf))
         .icon("mesh_export")
@@ -216,7 +209,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "bodies?: [names] (default: every body); ",
             "quality?: standard|fine|finest (default standard); ",
             "objects?: body|component (as file.export); ",
-            "lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: 3MF, whatever the path's extension",
+            "lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, skipped?, warnings?}: 3MF, whatever the path's extension",
         )),
     CommandSpec::new("file.export_obj", "Export OBJ", crate::checked!("file.export_obj", export_obj_cmd))
         .icon("export")
@@ -226,7 +219,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!(
             "path; ",
             "bodies?: [names] (default: every body); ",
-            "quality?: standard|fine|finest (default standard) → {path, bytes, format, files, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it",
+            "quality?: standard|fine|finest (default standard) → {path, bytes, format, files, skipped?, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it",
         )),
     CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
         .icon("export")
@@ -338,12 +331,20 @@ fn clear_import_cache(_: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"removed": removed}))
 }
 
+/// Why `new_tab` is refused where there is one design and no tab strip.
+const NEW_TAB_NEEDS_TABS: &str = "`new_tab` needs the desktop window, which has design tabs; this host holds one design";
+
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
+    // The desktop window opens the tab and takes the option off before this runs, so a design
+    // that is not in a tab strip (a command line, a headless server) is the one that gets here.
+    if p.get("new_tab").and_then(Value::as_bool) == Some(true) {
+        return Err(bad("file.new", NEW_TAB_NEEDS_TABS));
+    }
     let name = str_(p, "name").unwrap_or("Untitled");
     s.replace_design(Session::new(Document::new(name)));
     // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
-    let reply = NewDesignResult { name: name.to_string(), param_warnings: Vec::new() };
+    let reply = NewDesignResult { name: name.to_string(), document_id: None, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
 }
 
@@ -554,11 +555,34 @@ impl DesignSnapshot {
 /// While the profiler records, the reply's `profile` is the import's share of it (reading,
 /// building the solids in SMLib, placing, meshing and evaluating them), as
 /// `diagnostics.profile` reports it.
-fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
+fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions, keep_link: bool) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
+    let keep_link = keep_link && !cfg!(target_arch = "wasm32") && super::component_link::is_step_source(path);
     let warning = memory_warning(path);
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    add_step_bytes(s, path, name, options, &bytes, profiled).map(|reply| with_memory_warning(reply, warning))
+    let reply = add_step_bytes(s, path, name, options, &bytes, profiled)?;
+    if keep_link {
+        let (Some(component), Some(feature)) = (reply["component"].as_u64(), reply["feature"].as_u64()) else {
+            return Err(EngineError::Other(format!("{path}: the import has no component to link")));
+        };
+        let names = match options.names {
+            solidcraft_io::StepNames::Auto => "auto",
+            solidcraft_io::StepNames::Solid => "solid",
+            solidcraft_io::StepNames::Product => "product",
+            solidcraft_io::StepNames::Instance => "instance",
+        };
+        s.doc_mut().links.insert(
+            component,
+            solidcraft_doc::DesignLink {
+                path: super::design_link::absolute(std::path::Path::new(path)).to_string_lossy().into_owned(),
+                feature,
+                step_names: Some(names.into()),
+                file_sha256: Some(solidcraft_doc::DesignLink::file_digest(&bytes)),
+                ..Default::default()
+            },
+        );
+    }
+    Ok(with_memory_warning(reply, warning))
 }
 
 /// Add a STEP, IGES or native CAD file's `bytes`. A FreeCAD file's sketches and features come in
@@ -1125,7 +1149,12 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(kind)) if kind == "box" => true,
         Some(_) => return Err(bad(cmd, crate::schema::insert_step::ENVELOPE_MESSAGE)),
     };
-    let mut out = add_step(s, path, str_(p, "name"), &options)?;
+    let keep_link = match p.get("link") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(link)) => *link,
+        Some(_) => return Err(bad(cmd, "`link` must be a boolean")),
+    };
+    let mut out = add_step(s, path, str_(p, "name"), &options, keep_link)?;
     if envelope {
         out["envelope"] = json!(import_envelope(s, &out)?);
     }
@@ -1555,6 +1584,10 @@ fn read_kicad_env_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, del
 }
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
+    // The window opens the tab and takes the option off before this runs (see `new_doc`).
+    if p.get("new_tab").and_then(Value::as_bool) == Some(true) {
+        return Err(bad("doc.open", NEW_TAB_NEEDS_TABS));
+    }
     let path = path_arg(p, "doc.open")?;
     // A file SolidCraft does not read itself opens with the installed importer that claims its
     // extension; `format` picks an importer even for a file SolidCraft reads.
@@ -2154,7 +2187,9 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
-    s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
+    // The bytes just written, read back without the open-size limit: a save over it keeps its
+    // history for the next save (#18686).
+    s.provenance_chain = solidcraft_io::written_design_provenance_chain(&bytes);
     s.provenance = None;
     s.mark_saved();
     let bytes_len = bytes.len();
@@ -2703,8 +2738,8 @@ fn export_to(
     if format == Format::Glb {
         return export_glb(s, cmd, path, bodies, quality, hierarchy);
     }
-    if format == Format::Usd {
-        return export_usd(s, path, bodies);
+    if written_by_cadmpeg(format) {
+        return export_cadmpeg(s, cmd, path, bodies, quality, format, CadmpegChoices::default());
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
@@ -2748,6 +2783,31 @@ fn skipped_from_warnings(warnings: &[String]) -> Vec<String> {
 /// A picture of the part, drawn only for a format that has a place for it.
 fn export_thumbnail(s: &Session, format: Format, bodies: &[String]) -> Option<Vec<u8>> {
     matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s, bodies)).flatten()
+}
+
+/// `physics` as `file.export` reads it: true writes the joints, grounding and each component's
+/// mass as OpenUSD physics. Only OpenUSD takes it; `false` is accepted for any format.
+fn physics_flag(p: &Value, cmd: &str, format: Format) -> Result<bool> {
+    match p.get("physics") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => Ok(false),
+        Some(Value::Bool(true)) if format == Format::Usd => Ok(true),
+        Some(Value::Bool(true)) => {
+            Err(bad(cmd, "`physics` is for OpenUSD: URDF and SDF always write their joints and masses, and the other formats hold none"))
+        }
+        Some(_) => Err(bad(cmd, "`physics` must be true or false")),
+    }
+}
+
+/// `render_setup` as `file.export` reads it: the saved render setup whose image textures an
+/// OpenUSD package holds. Only OpenUSD takes it.
+fn render_setup_arg<'a>(p: &'a Value, cmd: &str, format: Format) -> Result<Option<&'a str>> {
+    match p.get("render_setup") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(name)) if format == Format::Usd && !name.trim().is_empty() => Ok(Some(name.as_str())),
+        Some(Value::String(_)) if format == Format::Usd => Err(bad(cmd, "`render_setup` must name a render setup")),
+        Some(Value::String(_)) => Err(bad(cmd, "`render_setup` is for OpenUSD: other formats written here hold no image textures")),
+        Some(_) => Err(bad(cmd, "`render_setup` must be the name of a render setup")),
+    }
 }
 
 /// `lay_on_print_faces` as the mesh exports read it: true writes each body with a print face laid
@@ -2824,6 +2884,7 @@ fn export_laid_to(
         bytes,
         format: format!("{format:?}"),
         print_faces: laid.bodies,
+        skipped: skipped_from_warnings(&laid.warnings),
         warnings: laid.warnings,
         delivery: SlicerDelivery::default(),
         param_warnings: Vec::new(),
@@ -2861,6 +2922,41 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Checked first so URDF and SDF refuse `solids: face` too, rather than ignoring it.
     let face_solids = stl_solids(p, cmd, format)?;
+    // A format asked for by name is written whatever the path's extension, as it always was
+    // (`format: stl` writes STL to `part.usda`), but for one cadmpeg writes: a Rhino or OpenUSD
+    // file asked for under another format's extension is refused, rather than written under
+    // the wrong one (OpenUSD's own target check refused that before; Rhino and FreeCAD are new).
+    if let Some(f) = str_(p, "format")
+        && let Ok(by_path) = Format::from_name(path)
+        && by_path != format
+        && written_by_cadmpeg(format)
+        && std::path::Path::new(path).extension().is_some()
+    {
+        return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which names {by_path:?}")));
+    }
+    // Read before URDF, SDF and laid-out prints go their own way, so none takes them silently.
+    let physics = physics_flag(p, cmd, format)?;
+    let setup = render_setup_arg(p, cmd, format)?;
+    // OpenUSD's purpose sets the defaults of its exact shapes and pictures; each given option
+    // overrides it.
+    let purpose = crate::schema::file::usd_purpose(p.get("purpose"), format).map_err(|e| bad(cmd, e))?.unwrap_or_default();
+    let usd_flag = |key: &str| -> Result<Option<bool>> {
+        match p.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Bool(b)) if format == Format::Usd => Ok(Some(*b)),
+            Some(Value::Bool(_)) if key == "exact_brep" => Err(bad(cmd, "`exact_brep` is for OpenUSD: other formats written here choose their own")),
+            Some(Value::Bool(_)) => Ok(None),
+            Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
+        }
+    };
+    let exact_brep = usd_flag("exact_brep")?;
+    // STEP and IGES: SolidCraft's own writer unless `writer: cadmpeg` asks for cadmpeg's.
+    let writer = crate::schema::file::export_writer(p.get("writer"), format).map_err(|e| bad(cmd, e))?;
+    if writer == Some(crate::schema::file::ExportWriter::Cadmpeg) {
+        lay_on_print_faces(p, cmd, format)?;
+        mesh_parts(s, p, cmd, format)?;
+        return export_cadmpeg(s, cmd, path, &string_list(cmd, p, "bodies")?, mesh_quality(p, cmd)?, format, CadmpegChoices::default());
+    }
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2879,6 +2975,13 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if lay {
         return export_laid(s, path, format, &bodies, &parts, quality);
+    }
+    // Pictures are written only when asked (or for distribution), as URDF's are.
+    let distribution = purpose == crate::schema::file::UsdPurpose::Distribution;
+    let images = format == Format::Usd && usd_flag("images")?.unwrap_or(distribution);
+    let meshes_only = format == Format::Usd && !exact_brep.unwrap_or(!distribution);
+    if written_by_cadmpeg(format) {
+        return export_cadmpeg(s, cmd, path, &bodies, quality, format, CadmpegChoices { physics, setup, images, meshes_only });
     }
     export_to(s, cmd, path, format, &bodies, &parts, quality, hierarchy(p, cmd, format)?)
 }
@@ -3025,6 +3128,10 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
     // What meshing the bodies reported: each face the mesh path left short of the smallest angle
     // or the chord tolerance.
     if !files.warnings.is_empty() {
+        let skipped = skipped_from_warnings(&files.warnings);
+        if !skipped.is_empty() {
+            reply["skipped"] = json!(skipped);
+        }
         reply["warnings"] = json!(files.warnings);
     }
     Ok(reply)
@@ -3109,6 +3216,33 @@ fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState,
             warnings.push(format!("decal `{}` is partly transparent in SolidCraft: exported opaque", c.name));
         }
         decals.push(ShownDecal { name: c.name.clone(), component: c.component, corners, image });
+    }
+    decals
+}
+
+/// What an export through cadmpeg writes beyond the bodies: OpenUSD's physics, a render setup's
+/// images and the pictures shown on the model.
+#[derive(Clone, Copy, Default)]
+struct CadmpegChoices<'a> {
+    physics: bool,
+    setup: Option<&'a str>,
+    images: bool,
+    meshes_only: bool,
+}
+
+/// The design's shown decals for an OpenUSD export, each in its component's frame and the world.
+fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::DecalPlan> {
+    let mut decals = Vec::new();
+    for d in shown_decals(doc, st, warnings) {
+        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(d.component)) else {
+            warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
+            continue;
+        };
+        let world = d.corners.map(|p| [p.x, p.y, p.z]);
+        let local = world.map(|p| solidcore_ops::affine::apply_point(&to_component, p));
+        let sha256 = solidcraft_doc::render_resources::HdrId::of(&d.image).to_string();
+        let image = solidcraft_io::SurfaceMap { sha256, bytes: std::sync::Arc::from(d.image) };
+        decals.push(solidcraft_io::DecalPlan { name: d.name, component: d.component, local, world, image });
     }
     decals
 }
@@ -3221,26 +3355,114 @@ fn usd_encoding(name: &str) -> &'static str {
     }
 }
 
-/// The OpenUSD export: the bodies written as STEP, as `file.export` writes STEP (a design with
-/// components, when no bodies are chosen, as a STEP assembly), then restated as OpenUSD by
-/// cadmpeg; the path's extension picks text (`.usda`), binary (`.usdc`, `.usd`) or a package
-/// (`.usdz`). Written atomically, so a refusal or a failed write leaves a file already there as it
-/// was. What the file could not carry is in the reply's warnings.
-fn export_usd(s: &Session, path: &str, bodies: &[String]) -> Result<Value> {
+/// Whether cadmpeg writes `format` from the design ([`export_cadmpeg`]).
+fn written_by_cadmpeg(format: Format) -> bool {
+    matches!(format, Format::Usd | Format::Rhino | Format::FreeCad)
+}
+
+/// An export through cadmpeg (OpenUSD, Rhino): the design written into cadmpeg's neutral model
+/// (its components and placements when no bodies are chosen and the format holds them, each
+/// body's exact B-rep and, where the format takes it, its mesh at `quality`, and the looks the
+/// design shows), then written by cadmpeg's writer for `format`; for OpenUSD the path's extension
+/// picks text (`.usda`), binary (`.usdc`, `.usd`) or a package (`.usdz`). FreeCAD is refused:
+/// cadmpeg cannot write a new FreeCAD file yet. What the view hides is written hidden. Written
+/// atomically, so a refusal or a failed write leaves a file already there as it was. What the
+/// file could not carry is in the reply's warnings, among them each body a render setup gives an
+/// image texture or optics, written with its look alone. With `physics`, OpenUSD also holds the
+/// joints, grounding and each component's mass, with `setup` the image textures that render
+/// setup gives bodies, and with `images` the pictures shown on the model (both in a `.usdz`
+/// package).
+fn export_cadmpeg(
+    s: &Session,
+    cmd: &str,
+    path: &str,
+    bodies: &[String],
+    quality: solidcraft_io::MeshQuality,
+    format: Format,
+    choices: CadmpegChoices<'_>,
+) -> Result<Value> {
+    let CadmpegChoices { physics, setup, images, meshes_only } = choices;
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
-    let step = if bodies.is_empty() && !s.doc.occurrences.is_empty() {
-        solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
-    } else {
-        let quality = solidcraft_io::MeshQuality::default();
-        solidcraft_io::export_with_parts_noted(&s.doc.painted(&*s.world_state()?), bodies, &[], Format::Step, &name, &s.doc.metadata, quality, None)?
-            .0
+    let world = s.world_state()?;
+    // The placements the world has, uncaptured moves included, so the assembly is written where
+    // the design shows it, as chosen bodies are; with physics written, as URDF has them, a
+    // placement the joints place is where they place it, so its joints' frames meet as the
+    // simulator starts. An export that writes no physics (chosen bodies, a placement that is not
+    // rigid) is written where the design shows it, and says nothing of joints.
+    let jointed = if physics { Some(jointed_document(s)) } else { None };
+    let (doc, held) = match jointed {
+        Some((doc, held)) if solidcraft_io::CadmpegOptions::physics_fits(&doc, bodies) => (doc, held),
+        _ => (s.placed_document(), Vec::new()),
     };
-    let (bytes, warnings) = solidcraft_io::usd_from_step(&step, path).map_err(EngineError::Other)?;
+    let hidden = solidcraft_io::Hidden {
+        bodies: world.bodies.iter().filter(|b| !s.body_visible(&b.name)).map(|b| b.name.clone()).collect(),
+        placements: s.visibility.hidden_occurrences.clone(),
+    };
+    let mut warnings = Vec::new();
+    let (surfaces, optics) = match setup {
+        Some(name) => (
+            super::render::surface_bindings::export_plans(s, name, cmd, &mut warnings)?,
+            super::render::surface_bindings::optics_plans(s, name, cmd, &mut warnings)?,
+        ),
+        None => (Vec::new(), Vec::new()),
+    };
+    let decals = if images { usd_decals(&doc, &s.model.state(), &mut warnings) } else { Vec::new() };
+    let options = solidcraft_io::CadmpegOptions { hidden, physics, surfaces, decals, optics, meshes_only };
+    let (bytes, written) =
+        solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
+    warnings.extend(written);
+    warnings.extend(held.iter().map(|name| held_warning(name)));
+    let label = match format {
+        Format::Usd => "OpenUSD",
+        Format::Rhino => "Rhino",
+        Format::Step => "STEP",
+        Format::Iges => "IGES",
+        Format::FreeCad => "FreeCAD",
+        _ => "this",
+    };
+    let chosen = |b: &str| bodies.is_empty() || bodies.iter().any(|x| x == b);
+    // The chosen setup's images and optics are written (or what is not is a warning already).
+    if setup.is_none() {
+        let bound = super::render::bound_bodies(s, cmd)?;
+        for b in world.bodies.iter().filter(|b| chosen(&b.name)) {
+            if let Some((setup, what)) = bound.get(&b.name) {
+                warnings.push(format!(
+                    "{}: render setup `{setup}` gives it {what}, which {label} export does not write yet: written with its look",
+                    b.name
+                ));
+            }
+        }
+    }
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply =
-        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{:?}", Format::Usd), warnings, ..ExportResult::default() };
+    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// The design with its uncaptured moves (not the exploded view, which is shown only), except
+/// for the occurrences the joint solver places: it puts them back as soon as a joint moves, so
+/// they stay where their joints place them. With the names of those left so.
+fn jointed_document(s: &Session) -> (std::borrow::Cow<'_, solidcraft_doc::Document>, Vec<String>) {
+    let moves = s.uncaptured_moves();
+    if moves.is_empty() {
+        return (std::borrow::Cow::Borrowed(&*s.doc), Vec::new());
+    }
+    let placed = solidcraft_doc::joints::solve(&s.doc, &s.model.state()).world;
+    let mut held = Vec::new();
+    let mut doc = (*s.doc).clone();
+    for o in &mut doc.occurrences {
+        match moves.get(&o.id) {
+            Some(_) if placed.contains_key(&o.id) => held.push(o.name.clone()),
+            Some(t) => o.transform = *t,
+            None => {}
+        }
+    }
+    (std::borrow::Cow::Owned(doc), held)
+}
+
+/// The warning for occurrence `name`, moved without the move captured, written where its joints
+/// place it ([`jointed_document`]).
+fn held_warning(name: &str) -> String {
+    format!("`{name}` was moved but the move is not captured: exported where its joints place it")
 }
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
@@ -3265,32 +3487,14 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     // places: it puts them back as soon as a joint moves, so the move must not become part of
     // their links.
     let st = s.model.state();
-    let mut held = Vec::new();
-    // The exploded view is shown only: the links are where the design places them.
-    let moves = s.uncaptured_moves();
-    let doc = if moves.is_empty() {
-        std::borrow::Cow::Borrowed(&*s.doc)
-    } else {
-        let placed = solidcraft_doc::joints::solve(&s.doc, &st).world;
-        let mut doc = (*s.doc).clone();
-        for o in &mut doc.occurrences {
-            match moves.get(&o.id) {
-                Some(_) if placed.contains_key(&o.id) => held.push(o.name.clone()),
-                Some(t) => o.transform = *t,
-                None => {}
-            }
-        }
-        std::borrow::Cow::Owned(doc)
-    };
+    let (doc, held) = jointed_document(s);
     let mut decal_warnings = Vec::new();
     if images {
         options.decals = urdf_decals(&doc, &st, &mut decal_warnings);
     }
     let mut pkg = solidcraft_io::urdf(&doc, &doc.painted(&st), &stem, &options)?;
     pkg.warnings.extend(decal_warnings);
-    for name in held {
-        pkg.warnings.push(format!("`{name}` was moved but the move is not captured: exported where its joints place it"));
-    }
+    pkg.warnings.extend(held.iter().map(|name| held_warning(name)));
     let dir = file.parent().unwrap_or(std::path::Path::new(""));
     let mut targets: Vec<(String, &[u8])> = pkg.meshes.iter().map(|(n, b)| (dir.join(n).to_string_lossy().to_string(), b.as_slice())).collect();
     targets.push((path.to_string(), pkg.xml.as_bytes()));

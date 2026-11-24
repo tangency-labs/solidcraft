@@ -22,6 +22,7 @@ mod ao;
 pub use ao::GroundAo;
 mod clouds;
 mod edges;
+mod gpu_cull;
 mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 mod motions;
@@ -2435,6 +2436,13 @@ struct Batches {
     arena: Option<Arc<indirect::Arena>>,
     /// `instanced`'s edges, drawn from the parts' shared edges ([`edges`]).
     edges: Option<edges::Edges>,
+    /// `instanced` culled on the GPU ([`gpu_cull`]), where the device can: made at the first
+    /// cull after the scene changes (`gpu_cull_stale`), from the pipelines kept across scenes.
+    gpu_cull: Option<gpu_cull::GpuCull>,
+    gpu_cull_stale: bool,
+    cull_kernel: Option<Arc<gpu_cull::Kernel>>,
+    /// The device cannot build the pipelines: the CPU culls.
+    cull_kernel_failed: bool,
     /// [`GpuScene::instanced_hidden_edges`].
     hidden_edges: bool,
     /// [`GpuScene::lit_instanced_edges`] and [`GpuScene::lit_instanced_hidden`].
@@ -2586,6 +2594,11 @@ impl Batches {
             };
             let parts = edges::Part::of_draws(&self.instanced);
             self.edges = shared_edges(&parts, self.edges.as_ref());
+            // The new draws are culled on the GPU from the next cull, by a cull made for them.
+            if let Some(g) = self.gpu_cull.take() {
+                self.cull_kernel = Some(g.kernel());
+            }
+            self.gpu_cull_stale = true;
             let lit_from = self.edges.as_ref().or_else(|| model.and_then(|scene| scene.edges.as_ref()));
             let lit_parts = edges::Part::of_meshes(&sc.lit_instanced_edges);
             self.lit_shared_edges = shared_edges(&lit_parts, lit_from);
@@ -2816,8 +2829,69 @@ impl Batches {
     /// Each placement's level of detail is chosen here too: the coarsest whose error stays under
     /// [`LOD_PX`] where it is drawn ([`placement_scale`], [`level_for`]), in a view of `size`
     /// pixels.
-    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2], motions: &Motions, edge_px: f32) {
+    /// Where the device can, the GPU culls instead ([`gpu_cull`]), in `encoder` before the
+    /// frame's passes: here only the see-through looks' placements are, to sort them. A frame
+    /// that moves bodies is culled here too, where their motions put the placements, and the GPU
+    /// cull is made again for the next frame that moves nothing.
+    fn cull(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        vp: &[[f32; 4]; 4],
+        size: [f32; 2],
+        motions: &Motions,
+        edge_px: f32,
+    ) {
         self.cull_blocks(vp, motions);
+        if std::mem::take(&mut self.gpu_cull_stale) {
+            self.gpu_cull = None;
+            if motions.is_empty() {
+                if self.cull_kernel.is_none() && !self.cull_kernel_failed && !self.instanced.is_empty() {
+                    self.cull_kernel = gpu_cull::Kernel::new(device).map(Arc::new);
+                    self.cull_kernel_failed = self.cull_kernel.is_none();
+                }
+                if let (Some(kernel), Some(indirect)) = (self.cull_kernel.clone(), self.indirect.as_mut()) {
+                    self.gpu_cull = gpu_cull::GpuCull::new(device, kernel, &self.instanced, indirect, self.edges.as_mut());
+                }
+            }
+        }
+        if !motions.is_empty() {
+            // The cull reads the placements as the scene holds them, not where their motions put
+            // them: a frame that moves something is culled where it is drawn on the CPU, in
+            // [`Self::cull_placements`], and the cull is made again for the next frame that
+            // moves nothing.
+            let took_over = self.indirect.as_ref().is_some_and(|i| i.culls_on_gpu()) || self.edges.as_ref().is_some_and(|e| e.culls_on_gpu());
+            self.gpu_cull = None;
+            self.gpu_cull_stale = true;
+            if took_over {
+                // The buffers hold the cull's placements: write every draw's again, where its
+                // motion puts it.
+                for d in &mut self.instanced {
+                    d.shown = None;
+                    d.edges_shown = None;
+                }
+            }
+        }
+        let (changed, edges_changed) = self.cull_placements(queue, vp, size, motions, edge_px);
+        if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
+            g.run(queue, encoder, vp, size, changed, &self.instanced, indirect, self.edges.as_mut());
+            return;
+        }
+        if changed && let Some(indirect) = self.indirect.as_mut() {
+            indirect.write(device, queue, &self.instanced);
+        }
+        if edges_changed && let Some(edges) = self.edges.as_mut() {
+            edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
+        }
+    }
+
+    /// [`Batches::cull`] on the CPU: the placements of each instanced draw in view, with their
+    /// levels (`shown`, `edges_shown`), those not drawn indirectly written to their levels'
+    /// buffers. With a GPU cull, only the draws it leaves (see-through), and no edges. Whether
+    /// the placements and the edges' placements changed.
+    fn cull_placements(&mut self, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2], motions: &Motions, edge_px: f32) -> (bool, bool) {
+        let gpu = self.gpu_cull.as_ref();
         let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
         // A placement where its motion draws it: its rows, then the motion its own word names,
@@ -2837,7 +2911,10 @@ impl Batches {
         };
         let mut edges_changed = false;
         for (n, d) in self.instanced.iter_mut().enumerate() {
-            let edge_levels = if self.edges.is_some() { d.edges.clone() } else { None };
+            if gpu.is_some_and(|g| g.culls(d)) {
+                continue;
+            }
+            let edge_levels = if self.edges.is_some() && gpu.is_none() { d.edges.clone() } else { None };
             let batched = self.indirect.as_ref().is_some_and(|x| x.batches(n));
             let errors: Vec<f32> = d.levels.iter().map(|l| l.error).collect();
             // Each placement's corners go through the view once, for whether it is in view and
@@ -2901,12 +2978,7 @@ impl Batches {
             }
             d.shown = Some(shown);
         }
-        if changed && let Some(indirect) = self.indirect.as_mut() {
-            indirect.write(device, queue, &self.instanced);
-        }
-        if edges_changed && let Some(edges) = self.edges.as_mut() {
-            edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
-        }
+        (changed, edges_changed)
     }
 
     /// Draw the instanced placements of look `look` (only closed bodies' when `closed_only`):
@@ -3045,12 +3117,15 @@ struct Cut {
     /// ray comes into what the section keeps adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
     /// inside a body; at or below it, outside (an open sheet seen from its front counts below).
     count: wgpu::RenderPipeline,
-    /// Where the count is above the base, the nearest back face past that point, by its true
-    /// depth, in its body's cut colour (the body the cut lies inside: the ray leaves it there),
-    /// hidden itself where the body reaches past another plane first.
+    /// Where the count is above the base, the nearest closed body's back face past that point,
+    /// by its true depth, in its body's cut colour (the body the cut lies inside: the ray leaves
+    /// it there), hidden itself where the body reaches past another plane first. An open body
+    /// is left out: its back face is no cut face, and a sheet inside a cut solid painted the
+    /// cap in its colour from one side only (#4258); `rest` leaves it out there too.
     fill: wgpu::RenderPipeline,
     /// The cap again, only there, at the section plane's depth (pushed as faces are), so what
-    /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728).
+    /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728), from
+    /// the same closed bodies.
     cap: wgpu::RenderPipeline,
     /// Elsewhere, the faces as they are drawn without a section, pushed back by
     /// `FACE_BIAS` so their edges draw over them (#1434); a back face there is an open body's
@@ -5030,7 +5105,7 @@ impl Renderer {
         if !see_through {
             res.pic.model.sort_glass(queue, cb.back);
         }
-        res.pic.model.cull(device, queue, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px);
+        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px);
         // The frame's own ground (under bodies drawn moved) before the model scene's.
         let ground = cb.ground.or(res.pic.model.ground_input);
         let ground_visible = ground.is_some_and(|ground| ground.visible_from(cb.back));
@@ -5273,7 +5348,7 @@ impl Renderer {
         pass.set_bind_group(1, &res.access_bind, &[]);
         pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        // `counting`: only closed bodies, for a section's crossing count ([`Cut::count`]).
+        // `counting`: only closed bodies, for a section's crossing count, fill and cap ([`Cut`]).
         let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
             for d in b.planned.iter().filter(|d| d.class == TriClass::Opaque && (d.closed || !counting)) {
                 pass.set_pipeline(p);
@@ -5337,11 +5412,12 @@ impl Renderer {
             (Some(cut), Some(cut_planned), Some(cut_instanced), Some(cut_flat), Some(base)) => {
                 // The model's own triangles, blocks, plans and instances with its palette, then the
                 // preview's with its own.
-                // `counting`: the crossing count, which leaves open bodies out.
-                let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline, counting: bool| {
+                // `closed_only`: the crossing count, the fill and the cap, which leave open bodies
+                // out (an open body has no inside, so its back face is no cut face, #4258).
+                let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline, closed_only: bool| {
                     pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
                     tris(pass, pick(cut), &m.tris);
-                    if counting {
+                    if closed_only {
                         for block in m.block_order.iter().filter_map(|k| m.blocks.get(k)).filter(|b| b.closed.is_some()) {
                             pass.set_pipeline(pick(cut));
                             block.draw_closed(pass, tally);
@@ -5350,11 +5426,11 @@ impl Renderer {
                         tris(pass, pick(cut), &m.open_tris);
                         block_class(pass, pick(cut), TriClass::Opaque);
                     }
-                    planned(pass, pick(cut_planned), m, counting);
-                    instanced(pass, pick(cut_instanced), pick(cut_flat), m, counting);
+                    planned(pass, pick(cut_planned), m, closed_only);
+                    instanced(pass, pick(cut_instanced), pick(cut_flat), m, closed_only);
                     in_moving(pass, &|pass, mv| {
                         tris(pass, pick(cut), &mv.tris);
-                        if counting {
+                        if closed_only {
                             for block in mv.block_order.iter().filter_map(|k| mv.blocks.get(k)).filter(|b| b.closed.is_some()) {
                                 pass.set_pipeline(pick(cut));
                                 block.draw_closed(pass, tally);
@@ -5363,12 +5439,12 @@ impl Renderer {
                             tris(pass, pick(cut), &mv.open_tris);
                             blocks_of(pass, pick(cut), TriClass::Opaque, mv);
                         }
-                        planned(pass, pick(cut_planned), mv, counting);
-                        instanced(pass, pick(cut_instanced), pick(cut_flat), mv, counting);
+                        planned(pass, pick(cut_planned), mv, closed_only);
+                        instanced(pass, pick(cut_instanced), pick(cut_flat), mv, closed_only);
                     });
                     pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                     tris(pass, pick(cut), &pv.tris);
-                    if !counting {
+                    if !closed_only {
                         tris(pass, pick(cut), &pv.open_tris);
                     }
                 };
@@ -5377,8 +5453,8 @@ impl Renderer {
                 pass.draw(0..3, 0..1);
                 tally.call();
                 all(pass, |c| &c.count, true);
-                all(pass, |c| &c.fill, false);
-                all(pass, |c| &c.cap, false);
+                all(pass, |c| &c.fill, true);
+                all(pass, |c| &c.cap, true);
                 all(pass, |c| &c.rest, false);
             }
             _ => {

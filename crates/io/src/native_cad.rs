@@ -1,7 +1,8 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd`, Rhino `.3dm` and experimental Siemens NX `.prt`, and OpenUSD both ways ([`usd`]);
-//! and STEP and IGES when the cadmpeg reader is chosen ([`cadmpeg_step_records`],
-//! [`cadmpeg_iges_records`]). cadmpeg decodes the file into its neutral model (CADIR). By default
+//! `.FCStd` and experimental Siemens NX `.prt` files are read, and Rhino `.3dm` and OpenUSD
+//! files read and written ([`usd`], [`cadmpeg_export`]); STEP and IGES files are read when
+//! the cadmpeg reader is chosen ([`cadmpeg_step_records`], [`cadmpeg_iges_records`]) and
+//! written through it. cadmpeg decodes the file into its neutral model (CADIR). By default
 //! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
 //! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
 //! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
@@ -13,7 +14,8 @@
 //! can transfer becomes an Import feature; source sketches and feature history are not rebuilt.
 //!
 //! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
-//! records or the OpenUSD bytes plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
+//! records or the exported bytes plus warnings; an export writes the design into cadmpeg's model
+//! directly (`cadir_out`) and cadmpeg's writer writes the file (`export`). A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
 /// Human-readable diagnostic also used by hosts to select the translated NX notice.
@@ -497,16 +499,163 @@ pub use design::NativeDesign;
 mod usd;
 pub use usd::{USD_EXTS, is_usd_path};
 
-/// `step` (STEP text SolidCraft wrote for the bodies to export) as an OpenUSD file called `file`:
-/// `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package. Returns the file's bytes and what
-/// it could not carry. Panics inside cadmpeg become errors.
-pub fn usd_from_step(step: &[u8], file: &str) -> Result<(Vec<u8>, Vec<String>), String> {
-    solidcraft_kernel::guard("cadmpeg USD export", || usd::from_step(step, file).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
-        |e| match e {
-            solidcraft_kernel::KernelError::Invalid(m) => m,
-            e => e.to_string(),
-        },
-    )
+mod cadir_out;
+mod cadir_physics;
+mod cadir_textures;
+mod export;
+
+/// What the design's view hides, for an export that writes it: bodies by their world name
+/// (hidden themselves, by a folder or by a placement above them) and placements by their path
+/// (hidden themselves).
+#[derive(Clone, Debug, Default)]
+pub struct Hidden {
+    pub bodies: std::collections::BTreeSet<String>,
+    pub placements: Vec<Vec<u64>>,
+}
+
+/// The choices of an export through cadmpeg beyond its bodies, file and quality.
+#[derive(Clone, Debug, Default)]
+pub struct CadmpegOptions {
+    /// What the design's view hides, written hidden.
+    pub hidden: Hidden,
+    /// OpenUSD: the joints, grounding and each component's mass written as physics.
+    pub physics: bool,
+    /// OpenUSD: the image textures a render setup gives bodies, written into a `.usdz` package.
+    pub surfaces: Vec<SurfacePlan>,
+    /// OpenUSD: the pictures shown on the model (decals), written into a `.usdz` package.
+    pub decals: Vec<DecalPlan>,
+    /// OpenUSD: the optics a render setup gives bodies (glass).
+    pub optics: Vec<OpticsPlan>,
+    /// OpenUSD: each body as its mesh alone, without its exact shape (B-rep), for a file a
+    /// viewer or a game engine shows rather than a CAD program edits.
+    pub meshes_only: bool,
+}
+
+/// The optics a render setup gives one placement of a body: a dielectric (glass) of index `ior`
+/// absorbing `absorption_per_mm` (red, green, blue, per mm) inside, its surface a thin sheet or
+/// the boundary of a closed volume.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpticsPlan {
+    /// The render setup's name.
+    pub setup: String,
+    /// The body as the design holds it: its definition name and the component holding it (0:
+    /// the design itself). An export with the design's components matches these and `path`.
+    pub definition: String,
+    pub component: u64,
+    /// The placement bound: its occurrence path from the design (empty for a body of the design
+    /// itself).
+    pub path: Vec<u64>,
+    /// The body's world name, which an export of bodies where the design shows them (no
+    /// components) matches.
+    pub world: String,
+    /// The index of refraction.
+    pub ior: f64,
+    /// How much of red, green and blue the inside absorbs, per mm.
+    pub absorption_per_mm: [f64; 3],
+    /// The surface is a thin sheet, not the boundary of a closed volume.
+    pub thin_sheet: bool,
+}
+
+/// A picture shown on the model: its image on a quad.
+#[derive(Clone, Debug)]
+pub struct DecalPlan {
+    pub name: String,
+    /// The component it belongs to (0: the design itself).
+    pub component: u64,
+    /// Its corners (bottom-left, bottom-right, top-right, top-left) in its component's frame and
+    /// in the world, mm.
+    pub local: [[f64; 3]; 4],
+    pub world: [[f64; 3]; 4],
+    /// Its PNG or JPEG image, and the image's SHA-256 (hex), naming the file it is written as.
+    pub image: SurfaceMap,
+}
+
+/// One image map of a [`SurfacePlan`]: its SHA-256 (hex), naming the file it is written as, and its
+/// PNG or JPEG bytes.
+#[derive(Clone, Debug)]
+pub struct SurfaceMap {
+    pub sha256: String,
+    pub bytes: std::sync::Arc<[u8]>,
+}
+
+/// The image maps a render setup gives one placement of a body: the textures of the body's look
+/// for an OpenUSD export.
+#[derive(Clone, Debug)]
+pub struct SurfacePlan {
+    /// The render setup's name.
+    pub setup: String,
+    /// The body as the design holds it: its definition name and component.
+    pub definition: String,
+    pub component: u64,
+    /// The placement bound (empty for a body of the design itself) and the body's world name.
+    pub path: Vec<u64>,
+    pub world: String,
+    /// The projection, in the body's definition frame (mm): a point `p` is at
+    /// `((p − origin)·u / |u|², (p − origin)·v / |v|²)` in the images, repeating.
+    pub origin: [f64; 3],
+    pub u: [f64; 3],
+    pub v: [f64; 3],
+    /// The image's v runs the other way (the built-in surfaces' images are stored so).
+    pub flip_v: bool,
+    /// How strongly the normal map tilts the surface, 0 to 1.
+    pub normal_strength: f64,
+    pub base_color: Option<SurfaceMap>,
+    pub normal: Option<SurfaceMap>,
+    pub roughness: Option<SurfaceMap>,
+    pub metallic: Option<SurfaceMap>,
+}
+
+impl CadmpegOptions {
+    /// Whether an export of `bodies` (all when empty) of `doc` writes the physics
+    /// [`Self::physics`] asks for: only the whole design, with its components, each placed
+    /// rigidly. Otherwise each body is written where the world shows it, without physics.
+    pub fn physics_fits(doc: &solidcraft_doc::Document, bodies: &[String]) -> bool {
+        bodies.is_empty() && !doc.occurrences.is_empty() && doc.occurrences.iter().all(|o| solidcraft_doc::is_placement(&o.transform))
+    }
+}
+pub(crate) use export::FREECAD_REFUSED;
+
+/// The bodies of `world` (the design's model placed in the world; all of them when `bodies` is
+/// empty) as a `format` file called `file`, written by cadmpeg: OpenUSD ([`crate::Format::Usd`],
+/// the extension picking the encoding), Rhino ([`crate::Format::Rhino`]), or STEP and IGES
+/// ([`crate::Format::Step`], [`crate::Format::Iges`]: SolidCraft's own writers are the default; this is
+/// the choice of writing them with cadmpeg); FreeCAD is refused,
+/// as cadmpeg cannot write a new FreeCAD file yet. With no bodies chosen, a design with components
+/// keeps them where the format holds them: `model`, the model before placing, holds each
+/// component's bodies. `options` says what else is written. Meshes are made at `quality`. Returns
+/// the file's bytes and what it could not carry (`export` says what each format leaves out).
+/// Panics inside cadmpeg become errors.
+#[allow(clippy::too_many_arguments)]
+pub fn cadmpeg_export(
+    doc: &solidcraft_doc::Document,
+    model: &solidcraft_doc::ModelState,
+    world: &solidcraft_doc::ModelState,
+    bodies: &[String],
+    options: &CadmpegOptions,
+    file: &str,
+    quality: crate::MeshQuality,
+    format: crate::Format,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    solidcraft_kernel::guard("cadmpeg export", || {
+        export::from_design(doc, model, world, bodies, options, file, quality, format).map_err(solidcraft_kernel::KernelError::Invalid)
+    })
+    .map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(m) => m,
+        e => e.to_string(),
+    })
+}
+
+/// [`cadmpeg_export`] as OpenUSD: `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package.
+pub fn usd_from_design(
+    doc: &solidcraft_doc::Document,
+    model: &solidcraft_doc::ModelState,
+    world: &solidcraft_doc::ModelState,
+    bodies: &[String],
+    options: &CadmpegOptions,
+    file: &str,
+    quality: crate::MeshQuality,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    cadmpeg_export(doc, model, world, bodies, options, file, quality, crate::Format::Usd)
 }
 
 /// An OpenUSD file (`file` is its name) read for an import of its exact geometry, kept as records

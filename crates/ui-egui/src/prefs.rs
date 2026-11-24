@@ -59,12 +59,22 @@ pub enum NavButton {
     Extra1,
     /// The side "forward" button.
     Extra2,
+    /// A further button of a mouse with many, by its number (6 to 16, as
+    /// [`egui::PointerButton::number`] counts them). Make one with [`NavButton::of_pointer`] or
+    /// [`NavButton::from_id`].
+    Numbered(u8),
 }
 
+/// The setting's names of the further buttons, from button 6.
+const NUMBERED_IDS: [&str; 11] =
+    ["button6", "button7", "button8", "button9", "button10", "button11", "button12", "button13", "button14", "button15", "button16"];
+
 impl NavButton {
+    /// The five buttons every mouse mapping names; the further ones are listed only once mapped.
     pub const ALL: [NavButton; 5] = [NavButton::Left, NavButton::Middle, NavButton::Right, NavButton::Extra1, NavButton::Extra2];
 
-    /// The name the setting and the control channel use.
+    /// The name the setting and the control channel use: `left`, `middle`, `right`, `extra1`,
+    /// `extra2`, or `button6` to `button16`.
     pub fn id(self) -> &'static str {
         match self {
             NavButton::Left => "left",
@@ -72,7 +82,53 @@ impl NavButton {
             NavButton::Right => "right",
             NavButton::Extra1 => "extra1",
             NavButton::Extra2 => "extra2",
+            NavButton::Numbered(n) => usize::from(n).checked_sub(6).and_then(|i| NUMBERED_IDS.get(i)).copied().unwrap_or(""),
         }
+    }
+
+    /// The button a setting's name names.
+    pub fn from_id(id: &str) -> Option<NavButton> {
+        Self::ALL.into_iter().find(|b| b.id() == id).or_else(|| {
+            let i = NUMBERED_IDS.iter().position(|n| *n == id)?;
+            Some(NavButton::Numbered(u8::try_from(i + 6).ok()?))
+        })
+    }
+
+    /// The button egui reports as `button`.
+    pub fn of_pointer(button: egui::PointerButton) -> NavButton {
+        match button {
+            egui::PointerButton::Primary => NavButton::Left,
+            egui::PointerButton::Secondary => NavButton::Right,
+            egui::PointerButton::Middle => NavButton::Middle,
+            egui::PointerButton::Extra1 => NavButton::Extra1,
+            egui::PointerButton::Extra2 => NavButton::Extra2,
+            further => NavButton::Numbered(u8::try_from(further.number()).unwrap_or(u8::MAX)),
+        }
+    }
+
+    /// The button egui reports for this one.
+    pub fn pointer(self) -> Option<egui::PointerButton> {
+        match self {
+            NavButton::Left => Some(egui::PointerButton::Primary),
+            NavButton::Right => Some(egui::PointerButton::Secondary),
+            NavButton::Middle => Some(egui::PointerButton::Middle),
+            NavButton::Extra1 => Some(egui::PointerButton::Extra1),
+            NavButton::Extra2 => Some(egui::PointerButton::Extra2),
+            NavButton::Numbered(n) => egui::PointerButton::from_number(u16::from(n)).filter(|b| b.number() >= 6),
+        }
+    }
+
+    /// A button no mouse mapping uses: it does nothing until the user maps it.
+    pub fn is_side(self) -> bool {
+        matches!(self, NavButton::Extra1 | NavButton::Extra2 | NavButton::Numbered(_))
+    }
+
+    /// The further buttons the user mapped, in order of their numbers.
+    pub fn mapped_numbered(prefs: &Prefs) -> impl Iterator<Item = NavButton> {
+        let mut numbered: Vec<NavButton> =
+            prefs.nav_button_map.keys().filter_map(|id| NavButton::from_id(id)).filter(|b| matches!(b, NavButton::Numbered(_))).collect();
+        numbered.sort_by_key(|b| b.pointer().map(egui::PointerButton::number));
+        numbered.into_iter()
     }
 }
 
@@ -4070,8 +4126,8 @@ fn prepare_preferences(
         return Err("`middle_double_click` must be home, fit or off".into());
     }
     for (button, choice) in &new.nav_button_map {
-        if !NavButton::ALL.iter().any(|b| b.id() == button) || NavChoice::parse(choice).is_none() {
-            return Err("`nav_button_map` maps left, middle, right, extra1 or extra2 to orbit, pan, zoom or none, after shift+, ctrl+ or alt+".into());
+        if NavButton::from_id(button).is_none() || NavChoice::parse(choice).is_none() {
+            return Err("`nav_button_map` maps left, middle, right, extra1, extra2 or button6 to button16 to orbit, pan, zoom or none, after shift+, ctrl+ or alt+".into());
         }
     }
     let mut new = new;
@@ -6413,6 +6469,55 @@ mod tests {
         assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
     }
 
+    /// #5522: Browse… fills a folder setting with the folder chosen, starting in the one it
+    /// names; Clear empties it; Defaults empties both; a host without folders shows neither.
+    #[test]
+    fn design_folders_browse_clear_defaults_and_a_host_without_folders() {
+        let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let seen = started.clone();
+        h.app.services.pick_folder = Some(Box::new(move |current: &str| {
+            seen.borrow_mut().push(current.to_string());
+            Box::pin(async { Some("/home/sam/Picked".to_string()) })
+        }));
+        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
+        assert_eq!((h.app.preferences.designs_folder.as_str(), h.app.preferences.exports_folder.as_str()), ("", ""));
+
+        h.app.prefs_window.shell.filter = "Designs folder".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:designs_folder:browse");
+        h.step(&json!({"click":{"handle":"prefs:designs_folder:browse"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.designs_folder, "/home/sam/Picked");
+        assert_eq!(started.borrow().as_slice(), [""], "an empty setting lets the system choose where Browse… starts");
+        super::reveal_preference(&mut h, "prefs:designs_folder:clear");
+        h.step(&json!({"click":{"handle":"prefs:designs_folder:clear"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.designs_folder, "");
+
+        h.app.preferences.exports_folder = "/home/sam/Prints".into();
+        h.app.prefs_window.shell.filter = "Exports folder".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:exports_folder:browse");
+        h.step(&json!({"click":{"handle":"prefs:exports_folder:browse"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.exports_folder, "/home/sam/Picked");
+        assert_eq!(started.borrow().last().map(String::as_str), Some("/home/sam/Prints"), "Browse… starts in the folder set");
+
+        h.call("ui.prefs", json!({"designs_folder":"/home/sam/Designs"}));
+        assert_eq!(h.app.preferences.designs_folder, "/home/sam/Designs", "scripts set it by name");
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert_eq!((h.app.preferences.designs_folder.as_str(), h.app.preferences.exports_folder.as_str()), ("", ""));
+
+        // The web app has no folders: no rows to show.
+        h.app.services.pick_folder = None;
+        h.app.prefs_window.shell.filter = "folder".into();
+        h.frames(5);
+        assert!(crate::scenario::rect_of("prefs:designs_folder").is_none() && crate::scenario::rect_of("prefs:exports_folder:browse").is_none());
+        h.call("ui.prefs", json!({"button":"cancel"}));
+    }
+
     #[test]
     fn tools_ghost_and_pointer_tiles_edit_only_their_state_and_preserve_transactions() {
         for theme in ["light", "dark"] {
@@ -6540,6 +6645,7 @@ mod tests {
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
             ("history_last_stops_at_component", json!(true), PAGE_LAYOUT),
+            ("feature_menus_act_on_selection", json!(false), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
@@ -10019,8 +10125,132 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:panel_layout:save_popover").is_some());
         h.step(&json!({"click":{"handle":"prefs:panel_layout:replace"}})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("prefs:panel_layout:replace_confirm").is_some(), "a full library still requires explicit confirmation");
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "a full library still requires explicit confirmation");
         assert_eq!(crate::panel_runtime::user_preset_names(&h.app).len(), 64);
+    }
+
+    /// A layout window with "Bench setup" saved from collapsed panels, so no built-in matches them.
+    fn layout_page_with_a_saved_layout() -> crate::scenario::Harness {
+        use solidcraft_engine::panels::{LayoutAction, Mutation};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        h.frames(2);
+        let section = h.app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: true }] })
+            .unwrap();
+        h.app.run_panel_command("layout.save", &json!({"name":"Bench setup"})).unwrap();
+        h.call("ui.prefs", json!({"open":"Layout","language":"en"}));
+        h.frames(3);
+        h
+    }
+
+    fn open_layout_menu(h: &mut crate::scenario::Harness, name: &str, row: &str) {
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:menu:{name}")}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:{row}")}})).unwrap();
+        h.frames(2);
+    }
+
+    #[test]
+    fn deleting_a_saved_layout_from_its_menu_asks_first_and_keeps_the_panels() {
+        let mut h = layout_page_with_a_saved_layout();
+        let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
+        assert!(crate::scenario::rect_of("prefs:panel_layout:custom").is_none(), "the panels match the saved layout");
+        open_layout_menu(&mut h, "Bench setup", "delete");
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "Delete asks first, in the shared confirmation");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "the first Escape belongs to the confirmation");
+        assert!(crate::scenario::handle_at("dialog:Delete").is_none());
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Cancel keeps the layout");
+        open_layout_menu(&mut h, "Bench setup", "delete");
+        h.step(&json!({"click":{"handle":"dialog:Delete"}})).unwrap();
+        h.frames(3);
+        assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty());
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &layout, "deleting the applied layout leaves the panels where they are");
+        assert!(crate::scenario::rect_of("prefs:panel_layout:tile:Bench setup").is_none());
+        assert!(crate::scenario::rect_of("prefs:panel_layout:custom").is_some(), "the arrangement now shows as Custom");
+        assert_eq!(h.app.status.clone().map(|(text, ..)| text).as_deref(), Some("Deleted layout Bench setup"));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.prefs_window.shell.open);
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Preferences Cancel brings the deleted layout back");
+    }
+
+    #[test]
+    fn replacing_a_saved_layout_from_its_menu_asks_in_the_shared_confirmation() {
+        use solidcraft_engine::panels::{LayoutAction, Mutation};
+        let mut h = layout_page_with_a_saved_layout();
+        let section = h.app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: false }] })
+            .unwrap();
+        h.frames(2);
+        open_layout_menu(&mut h, "Bench setup", "menu_replace");
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "Replace asks first, in the shared confirmation");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open);
+        let unmatched = |h: &crate::scenario::Harness| {
+            crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.iter().any(|entry| entry.name == "Bench setup" && !entry.matches)
+        };
+        assert!(unmatched(&h), "Cancel keeps the saved arrangement");
+        open_layout_menu(&mut h, "Bench setup", "menu_replace");
+        h.step(&json!({"click":{"handle":"dialog:Replace"}})).unwrap();
+        h.frames(3);
+        assert!(!unmatched(&h), "Replace saves the current panels under the name");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+    }
+
+    #[test]
+    fn the_delete_key_asks_before_deleting_a_saved_layout_and_ignores_built_ins() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "the Delete key asks first");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "the first Escape belongs to the confirmation");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        // Enter answers with the primary action, Delete, as in the app's other delete confirmations.
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(3);
+        assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty());
+
+        let builtin = crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.into_iter().find(|entry| !entry.user).unwrap().name;
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:tile:{builtin}")}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Delete").is_none(), "a built-in layout can't be deleted");
+        assert!(crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.iter().any(|entry| entry.name == builtin));
+    }
+
+    #[test]
+    fn delete_with_preferences_open_never_deletes_the_design_selection_behind_it() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let body = h.app.session.model.state().bodies.last().unwrap().name.clone();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.frames(2);
+        // Nothing in Preferences has the keyboard focus, as after a click on a layout tile.
+        for key in ["Delete", "Backspace"] {
+            h.step(&json!({"key":key})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.prefs_window.shell.open);
+        assert!(h.app.session.model.state().body(&body).is_some(), "the selected body stays");
+        assert!(h.app.menu.confirm.is_none(), "and nothing asks to delete it");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
     }
 
     #[test]
@@ -10370,7 +10600,7 @@ mod tests {
         h.call("ui.resize", json!({"width":2400,"height":1000}));
         for (lang, want) in [
             ("en", ["Model", "Surface", "Mesh", "Form", "Sheet Metal", "Render"]),
-            ("de", ["Modell", "Fläche", "Mesh", "Form", "Blech", "Rendern"]),
+            ("de", ["Modell", "Fläche", "Netz", "Form", "Blech", "Rendern"]),
             ("fr", ["Modèle", "Surface", "Maillage", "Forme", "Tôlerie", "Rendu"]),
         ] {
             h.app.preferences.language = lang.into();
@@ -11420,6 +11650,30 @@ mod tests {
         assert!(!app.preferences.selection_shift_add_only, "the merged Sketch & selection page resets both sets of modifiers");
         control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(app.preferences.suppress_sketch_snap, ModifierCombo::CTRL);
+    }
+
+    #[test]
+    fn preview_modifier_persists_and_follows_shortcut_dialog_buttons() {
+        use crate::tool_modifiers::PreviewModifier;
+        let old: Prefs = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(old.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for (value, binding) in [("control", PreviewModifier::Control), ("alt", PreviewModifier::Alt), ("disabled", PreviewModifier::Disabled)] {
+            control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":value})).unwrap();
+            control(&mut app, &json!({"button":"apply"})).unwrap();
+            let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            restored.load_prefs(&app.prefs());
+            assert_eq!(restored.preferences.preview_reselect_modifier, binding);
+            control(&mut app, &json!({"preview_reselect_modifier":"shift"})).unwrap();
+            control(&mut app, &json!({"button":"cancel"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, binding);
+            control(&mut app, &json!({"open":"Keyboard Shortcuts", "button":"defaults"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+            control(&mut app, &json!({"button":"cancel"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, binding);
+        }
+        control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":"primary", "button":"ok"})).unwrap();
+        assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::Primary);
     }
 
     #[test]

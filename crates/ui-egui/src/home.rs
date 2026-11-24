@@ -827,6 +827,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // A file waiting for its unit is asked on this page too (#15598): its Escape gives the
         // question up, and does not close the page behind it.
         && app.mesh_units.is_none()
+        && app.import_options.is_none()
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.home.open = false;
@@ -1189,12 +1190,15 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("obj", "OBJ", None, FileAction::Export("obj")),
         ("glb", "GLB", None, FileAction::Export("glb")),
         ("usd", "OpenUSD", None, FileAction::Export("usd")),
+        ("3dm", "Rhino", None, FileAction::Export("3dm")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
         ("sdf", "SDF", None, FileAction::Export("sdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
     let tiles = formats
         .into_iter()
+        // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+        .filter(|(id, ..)| *id != "3dm" || !cfg!(target_arch = "wasm32"))
         .map(|(id, format, hint, chosen)| start_page::Tile {
             id: format!("home:export:{id}").into(),
             icon: start_page::Icon::Kit("export"),

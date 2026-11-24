@@ -755,6 +755,33 @@ fn parallel_curved_import_keeps_face_colours_and_exact_display_meshes() {
     }
 }
 
+/// An imported part's check plans it at display tolerance and keeps that plan, so its display
+/// mesh (and the viewport's plan at Normal quality) take it rather than planning the part twice
+/// more: a 50 000-face plate planned for 5 s each time. The mesh is the one a fresh plan gives.
+#[test]
+fn an_imported_part_is_planned_once_for_its_check_and_its_display() {
+    let b = fillet(&box_solid(Vec3::ZERO, Vec3::new(30.0, 20.0, 10.0)).unwrap(), &[Vec3::new(15.0, 0.0, 10.0)], 3.0).unwrap();
+    let text = step_export(&[&b], "rounded block").unwrap();
+    let imp = step_import(&text).unwrap();
+    let part = &imp.bodies[0].body;
+    let kept = |b: &Body| b.memo().and_then(|m| m.plans.as_ref()).map(|p| p.lock().unwrap().len());
+    assert_eq!(kept(part), Some(1), "the check's plan is kept");
+    let t = crate::display_tolerance(part.size());
+    let plan = part.mesh_plan_shared(&t).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&plan, &part.clone().mesh_plan_shared(&t).unwrap()), "clones share it");
+    assert_eq!(kept(part), Some(1), "and nothing was planned again");
+    let fresh = Body::from_record(part.record().clone()).unwrap();
+    assert_eq!(kept(&fresh), None);
+    let (a, b) = (part.mesh(&t).unwrap(), fresh.mesh(&t).unwrap());
+    assert_eq!(a.positions, b.positions);
+    assert_eq!(a.triangles, b.triangles);
+    assert_eq!(part.unmeshed_display_faces(), 0);
+    // A plan at any other tolerance (another quality, the coarse check's) is not kept.
+    part.mesh_plan_shared(&crate::MeshTolerance::chord(t.chord * 3.0)).unwrap();
+    part.unmeshed_faces();
+    assert_eq!(kept(part), Some(1), "only the display plan is kept");
+}
+
 #[test]
 fn parallel_import_does_not_prepare_past_body_budget_with_duplicates_or_mapped_items() {
     let text = format!(
@@ -1431,6 +1458,41 @@ fn a_stopped_import_stops_in_the_check() {
     assert!(jobs().iter().all(|j| matches!(checks::check(j), checks::Outcome::NeedsRepair(_))), "unstopped, the lifted block fails the check");
     let found = ImportChecks::start(jobs(), checks::Heals::default(), 2, None).wait().expect("unstopped, they end");
     assert_eq!(found.len(), 2);
+}
+
+/// A window asks for no frames while a check runs (#20633): the end of the run wakes it once, and
+/// a run that ended already wakes a window that asks later. Asking again while the same run is in
+/// flight is not kept twice, so the end still wakes once.
+#[test]
+fn the_end_of_an_imports_check_wakes_once_and_not_before() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let waker = |woke: &Arc<AtomicUsize>| -> Arc<dyn Fn() + Send + Sync> {
+        let w = woke.clone();
+        Arc::new(move || {
+            w.fetch_add(1, Ordering::SeqCst);
+        })
+    };
+    let (checks, end) = ImportChecks::running_for_tests();
+    let woke = Arc::new(AtomicUsize::new(0));
+    checks.on_end(waker(&woke));
+    checks.on_end(waker(&woke));
+    assert_eq!(woke.load(Ordering::SeqCst), 0, "nothing is asked of the window while the check runs");
+    end(Vec::new());
+    assert_eq!(woke.load(Ordering::SeqCst), 1, "the end of the check wakes it, once");
+    checks.on_end(waker(&woke));
+    assert_eq!(woke.load(Ordering::SeqCst), 2, "a window that asks after the end is woken at once");
+}
+
+/// A report with no run (nothing to check, or one read from a saved design) wakes nothing.
+#[test]
+fn an_import_with_no_check_wakes_nothing() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let woke = Arc::new(AtomicUsize::new(0));
+    let w = woke.clone();
+    ImportChecks::default().on_end(Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(woke.load(Ordering::SeqCst), 0, "no run ends, so nothing is woken");
 }
 
 /// #17697 review: a part is checked once however often it is placed rigidly, and the warning
@@ -5715,8 +5777,26 @@ fn hair_step_with_a_lifted_corner() -> Body {
 /// own check, which the heal used to run again (1, now 0): 2, was 3. The heal kept is the same
 /// either way: given the import's check or running its own, the heal decides on the same check
 /// of the same body.
+///
+/// The profilers counts are process-wide, so another tests checks running at the same time
+/// would be counted too: under a parallel `cargo test` the test runs again alone in a child
+/// process and passes when that child does (nextest already gives each test its own process).
 #[test]
 fn the_heal_of_an_imported_part_reuses_the_imports_check_of_it() {
+    const TEST: &str = "step_in::tests::the_heal_of_an_imported_part_reuses_the_imports_check_of_it";
+    const CHILD: &str = "SOLIDCRAFT_KERNEL_HEAL_REUSE_CHILD";
+    if std::env::var_os("NEXTEST_EXECUTION_MODE").is_none() && std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{}\n{stdout}\n{stderr}", output.status);
+        assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"), "the child must run the test: {stdout}");
+        return;
+    }
     let part = hair_step_with_a_lifted_corner();
     let own = crate::validation::failing_check(&part).unwrap().expect("the part fails the check");
     let kinds = |c: &crate::CheckFailure| c.tests.iter().map(|t| t.name.clone()).collect::<std::collections::BTreeSet<_>>();
@@ -6994,8 +7074,7 @@ fn thin_ring(ro: f64, ri: f64, split_inner: bool) {
     assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
 }
 
-#[test]
-fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
+fn mapped_cube_row(extra: &str) -> String {
     // A unit cube in its own representation (#60), placed at x = 0, 30 and 60 by three mapped
     // items of the part's representation (#70); #5033 repeats the placement at x = 30.
     let mut mapped = String::new();
@@ -7004,16 +7083,129 @@ fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
         mapped += &format!("#{}=CARTESIAN_POINT('',({x}.,0.,0.));\n#{}=AXIS2_PLACEMENT_3D('',#{},$,$);\n", b, b + 1, b);
         mapped += &format!("#{}=REPRESENTATION_MAP(#4000,#60);\n#{}=MAPPED_ITEM('',#{},#{});\n", b + 2, b + 3, b + 2, b + 1);
     }
-    let text = format!(
-        "{HEAD}{}#4001=CARTESIAN_POINT('',(0.,0.,0.));\n#4000=AXIS2_PLACEMENT_3D('',#4001,$,$);\n#60=SHAPE_REPRESENTATION('cube',(#101,#4000),$);\n{mapped}#70=SHAPE_REPRESENTATION('row',(#5003,#5013,#5023,#5033,#4000),$);\n#80=PRODUCT_CONTEXT('',#81,'mechanical');\n#81=APPLICATION_CONTEXT('x');\n#82=PRODUCT_DEFINITION_CONTEXT('part definition',#81,'design');\n#83=PRODUCT('row','row','',(#80));\n#84=PRODUCT_DEFINITION_FORMATION('','',#83);\n#85=PRODUCT_DEFINITION('design','',#84,#82);\n#86=PRODUCT_DEFINITION_SHAPE('','',#85);\n#87=SHAPE_DEFINITION_REPRESENTATION(#86,#70);\n{TAIL}",
+    format!(
+        "{HEAD}{}#4001=CARTESIAN_POINT('',(0.,0.,0.));\n#4000=AXIS2_PLACEMENT_3D('',#4001,$,$);\n#60=SHAPE_REPRESENTATION('cube',(#101,#4000),$);\n{mapped}#70=SHAPE_REPRESENTATION('row',(#5003,#5013,#5023,#5033,#4000),$);\n#80=PRODUCT_CONTEXT('',#81,'mechanical');\n#81=APPLICATION_CONTEXT('x');\n#82=PRODUCT_DEFINITION_CONTEXT('part definition',#81,'design');\n#83=PRODUCT('row','row','',(#80));\n#84=PRODUCT_DEFINITION_FORMATION('','',#83);\n#85=PRODUCT_DEFINITION('design','',#84,#82);\n#86=PRODUCT_DEFINITION_SHAPE('','',#85);\n#87=SHAPE_DEFINITION_REPRESENTATION(#86,#70);\n{extra}{TAIL}",
         cube_entities()
-    );
+    )
+}
+
+#[test]
+fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
+    let text = mapped_cube_row("");
     let imp = step_import(&text).unwrap();
     let mut xs: Vec<f64> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox.min.x).collect();
     xs.sort_by(f64::total_cmp);
     assert_eq!(xs.len(), 3, "{xs:?} {:?}", imp.warnings);
     for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
         assert!((x - want).abs() < 1e-6, "{xs:?}");
+    }
+}
+
+// A second product owns the mapped shape. It is the source of the copies in "row".
+const MAPPED_CUBE_PRODUCT: &str = "\
+#91=PRODUCT('cube','cube','',(#80));\n\
+#92=PRODUCT_DEFINITION_FORMATION('','',#91);\n\
+#93=PRODUCT_DEFINITION('design','',#92,#82);\n\
+#94=PRODUCT_DEFINITION_SHAPE('','',#93);\n\
+#95=SHAPE_DEFINITION_REPRESENTATION(#94,#60);\n";
+
+#[test]
+fn mapped_template_product_adds_no_standalone_cube() {
+    let text = mapped_cube_row(MAPPED_CUBE_PRODUCT);
+    let imp = step_import(&text).unwrap();
+    let mut xs: Vec<f64> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox.min.x).collect();
+    xs.sort_by(f64::total_cmp);
+    assert_eq!(xs.len(), 3, "{xs:?} {:?}", imp.warnings);
+    for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
+        assert!((x - want).abs() < 1e-6, "{xs:?}");
+    }
+    assert_eq!(imp.tree.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["row"]);
+}
+
+#[test]
+fn repeated_mapped_placements_count_toward_the_discovery_limit() {
+    let text = mapped_cube_row(MAPPED_CUBE_PRODUCT);
+    let ex = Arc::new(p21::parse(&text).unwrap());
+    let mut reader = Reader::new(ex, 1);
+    reader.index();
+    // The row lists five items, then visits the two items of the cube four times.
+    // The four visits cost four more. The repeated placement still needs work.
+    let mut work = MAX_CLOSURE_WORK - 16;
+    assert!(reader.mapped_shapes(std::iter::once(70), &mut work).is_none());
+}
+
+#[test]
+fn roots_follow_nested_mappings_and_linked_representations() {
+    // "row" places a module three times. The module's linked shape places the cube.
+    let extra = format!(
+        "{MAPPED_CUBE_PRODUCT}\
+         #51=PRODUCT('module','module','',(#80));\n\
+         #52=PRODUCT_DEFINITION_FORMATION('','',#51);\n\
+         #53=PRODUCT_DEFINITION('design','',#52,#82);\n\
+         #54=PRODUCT_DEFINITION_SHAPE('','',#53);\n\
+         #55=SHAPE_REPRESENTATION('module shape',(#5103),$);\n\
+         #56=SHAPE_REPRESENTATION('module',(#4000),$);\n\
+         #57=SHAPE_REPRESENTATION_RELATIONSHIP('','',#56,#55);\n\
+         #58=SHAPE_DEFINITION_REPRESENTATION(#54,#56);\n\
+         #5102=REPRESENTATION_MAP(#5001,#60);\n\
+         #5103=MAPPED_ITEM('',#5102,#5001);\n"
+    );
+    let text = mapped_cube_row(&extra).replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#4000,#55)");
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 3, "{:?}", imp.warnings);
+    assert_eq!(imp.tree.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["row"]);
+}
+
+fn nested_scaled_cube(mapped_items: &str) -> String {
+    let row = mapped_cube_row(MAPPED_CUBE_PRODUCT)
+        .replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#4000,#55)")
+        .replace("#5003,#5013,#5023,#5033,#4000", mapped_items)
+        .replace(
+            "#5001=AXIS2_PLACEMENT_3D('',#5000,$,$)",
+            "#5001=CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM('','',$,$,#4001,1.E160,$,1.E-80,1.E-80)",
+        )
+        .replace(
+            "#5011=AXIS2_PLACEMENT_3D('',#5010,$,$)",
+            "#5011=CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM('','',$,$,#4001,1.E-160,$,1.E80,1.E80)",
+        );
+    let nested = "\
+        #55=SHAPE_REPRESENTATION('module',(#5103),$);\n\
+        #5102=REPRESENTATION_MAP(#4000,#60);\n\
+        #5103=MAPPED_ITEM('',#5102,#5001);\n";
+    row.replace(TAIL, &format!("{nested}{TAIL}"))
+}
+
+#[test]
+fn a_later_placement_can_reach_the_cube_when_the_first_overflows() {
+    // The first outer scale and the nested scale multiply to a non-finite X scale.
+    // The second outer scale is the inverse of the nested one and leaves a unit cube.
+    let imp = step_import(&nested_scaled_cube("#5003,#5013")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert_eq!(imp.bodies[0].path, ["row"]);
+    assert!((measure(&imp.bodies[0].body).unwrap().volume - 1.0).abs() < 1e-6);
+    assert!(imp.warnings.iter().any(|w| w.contains("mapped item #5103")));
+}
+
+#[test]
+fn a_product_with_an_unmapped_shape_stays_in_the_import() {
+    let extra = format!(
+        "{MAPPED_CUBE_PRODUCT}#102=MANIFOLD_SOLID_BREP('Spare',#100);\n\
+         #62=SHAPE_REPRESENTATION('spare',(#102),$);\n\
+         #96=SHAPE_DEFINITION_REPRESENTATION(#94,#62);\n"
+    );
+    let imp = step_import(&mapped_cube_row(&extra)).unwrap();
+    assert_eq!(imp.bodies.len(), 5, "{:?}", imp.warnings);
+    assert!(imp.bodies.iter().any(|b| b.name == "Spare" && b.path == ["cube"]));
+}
+
+#[test]
+fn failed_mappings_keep_the_source_product() {
+    let missing = mapped_cube_row(MAPPED_CUBE_PRODUCT).replace("REPRESENTATION_MAP(#4000,#60)", "REPRESENTATION_MAP(#99999,#60)");
+    for text in [missing, nested_scaled_cube("#5003")] {
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        assert_eq!(imp.bodies[0].path, ["cube"]);
+        assert!(imp.warnings.iter().any(|w| w.contains("mapped item")));
     }
 }
 
