@@ -150,6 +150,9 @@ fn with_mains_choices(u: &dyn UnitDiff, case: &crate::Case) -> (Value, Flips) {
             let main = match c.seam {
                 Seam::AnalyticCopy => vec![0],
                 Seam::SplitTrims => c.input.to_vec(),
+                // (main had no carry gate; its flips are not a class of their own: the
+                // gate turns away only trims an exact copy or a kept trim brought)
+                Seam::CarryGate => return Ok(vec![0]),
                 _ => return c.own,
             };
             if c.own.as_ref().ok() != Some(&main) {
@@ -221,7 +224,7 @@ pub(crate) fn with_mains_choices_for<R>(unit_id: &str, case: &str, f: impl FnOnc
     }
     with_hook(
         |c: Call<'_>| match c.seam {
-            Seam::AnalyticCopy => Ok(vec![0]),
+            Seam::AnalyticCopy | Seam::CarryGate => Ok(vec![0]),
             Seam::SplitTrims => Ok(c.input.to_vec()),
             _ => c.own,
         },
@@ -323,6 +326,67 @@ replay_tests! {
     topology_face_p2: "topology.face_p2", 1;
     topology_face_p3: "topology.face_p3", 14;
     vertex: "topology.vertex", 1;
+}
+
+/// The lines of the rows the carry gate moved ([`Seam::CarryGate`],
+/// `copy_uv_trim_curves_of_other_face` turning away the other operand's trim of a copied
+/// edge whose same-parameter gap is not proved within the edge's tolerance), as committed
+/// before the gate (`{"unit": .., "line": ..}`, the branch's lines at 9301c9f45e).
+const UNGATED_LINES: &str = include_str!("wr450_rows/ungated.jsonl");
+
+/// Each row the carry gate moved: run with only the gate's choice put back (every trim
+/// carried, as before the gate), it is its line before the gate under the goldens' rule
+/// ([`diff`] with the unit's floors) and at least one call turned a trim away; run as is,
+/// it is its committed golden line. So the gate's choices are the rows' only move, and each
+/// trim it turned away had a same-parameter bound past its edge's tolerance (or none
+/// enclosed): the gate turns away nothing else.
+#[test]
+fn carry_gate_rows_move_only_through_the_gate() {
+    let mut failures = Vec::new();
+    let mut rows = 0;
+    for l in UNGATED_LINES.lines() {
+        let v: Value = serde_json::from_str(l).unwrap();
+        let unit_id = v["unit"].as_str().unwrap();
+        let name = v["line"]["case"].as_str().unwrap();
+        let u = unit(unit_id);
+        let all = cases(u.as_ref());
+        let case = all
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
+        let turned = Arc::new(Mutex::new(0_usize));
+        let t = Arc::clone(&turned);
+        let line = with_hook(
+            move |c: Call<'_>| match c.seam {
+                Seam::CarryGate => {
+                    if c.own.as_ref().ok() == Some(&vec![1]) {
+                        *t.lock().unwrap() += 1;
+                    }
+                    Ok(vec![0])
+                }
+                _ => c.own,
+            },
+            || row(u.as_ref(), case),
+        );
+        if let Some(change) = diff(&v["line"], &line, u.abs_floors()) {
+            failures.push(format!(
+                "{unit_id} {name}: ungated, the row is not its line before the gate: {change:?}"
+            ));
+        }
+        let turned = *turned.lock().unwrap();
+        if turned == 0 {
+            failures.push(format!("{unit_id} {name}: the gate turned no trim away"));
+        }
+        let golden = read(&default_dir(), unit_id).unwrap();
+        if golden.get(name) != Some(&row(u.as_ref(), case)) {
+            failures.push(format!(
+                "{unit_id} {name}: the row is not the committed golden line"
+            ));
+        }
+        eprintln!("{unit_id} {name}: {turned} trims turned away");
+        rows += 1;
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(rows, 6, "the rows the carry gate moved");
 }
 
 /// Each [`BELOW_COMPARATOR`] row: not in [`DATA`]; as run, it agrees with its committed

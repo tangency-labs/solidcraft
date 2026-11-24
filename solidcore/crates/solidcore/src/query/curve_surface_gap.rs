@@ -62,7 +62,7 @@ type Edge = (bool, bool, Vec<(usize, usize)>);
 const OP: &str = "query::curve_surface_gap";
 
 /// The most pieces the bisection may make before the gap is called not enclosed.
-const MAX_PIECES: usize = 1 << 15;
+pub(crate) const MAX_PIECES: usize = 1 << 15;
 /// The deepest bisection of one piece.
 const MAX_DEPTH: u32 = 30;
 /// A piece is closed once its second-order term is at most this fraction of its end values.
@@ -3619,13 +3619,15 @@ pub fn trim_image_gap_bound_within(
 /// trims evaluated at one edge parameter, as a volume enclosure's strips and a vertex's
 /// sectors take them), which a Hausdorff bound does not give (fillet1019's corner round
 /// extended for a defeature: a trim within 4.2e-4 of its edge as a curve, 5.9e-3 from it at
-/// equal parameters). The gap it bounds is at least the one [`trim_image_gap_bound_within`]
-/// bounds (the computed bounds need not be ordered). `floor`,
+/// equal parameters). The gap it bounds is at least the trim's distance from the curve as a
+/// set, which [`trim_image_gap_bound_within`] bounds (the two computed bounds need not be
+/// ordered). `floor`,
 /// `enough`, `over` and `budget` mean what they mean there. `None` only where the pair has no
-/// exact data (as there: a surface without an exact net, a curve without exact data, a UV
-/// line, whose rounding moves its parameters, or a range outside either curve's domain);
-/// a pair with exact data whose gap it does not enclose gets `Some(f64::INFINITY)`, since
-/// nothing proves that gap.
+/// exact data (a surface with no exact net at the trim, a curve without exact data, a UV
+/// line, whose rounding moves its parameters, a range outside either curve's domain) or the
+/// floor is not finite; a pair with exact data whose gap it does not enclose (a net whose
+/// own distance from the surface is not enclosed among them) gets `Some(f64::INFINITY)`,
+/// since nothing proves that gap.
 ///
 /// # Errors
 ///
@@ -4607,6 +4609,59 @@ mod tests {
         let slip = (t.point([0.45, 0.45], 0.0) - curve.evaluate_point(&t.k, 0.5).unwrap()).length();
         assert!(slip > 100.0 * lift, "{slip:e}");
         let g = t.bound(&curve, &trim).unwrap();
+        assert!(
+            g >= lift && g <= lift * (1.0 + 2.0 * CLOSE_RELATIVE),
+            "{g:e} against {lift:e}"
+        );
+    }
+
+    /// WR-450 (#18923): the slipping trim of the test above, and the same trim with the curve's
+    /// middle point at the line's centre (no slip). The same-parameter bound counts the slip
+    /// (it is at least the gap at `t = 0.5`, an outward-rounded witness) where the Hausdorff
+    /// bound does not, and with `over` below it the bound is turned away as infinite; without
+    /// slip it is within the bisection's closing fraction of `lift`, as the Hausdorff bound.
+    #[test]
+    fn a_same_parameter_bound_counts_the_slip() {
+        let t = Top::new();
+        let lift = 3.0e-4;
+        let (a, b) = ([0.2, 0.3], [0.7, 0.6]);
+        let trim = Top::curve(&[t.uv(a), t.uv(b)], 1, vec![0.0, 0.0, 1.0, 1.0], true);
+        let quadratic = |mid: [f64; 2]| {
+            Top::curve(
+                &[t.point(a, lift), t.point(mid, lift), t.point(b, lift)],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                false,
+            )
+        };
+        let same = |curve: &Curve, over: f64| {
+            trim_same_parameter_gap_bound_within(
+                &t.k,
+                &t.surface,
+                curve,
+                &trim,
+                [0.0, 1.0],
+                1e-9,
+                [f64::NEG_INFINITY, over],
+                None,
+            )
+            .unwrap()
+        };
+        let slipping = quadratic([0.2 + 0.7 * 0.5, 0.3 + 0.7 * 0.3]);
+        let w = trim.evaluate_point(&t.k, 0.5).unwrap();
+        let at_half = (t
+            .surface
+            .evaluate_point(&t.k, Point2::new(w.x, w.y))
+            .unwrap()
+            - slipping.evaluate_point(&t.k, 0.5).unwrap())
+        .length();
+        assert!(at_half > 100.0 * lift, "{at_half:e}");
+        let g = same(&slipping, f64::INFINITY).unwrap();
+        assert!(g >= at_half, "{g:e} against {at_half:e}");
+        assert!(t.bound(&slipping, &trim).unwrap() < 2.0 * lift);
+        assert_eq!(same(&slipping, 10.0 * lift), Some(f64::INFINITY));
+        let even = quadratic([0.45, 0.45]);
+        let g = same(&even, f64::INFINITY).unwrap();
         assert!(
             g >= lift && g <= lift * (1.0 + 2.0 * CLOSE_RELATIVE),
             "{g:e} against {lift:e}"

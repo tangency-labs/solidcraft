@@ -52,6 +52,11 @@ pub enum Seam {
     /// the retirement where the copy is of another kind (input `[1]`); never now (`[0]`).
     /// The call's surface is the split face's.
     SplitTrims,
+    /// WR-450: whether `copy_uv_trim_curves_of_other_face` turns away the other operand's
+    /// trim of an edge MergeEdge copied (`[1]`: its same-parameter gap is not proved within
+    /// the edge's tolerance) or carries it (`[0]`, as before that gate, whatever its gap).
+    /// The call's surface is the new face's, its input empty.
+    CarryGate,
 }
 
 /// A call's answer: its value as bits, or its error.
@@ -196,7 +201,8 @@ impl Bits for bool {
     }
 }
 
-/// The choice `own` of `seam` ([`Seam::AnalyticCopy`], [`Seam::SplitTrims`]) on
+/// The choice `own` of `seam` ([`Seam::AnalyticCopy`], [`Seam::SplitTrims`],
+/// [`Seam::CarryGate`]) on
 /// `surface` with `input`, through `k`'s hook ([`wrap`]).
 ///
 /// # Errors

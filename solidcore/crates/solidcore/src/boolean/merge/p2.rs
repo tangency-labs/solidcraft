@@ -1004,11 +1004,13 @@ pub fn make_faceuse_attempt_with(
 
 /// Not upstream (WR-450, #18923): the bisection pieces the same-parameter bound of a carried
 /// trim may take ([`copy_uv_trim_curves_of_other_face`]): the bisection's own cap
-/// (`query::curve_surface_gap`'s `MAX_PIECES`), passed as a budget so that the bisection
-/// stops as soon as an evaluated point of the trim lies farther from the edge than its
-/// tolerance (a trim that slips is turned away at once, not after the whole bisection on
-/// a dense net) without capping a gap that is within it.
-const CARRY_PIECES: usize = 1 << 15;
+/// ([`MAX_PIECES`](crate::query::curve_surface_gap::MAX_PIECES)), passed as a budget so that
+/// the bisection stops as soon as the enclosure of an evaluated point is past the edge's
+/// tolerance (then the bound cannot be within it: a trim that slips is turned away at once,
+/// not after the whole bisection on a dense net). Pieces left open when the cap is reached
+/// leave the gap unenclosed, so the trim is turned away, where without a budget they would
+/// be bounded as they stand.
+const CARRY_PIECES: usize = crate::query::curve_surface_gap::MAX_PIECES;
 
 /// Not upstream (tangency-labs/solidcore#488, the fork's
 /// `sm_CopyUVTrimCurvesOfOtherFace`; WR-361): gives the
@@ -1176,11 +1178,14 @@ fn copy_uv_trim_curves_of_other_face(
         // strips there 5.9e-3 wide). So where the pair's exact data bound it, it is carried
         // only where its same-parameter gap is proved within the new edge's tolerance
         // (`trim_same_parameter_deviation_bound`, enclosed over the whole interval: no sample
-        // decides it); elsewhere the edge keeps MakeFace's trim. An edge the intersection made is not gated: its curve was fitted
-        // from the intersector's trace at the trace's own parameters, so the trace is the
-        // curve's source rather than a stand-in for it (solidcraft#2992's traces lie up to
-        // 1.07e-5 from their edges at equal parameters, at the fit's tolerance 1e-5, and
-        // MakeFace's re-fit of them is the cusped trim the carry is there to avoid)
+        // decides it); elsewhere the edge keeps MakeFace's trim. An edge MergeEdge did not
+        // copy (one the intersection made or related, carried above only on a free-form
+        // surface or at a singular end) is not gated, and its carry stays unproved: the
+        // intersector fitted the edge's curve from that trace at the trace's own parameters,
+        // so the trace is the curve's source rather than a stand-in for it (solidcraft#2992's
+        // traces lie up to 1.07e-5 from their edges at equal parameters, at the fit's
+        // tolerance 1e-5, and MakeFace's re-fit of them is the cusped trim the carry is there
+        // to avoid)
         if relations.copied_edges.contains(&new_edge) {
             let tol = new_record.tolerance;
             let gap = crate::topology::edgeuse::p3::trim_same_parameter_deviation_bound(
@@ -1197,7 +1202,18 @@ fn copy_uv_trim_curves_of_other_face(
             // surface): it is carried as before, unproved either way. A pair with exact data
             // is carried only on a bound within the tolerance: one not enclosed is
             // `Some(INFINITY)`, and a NaN bound proves nothing)
-            if gap.is_some_and(|g| g.is_nan() || g > tol) {
+            let turn_away = gap.is_some_and(|g| g.is_nan() || g > tol);
+            // (test-only seam of the goldens' WR-450 replay, feature `wr57-replay`: the
+            // carry before this gate kept every such trim)
+            #[cfg(feature = "wr57-replay")]
+            let turn_away = crate::surface::surface::replay::choose(
+                k,
+                surface,
+                crate::surface::surface::replay::Seam::CarryGate,
+                &[],
+                turn_away,
+            )?;
+            if turn_away {
                 continue;
             }
         }
