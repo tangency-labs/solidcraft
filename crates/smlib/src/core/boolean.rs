@@ -102,8 +102,11 @@ pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
             let fresh = copies(bodies)?;
             match union_one_by_one(fresh) {
                 Ok(b) => Ok(b),
-                Err(e) if matches!(e, Error::Cancelled(_)) => Err(e),
-                Err(_) => Err(first),
+                // the retry's own classification refusal keeps the level scheme's; any other
+                // failure of the retry - a deliberate refusal, an unported step, a cancellation -
+                // is the answer, not masked by the level scheme's refusal
+                Err(Error::NotOneFoot { .. }) => Err(first),
+                Err(e) => Err(e),
             }
         }
         Err(first) => Err(first),
