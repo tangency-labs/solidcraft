@@ -1,7 +1,7 @@
 //! Versioned design packages. Entries are never extracted to filesystem paths. The optional
 //! model cache is only read back by the build that wrote it, for the exact document it was
 //! written with.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 #[cfg(test)]
 use std::io::Write;
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -1224,15 +1224,27 @@ fn hydrate_newer<R: Read + Seek>(
     if !is_known_container(&container) {
         file.container = Some(container);
     }
-    // A blob a typed record uses comes back from that record; others only for what is kept.
-    for name in reader.part_names() {
+    // A blob a typed record uses comes back from that record. Others are kept only when a string in
+    // what is kept or in a feature this build couldn't read is their name. One walk finds them all,
+    // where a walk for each part took minutes on a file of thousands of parts and a large feature.
+    let names = reader.part_names();
+    let mut unused_blobs: HashSet<&str> = names.iter().map(String::as_str).filter(|name| name.starts_with("blobs/")).collect();
+    let mut used = |text: &str| {
+        unused_blobs.remove(text);
+    };
+    file.strings(&mut used);
+    for feature in &doc.features {
+        if let FeatureKind::NewerFileFeature { raw } = &feature.kind {
+            solidcraft_format::newer::strings_in(&raw.0, &mut used);
+        }
+    }
+    for name in &names {
         let ours = matches!(name.as_str(), "document.json" | "container.json" | FORM_DRAFT_ENTRY)
             || name.starts_with("cache/")
             || name.starts_with("drawings/")
-            || plugin_part(&name).is_some();
-        let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
-        if !ours && !unused_blob {
-            file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
+            || plugin_part(name).is_some();
+        if !ours && !unused_blobs.contains(name.as_str()) {
+            file.parts.push((name.clone(), reader.limited_part(name, part_limit(name))?.into()));
         }
     }
     // Looking counts against what a design may expand to only once: the reads below are the real ones.
@@ -1269,19 +1281,6 @@ fn is_known_container(container: &Value) -> bool {
 /// A container format of ours, this build's or a later one's: `solidcraft-container/N`.
 pub(crate) fn is_container_version(format: &str) -> bool {
     format == LEGACY_VERSION || format.strip_prefix("solidcraft-container/").is_some_and(|n| n.parse::<u32>().is_ok())
-}
-
-/// Whether a feature this build couldn't read refers to this blob.
-fn foreign_mentions(features: &[solidcraft_doc::Feature], name: &str) -> bool {
-    fn names(value: &Value, name: &str) -> bool {
-        match value {
-            Value::String(s) => s == name,
-            Value::Array(a) => a.iter().any(|x| names(x, name)),
-            Value::Object(o) => o.values().any(|x| names(x, name)),
-            _ => false,
-        }
-    }
-    features.iter().any(|f| matches!(&f.kind, FeatureKind::NewerFileFeature { raw } if names(&raw.0, name)))
 }
 
 fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Document> {
@@ -2992,6 +2991,57 @@ mod tests {
         let said = &opened.newer_file.as_ref().unwrap().not_understood;
         assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
         assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
+    }
+
+    /// A newer build's container keeps exactly the blobs that what this build can't read names,
+    /// each as a whole string at any depth (not an object's key, not part of a longer text). What
+    /// this build can't read here is a feature, fields it doesn't know, a section it leaves out
+    /// whole and an element it leaves out of a list. Which blobs those name is found in one walk of
+    /// what is kept, not one walk for each part. With these thousands of parts and an unread
+    /// feature holding a long list, checking each part against all of it took seconds, and a
+    /// crafted file of about 1 MB took minutes.
+    #[test]
+    fn a_newer_builds_container_keeps_exactly_the_blobs_its_unread_parts_name() {
+        let mut entries = parts(&write_design_container(&document()).unwrap());
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        metadata["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
+        let blobs: Vec<String> = (0..9_000).map(|i| format!("blobs/{i}")).collect();
+        let every = |step: usize| blobs.iter().step_by(step).cloned().collect::<Vec<_>>();
+        // An unread feature names every third blob, deep in its record and after a long list.
+        let future = json!({
+            "id": 9000,
+            "name": "Lattice1",
+            "type": "gyroid_lattice",
+            "cells": vec![0; 200_000],
+            "layers": [{"parts": every(3)}],
+            // Neither a key nor a longer text names a blob.
+            "by_part": {"blobs/1": true},
+            "note": "blobs/2 is not a name",
+        });
+        metadata["features"].as_array_mut().unwrap().push(future);
+        // A field this build doesn't know names every fifth, and one it doesn't know at the top names
+        // blobs/4. Typed reading drops both, so they are kept as fields.
+        metadata["features"][0]["future_field"] = json!({"refs": every(5)});
+        metadata["future_top_field"] = json!([[{"part": "blobs/4"}]]);
+        // A point cloud this build can't read leaves its section out whole, and only it names
+        // blobs/7.
+        metadata["point_clouds"] = json!([{"id": 9001, "name": "Scan", "points_blob": "blobs/7", "complex": {"columns": {"nz": "packed"}}}]);
+        // A parameter this build can't read is left out of the list, and only it names blobs/8.
+        metadata["params"].as_array_mut().unwrap().push(json!({"name": "Lookup", "expression": {"kind": "table", "rows": ["blobs/8"]}}));
+        entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+        for blob in &blobs {
+            entries.insert(blob.clone(), Vec::new());
+        }
+
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        let file = opened.newer_file.as_ref().unwrap();
+        let unread = &file.not_understood;
+        assert!(unread.iter().any(|what| what.starts_with("section `point_clouds`")), "{unread:?}");
+        assert!(unread.iter().any(|what| what.starts_with("parameter `Lookup`")), "{unread:?}");
+        let kept: BTreeSet<&str> = file.parts.iter().map(|(name, _)| name.as_str()).collect();
+        let named: BTreeSet<&str> =
+            blobs.iter().enumerate().filter(|(i, _)| i % 3 == 0 || i % 5 == 0 || [4, 7, 8].contains(i)).map(|(_, blob)| blob.as_str()).collect();
+        assert_eq!(kept, named);
     }
 
     /// A newer build's import whose records this build cannot read costs that feature, which is

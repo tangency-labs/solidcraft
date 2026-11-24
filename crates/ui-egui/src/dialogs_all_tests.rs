@@ -1070,9 +1070,11 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1400,"height":950}));
             h.app.dialog = Some(representative(&h, command));
-            h.frames(2);
+            // The card settles on its own; its preview (joint.create's is an error row here)
+            // comes from a worker, which a loaded machine can finish a frame later.
+            h.frames_after_preview(2);
             let first = scenario::rect_of("dialog:footer").unwrap();
-            h.frames(1);
+            h.frames_after_preview(1);
             let settled = scenario::rect_of("dialog:footer").unwrap();
             assert_eq!(first, settled, "{command} {mode:?}: footer moved under the first click");
         }

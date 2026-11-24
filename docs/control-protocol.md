@@ -1318,6 +1318,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)
 - `placement_handles` (default false: handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil that move it across the model and turn it where it can turn)
 - `plugin_grants` (default `{}`): approved command groups and named folder grants by plugin id, at most 256 ids, four groups and 32 folders each; `plugin.install` validates and stores its optional `approve` object, and `plugin.remove` and `plugin.revoke` delete the record. The app also keeps the records in the plugins folder's grant store, shared with the command line and headless MCP when they run with `--keep-plugin-approvals` ([Headless use](plugins.md#headless-use)). Approval folders use `{name, path, read, write}`; stored folder grants use `folder` for the local path. Omitting `approve` grants nothing, including on replacement; explicit approvals replace the set, dropping stale grants. Package permissions still limit every run. Stored grants and removal survive closing or resetting Preferences. `dry_run: true` validates and describes the package without writing files or grants.
+- `preview_reselect_modifier` (`primary_at_least` (default: Command on macOS or Control elsewhere, with extra modifiers allowed), `control` (physical Control alone), `primary` (Command on macOS or Control elsewhere, alone), `alt`, `shift`, or `disabled`: temporarily hide the feature preview for geometry reselect; see Preview Reselect Modifier below)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
 - `region_pick_takes_holes` (default false: a click inside a closed profile for the Entities of Sketch Transform, Move/Copy, Scale, Mirror and the sketch patterns picks the curves of its outline, and a shape inside it is picked by a click inside that shape, #14496; true also picks the curves of its holes, as before)
@@ -1467,6 +1468,24 @@ Pan and orbit take `delta: [dx,dy]` in screen points (each within ±10000); pan 
 viewport size. Zoom takes `factor` (0.05..20, below 1 zooms in) and an optional world-space
 `anchor`. The returned `camera` is applied immediately by the UI, without animation,
 document edits, undo steps or a success-log entry per movement.
+
+### Preview Reselect Modifier
+
+Preferences > Keyboard Shortcuts > Modifier Keys controls **Hide preview for reselect**.
+The default keeps the old platform-primary behaviour: Command on macOS or Control elsewhere
+hides the preview even when extra modifiers are held. The modifier temporarily hides an active
+feature preview so obscured geometry can be selected; it does not suppress the saved feature.
+Manipulator drags prevent rollback for every choice.
+
+`ui.prefs {"preview_reselect_modifier":"primary_at_least"}` selects the default, labelled
+**Cmd + modifiers** or **Ctrl + modifiers**. It retains the old interaction with macOS
+screenshot chords. To avoid that interaction, select `control` (physical Control alone),
+`primary` (Command on macOS or Control elsewhere, alone), `alt` (Option on macOS), `shift`,
+or `disabled`. These opt-in key choices require an exact match: extra modifiers, including
+physical Control with Command on macOS, prevent rollback.
+
+The setting follows Apply/OK/Cancel, the per-row Reset button and Restore page defaults, and
+is included in shortcut exports. Older settings without it retain `primary_at_least`.
 
 ## MCP
 
