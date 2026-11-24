@@ -322,7 +322,7 @@ struct JobInfo {
     key: u64,
     command: &'static str,
     subject: Option<String>,
-    started: std::time::Instant,
+    started: web_time::Instant,
 }
 
 static RUNNING_JOBS: std::sync::Mutex<Vec<JobInfo>> = std::sync::Mutex::new(Vec::new());
@@ -370,7 +370,7 @@ pub(crate) struct PackageJob {
     /// `PrefsWindow::grants_revision` when the job started.
     revision: u64,
     done: std::sync::mpsc::Receiver<PackageReply>,
-    started: std::time::Instant,
+    started: web_time::Instant,
     /// Its entry in [`RUNNING_JOBS`], removed when the job ends.
     key: u64,
 }
@@ -394,7 +394,7 @@ impl PackageJob {
         done: std::sync::mpsc::Receiver<PackageReply>,
     ) -> Self {
         let key = JOB_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         if let Ok(mut jobs) = RUNNING_JOBS.lock() {
             jobs.push(JobInfo { key, command, subject, started });
         }
@@ -405,10 +405,10 @@ impl PackageJob {
 /// What refuses a new install or removal while a package job runs: which, on what, for how long, and
 /// that it ends by itself.
 pub(crate) fn busy_message(app: &SolveApp) -> String {
-    busy_message_at(app, std::time::Instant::now())
+    busy_message_at(app, web_time::Instant::now())
 }
 
-fn busy_message_at(app: &SolveApp, now: std::time::Instant) -> String {
+fn busy_message_at(app: &SolveApp, now: web_time::Instant) -> String {
     let Some(job) = app.prefs_window.plugin_job.as_ref() else { return app.tr("prefs.plugin_busy").to_owned() };
     let subject = RUNNING_JOBS.lock().ok().and_then(|jobs| jobs.iter().find(|info| info.key == job.key).and_then(|info| info.subject.clone()));
     let what = match subject {
@@ -470,14 +470,15 @@ fn spawn_package(
 }
 
 /// Poll package I/O on every frame, including after Preferences closes. Tests drain deterministically.
+/// It runs in the browser too, so its clock is `web_time`: `std::time::Instant::now` panics on wasm.
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
-    tick_at(app, ctx, wait, std::time::Instant::now());
+    tick_at(app, ctx, wait, web_time::Instant::now());
 }
 
 /// [`tick`] at the time `now`. A job still silent after [`PACKAGE_DEADLINE`] is abandoned: it fails
 /// like any other, and its reply, should it ever come, has nowhere to go (the job worked on a copy of
 /// the session, so nothing of it reaches this one).
-fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: std::time::Instant) {
+fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::Instant) {
     let Some(job) = app.prefs_window.plugin_job.take() else { return };
     let result = if wait {
         job.done.recv().unwrap_or_else(|e| Err(e.to_string()))
