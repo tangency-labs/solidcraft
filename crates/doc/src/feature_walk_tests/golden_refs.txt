@@ -221,6 +221,8 @@ surface_blend
   remap_bodies: from.body
 surface_offset
   remap_bodies: body
+surface_midsurface
+  remap_bodies: body
 surface_blend
   remap_bodies: from.body
 surface_boundary

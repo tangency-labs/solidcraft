@@ -2364,6 +2364,36 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Option<Expr>,
     },
+    /// The mid-surfaces of `body`'s thin walls: for each pair of faces that face each other
+    /// across material (`faces`, two points a pair, in order: the pairs chosen when the feature
+    /// was made; a rebuild chooses no other pairs), the sheet halfway between them, joined to its
+    /// neighbours. A rebuild checks the stored pairs again: they must still face each other
+    /// between `min_thickness` and `max_thickness` apart, or the feature fails. `min_aspect`
+    /// (default 5) decides which pairs not chosen the warning says need a decision.
+    /// `carry_holes`: holes through both faces stay holes, those no wider than
+    /// `suppress_holes_below` filled; `stitch`: one surface body sewn where sheets meet, else one
+    /// per sheet (and per piece of a sheet a joint cut in pieces); `remove_original` takes the solid away.
+    SurfaceMidsurface {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+        faces: Vec<FacePick>,
+        #[walk(length = "Max thickness")]
+        max_thickness: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Min thickness")]
+        min_thickness: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_aspect: Option<f64>,
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        carry_holes: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Fill holes below")]
+        suppress_holes_below: Option<Expr>,
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        stitch: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        remove_original: bool,
+    },
     /// A strip of ruled surface `distance` wide hanging off the chain of `body`'s edges through
     /// `edges`, as a new surface body: along `mode` (`angle` from `direction`, or from the
     /// face's normal; along `direction`), from the face at `face` where it borders the chain;
@@ -3585,6 +3615,7 @@ impl FeatureKind {
             FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
             FeatureKind::DeleteFace { .. } => "DeleteFaceFeature",
             FeatureKind::SurfaceOffset { .. } => "OffsetSurfaceFeature",
+            FeatureKind::SurfaceMidsurface { .. } => "MidsurfaceFeature",
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::FrameEndCap { .. } => "EndCapFeature",
@@ -3720,6 +3751,7 @@ impl FeatureKind {
             FeatureKind::SurfaceSweep { .. } => "surface_sweep",
             FeatureKind::SurfaceLoft { .. } => "surface_loft",
             FeatureKind::SurfaceOffset { .. } => "surface_offset",
+            FeatureKind::SurfaceMidsurface { .. } => "surface_midsurface",
             FeatureKind::SurfaceRuled { .. } => "surface_ruled",
             FeatureKind::SurfaceExtend { .. } => "surface_extend",
             FeatureKind::SurfaceBlend { .. } => "surface_blend",
@@ -3771,6 +3803,7 @@ impl FeatureKind {
             "OffsetFacesFeature" => "offset_face",
             "DeleteFaceFeature" => "delete_face",
             "OffsetSurfaceFeature" => "surface_offset",
+            "MidsurfaceFeature" => "surface_midsurface",
             "BoundingSolidFeature" => "bounding_solid",
             "PipeFeature" => "pipe",
             "EndCapFeature" => "frame_end_cap",
@@ -3864,6 +3897,7 @@ impl FeatureKind {
             FeatureKind::OffsetFace { .. } => "OffsetFace",
             FeatureKind::DeleteFace { .. } => "DeleteFace",
             FeatureKind::SurfaceOffset { .. } => "OffsetSurface",
+            FeatureKind::SurfaceMidsurface { .. } => "Midsurface",
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::FrameEndCap { .. } => "EndCap",

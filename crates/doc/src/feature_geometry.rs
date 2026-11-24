@@ -83,6 +83,7 @@ impl FeatureKind {
             | FeatureKind::DeleteFace { .. }
             | FeatureKind::ReplaceFace { .. }
             | FeatureKind::SurfaceOffset { .. }
+            | FeatureKind::SurfaceMidsurface { .. }
             | FeatureKind::SurfaceMatch { .. }
             | FeatureKind::SurfaceFair { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
@@ -115,6 +116,7 @@ impl FeatureKind {
             | FeatureKind::DeleteFace { body, .. }
             | FeatureKind::ReplaceFace { body, .. }
             | FeatureKind::SurfaceOffset { body, .. }
+            | FeatureKind::SurfaceMidsurface { body, .. }
             | FeatureKind::Boss { body, .. }
             | FeatureKind::Lip { body, .. }
             | FeatureKind::SnapFit { body, .. }

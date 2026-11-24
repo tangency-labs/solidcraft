@@ -64,6 +64,7 @@ pub mod joints;
 pub mod json_layout;
 mod lineage;
 pub mod metadata;
+pub mod midsurface;
 pub use metadata::Metadata;
 pub mod motion;
 pub mod notes;

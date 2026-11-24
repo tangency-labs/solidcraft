@@ -4249,6 +4249,8 @@ mod measure_centre_tests;
 #[cfg(test)]
 mod measure_surface_tests;
 #[cfg(test)]
+mod midsurface_samples_tests;
+#[cfg(test)]
 mod naming_history_tests;
 #[cfg(test)]
 mod pattern_suppress_tests;

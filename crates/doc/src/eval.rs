@@ -14146,6 +14146,7 @@ fn eval_feature_kind(
         | FeatureKind::SurfaceMatch { .. }
         | FeatureKind::SurfaceFair { .. }
         | FeatureKind::SurfaceOffset { .. }
+        | FeatureKind::SurfaceMidsurface { .. }
         | FeatureKind::SurfaceRuled { .. }
         | FeatureKind::SurfaceUntrim { .. } => surface::eval(doc, vals, f, st, warning),
         FeatureKind::Emboss { .. }
