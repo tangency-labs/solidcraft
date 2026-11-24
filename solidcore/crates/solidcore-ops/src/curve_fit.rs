@@ -23,7 +23,7 @@ use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural, MAX_S
 use crate::body::Body;
 use crate::curve_knots::{nurb_of, record_of};
 use crate::order::{self, Order};
-use crate::session::{run, with_body, Answer};
+use crate::session::{read_body, run, Answer};
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
@@ -396,7 +396,7 @@ pub fn edge_as_curve(
         return Err(Error::Argument);
     }
     let e = order::edge(order, edge)?;
-    let trimmed = with_body("curve_fit::edge_as_curve", body, |k, b| {
+    let trimmed = read_body("curve_fit::edge_as_curve", body, |k, b| {
         let Some(curve) = create_trimmed_nurbs_curve(k, b, e)? else {
             return Ok(Err(Error::Unsupported(
                 "an edge whose curve has no B-spline form",

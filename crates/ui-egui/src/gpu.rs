@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
-    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer,
-    SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width,
-    lit_line_style, placement_scale, runs_within, supersampled_size,
+    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_MOTIONS, MAX_PALETTE, Material, MotionRows, Motions, MovingLayer, PBR_SIZE, Palette,
+    PaletteIndex, PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UNMOVED_SLOT, UploadError,
+    extend_runs, level_for, lifted_width, lit_line_style, placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -414,7 +414,7 @@ pub(crate) fn offscreen_backends() -> wgpu::Backends {
             let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
             desc.backends = backends;
             desc.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
-            let adapters = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
+            let adapters = pollster::block_on(solidcraft_viewport_gpu::select::start_instance(desc).enumerate_adapters(backends));
             adapters.iter().any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
         };
         [wgpu::Backends::DX12, wgpu::Backends::VULKAN, wgpu::Backends::GL].into_iter().find(|b| hardware(*b)).unwrap_or(wgpu::Backends::DX12)
@@ -423,7 +423,9 @@ pub(crate) fn offscreen_backends() -> wgpu::Backends {
 
 /// Held while a test starts an instance, adapter or device: starting an instance scans the Vulkan
 /// drivers, and tests doing that side by side crashed the test process inside the Vulkan loader
-/// (`loader_icd_scan`). Rendering on the devices still runs side by side.
+/// (`loader_icd_scan`). Rendering on the devices still runs side by side. The instance itself
+/// starts through `select::start_instance`, so it also waits for an instance that
+/// `solidcraft-viewport-gpu` is starting in the same test process (#10232).
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn offscreen_starting() -> std::sync::MutexGuard<'static, ()> {
     static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -440,7 +442,7 @@ fn offscreen_adapter(policy: solidcraft_viewport_gpu::select::Policy) -> Option<
     use solidcraft_viewport_gpu::select::Policy;
     let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
     desc.backends = offscreen_backends();
-    let instance = wgpu::Instance::new(desc);
+    let instance = solidcraft_viewport_gpu::select::start_instance(desc);
     match policy {
         Policy::Auto => pollster::block_on(instance.request_adapter(&Default::default())).ok(),
         Policy::Hardware | Policy::Software => {
@@ -472,6 +474,8 @@ pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Q
 /// policy admits, or when the variable names no policy: [`solidcraft_gpu::env`]), on [`offscreen_backends`]. One test at a
 /// time starts its instance, adapter and device ([`offscreen_starting`]).
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let policy = solidcraft_gpu::env::policy().map_err(|e| eprintln!("no offscreen device: {e}")).ok()?;
     let _one_at_a_time = offscreen_starting();
@@ -727,6 +731,8 @@ pub(crate) fn render_offscreen_ao(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 fn offscreen(
     scene: GpuScene,
     highlight: Option<GpuScene>,
@@ -778,12 +784,15 @@ fn offscreen(
         eye,
         ao_radius,
         ao_samples,
+        edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         ssaa,
         sky: [0.0; 4],
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
         moving: moving.map(|(scene, transform)| MovingLayer { key: 1, slot: Arc::new(Mutex::new(Some(scene))), transform }),
+        motions: Default::default(),
+        ground: None,
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {

@@ -205,6 +205,16 @@ pub struct SelectClearResult {
     pub param_warnings: Vec<String>,
 }
 
+/// `select.invert` takes no parameters. It selects, in place of the selected faces, the other
+/// faces of their bodies; in place of the selected edges, the other edges of their bodies; and in
+/// place of the selected bodies, the other bodies that are shown. A body selected together with
+/// faces or edges of it is not swapped for the other bodies: the invert stays inside it. Other
+/// selected items, such as features or sketch curves, stay selected. Refused when nothing of
+/// those three kinds is selected, or when the result would exceed 10,000 items. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SelectInvertParams {}
+
 /// How fine the window lets a click pick: the three words `select.filter` takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]

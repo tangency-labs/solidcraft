@@ -167,6 +167,29 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
     assert!(!editing.iter().any(|i| i.label == "Edit Sketch"), "{:?}", labels(&editing));
 }
 
+/// The History bar names the edit item as the Browser does: Edit Sketch on a sketch, Edit
+/// Feature on any other feature (#14366).
+#[test]
+fn the_history_bar_offers_edit_sketch_on_a_sketch() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch": "Base", "distance": 10, "name": "Block"})).unwrap();
+    let id = |app: &SolveApp, name: &str| app.session.doc.features.iter().find(|f| f.name == name).unwrap().id;
+    let (sketch, block) = (id(&app, "Base"), id(&app, "Block"));
+    let labels = |v: &[Item]| v.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+    let on_sketch = context_menu::items(&app, &Target::Timeline { feature: sketch });
+    assert!(!on_sketch.iter().any(|i| i.label == "Edit Feature"), "{:?}", labels(&on_sketch));
+    let edit = find(&on_sketch, "Edit Sketch");
+    assert_eq!((&*edit.icon, edit.params.clone()), ("sketch", Some(json!({"feature": sketch}))));
+    let on_block = context_menu::items(&app, &Target::Timeline { feature: block });
+    assert!(find(&on_block, "Edit Feature").enabled);
+    assert!(!on_block.iter().any(|i| i.label == "Edit Sketch"), "{:?}", labels(&on_block));
+    context_menu::run_item(&mut app, &edit, pos2(0.0, 0.0));
+    assert_eq!(app.session.active_sketch, Some(sketch), "Edit Sketch opens the sketch that was right-clicked");
+}
+
 /// Solid geometry in the selection keeps the body menu: a right-click on a face offers the
 /// face's commands even when a sketch curve is selected as well.
 #[test]
@@ -1251,6 +1274,8 @@ fn deleting_sketch_entities_ignores_a_canvas_removed_by_undo() {
         app.tree.picked_canvases = vec![removed];
         app.run("edit.undo", json!({})).unwrap();
         assert!(!app.session.doc.canvases.iter().any(|canvas| canvas.id == removed));
+        // Inserting a canvas ended the sketch; open it again to delete from it.
+        app.run("sketch.edit", json!({"sketch": sketch})).unwrap();
         app.run("select.set", json!({"items": [{"type": "sketch_curve", "id": line}]})).unwrap();
         if include_existing_canvas {
             app.tree.picked_canvases.push(kept);
@@ -1922,7 +1947,7 @@ fn construction_plane_row_opens_its_menu() {
     assert_eq!(menu["open"], true, "{menu}");
     assert_eq!(menu["target"], json!({"type": "plane", "id": id}), "{menu}");
     let labels: Vec<&str> = menu["items"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).filter(|l| !l.is_empty()).collect();
-    assert_eq!(labels, ["Create Sketch", "Edit Feature", "Delete", "Rename", "Show/Hide", "Find in Timeline"]);
+    assert_eq!(labels, ["Create Sketch", "Edit Feature", "Delete", "Rename", "Show/Hide", "Zoom to Selection", "Find in Timeline"]);
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Plane { name: "Cut".into() }], "the right-click picks the plane");
     context_menu::close(&mut h.app);
 
@@ -2229,6 +2254,7 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::Units,
         Target::VisualStyle,
         Target::ViewTool,
+        Target::SelectionMode,
         Target::ToolbarCommand { id: "solid.extrude".into() },
         Target::Toolbar,
         Target::HistoryControls,

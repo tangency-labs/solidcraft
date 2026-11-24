@@ -284,10 +284,22 @@ pub(crate) fn placement_error(s: &solidcraft_engine::Session) -> Option<String> 
     s.world_state().err().map(|e| e.to_string())
 }
 
+/// The session's world for a reader that runs at every frame and reads only what a joint drag
+/// does not move (the feature that made a face, a sketch, a dimension): while a drag is drawn by
+/// moving its bodies, the world the drag began on. Asking the session then would place the drag's
+/// frame, every moved body again, at every frame (#6325).
+pub(crate) fn still_world(app: &SolveApp) -> std::sync::Arc<solidcraft_engine::doc::ModelState> {
+    crate::viewport::joint_motions::world(app).unwrap_or_else(|| session_world(&app.session))
+}
+
 /// The world the viewport draws: while an opened design is being meshed, the bodies meshed so
 /// far (the picture grows a few times a second), then all of them, in the order they came, until
 /// the design changes; otherwise the session's ([`session_world`]).
 pub(crate) fn shown_world(app: &SolveApp) -> Arc<ModelState> {
+    // A joint drag drawn by moving its bodies shows the world it began on, they moved on the GPU.
+    if let Some(w) = crate::viewport::joint_motions::world(app) {
+        return w;
+    }
     let world = session_world(&app.session);
     let Some(m) = app.open_meshing.as_ref() else { return world };
     if !Arc::ptr_eq(&world, &m.world) {

@@ -1012,6 +1012,7 @@
   "cmd.motion_list": "Popis studija kretanja",
   "cmd.motion_play": "Reprodukuj studiju kretanja",
   "cmd.motion_plot": "Dijagram studije kretanja",
+  "cmd.motion_simulate": "Simuliraj kretanje",
   "cmd.motion_study": "Studija kretanja",
   "cmd.motion_trace": "Trag kretanja",
   "cmd.motion_trace_edit": "Uredi trag kretanja",

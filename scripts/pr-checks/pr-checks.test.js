@@ -36,6 +36,53 @@ test('parseDefaults', () => {
   assert.equal(pc.parseDefaults('Changes a default: yes - faster zoom').status, 'malformed');
 });
 
+test('parseDefaults takes a note after the separator', () => {
+  for (const sep of [',', '—', '–', '-', ':', ';']) {
+    assert.equal(pc.parseDefaults(`Changes a default: no${sep} only a corrected label`).status, 'no', sep);
+    assert.equal(pc.parseDefaults(`Changes a default: no ${sep} only a corrected label`).status, 'no', sep);
+    const r = pc.parseDefaults(`Changes a default: yes${sep} M opens Sketch Move, old behaviour kept behind preference shortcuts`);
+    assert.equal(r.status, 'yes', sep);
+    assert.equal(r.preference, 'shortcuts', sep);
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes, x, approved by the owner').approvedByOwner, true);
+  // A note alone still has to say how the old behaviour is kept, and "nothing" after "no," is not a note.
+  assert.equal(pc.parseDefaults('Changes a default: yes, faster zoom').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: no,').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: nope').status, 'malformed');
+});
+
+test('parseDefaults takes a full stop, spaces and backticks', () => {
+  for (const v of ['no.', 'no. ', 'No.  ', '`no`', 'no .', 'no. Only a fix.', 'no!']) {
+    assert.equal(pc.parseDefaults(`Changes a default: ${v}`).status, 'no', v);
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes — x, old behaviour kept behind preference p.  ').status, 'yes');
+  assert.equal(pc.parseDefaults('Changes a default: no..x').status, 'no');
+  assert.equal(pc.parseDefaults('Changes a default: `nope`').status, 'malformed');
+});
+
+test('parseDefaults: the owner-approved label stands for the owner\'s approval on any yes', () => {
+  for (const v of ['yes', 'yes.', 'yes — endpoints share a vertex', 'yes, endpoints share a vertex.', 'yes — approved by the owner']) {
+    assert.equal(pc.parseDefaults(`Changes a default: ${v}`).status, 'malformed', v);
+    const r = pc.parseDefaults(`Changes a default: ${v}`, { ownerApproved: true });
+    assert.equal(r.status, 'yes', v);
+    assert.equal(r.approvedByOwner, true, v);
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes — endpoints share a vertex', { ownerApproved: true }).detail, 'endpoints share a vertex');
+  assert.equal(pc.parseDefaults('Changes a default: maybe', { ownerApproved: true }).status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: no', { ownerApproved: true }).status, 'no');
+});
+
+test('checkDefaults: a yes without a preference passes with the owner-approved label', async () => {
+  const me = mk(21, 'alice', 'Changes a default: yes — endpoints share a vertex', { created_at: '2026-10-25T00:00:00Z' });
+  const files = [{ filename: 'crates/a.rs' }];
+  let f = fakes(me, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 1);
+  f = fakes({ ...me, labels: [{ name: 'owner-approved' }] }, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 0);
+});
+
 test('parseDefaults yes forms', () => {
   for (const sep of ['—', '–', '-', '->', '→', ':']) {
     const r = pc.parseDefaults(`Changes a default: yes ${sep} zoom speed doubled, old behaviour kept behind preference viewport.zoom_speed`);
@@ -45,6 +92,36 @@ test('parseDefaults yes forms', () => {
   }
   assert.equal(pc.parseDefaults('Changes a default: yes — x, old value kept behind preference `p`').status, 'yes');
   assert.equal(pc.parseDefaults('Changes a default: yes — x, old behaviour kept behind preference <name>').status, 'malformed');
+});
+
+test('parseDefaults approved by the owner', () => {
+  for (const sep of ['—', '–', '-']) {
+    const r = pc.parseDefaults(`Changes a default: yes ${sep} links ask once, Approved By The Owner`);
+    assert.equal(r.status, 'yes', sep);
+    assert.equal(r.approvedByOwner, true);
+    assert.equal(r.detail, 'links ask once');
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes — x, approved by the owner.').status, 'yes');
+  assert.equal(pc.parseDefaults('Changes a default: yes — approved by the owner').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: yes — x, old behaviour kept behind preference p').approvedByOwner, undefined);
+});
+
+test('checkDefaults: approved by the owner needs the owner-approved label', async () => {
+  const body = 'Changes a default: yes — links ask once, approved by the owner';
+  const me = mk(20, 'alice', body, { created_at: '2026-10-25T00:00:00Z' });
+  const files = [{ filename: 'crates/a.rs' }];
+  let f = fakes(me, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 1);
+  assert.match(f.failures[0], /approved by the owner needs the owner-approved label/);
+
+  f = fakes({ ...me, labels: [{ name: 'owner-approved' }] }, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 0);
+
+  f = fakes({ ...me, body: 'Changes a default: yes — a, old behaviour kept behind preference p' }, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 0);
 });
 
 test('isBot and isDocsOnly', () => {

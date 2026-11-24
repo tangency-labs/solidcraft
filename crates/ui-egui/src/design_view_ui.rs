@@ -17,6 +17,9 @@ pub const VIEW_RENAME: &str = "view.rename";
 pub const VIEW_DUPLICATE: &str = "view.duplicate";
 pub const VIEW_BESIDE: &str = "view.beside";
 pub const VIEW_NEW_WINDOW: &str = "view.new_window";
+pub const VIEW_MOVE_TO_WINDOW: &str = "view.move_to_window";
+const WINDOW_PREFIX: &str = "view.window.";
+pub const VIEW_RETURN: &str = "view.return";
 pub const VIEW_CLOSE: &str = "view.close";
 pub const VIEW_CLOSE_OTHERS: &str = "view.close_others";
 pub const VIEW_CLOSE_RIGHT: &str = "view.close_right";
@@ -34,27 +37,69 @@ pub const SWITCHER_OPEN: &str = "switcher.open";
 pub const SWITCHER_REOPEN: &str = "switcher.reopen";
 pub const SWITCHER_AS_TABS: &str = "switcher.as_tabs";
 
+pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_TO_WINDOW, "multi_window.move_to_window", "")
+    .with_icon(solidcraft_ui_kit::icons::window_icon(false), None)
+    .for_local_view()
+    .with_children(&[TabMenuRow::new(VIEW_NEW_WINDOW, "multi_window.new_window", "").with_icon(solidcraft_ui_kit::icons::window_icon(false), None)]);
+
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
-pub const VIEW_MENU: [TabMenuRow<'static>; 8] = [
-    TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None),
-    TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None),
-    TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None),
-    TabMenuRow::new(VIEW_NEW_WINDOW, "Open in new window", "").with_icon("window", None),
+pub const VIEW_MENU: &[TabMenuRow<'static>] = &[
+    TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None).for_local_view(),
+    TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None).for_local_view(),
+    TabMenuRow::new("view.compass", "view_compass.visibility", "").separated().for_local_view(),
+    TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None).for_local_view(),
+    TabMenuRow::new("view.place", "design_view.place", "").with_icon("tiles", None).needing_others().for_local_view(),
+    MOVE_TO_WINDOW_MENU,
+    TabMenuRow::new(VIEW_RETURN, "view_menu.return", "").with_icon(solidcraft_ui_kit::icons::window_icon(true), None).needing_remote_view(),
     TabMenuRow::new(VIEW_CLOSE, "Close view", "Ctrl+W").with_icon("close", None).separated(),
-    TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others(),
-    TabMenuRow::new(VIEW_CLOSE_RIGHT, "Close views to the right", "").needing_others(),
+    TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others().for_local_view(),
+    TabMenuRow::new(VIEW_CLOSE_RIGHT, "Close views to the right", "").needing_others().for_local_view(),
     TabMenuRow::new(DESIGN_CLOSE, "Close design", "Ctrl+Shift+W").with_icon("close", None).separated(),
 ];
 
+pub(crate) fn window_menu_entries(app: &SolveApp) -> Vec<(String, String)> {
+    crate::view_windows::window_choices(app).iter().map(|choice| (format!("{WINDOW_PREFIX}{}", choice.id), choice.label.clone())).collect()
+}
+
+pub(crate) fn window_menu_rows<'a>(app: &SolveApp, entries: &'a [(String, String)]) -> Vec<TabMenuRow<'a>> {
+    let current = app.view_windows.current_window();
+    let mut new = MOVE_TO_WINDOW_MENU.children[0];
+    if !crate::view_windows::can_create(app) {
+        new.disabled_tip = Some(app.tr("multi_window.too_many"));
+    }
+    [new, TabMenuRow::heading(app.tr("multi_window.open_windows")).separated()]
+        .into_iter()
+        .chain(entries.iter().map(|(id, label)| {
+            let here = window_menu_target(id) == Some(current);
+            let label = if here { app.tr("view_layout.this_window") } else { label };
+            TabMenuRow { checked: here, ..TabMenuRow::new(id, label, "").with_icon(solidcraft_ui_kit::icons::window_icon(here), None) }
+        }))
+        .collect()
+}
+
+pub(crate) fn window_menu_target(id: &str) -> Option<u32> {
+    id.strip_prefix(WINDOW_PREFIX)?.parse().ok()
+}
+
+pub(crate) fn view_menu_rows<'a>(app: &SolveApp, window_rows: &'a [TabMenuRow<'a>]) -> Vec<TabMenuRow<'a>> {
+    let pop_out = app.view_windows.is_child();
+    let can_move = crate::view_windows::supports_pop_out(app);
+    VIEW_MENU
+        .iter()
+        .copied()
+        .filter(|row| (row.id != VIEW_MOVE_TO_WINDOW || can_move) && (row.id != DESIGN_CLOSE || !pop_out))
+        .map(|row| if row.id == VIEW_MOVE_TO_WINDOW { row.with_children(window_rows) } else { row })
+        .collect()
+}
+
 /// The "+" menu: a header, one row per view kind with its icon in the kind's accent (`dark` picks
 /// the accent for the menu's ground), then copy the shown view and bring back the last closed one.
-pub fn plus_menu(dark: bool) -> Vec<TabMenuRow<'static>> {
+pub fn plus_menu<'a>(dark: bool) -> Vec<TabMenuRow<'a>> {
     let kind = |id, label: &'static str, icon| TabMenuRow::new(id, label, "").with_icon(icon, Some(crate::workspace::view_icon_colour(label, dark)));
     vec![
         TabMenuRow::heading("Open as a view"),
         kind("plus.model", "Model", "model"),
-        kind("plus.sketch", "Sketch", "sketch"),
         kind("plus.sheet", "Sheet", "sheet"),
         kind("plus.render", "Render", "render"),
         kind("plus.animation", "Animation", "animation"),
@@ -80,15 +125,21 @@ pub fn layout_menu() -> Vec<TabMenuRow<'static>> {
 
 /// The id of the shown design's view at place `index`.
 fn view_id(app: &SolveApp, index: usize) -> Option<u64> {
-    app.docs.views.views().get(index).map(|view| view.id)
+    documents::strip_view_id(app, index)
 }
 
 /// Carry out one of the strip's view actions. False for an action that is not a view action.
-pub fn handle(app: &mut SolveApp, action: TabAction) -> bool {
+pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> bool {
     match action {
         TabAction::SelectView(i) => {
             if let Some(id) = view_id(app, i) {
                 documents::view_activate(app, id);
+            }
+        }
+        TabAction::ReturnView(i) => {
+            if let Some(id) = view_id(app, i) {
+                let window = app.view_windows.current_window();
+                move_to_window(app, id, serde_json::json!(window));
             }
         }
         TabAction::CloseView(i) => {
@@ -99,9 +150,18 @@ pub fn handle(app: &mut SolveApp, action: TabAction) -> bool {
         TabAction::NewView => {
             documents::view_open(app, ViewKind::Model, None, false);
         }
-        TabAction::ReorderView { from, to } => documents::view_move(app, from, to),
+        TabAction::ReorderView { from, to } => {
+            let local_index = |i| {
+                let id = view_id(app, i)?;
+                app.docs.views.views().iter().position(|view| view.id == id)
+            };
+            if let Some((from, to)) = local_index(from).zip(local_index(to)) {
+                documents::view_move(app, from, to);
+            }
+        }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
-        TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
+        TabAction::PlusMenu { id } => return plus_row(app, &id),
+        TabAction::LayoutMenu { id } => return crate::view_setups_ui::handle(app, ctx, &id) || layout_action(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
         TabAction::TearOff(i) => {
             if !app.file_picker_busy() {
@@ -122,29 +182,148 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
         VIEW_RENAME => {
             documents::view_rename_start(app, view);
         }
+        "view.compass" => {
+            let Some(current) = app.docs.views.get(view) else { return false };
+            let on = !current.compass;
+            return app.run("view.set_compass", serde_json::json!({"view": view, "on": on})).is_ok();
+        }
         VIEW_DUPLICATE => {
-            documents::view_duplicate(app, view);
+            return app.run("tab.view.duplicate", serde_json::json!({"id": view})).is_ok();
         }
         VIEW_BESIDE => {
             let beside = (view != app.docs.views.active().id).then_some(view);
             return documents::view_beside(app, beside, solidcraft_views::Edge::Right).is_some();
         }
-        VIEW_NEW_WINDOW => {
-            let kind = app.docs.views.get(view).map(|v| v.kind.key());
-            open_new_window(app, kind);
+        "view.place" => {
+            app.docs.view_placement = Some((app.docs.active_tab(), view));
         }
+        VIEW_NEW_WINDOW => move_to_window(app, view, serde_json::json!("new")),
+        VIEW_RETURN => {
+            let window = app.view_windows.current_window();
+            move_to_window(app, view, serde_json::json!(window));
+        }
+
+        id if let Some(window) = window_menu_target(id) => move_to_window(app, view, serde_json::json!(window)),
         VIEW_CLOSE => {
-            documents::view_close(app, view);
+            if !crate::view_windows::defer_close_view(app, view) {
+                documents::view_close(app, view);
+            }
         }
-        VIEW_CLOSE_OTHERS => documents::view_close_others(app, view),
-        VIEW_CLOSE_RIGHT => documents::view_close_right_of(app, view),
+        VIEW_CLOSE_OTHERS | VIEW_CLOSE_RIGHT => {
+            let command = if id == VIEW_CLOSE_OTHERS { "tab.view.close_others" } else { "tab.view.close_right" };
+            let window = app.view_windows.current_window();
+            return app.run(command, serde_json::json!({"id": view, "window": window})).is_ok();
+        }
         DESIGN_CLOSE => documents::close(app, app.docs.active, false),
         _ => return false,
     }
     true
 }
 
+pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_menu::LayoutMenu {
+    use solidcraft_ui_kit::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
+    use solidcraft_ui_text::tr;
+    use solidcraft_views::CameraLinkMode;
+
+    let choices = crate::view_windows::window_choices(app);
+    let views = crate::view_windows::layout_views(app);
+    let windows = choices
+        .iter()
+        .map(|choice| LayoutWindow {
+            id: choice.id,
+            name: choice.name.clone(),
+            display: choice.display_label.clone(),
+            views: views
+                .iter()
+                .filter(|(owner, _)| *owner == choice.id)
+                .map(|(_, view)| LayoutView {
+                    id: view.id,
+                    name: crate::i18n::tr_name(&view.name),
+                    kind: view.kind.key().to_owned(),
+                    accent: crate::workspace::view_icon_colour(documents::kind_word(view.kind), solidcraft_theme::is_dark()),
+                })
+                .collect(),
+        })
+        .collect();
+    let visible = documents::visible_view_ids(app);
+    let models = visible.iter().filter(|id| app.docs.views.get(**id).is_some_and(|view| view.kind == ViewKind::Model)).count();
+    let link = match app.docs.views.camera_link() {
+        CameraLinkMode::Off => "off",
+        CameraLinkMode::Orientation => "orientation",
+        CameraLinkMode::Zoom => "zoom",
+        CameraLinkMode::Both => "both",
+    };
+    let saved = crate::view_setups::names(app);
+    let matching_saved = crate::view_setups::matching_name(app);
+    LayoutMenu {
+        text: LayoutText {
+            heading: tr("view_layout.heading").to_owned(),
+            summary_single: tr("view_layout.summary_single").to_owned(),
+            summary: tr("view_layout.summary").to_owned(),
+            this_window: tr("view_layout.this_window").to_owned(),
+            show: tr("view_layout.show").to_owned(),
+            bring: tr("view_layout.bring").to_owned(),
+            windows: tr("view_layout.windows").to_owned(),
+            link: tr("view_layout.link").to_owned(),
+            off: tr("view_layout.off").to_owned(),
+            orientation: tr("view_layout.orientation").to_owned(),
+            zoom: tr("view_layout.zoom").to_owned(),
+            both: tr("view_layout.both").to_owned(),
+            new_cells: tr("view_layout.new_cells").to_owned(),
+            detach: tr("view_layout.detach").to_owned(),
+            equal: tr("view_layout.equal").to_owned(),
+            reset: tr("view_layout.reset").to_owned(),
+            clean: tr("view_layout.clean").to_owned(),
+            save: tr("view_layout.save").to_owned(),
+            saved: tr("view_layout.saved").to_owned(),
+            manage: tr("view_layout.manage").to_owned(),
+        },
+        saved,
+        matching_saved,
+        design: crate::i18n::tr_name(&documents::tab_name(app, &app.session)),
+        window: app.view_windows.current_window(),
+        native: crate::view_windows::supports_pop_out(app) && crate::view_windows::can_create(app),
+        visible: visible.len(),
+        link: link.to_owned(),
+        can_link: models >= 2,
+        clean: crate::view_windows::is_clean(app),
+        windows,
+    }
+}
+
+fn layout_action(app: &mut SolveApp, id: &str) -> bool {
+    use serde_json::json;
+    let window = app.view_windows.current_window();
+    let (command, args) = match id {
+        "layout.equal" => ("tab.view.equal_sizes", json!({"window": window})),
+        "layout.reset_cameras" => ("tab.view.reset_cameras", json!({"window": window})),
+        "layout.clean" => ("tab.window.clean", json!({"window": window})),
+        _ if let Some(mode) = id.strip_prefix("layout.link.") => ("tab.view.link", json!({"window": window, "mode": mode})),
+        _ if let Some(target) = id.strip_prefix("win.focus.").and_then(|value| value.parse::<u32>().ok()) => {
+            ("tab.window.focus", json!({"window": target}))
+        }
+        _ if let Some(source) = id.strip_prefix("win.bring.").and_then(|value| value.parse::<u32>().ok()) => {
+            if let Err(reason) = crate::view_windows::bring_views(app, source) {
+                show_move_error(app, reason);
+            }
+            return true;
+        }
+        _ if let Some(view) = id.strip_prefix("win.detach.").and_then(|value| value.parse::<u64>().ok()) => {
+            move_to_window(app, view, json!("new"));
+            return true;
+        }
+        _ => return plus_row(app, id),
+    };
+    if let Err(reason) = app.run(command, args) {
+        show_move_error(app, reason);
+    }
+    true
+}
+
 fn plus_row(app: &mut SolveApp, id: &str) -> bool {
+    if crate::sheet_views::menu_action(app, id) {
+        return true;
+    }
     if let Some(kind) = id.strip_prefix("plus.").and_then(ViewKind::from_key) {
         // A Model view is another angle on the design, so "+ Model" always opens a new one; the
         // Render workspace is one place, so it is reused.
@@ -157,7 +336,10 @@ fn plus_row(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     if let Some(preset) = id.strip_prefix(LAYOUT_PREFIX).and_then(solidcraft_views::Preset::from_key) {
-        documents::view_layout(app, preset);
+        let window = app.view_windows.current_window();
+        if let Err(reason) = app.run("tab.view.layout", serde_json::json!({"layout": preset.key(), "window": window})) {
+            show_move_error(app, reason);
+        }
         return true;
     }
     match id {
@@ -184,10 +366,33 @@ fn switcher_menu(app: &mut SolveApp, id: &str) -> bool {
         SWITCHER_REOPEN => {
             documents::view_reopen(app);
         }
+        VIEW_NEW_WINDOW => {
+            let view = app.docs.views.active().id;
+            move_to_window(app, view, serde_json::json!("new"));
+        }
+        id if let Some(window) = window_menu_target(id) => {
+            move_to_window(app, app.docs.views.active().id, serde_json::json!(window));
+        }
         SWITCHER_AS_TABS => app.preferences.design_views_as_tabs = true,
         _ => return false,
     }
     true
+}
+
+pub(crate) fn move_to_window(app: &mut SolveApp, view: u64, window: serde_json::Value) {
+    if let Err(reason) = app.run("tab.view.move_to_window", serde_json::json!({"view": view, "window": window})) {
+        show_move_error(app, reason);
+    }
+}
+
+pub(crate) fn show_move_error(app: &mut SolveApp, reason: String) {
+    let message = match reason.as_str() {
+        "last_view_of_main_window" => app.tr("multi_window.last_view").to_owned(),
+        "too_many_windows" => app.tr("multi_window.too_many").to_owned(),
+        "windows_unavailable" => app.tr("multi_window.unavailable").to_owned(),
+        _ => reason,
+    };
+    app.set_status(message, true);
 }
 
 /// Move the shown design to a new window (on the view named `view`, a [`ViewKind::key`]). A design
@@ -296,7 +501,7 @@ mod tests {
         h.app.pick_open(|_, _| {});
         assert!(h.app.file_picker_busy());
         h.app.status = None;
-        assert!(handle(&mut h.app, TabAction::TearOff(1)));
+        assert!(handle(&mut h.app, &h.ctx, TabAction::TearOff(1)));
         assert_eq!(h.app.docs.active, 0);
         assert!(h.app.status.is_none(), "the refused switch does not try to open the active design");
     }
@@ -320,7 +525,7 @@ mod tests {
     #[test]
     fn view_menu_groups_are_set_apart_by_lines() {
         let starts: Vec<&str> = VIEW_MENU.iter().filter(|r| r.separator_before).map(|r| r.id).collect();
-        assert_eq!(starts, [VIEW_CLOSE, DESIGN_CLOSE]);
+        assert_eq!(starts, ["view.compass", VIEW_CLOSE, DESIGN_CLOSE]);
     }
 
     #[test]

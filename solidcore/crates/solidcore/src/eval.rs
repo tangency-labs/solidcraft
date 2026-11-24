@@ -22,6 +22,7 @@ pub mod curve;
 pub mod folded;
 pub mod form;
 pub mod geometry;
+pub mod hole_stacks;
 pub mod label;
 pub mod normal_section;
 pub mod outline;

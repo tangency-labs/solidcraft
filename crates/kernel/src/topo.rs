@@ -208,7 +208,7 @@ fn same_pair(faces: &Faces, a: &[usize], b: &[usize]) -> bool {
 /// The exact area of face `f` (SMLib's integration); infinite when the kernel cannot tell, so
 /// such a face is counted rather than dropped.
 fn face_area_exact(b: &Body, f: usize) -> f64 {
-    b.ops_body().and_then(|(ops, order)| ops.face_area(order, f, 1e-2).ok()).unwrap_or(f64::INFINITY)
+    b.ops_body().and_then(|form| form.0.face_area(&form.1, f, 1e-2).ok()).unwrap_or(f64::INFINITY)
 }
 
 /// The area of the polygon through face `f`'s record vertices: cheap, and a face whose corners
