@@ -8109,12 +8109,16 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let paint_vp = framed_in_paint(&proj.vp, rect, paint);
         let ssaa = supersampling(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let ao_samples = ao_samples(app, ui.ctx(), paint_vp.to_f32(), size_px);
+        // While the view moves, placements the last frame hid are left out; a still view draws them.
+        let occlusion = !view_settled(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let edge_px = edge_px(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let (clip, clip_hatch) = section_clip(app);
         let frame = Frame {
+            selection_all: app.session.all_bodies_selected(),
             product_lights: None,
             ssaa,
             ao_samples,
+            occlusion,
             edge_px,
             product: false,
             upload_error: None,
@@ -9488,10 +9492,16 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
     match sel {
         Some(x) => {
             let items = picked_selection(&app.session, &x);
-            // Toggle-removal: all picked items are already selected and toggle is allowed.
-            if add && toggle && items.iter().all(|x| app.session.selection.iter().any(|y| crate::selection::same_item(x, y))) {
-                let rest: Vec<Sel> =
-                    app.session.selection.iter().filter(|y| !items.iter().any(|x| crate::selection::same_item(x, y))).cloned().collect();
+            // Toggle-removal: all picked items are already selected and toggle is allowed. After
+            // Select All, a Ctrl+click on a body leaves every other shown body selected, so the
+            // scope is named here, once, for that click.
+            let current = if add && toggle && app.session.all_bodies_selected() {
+                std::borrow::Cow::Owned(app.session.selected_items().unwrap_or_default())
+            } else {
+                std::borrow::Cow::Borrowed(&app.session.selection)
+            };
+            if add && toggle && items.iter().all(|x| current.iter().any(|y| crate::selection::same_item(x, y))) {
+                let rest: Vec<Sel> = current.iter().filter(|y| !items.iter().any(|x| crate::selection::same_item(x, y))).cloned().collect();
                 let _ = app.run("select.set", json!({ "items": rest }));
             } else {
                 let _ = app.run("select.set", json!({"items": items, "add": add}));
@@ -11028,7 +11038,7 @@ mod tests {
         tap(&mut h, a, true, Modifiers::NONE);
         assert_eq!(h.app.session.selection.len(), 2);
         tap(&mut h, empty, true, Modifiers::NONE);
-        assert!(h.app.session.selection.is_empty());
+        assert!(!h.app.session.has_selection());
 
         tap(&mut h, a, true, Modifiers::NONE);
         tap(&mut h, b, false, Modifiers::NONE);
@@ -11100,7 +11110,7 @@ mod tests {
         let top = screen(&mut h, [5.0, 5.0, 10.0]);
         finger_tap(&mut h, top, 1);
         h.frames(30);
-        assert!(h.app.session.selection.is_empty(), "{:?}", h.app.session.selection);
+        assert!(!h.app.session.has_selection(), "{:?}", h.app.session.selection);
         assert!(h.app.session.active_sketch.is_none());
 
         h.app.preferences.pencil_mode = false;
@@ -11153,7 +11163,7 @@ mod tests {
         let empty = h.app.viewport.rect.map(|r| r.left_top() + egui::vec2(r.width() * 0.85, r.height() * 0.8)).unwrap();
         pen_tap(&mut h, empty);
         h.frames(30);
-        assert!(h.app.session.selection.is_empty(), "a pen tap on empty space clears: {:?}", h.app.session.selection);
+        assert!(!h.app.session.has_selection(), "a pen tap on empty space clears: {:?}", h.app.session.selection);
         assert!(h.app.session.active_sketch.is_none(), "the Apple Pencil's touches are not a finger's double-tap");
 
         let mut h = crate::scenario::Harness::new();
@@ -11193,7 +11203,7 @@ mod tests {
         h.frame_with(vec![button(at, false), egui::Event::PointerGone, touch(egui::TouchPhase::End, at)]);
         h.frames(10);
         assert!((h.app.cam.yaw - yaw).abs() > 1e-3 || (h.app.cam.pitch - pitch).abs() > 1e-3, "the view orbited");
-        assert!(h.app.session.selection.is_empty(), "{:?}", h.app.session.selection);
+        assert!(!h.app.session.has_selection(), "{:?}", h.app.session.selection);
     }
 
     /// Pencil mode keeps a finger's presses where the finger is not on the open view (a panel,
@@ -13868,6 +13878,7 @@ mod tests {
                     sketch_key: 0,
                     sketch_slot: none(),
                     hl_key: 0,
+                    selection_all: false,
                     hl_slot: none(),
                     pv_key: 0,
                     pv_slot: none(),
@@ -13889,6 +13900,7 @@ mod tests {
                     eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
                     ao_radius: 0.0,
                     ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+                    occlusion: false,
                     edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
                     sky: [0.0; 4],
                     ssaa: 1.0,
@@ -14928,9 +14940,9 @@ mod tests {
                 frame(&mut app, vec![egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers }]);
                 frame(&mut app, vec![]);
                 match action {
-                    "click" => assert!(!app.session.selection.is_empty(), "{preset}: Ctrl+click still selects"),
+                    "click" => assert!(app.session.has_selection(), "{preset}: Ctrl+click still selects"),
                     "tool" => assert_eq!(app.session.undo.len(), undo, "{preset}: the orbit drag adds no geometry"),
-                    "orbit" => assert!(app.session.selection.is_empty(), "{preset}: the end of the orbit selects nothing"),
+                    "orbit" => assert!(!app.session.has_selection(), "{preset}: the end of the orbit selects nothing"),
                     _ => {}
                 }
             }
@@ -14984,7 +14996,7 @@ mod tests {
             }
             frame(&mut app, vec![egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers }]);
             if action == "box" {
-                assert!(!app.session.selection.is_empty());
+                assert!(app.session.has_selection());
             }
         }
     }
@@ -15069,7 +15081,7 @@ mod tests {
             assert!(app.viewport.boxsel.is_none() && app.viewport.point_drag.is_none());
             frame(&mut app, vec![egui::Event::PointerButton { pos: end, button, pressed: false, modifiers }]);
             assert_eq!(app.session.undo.len(), undo);
-            assert!(app.session.selection.is_empty());
+            assert!(!app.session.has_selection());
             assert!(app.viewport.context_menu.is_none());
             if button == egui::PointerButton::Primary {
                 assert_ne!(app.cam.yaw, before.yaw);
@@ -15122,7 +15134,7 @@ mod tests {
             assert_eq!(app.session.doc.to_json(), doc);
             assert_eq!(app.session.undo.len(), undo);
             assert_eq!(app.session.log.len(), log, "continuous motion must not flood the command log");
-            assert!(app.session.selection.is_empty());
+            assert!(!app.session.has_selection());
             assert!(app.viewport.boxsel.is_none() && app.viewport.point_drag.is_none());
         }
     }
@@ -17135,7 +17147,7 @@ mod tests {
         assert_eq!(build_highlight(&app).merged().lines.len(), 4 * line_count * crate::gpu::LINE_SIZE);
         // Ctrl/Shift clicking the rim deselects it.
         select(&mut app, Some(item.clone()), true, true);
-        assert!(app.session.selection.is_empty());
+        assert!(!app.session.has_selection());
         let mut d = crate::dialogs::Dialog::for_command(&app, "solid.chamfer").unwrap();
         if let crate::dialogs::Kind::Fillet { chain, .. } = &mut d.kind {
             *chain = false;
@@ -17229,7 +17241,7 @@ mod tests {
                 assert!(point.dist(polyline_mid(&m.edges[*index])) < 1e-9);
             }
             select(&mut app, Some(item), true, true);
-            assert!(app.session.selection.is_empty());
+            assert!(!app.session.has_selection());
         }
         app.viewport.hover = None;
         // Fillet with Tangent chain off: one pick on a half takes both, a second takes both out.
@@ -17549,7 +17561,7 @@ mod tests {
             assert_eq!(dialog.items().len(), 1);
             // A point on the other side of the seam still toggles the whole surface off.
             select(&mut app, Some(Sel::Face { body: b.name.clone(), index, point: sides[1 - k] }), true, true);
-            assert!(app.session.selection.is_empty());
+            assert!(!app.session.has_selection());
         }
         // Every face is its own patch: the planar caps, the wall, a box's faces.
         for i in 0..b.body.face_count() {
@@ -18734,7 +18746,7 @@ mod tests {
         assert!(!h.app.viewport.trackpad_gesture, "the wheel left no gesture open");
         h.call("ui.move", json!({"x": p.x + 1.0, "y": p.y}));
         h.call("ui.click", json!({"x": p.x + 1.0, "y": p.y}));
-        assert!(!h.app.session.selection.is_empty(), "a click after the wheel must select");
+        assert!(h.app.session.has_selection(), "a click after the wheel must select");
     }
 
     #[test]
@@ -18747,7 +18759,7 @@ mod tests {
         h.call("ui.move", json!({"x": p.x, "y": p.y}));
         assert!(h.app.viewport.hover.is_some(), "the test point must hover over the model");
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
-        assert!(!h.app.session.selection.is_empty(), "the uncovered model must be selectable");
+        assert!(h.app.session.has_selection(), "the uncovered model must be selectable");
         h.app.session.selection.clear();
 
         h.call("ui.prefs", json!({"open": "Navigation"}));
@@ -18757,13 +18769,13 @@ mod tests {
         assert!(h.app.viewport.hover.is_none(), "the dialog must block model highlights");
         assert!(h.app.viewport.mouse.is_none());
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
-        assert!(h.app.session.selection.is_empty(), "clicks in the dialog must not select the model");
+        assert!(!h.app.session.has_selection(), "clicks in the dialog must not select the model");
 
         h.call("ui.prefs", json!({"button": "cancel"}));
         h.call("ui.move", json!({"x": p.x, "y": p.y}));
         assert!(h.app.viewport.hover.is_some(), "closing the dialog must restore model highlights");
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
-        assert!(!h.app.session.selection.is_empty());
+        assert!(h.app.session.has_selection());
     }
 
     #[test]

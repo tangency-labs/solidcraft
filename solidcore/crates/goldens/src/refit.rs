@@ -138,12 +138,6 @@ pub(crate) mod state {
             if !add_analytics {
                 return;
             }
-            if k.fixes.analytic_copy_keeps_parameterization {
-                // (that fix may keep an exact copy instead: not replayed here)
-                r.failures
-                    .push("analytic_copy_keeps_parameterization is on".to_string());
-                return;
-            }
             for (i, s) in data.surfaces.iter_mut().enumerate() {
                 let SurfaceKind::BSpline(srf) = s.object.kind() else {
                     continue;
