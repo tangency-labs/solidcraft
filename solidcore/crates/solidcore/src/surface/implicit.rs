@@ -11,7 +11,7 @@
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR};
-use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
@@ -1734,9 +1734,7 @@ impl AnalyticSupport {
             | Self::Sphere { placement, .. }
             | Self::Torus { placement, .. } => placement,
         };
-        let ulps = 8.0 * f64::EPSILON;
-        let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-        unit(p.x_axis()) && unit(p.y_axis()) && p.x_axis().dot(p.y_axis()).abs() <= ulps
+        axes_are_orthonormal(p.x_axis(), p.y_axis())
     }
 
     /// The largest ratio, over the form's Greville points, of this support's analytic

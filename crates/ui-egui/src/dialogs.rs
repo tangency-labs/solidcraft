@@ -1314,7 +1314,10 @@ impl Dialog {
         let preselection: Vec<Sel> = if matches!(d.kind, Kind::Text(_)) {
             Vec::new()
         } else if hole_points.is_empty() {
-            s.selection.clone()
+            // A whole-body selection is a scope (`Session::selection_all_bodies`): resolve it into
+            // the bodies, so Move and the other dialogs start with all of them (about 5 ms at
+            // 56,000 bodies, once when the dialog opens).
+            s.selected_items().unwrap_or_default()
         } else {
             hole_points
         };
@@ -1324,6 +1327,9 @@ impl Dialog {
         {
             input.multi = true;
         }
+        // Select All's bodies are distinct already: each is taken without scanning those before it
+        // (56,000 bodies would otherwise be over a billion comparisons as the dialog opens).
+        let distinct_bodies = s.all_bodies_selected();
         for sel in &preselection {
             if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
                 continue;
@@ -1434,7 +1440,7 @@ impl Dialog {
                     _ => vec![sel.clone()],
                 };
                 for x in picked {
-                    if !inp.items.iter().any(|y| selection::same_item(y, &x)) {
+                    if (distinct_bodies && matches!(x, Sel::Body { .. })) || !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                         inp.items.push(x);
                     }
                 }
