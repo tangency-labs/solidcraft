@@ -79,9 +79,10 @@ pub(crate) fn intersect(
         domain.v_interval()
     };
     let natural = spline.natural_uv_domain();
-    if !(interval.min() < t && t < interval.max())
-        || !natural.contains_point(domain.min(), 0.0)
-        || !natural.contains_point(domain.max(), 0.0)
+    let interior = interval.min() < t && t < interval.max();
+    if !(interior
+        && natural.contains_point(domain.min(), 0.0)
+        && natural.contains_point(domain.max(), 0.0))
     {
         return Ok(None);
     }
