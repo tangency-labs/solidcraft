@@ -548,6 +548,22 @@ fn frame(
     // reported as a sagitta too large, hiding the leg that is wrong
     setback_below_resolution(OP, edge_id, [d1, d2], target.tolerance())
         .map_err(|e| e.or_at(at_edge))?;
+    // the legs before the sagitta: an obtuse toe and a toe past its face do not depend on the
+    // sagitta, so a retry at the sagitta that fits is not refused for a leg. Legs with an
+    // obtuse toe fold the chamfer's ball (its offsets are not both positive), and the
+    // cylinder's side is read from that ball, so they are refused here
+    // (`ChamferDefinition::offsets` refuses nothing else)
+    let Ok(offsets) = chamfer.offsets() else {
+        return Err(not_built(WeldGap::ObtuseToe, at_edge));
+    };
+    toes_on_faces(
+        k,
+        target,
+        edge_id,
+        [(face1, &s1, u1, d1), (face2, &s2, u2, d2)],
+        start,
+        run,
+    )?;
     // a sagitta past its bound: refused with the bound, the size that builds
     if let Err(refused) = (BeadDefinition { chamfer, sagitta }).check() {
         return Err(sagitta_refusal(edge_id, refused.bound));
@@ -568,21 +584,7 @@ fn frame(
             .map_or(0.0, |a| arc_extreme(a, start, Some(up))),
     );
     // the ball's centre at the edge's start: its offsets from the planes along the normals
-    // into the wedge, its feet the bead's (the chamfer's offsets, positive). Legs with an
-    // obtuse toe fold the chamfer's ball (its offsets are not both positive), and the
-    // cylinder's side is read from that ball, so they are refused here
-    // (`ChamferDefinition::offsets` refuses nothing else)
-    let Ok(offsets) = bead.chamfer.offsets() else {
-        return Err(not_built(WeldGap::ObtuseToe, at_edge));
-    };
-    toes_on_faces(
-        k,
-        target,
-        edge_id,
-        [(face1, &s1, u1, d1), (face2, &s2, u2, d2)],
-        start,
-        run,
-    )?;
+    // into the wedge, its feet the bead's (the chamfer's offsets, positive)
     let into = (u2 - u1 * u1.dot(u2)).unitize()?;
     let centre = start + feet[0] + into * offsets[0];
     // signed along each plane's own normal, as the blend reads them
@@ -869,8 +871,9 @@ fn refuse_repeats_and_corners(target: &Brep, edges: &[EdgeId]) -> Result<()> {
 /// naming the edge for a leg below the smallest size a fillet builds on `target` (eight
 /// times its tolerance), whether given or computed from an angle;
 /// [`NoRoomReason::BeadCutsFace`] for a bead past its bound ([`BeadDefinition::new`]), with the
-/// smallest sagitta that fits over all of `edges` and naming that edge, so a retry at it
-/// builds on every edge; and
+/// smallest sagitta that fits over all of `edges` and naming that edge; each edge's legs and
+/// toes are checked before its sagitta and their refusal on any edge comes first, so a retry
+/// at that sagitta is not refused for a leg; and
 /// [`NoRoomReason::LegPastFace`] with the leg that fits, naming the face, for a toe past its
 /// face's trims; [`BlendFailure::WeldNotBuilt`] for two of `edges` that meet at a
 /// vertex ([`WeldGap::BeadsMeetAtVertex`], naming it), an edge that is not straight between
@@ -893,7 +896,9 @@ pub fn beads_apart(
     }
     refuse_repeats_and_corners(target, edges)?;
     // every frame first, so a refused edge leaves nothing built; a sagitta too large is
-    // refused with the smallest fit over all edges, so a retry at it builds on every one
+    // refused with the smallest fit over all edges, and only once no edge is refused for its
+    // legs or toes (each frame checks them before its sagitta), so a retry at it builds on
+    // every one
     let sagitta_fit = |e: &SolidError| {
         e.fit()
             .filter(|f| matches!(f.measure, FitMeasure::Sagitta))
@@ -953,9 +958,10 @@ pub fn beads_apart(
 /// [`crate::error::blend::BlendFailure::WeldNotBuilt`]
 /// naming the vertex for two of `edges` that meet at one, and for a shaped end the foot blend
 /// does not build; the foot blend's refusals, typed and with the size that builds (a toe off
-/// its face, no toe at the leg, an arc that would cut into a face: the smallest sagitta that
-/// fits over all of `edges`, naming that edge, so a retry at it builds on every edge); those
-/// of the closing.
+/// its face: checked on every edge before anything that depends on the sagitta; no toe at
+/// the leg, found while a bead is built; an arc that would cut into a face: the smallest
+/// sagitta that fits over all of `edges`, naming that edge, so a retry at it is not refused
+/// for the sagitta or for a toe off its face on any edge); those of the closing.
 #[allow(clippy::too_many_arguments)]
 pub fn bead_body(
     k: &mut Kernel,
@@ -989,6 +995,9 @@ pub fn bead_body(
     body.set_editing_enabled(true);
     let mut defined = Vec::new();
     let mut apart: Vec<Brep> = Vec::new();
+    // the legs before the sagitta, on every joint: a toe off its face does not depend on the
+    // sagitta, so a retry at the sagitta that fits is not refused for one
+    let mut joints = Vec::new();
     for (i, (&e, size)) in edges.iter().zip(sizes).enumerate() {
         let ChamferSize::Distances(legs) = *size else {
             return Err(SolidError::invalid_input(
@@ -1008,6 +1017,9 @@ pub fn bead_body(
         let blend = FootBlend::of_edge(k, target, e, first)?;
         let params = span_parameters(k, &blend, &spans)?;
         blend.toes_on_faces(k, target, legs, &params)?;
+        joints.push((e, *size, legs, first, blend, params));
+    }
+    for (i, (e, size, legs, first, blend, params)) in joints.into_iter().enumerate() {
         if shaped {
             // the shaped ends: the planar sweep's, cut at its ends
             let gap = if !between_planes(target, e)? {
@@ -1020,7 +1032,7 @@ pub fn bead_body(
             if let Some(gap) = gap {
                 return Err(not_built(gap, Site::edge(TargetEdge::of_target(e))));
             }
-            let f = match frame(k, target, e, *size, sagitta, first) {
+            let f = match frame(k, target, e, size, sagitta, first) {
                 Ok(f) => f,
                 Err(refused) => {
                     return Err(smallest_sagitta_fit(
@@ -1111,7 +1123,8 @@ fn no_leg_below_resolution(target: &Brep, refused: SolidError) -> SolidError {
 
 /// `refused`, the refusal of joint `at` of `edges` for a sagitta too large, with the smallest
 /// sagitta that fits over the joints after it too, naming the edge whose fit it is, so a retry
-/// at it builds on every joint (those before `at` were built at the sagitta asked). Each of
+/// at it is not refused for the sagitta on any joint (those before `at` were built at the
+/// sagitta asked, and every joint's toes were found on their faces before). Each of
 /// those joints' fits is its foot blend's over its stations
 /// ([`crate::blend::foot_blend::FootBlend::sagitta_that_fits`]); one refused for another
 /// reason is left to its own refusal at the retry. Any other error is returned as it is.

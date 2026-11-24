@@ -2713,6 +2713,35 @@ fn a_face_narrower_than_the_body_s_resolution_leaves_no_room() {
     }
 }
 
+/// The legs are refused before the sagitta: in the square corner (faces 40 wide) legs 60 and
+/// 6 with a sagitta of 100 are refused for the leg, exact and on the foot blend; at the leg
+/// that fits the sagitta is refused, and at the sagitta that fits the exact bead builds.
+#[test]
+fn an_oversized_leg_is_refused_before_an_oversized_sagitta() {
+    use solidcore::error::FitMeasure;
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let joint = pick(&k, &b, at);
+    let size = |leg: f64| ChamferSize::Distances([leg, 6.0]);
+    let fit = |r: Result<(), SolidError>| r.unwrap_err().fit().unwrap();
+    let apart = |k: &mut Kernel, b: &mut Brep, leg: f64, h: f64| {
+        beads_apart(k, b, &[joint], &[size(leg)], h, &[]).map(|_| ())
+    };
+    let together = |k: &mut Kernel, b: &mut Brep, leg: f64, h: f64| {
+        weld_bead_body(k, b, &[joint], &[size(leg)], h, &[], &[], SQUARE).map(|_| ())
+    };
+    let leg = fit(apart(&mut k, &mut b, 60.0, 100.0));
+    assert_eq!(leg.measure, FitMeasure::Leg, "{leg:?}");
+    assert!(leg.size > 39.0 && leg.size <= 40.0, "{leg:?}");
+    let h = fit(apart(&mut k, &mut b, leg.size, 100.0));
+    assert_eq!(h.measure, FitMeasure::Sagitta, "{h:?}");
+    assert!(apart(&mut k, &mut b, leg.size, h.size).is_ok(), "{h:?}");
+    let leg = fit(together(&mut k, &mut b, 60.0, 100.0));
+    assert_eq!(leg.measure, FitMeasure::Leg, "{leg:?}");
+    let h = fit(together(&mut k, &mut b, leg.size, 100.0));
+    assert_eq!(h.measure, FitMeasure::Sagitta, "{h:?}");
+}
+
 /// An `along` that is not one per edge, or names a face that is not on its edge, is refused
 /// as invalid input.
 #[test]
