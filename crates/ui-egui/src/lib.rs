@@ -747,6 +747,8 @@ pub struct SolveApp {
     pub(crate) snaps: dialogs_assembly::SnapMemo,
     /// Each command dialog's options and values as last applied (this session only).
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
+    /// Radius of the last new Fillet applied this session, for the next new Fillet dialog.
+    pub(crate) last_fillet_radius: String,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
@@ -1029,6 +1031,12 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    /// Where the control channel's design events go ([`control::publish_design`]): the shared
+    /// channel, or a test's own.
+    pub(crate) design_watch: &'static control::DocumentWatch,
+    /// The open designs as the last frame with a subscriber saw them (`document_id`, path,
+    /// read-only); `None` while nobody is subscribed.
+    pub(crate) open_designs_seen: Option<Vec<(String, Option<String>, bool)>>,
     view_window_drag: view_window_drag::State,
     view_windows: view_windows::Windows,
     /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
@@ -1143,6 +1151,7 @@ impl SolveApp {
             dialog: None,
             snaps: Default::default(),
             remembered_commands: Vec::new(),
+            last_fillet_radius: String::new(),
             params: None,
             design_properties: None,
             sketch_report: None,
@@ -1282,6 +1291,8 @@ impl SolveApp {
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            design_watch: &control::DOCUMENT_WATCH,
+            open_designs_seen: None,
             view_window_drag: view_window_drag::State::default(),
             view_windows: view_windows::Windows::default(),
             window_title: Default::default(),
@@ -1755,6 +1766,8 @@ impl SolveApp {
         // channel. Protect every open tab here, including after asynchronous pickers.
         let removes_open_file = matches!(id, "file.move" | "file.trash")
             && params.get("path").and_then(Value::as_str).is_some_and(|path| documents::uses_file(self, path));
+        // The file the design had before a save, for the `design.saved` event.
+        let saved_from = if matches!(id, "file.save" | "file.save_as") { self.session.path.clone() } else { None };
         let r = if removes_open_file {
             Err("Close designs using this file before renaming, moving, or trashing it".into())
         } else {
@@ -1771,6 +1784,10 @@ impl SolveApp {
             self.library.refresh();
         }
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
+        if matches!(id, "file.save" | "file.save_as") && r.is_ok() {
+            let document_id = self.session.document_id.clone();
+            control::post_design_saved(self, &document_id, saved_from);
+        }
         let r = r.map(|mut reply| {
             if let Some(event) = finished_sketch
                 && let Some(reply) = reply.as_object_mut()
@@ -1871,11 +1888,6 @@ impl SolveApp {
                 let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
                 saved.map(|()| v)
-            }
-            // An inspected package is listed beside the installed ones.
-            Ok(v) if id.eq_ignore_ascii_case("plugin.inspect") => {
-                plugin_slots::invalidate(self);
-                Ok(v)
             }
             r => r,
         };
@@ -2201,7 +2213,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "file.revert_saved") {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -4355,6 +4367,7 @@ impl SolveApp {
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
+        timeline::tick_feature_checks(self, ctx);
         edit_in_place::tick(self);
         browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();
@@ -4435,7 +4448,8 @@ impl SolveApp {
                 }
             }
         }
-        control::publish_design(self, &control::DOCUMENT_WATCH);
+        let watch = self.design_watch;
+        control::publish_design(self, watch);
     }
 
     /// Input for another viewport of the same app. Shared jobs are serviced by the root window.
@@ -4656,7 +4670,8 @@ impl SolveApp {
         if self.file_picker_busy() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
-        control::publish_design(self, &control::DOCUMENT_WATCH);
+        let watch = self.design_watch;
+        control::publish_design(self, watch);
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
@@ -4740,6 +4755,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // The recovery banner's Discard all asks here (File view lists the designs inline).
+                recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
                 plugin_menu::show(self, ui.ctx());
                 // The unit of an imported mesh is asked on the screen the import starts: the
@@ -4940,6 +4957,7 @@ impl SolveApp {
                 continue;
             };
             self.run_control(ctx, req);
+            control::post_request_open_close(self);
         }
         self.control_rx = rx;
     }

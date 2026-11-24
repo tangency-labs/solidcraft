@@ -749,7 +749,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
-        crate::plugin_slots::page_shown(app, ui.ctx());
         let plugins = crate::plugin_slots::preferences_inventory(app, dir);
         if plugins.is_empty() {
             // First-time users need the package format and a way to find the guide before
