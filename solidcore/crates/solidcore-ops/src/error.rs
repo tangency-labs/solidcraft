@@ -296,6 +296,14 @@ pub enum Error {
     },
     /// Ops was called from inside a kernel call or from the failure callback.
     Reentered,
+    /// A classification that needs one nearest point on a face's surface found `found` of them,
+    /// also within 100 times the zone tolerance (the kernel's `IntersectFailure::NotOneFoot`,
+    /// `compute_point_parameters`, `intersect/point_class.rs`): the point's place on the face is
+    /// undecided, the operation refuses. Status `SM_ERR`.
+    NotOneFoot {
+        /// How many nearest points the wider solve found.
+        found: usize,
+    },
     /// A record the conversion cannot carry to the kernel, and why.
     Record(String),
     /// The kernel panicked; the session caught it: the call, then the panic's message.
@@ -530,6 +538,7 @@ impl Error {
             Error::Cancelled => "Cancelled",
             Error::DefinitionNotCertified { .. } => "DefinitionNotCertified",
             Error::Reentered => "Reentered",
+            Error::NotOneFoot { .. } => "NotOneFoot",
             Error::Record(..) => "Record",
             Error::Internal(..) => "Internal",
             Error::Unported(..) => "Unported",
@@ -1101,6 +1110,10 @@ impl std::fmt::Display for Error {
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"
             ),
+            Error::NotOneFoot { found } => write!(
+                f,
+                "a classification found {found} nearest points on the face's surface, where one is needed"
+            ),
             Error::Record(w) => write!(f, "record: {w}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unsupported(what) | Error::Unported(what) => {
@@ -1183,6 +1196,7 @@ pub(crate) fn status(e: SolidError) -> Error {
 
 /// [`status`]'s typing of the kernel error `e`.
 fn typed(e: SolidError) -> Error {
+    use solidcore::error::intersect::IntersectFailure;
     use solidcore::error::{SM_ERR, SM_ERR_NOT_CONVERGING};
     match e {
         SolidError::InvalidInput { operation, reason } => Error::Refused { operation, reason },
@@ -1202,6 +1216,18 @@ fn typed(e: SolidError) -> Error {
             reason,
         },
         SolidError::PreparationRequired { .. } => Error::Exception,
+        // compute_point_parameters' ambiguous point solve, by its type: the status stays `SM_ERR`
+        // (the table in `error/intersect.rs`), the count travels with it
+        e if matches!(
+            e.intersect_failure(),
+            Some(IntersectFailure::NotOneFoot { .. })
+        ) =>
+        {
+            let Some(IntersectFailure::NotOneFoot { found }) = e.intersect_failure() else {
+                unreachable!("matched above")
+            };
+            Error::NotOneFoot { found: *found }
+        }
         // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
         e => match e.blend_failure() {
@@ -1211,5 +1237,29 @@ fn typed(e: SolidError) -> Error {
             }
             _ => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
         },
+    }
+}
+
+/// The kernel-to-ops typing of `compute_point_parameters`' ambiguous point solve: the typed
+/// refusal carries its count and keeps its status; the `union_all` retry in SolidCraft fires on
+/// it and on nothing else.
+#[cfg(test)]
+mod not_one_foot_tests {
+    use super::{status, Error};
+    use solidcore::error::{intersect::IntersectFailure, Failure, Reason};
+
+    #[test]
+    fn the_kernel_refusal_becomes_the_typed_error() {
+        let e = Failure::new(
+            "intersect::compute_point_parameters",
+            Reason::Intersect(IntersectFailure::NotOneFoot { found: 2 }),
+        )
+        .into_error();
+        let typed = status(e);
+        assert_eq!(typed, Error::NotOneFoot { found: 2 });
+        assert_eq!(
+            typed.to_string(),
+            "a classification found 2 nearest points on the face's surface, where one is needed"
+        );
     }
 }

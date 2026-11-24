@@ -90,6 +90,8 @@ solidcraft-develop = { workspace = true }
 solidcraft-render = { workspace = true, features = ["test-support"] }
 # Sheet PDF tests inflate the pages' content to read them back.
 flate2 = { workspace = true }
+# The URDF tests read the written file back with a general XML reader.
+quick-xml = { workspace = true }
 # Writes a KiCad `.stpZ` (a zipped STEP) for the board-import tests.
 zip = { workspace = true }
 # A temporary folder per test, removed when the test ends, a failure included.
