@@ -47,12 +47,14 @@ function parseClosing(body, repoFullName) {
 }
 
 // -> { status: 'missing' | 'malformed' | 'no' | 'yes', preference?, detail? }
-function parseDefaults(body) {
+// `ownerApproved`: the PR carries the owner-approved label, which stands for "approved by the owner" on any `yes`.
+function parseDefaults(body, { ownerApproved = false } = {}) {
   const m = stripNoise(body, { inlineCode: false }).replace(/\*\*/g, '').match(/^[ \t]*(?:[-*][ \t]+)?Changes a default:[ \t]*(.*?)[ \t]*$/im);
   if (!m) return { status: 'missing' };
-  const value = m[1].replace(/\*\*/g, '').trim();
-  // `no` may be followed by a note after a separator: `no, only a fix`, `no — a new button`.
-  if (/^no\.?$/i.test(value) || /^no\b[ \t]*(?:—|–|->|→|-{1,2}|:|,|;)[ \t]*\S/i.test(value)) return { status: 'no' };
+  const value = m[1].replace(/\*\*/g, '').trim().replace(/^`([^`]*)`$/, '$1').trim();
+  // `no` may end in a full stop or be followed by a note after a separator: `no.`, `no, only a fix`,
+  // `no — a new button`, `no. Only a fix.`
+  if (/^no\b[ \t]*(?:[.!]*|(?:—|–|->|→|-{1,2}|:|,|;|\.)[ \t]*\S.*)$/i.test(value)) return { status: 'no' };
   const yes = value.match(/^yes\b[ \t]*(?:—|–|->|→|-{1,2}|:|,|;)[ \t]*(.+)$/i);
   if (yes) {
     const pref = yes[1].match(/^(.*?)[ ,;]*\bold (?:behaviou?r|value) kept behind (?:preference|pref|setting)[ \t]+`?([\w.:/-]+)`?\.?$/i);
@@ -63,6 +65,11 @@ function parseDefaults(body) {
     // requires the `owner-approved` label for this form.
     const owner = yes[1].match(/^(.*?)[ ,;]*\bapproved by the owner\.?$/i);
     if (owner && owner[1].trim()) return { status: 'yes', detail: owner[1].trim(), approvedByOwner: true };
+  }
+  // The owner-approved label is the owner's approval: any `yes` line passes with it, whatever follows.
+  if (ownerApproved && /^yes\b/i.test(value)) {
+    const detail = value.replace(/^yes\b[ \t]*(?:—|–|->|→|-{1,2}|:|,|;|\.)?[ \t]*/i, '').replace(/[ \t.]+$/, '');
+    return { status: 'yes', detail, approvedByOwner: true };
   }
   return { status: 'malformed', detail: value };
 }
@@ -261,7 +268,7 @@ async function checkDefaults({ github, context, core }) {
     ...context.repo, pull_number: pull.number, per_page: 100,
   })).map((f) => f.filename);
   if (isDocsOnly(files)) return { skipped: 'docs only' };
-  const result = parseDefaults(pull.body);
+  const result = parseDefaults(pull.body, { ownerApproved: hasLabel(pull, OWNER_APPROVED_LABEL) });
   if (result.status === 'missing') {
     core.setFailed(`The description has no "Changes a default:" line. ${DEFAULTS_HELP}`);
   } else if (result.status === 'malformed') {
@@ -275,7 +282,7 @@ async function checkDefaults({ github, context, core }) {
 // Separate job (it needs write access, which fork PRs don't get): best effort.
 async function syncDefaultLabel({ github, context, core }) {
   const pull = context.payload.pull_request;
-  const { status } = parseDefaults(pull.body);
+  const { status } = parseDefaults(pull.body, { ownerApproved: hasLabel(pull, OWNER_APPROVED_LABEL) });
   const has = hasLabel(pull, DEFAULT_LABEL);
   const args = { ...context.repo, issue_number: pull.number };
   try {

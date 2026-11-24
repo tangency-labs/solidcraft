@@ -51,6 +51,38 @@ test('parseDefaults takes a note after the separator', () => {
   assert.equal(pc.parseDefaults('Changes a default: nope').status, 'malformed');
 });
 
+test('parseDefaults takes a full stop, spaces and backticks', () => {
+  for (const v of ['no.', 'no. ', 'No.  ', '`no`', 'no .', 'no. Only a fix.', 'no!']) {
+    assert.equal(pc.parseDefaults(`Changes a default: ${v}`).status, 'no', v);
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes — x, old behaviour kept behind preference p.  ').status, 'yes');
+  assert.equal(pc.parseDefaults('Changes a default: no..x').status, 'no');
+  assert.equal(pc.parseDefaults('Changes a default: `nope`').status, 'malformed');
+});
+
+test('parseDefaults: the owner-approved label stands for the owner\'s approval on any yes', () => {
+  for (const v of ['yes', 'yes.', 'yes — endpoints share a vertex', 'yes, endpoints share a vertex.', 'yes — approved by the owner']) {
+    assert.equal(pc.parseDefaults(`Changes a default: ${v}`).status, 'malformed', v);
+    const r = pc.parseDefaults(`Changes a default: ${v}`, { ownerApproved: true });
+    assert.equal(r.status, 'yes', v);
+    assert.equal(r.approvedByOwner, true, v);
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes — endpoints share a vertex', { ownerApproved: true }).detail, 'endpoints share a vertex');
+  assert.equal(pc.parseDefaults('Changes a default: maybe', { ownerApproved: true }).status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: no', { ownerApproved: true }).status, 'no');
+});
+
+test('checkDefaults: a yes without a preference passes with the owner-approved label', async () => {
+  const me = mk(21, 'alice', 'Changes a default: yes — endpoints share a vertex', { created_at: '2026-10-25T00:00:00Z' });
+  const files = [{ filename: 'crates/a.rs' }];
+  let f = fakes(me, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 1);
+  f = fakes({ ...me, labels: [{ name: 'owner-approved' }] }, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 0);
+});
+
 test('parseDefaults yes forms', () => {
   for (const sep of ['—', '–', '-', '->', '→', ':']) {
     const r = pc.parseDefaults(`Changes a default: yes ${sep} zoom speed doubled, old behaviour kept behind preference viewport.zoom_speed`);
