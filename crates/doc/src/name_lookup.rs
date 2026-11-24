@@ -193,6 +193,7 @@ pub(crate) fn locate_projected_edge_from(b: &ModelBody, saved_body: &str, name: 
         recover_numbered_projected_edge(b, name, near)
             .or_else(|| recover_blend_numbered_edge(b, name, near))
             .or_else(|| recover_align_projected_edge(b, saved_body, name, near))
+            .or_else(|| recover_misnumbered_side_edge(b, name, near))
             .or_else(|| recover_positional_edge(b, name, near))
             .ok_or(miss)
     })
@@ -319,6 +320,55 @@ fn recover_align_projected_edge(b: &ModelBody, saved_body: &str, name: &str, nea
         return None;
     }
     Some(EdgeHit { edge, point: near, verified: false, on_point: true })
+}
+
+/// 0.45.0-rc.4 and 0.45.0 could name several faces a feature swept from different curves after
+/// one of them, told apart by a number only: a revolve cut after another named both flanks of its
+/// groove `F6:side:l1#1` and `F6:side:l1#2`, where earlier and later builds name them
+/// `F6:side:l1` and `F6:side:l2` (#21293). A saved edge naming such a numbered side face is found
+/// at its saved point: the one exact edge within a pick's reach of it, where each
+/// numbered face is a side face the same feature swept from the same profile, and each other face
+/// is the saved face or a piece of it. No mesh or nearest-edge substitution decides this.
+fn recover_misnumbered_side_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    use crate::persistent_name::{Base, EdgeName, FaceName, Role, Suffix};
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let read = EdgeName::parse(name).ok()?;
+    let side = |f: &FaceName| match &f.base {
+        Base::Made { feature, role: Role::Side { profile, .. } } => Some((*feature, *profile)),
+        _ => None,
+    };
+    let numbered = |f: &FaceName| side(f).is_some() && matches!(f.suffixes.as_slice(), [Suffix::Numbered(_)]);
+    let [first, second] = read.faces.as_slice() else { return None };
+    if !numbered(first) && !numbered(second) {
+        return None;
+    }
+    let record = b.body.record();
+    let reach = pick_reach(b);
+    let mut on = record
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach));
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    let [p, q] = record.edges.get(edge)?.uses.as_slice() else { return None };
+    let faces = naming::names(b);
+    let current = |face: u32| faces.faces.get(face as usize).and_then(|n| FaceName::parse(n).ok());
+    let (p, q) = (current(p.face)?, current(q.face)?);
+    let answers = |saved: &FaceName, now: &FaceName| {
+        if numbered(saved) {
+            side(saved) == side(now) && now.suffixes.iter().all(|s| matches!(s, Suffix::Piece(_)))
+        } else {
+            now.stem() == saved.stem()
+        }
+    };
+    ((answers(first, &p) && answers(second, &q)) || (answers(first, &q) && answers(second, &p))).then_some(EdgeHit {
+        edge,
+        point: near,
+        verified: false,
+        on_point: true,
+    })
 }
 
 /// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older

@@ -1419,3 +1419,69 @@ fn a_sketch_attaches_to_a_chamfer_that_takes_the_whole_side_wall() {
     assert!(names(&s, "B").iter().all(|(_, exact)| *exact), "{:?}", names(&s, "B"));
     run(&mut s, "sketch.create", json!({"plane": {"face": [84.6745, 79.3562, 5.8114]}}));
 }
+
+/// The issue's design (#21293): a revolved part, two revolve cuts, and a sketch projecting two
+/// edges of the second cut's groove.
+fn revolve_with_two_cuts_projected() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 100], [6, 100]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [6, 100], "through": [20, 65], "end": [25, 30]}));
+    run(&mut s, "sketch.line", json!({"points": [[25, 30], [25, 0], [0, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "Z", "angle": "360 deg"}));
+    for groove in [[[26, -20], [23, -22], [26, -24]], [[22, -80], [12, -85], [22, -90]]] {
+        run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+        run(&mut s, "sketch.line", json!({"points": groove, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"axis": "Z", "angle": "360 deg", "operation": "cut"}));
+    }
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "30"}));
+    let profile = run(&mut s, "sketch.create", json!({"plane": "Plane1", "name": "Projection"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [9.585, 9.585, 84.222]}, {"edge": [-9.585, -9.585, 84.222]}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    (s, profile)
+}
+
+#[test]
+fn saved_projections_of_a_revolve_cuts_flanks_open_with_0_45_numbered_names() {
+    let (s, profile) = revolve_with_two_cuts_projected();
+    let (first, cut) = (id(&s, "Revolve1"), id(&s, "Revolve3"));
+    let state = s.model.state();
+    let expected = &state.sketch(profile).unwrap().sketch;
+    assert_eq!(expected.links.len(), 2);
+    assert!(expected.links.iter().all(|link| !link.lost));
+    // 0.45.0 named both flanks of the second cut's groove after its first line, numbered, and
+    // the face they cut without the other cut's flank (#21293). Synthetic saved links of that form.
+    let old = |n: u32, tie: u32| format!("F{first}:side:a1#[F{first}:side:l3]|F{cut}:side:l1#{n}~{tie}");
+    for names in [None, Some([old(1, 2), old(2, 1)]), Some([old(2, 2), old(1, 1)])] {
+        let mut doc = solidcraft_doc::Document::clone(&s.doc);
+        if let Some(names) = &names {
+            let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+            for (link, name) in sketch.links.iter_mut().zip(names) {
+                link.edge_name = Some(name.clone());
+            }
+        }
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        cold.model.no_cache = true;
+        cold.refresh();
+        assert_eq!(error(&cold, "Projection"), None, "{names:?}");
+        let reopened = cold.model.state();
+        let actual = &reopened.sketch(profile).unwrap().sketch;
+        assert!(actual.links.iter().all(|link| !link.lost), "{names:?}");
+        assert_eq!(actual.curves, expected.curves, "{names:?}");
+        assert_eq!(actual.points, expected.points, "{names:?}");
+    }
+    // A numbered side face of another feature, and a point off the edge, find nothing.
+    let near = Vec3::new(9.585, 9.585, 84.222);
+    for (name, at) in
+        [(format!("F{first}:side:a1#[F{first}:side:l3]|F{}:side:l1#1~2", id(&s, "Revolve2")), near), (old(1, 2), near + Vec3::new(0., 0., 3.))]
+    {
+        let mut doc = solidcraft_doc::Document::clone(&s.doc);
+        let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+        sketch.links[0].edge_name = Some(name.clone());
+        sketch.links[0].source = solidcraft_sketch::LinkSource::Edge { body: "Body1".into(), at };
+        let cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        assert!(error(&cold, "Projection").is_some(), "{name} at {at:?}");
+    }
+}
