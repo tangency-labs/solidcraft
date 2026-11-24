@@ -47,7 +47,7 @@
 //! | [`OffsetFailure::BrepNotGiven`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` (`offset_executive::p2`) |
 //! | [`OffsetFailure::ShellLeavesNoCavity`], [`OffsetFailure::ShellWallUnresolved`], [`OffsetFailure::ShellFaceNotOfBody`] | `SM_ERR_INVALID_INPUT` (`offset_executive::p2`) |
 //! | [`OffsetFailure::ExtendedFaceCollapses`], [`OffsetFailure::TrimPastExtension`] | `SM_ERR` (`offset_executive::p2`) |
-//! | [`OffsetFailure::FaceHasNoFaceuse`], [`OffsetFailure::FaceuseHasNoShell`], [`OffsetFailure::ShellHasNoRegion`], [`OffsetFailure::FaceuseHasNoMate`], [`OffsetFailure::EdgeuseHasNoEdge`], [`OffsetFailure::EdgeuseHasNoMate`], [`OffsetFailure::EdgeuseHasNoRadial`] | `SM_ERR_NULL_POINTER` (`offset_executive::p2`) |
+//! | [`OffsetFailure::FaceHasNoFaceuse`], [`OffsetFailure::FaceuseHasNoShell`], [`OffsetFailure::ShellHasNoRegion`], [`OffsetFailure::FaceuseHasNoMate`], [`OffsetFailure::EdgeuseHasNoEdge`], [`OffsetFailure::EdgeuseHasNoMate`], [`OffsetFailure::EdgeuseHasNoRadial`], [`OffsetFailure::EdgeuseHasNoFaceuse`] | `SM_ERR_NULL_POINTER` (`offset_executive::p1`, `offset_executive::p2`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -663,6 +663,13 @@ pub enum OffsetFailure {
         /// The edge use, of the operation's input.
         edgeuse: EdgeuseId,
     },
+    /// An edge use of the operation's input has no face use (it is in no loop of a face).
+    /// A caller can build such a body (`Brep::edgeuse_mut`, `Brep::loopuse_mut`), so it is
+    /// the caller's input, not the kernel's fault.
+    EdgeuseHasNoFaceuse {
+        /// The edge use, of the operation's input.
+        edgeuse: EdgeuseId,
+    },
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -819,7 +826,8 @@ impl OffsetFailure {
             Self::ShellHasNoRegion { shell } => Some(EntityRef::Shell(shell)),
             Self::EdgeuseHasNoEdge { edgeuse }
             | Self::EdgeuseHasNoMate { edgeuse }
-            | Self::EdgeuseHasNoRadial { edgeuse } => Some(EntityRef::Edgeuse(edgeuse)),
+            | Self::EdgeuseHasNoRadial { edgeuse }
+            | Self::EdgeuseHasNoFaceuse { edgeuse } => Some(EntityRef::Edgeuse(edgeuse)),
             Self::BlendRailWithoutSupport { edge }
             | Self::EdgeOffsetsUnpaired { edge }
             | Self::GapEndWithoutEdge { edge }
@@ -909,6 +917,7 @@ impl OffsetFailure {
                 | Self::EdgeuseHasNoEdge { .. }
                 | Self::EdgeuseHasNoMate { .. }
                 | Self::EdgeuseHasNoRadial { .. }
+                | Self::EdgeuseHasNoFaceuse { .. }
         ) || self.is_named_at_a_status_site()
     }
 
@@ -1033,7 +1042,8 @@ impl OffsetFailure {
             | Self::FaceuseHasNoMate { .. }
             | Self::EdgeuseHasNoEdge { .. }
             | Self::EdgeuseHasNoMate { .. }
-            | Self::EdgeuseHasNoRadial { .. } => false,
+            | Self::EdgeuseHasNoRadial { .. }
+            | Self::EdgeuseHasNoFaceuse { .. } => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -1130,7 +1140,8 @@ impl OffsetFailure {
             | Self::FaceuseHasNoMate { .. }
             | Self::EdgeuseHasNoEdge { .. }
             | Self::EdgeuseHasNoMate { .. }
-            | Self::EdgeuseHasNoRadial { .. } => false,
+            | Self::EdgeuseHasNoRadial { .. }
+            | Self::EdgeuseHasNoFaceuse { .. } => false,
         }
     }
 
@@ -1204,7 +1215,8 @@ impl OffsetFailure {
             | Self::FaceuseHasNoMate { .. }
             | Self::EdgeuseHasNoEdge { .. }
             | Self::EdgeuseHasNoMate { .. }
-            | Self::EdgeuseHasNoRadial { .. } => SM_ERR_NULL_POINTER,
+            | Self::EdgeuseHasNoRadial { .. }
+            | Self::EdgeuseHasNoFaceuse { .. } => SM_ERR_NULL_POINTER,
             Self::FaceMoveEmpty { .. }
             | Self::InvalidValue(_)
             | Self::ShellLeavesNoCavity { .. }
@@ -1294,7 +1306,8 @@ impl OffsetFailure {
             | Self::FaceuseHasNoMate { .. }
             | Self::EdgeuseHasNoEdge { .. }
             | Self::EdgeuseHasNoMate { .. }
-            | Self::EdgeuseHasNoRadial { .. } => ErrorKind::InvalidInput,
+            | Self::EdgeuseHasNoRadial { .. }
+            | Self::EdgeuseHasNoFaceuse { .. } => ErrorKind::InvalidInput,
             Self::StageFailed
             | Self::Defect { .. }
             | Self::LoopGapPassLimit { .. }
@@ -1813,6 +1826,9 @@ impl core::fmt::Display for OffsetFailure {
             }
             Self::EdgeuseHasNoRadial { .. } => {
                 f.write_str("invalid input: an edge use of the body has no radial")
+            }
+            Self::EdgeuseHasNoFaceuse { .. } => {
+                f.write_str("invalid input: an edge use of the body has no face use")
             }
         }
     }
@@ -2511,6 +2527,14 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::EdgeuseHasNoFaceuse {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -2593,6 +2617,7 @@ mod tests {
                 O::EdgeuseHasNoEdge { .. } => 76,
                 O::EdgeuseHasNoMate { .. } => 77,
                 O::EdgeuseHasNoRadial { .. } => 78,
+                O::EdgeuseHasNoFaceuse { .. } => 79,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -2816,6 +2841,13 @@ mod tests {
             ),
             (
                 OffsetFailure::EdgeuseHasNoRadial {
+                    edgeuse: EdgeuseId::from_index(3),
+                },
+                SM_ERR_NULL_POINTER,
+                Some(EntityRef::Edgeuse(EdgeuseId::from_index(3))),
+            ),
+            (
+                OffsetFailure::EdgeuseHasNoFaceuse {
                     edgeuse: EdgeuseId::from_index(3),
                 },
                 SM_ERR_NULL_POINTER,
