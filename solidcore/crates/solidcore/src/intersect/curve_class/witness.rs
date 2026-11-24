@@ -27,17 +27,23 @@
 //! - the solution is not a range of the curve on an edge, or the edge is a seam;
 //! - the range does not meet the case-3e predicate on its own ends
 //!   ([`Curve::approaches_without_crossing`]);
-//! - neither end of the range is at an end vertex of E that the classification met;
+//! - the range is not at exactly one end vertex of E that the classification met (a
+//!   range with both ends at vertices is kept);
 //! - E has no other face, or the classifying face lies on both sides of it;
 //! - G or a Z is not an analytic surface, or their intersection fails (any error but a
 //!   cancellation, unported paths included);
-//! - E or a curve of K is not a line or a circle, a K curve overlaps E, or two circles do
-//!   not lie in one plane;
-//! - the stretch is no longer than the chord 2 sqrt(2 r tol) along which a carrier stays
-//!   within the tolerance of a circle of radius r it touches;
+//! - E or a curve of K is not a line or a circle, or a K curve overlaps E;
+//! - a line runs along a circle's plane but is neither within the tolerance of the plane
+//!   nor apart from it on one side over the whole stretch where it can reach the circle;
+//! - two circles are tilted or offset so far that the flattened one strays more than the
+//!   tolerance from the true one (off + 2 r sin θ, see `meet`);
+//! - a near-parallel pair changes side along the stretch, or a point is not finite;
+//! - the stretch is no longer than the chord 2 sqrt(2 R tol) along which two carriers
+//!   with relative radius of curvature R stay within the tolerance where they touch;
 //! - for some Z, no point of K ∩ E lies on the stretch, or one lies away from V.
 //!
-//! Each Z of a non-manifold edge is tested on its own.
+//! Each Z of a non-manifold edge is tested on its own, within the larger of the range's
+//! tolerance and the intersection tolerance of E's and Z's zones.
 //!
 //! Deviations: not upstream.
 
@@ -46,6 +52,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{Solution, SolutionEnd, SolutionType};
+use crate::geom::tol::xsect_tol_3d_from_zones;
 use crate::geom::vector3d::Point3;
 use crate::geom::vector3d::Vec3;
 use crate::intersect::curve_class::p9::BoundaryEdge;
@@ -140,8 +147,7 @@ fn finite(points: Vec<Point3>) -> Meet {
 }
 
 /// How the line (`point`, unit `direction`) meets the circle; `line_is_e` says which
-/// carrier's points are returned. `stretch` holds E's points at the stretch's ends, where
-/// the line's offset from the circle's plane is measured.
+/// carrier's points are returned.
 ///
 /// Within the tolerance of tangent the true crossings are returned, not the touching
 /// point: a line just inside the circle crosses it twice, as far apart as the depth
@@ -154,7 +160,6 @@ fn line_circle(
     normal: Vec3,
     radius: f64,
     line_is_e: bool,
-    stretch: [Point3; 2],
     tol: f64,
     sin_ang: f64,
 ) -> Meet {
@@ -177,22 +182,35 @@ fn line_circle(
         finite(out)
     };
     if dn.abs() <= sin_ang {
-        // the line lies along the circle's plane: in it, or apart from it, decided at
-        // both ends of the stretch
-        let [a, b] = stretch;
-        let h = |x: Point3| (foot(point, direction, x) - origin).dot(normal);
-        let (ha, hb) = (h(a), h(b));
-        if ha.abs() > tol && hb.abs() > tol && ha * hb > 0.0 {
-            return Meet::Points(Vec::new());
-        }
-        if ha.abs() > tol || hb.abs() > tol {
+        // the line runs along the circle's plane. Only its part whose foot on the line
+        // through the centre lies within r + tol of the centre's foot can come within tol
+        // of the circle (any other point is farther than r + tol from the centre); over
+        // that part its height h(s) = h(s0) + dn (s - s0) above the plane is linear, so its
+        // two ends bound it. Within tol of the plane over all of it, the line is in the
+        // plane up to that height; beyond tol on one side over all of it, the line is apart
+        // from the circle; otherwise it may cross the plane anywhere along the circle, and
+        // the in-plane picture does not decide it
+        let s0 = (origin - point).dot(direction);
+        let reach = radius + tol;
+        let h = |s: f64| (point + direction * s - origin).dot(normal);
+        let (h1, h2) = (h(s0 - reach), h(s0 + reach));
+        if !(h1.is_finite() && h2.is_finite()) {
             return Meet::Undecided;
         }
-        let p = foot(point, direction, midpoint_of(a, b));
+        if h1.abs() > tol && h2.abs() > tol && h1 * h2 > 0.0 {
+            return Meet::Points(Vec::new());
+        }
+        let lift = h1.abs().max(h2.abs());
+        if lift > tol {
+            return Meet::Undecided;
+        }
+        let p = point + direction * s0;
         let in_plane = p - normal * (p - origin).dot(normal);
         let f = foot(in_plane, direction, origin);
         let delta = (f - origin).length();
-        if delta > radius + tol {
+        // the projection moves the line by at most `lift`: a crossing within tol of the
+        // line itself lies within tol + lift of its projection
+        if delta > radius + tol + lift {
             return Meet::Points(Vec::new());
         }
         let half_sq = radius * radius - delta * delta;
@@ -204,8 +222,7 @@ fn line_circle(
         return project(vec![f - direction * half, f + direction * half]);
     }
     // the line crosses the circle's plane at one point
-    let p = foot(point, direction, midpoint_of(stretch[0], stretch[1]));
-    let x = p + direction * ((origin - p).dot(normal) / dn);
+    let x = point + direction * ((origin - point).dot(normal) / dn);
     if ((x - origin).length() - radius).abs() > tol {
         return Meet::Points(Vec::new());
     }
@@ -271,9 +288,7 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
                 radius,
                 ..
             },
-        ) => line_circle(
-            point, direction, origin, normal, radius, true, stretch, tol, sin_ang,
-        ),
+        ) => line_circle(point, direction, origin, normal, radius, true, tol, sin_ang),
         (
             Carrier::Circle {
                 origin,
@@ -283,7 +298,7 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
             },
             Carrier::Line { point, direction },
         ) => line_circle(
-            point, direction, origin, normal, radius, false, stretch, tol, sin_ang,
+            point, direction, origin, normal, radius, false, tol, sin_ang,
         ),
         (
             Carrier::Circle {
@@ -299,20 +314,33 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
                 ..
             },
         ) => {
-            let off_plane = |x: Point3| (x - o2).dot(n2).abs();
-            if n1.cross(n2).length() > sin_ang || off_plane(a) > tol || off_plane(b) > tol {
+            // circle 2 is flattened into E's plane. With sin θ = |n1 × n2| and off the
+            // height of o2 above that plane, a point P of circle 2 lies within
+            // off + r2 sin θ of the plane, and its projection within r2 (1 - cos θ)
+            // <= r2 sin θ of the circle of radius r2 about o2's projection: P lies within
+            // e = off + 2 r2 sin θ of the flattened circle. The flattening decides only
+            // where e <= tol, and every band below is widened by e, so no crossing within
+            // tol of circle 2 itself is dropped
+            let sin_tilt = n1.cross(n2).length();
+            if sin_tilt > sin_ang {
                 return Meet::Undecided;
             }
-            let o2_in = o2 - n1 * (o2 - o1).dot(n1);
+            let off = (o2 - o1).dot(n1);
+            let lift = off.abs() + 2.0 * r2 * sin_tilt;
+            if !lift.is_finite() || lift > tol {
+                return Meet::Undecided;
+            }
+            let band = tol + lift;
+            let o2_in = o2 - n1 * off;
             let dvec = o2_in - o1;
             let d = dvec.length();
-            if d <= tol && (r1 - r2).abs() <= tol {
+            if d <= band && (r1 - r2).abs() <= band {
                 return Meet::Overlap;
             }
             if d <= EFF_ZERO {
                 return Meet::Points(Vec::new());
             }
-            if d > r1 + r2 + tol || d < (r1 - r2).abs() - tol {
+            if d > r1 + r2 + band || d < (r1 - r2).abs() - band {
                 return Meet::Points(Vec::new());
             }
             // within the tolerance of crossing or touching: the true crossings where the
@@ -452,6 +480,13 @@ fn stretch_points(
         }
     }
     Some(points)
+}
+
+/// The tolerance K ∩ E is found within for a face Z of E: the larger of the range's
+/// `tolerance` (found with the classifying face's zone) and the intersection tolerance of
+/// E's and Z's zones, the gap the B-rep allows between E and Z.
+fn z_tolerance(k: &Kernel, tolerance: f64, edge_zone: f64, z_zone: f64) -> f64 {
+    tolerance.max(xsect_tol_3d_from_zones(k, edge_zone, z_zone))
 }
 
 /// An end vertex of edge `e` the range ends at: within the vertex's tolerance of both
@@ -646,7 +681,16 @@ pub(crate) fn tangency_point<O: ClassObject>(
             Err(err) if err.is_cancelled() => return Err(err),
             Err(_) => return Ok(None),
         };
-        let Some(points) = stretch_points(e_carrier, &k_curves, stretch, tolerance, sin_ang) else {
+        // E lies within its own and Z's zone tolerances of Z, not the classifying face's: K
+        // is met within the larger of the range's tolerance and that bound, so a crossing
+        // E has with K through Z's wider zone is not dropped
+        let tol_z = z_tolerance(
+            k,
+            tolerance,
+            edge.zone_tol_3d,
+            crate::topology::face::p2::tolerance(brep, z)?,
+        );
+        let Some(points) = stretch_points(e_carrier, &k_curves, stretch, tol_z, sin_ang) else {
             return Ok(None);
         };
         // K ∩ E on the stretch is not empty, and all of it is at one range-end vertex
@@ -774,6 +818,102 @@ mod tests {
         let ps = points(line([4.0, 249.15, 0.0], [0.0, 0.0, 1.0])).unwrap();
         assert_eq!(ps.len(), 1);
         assert!((ps[0] - Point3::new(4.0, 249.15, 7.0)).length() <= 1e-12);
+    }
+
+    #[test]
+    fn a_near_coplanar_line_crossing_the_arc_inside_is_undecided() {
+        // the review's case: the right half of the unit circle in z = 0, and a line through
+        // its midpoint (1, 0, 0) rising 1e-4 per unit, below the angle tolerance. The feet
+        // of both arc ends sit 1e-4 below the plane, but the line crosses the arc
+        let e = Carrier::Circle {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            x: Point3::new(1.0, 0.0, 0.0),
+            y: Point3::new(0.0, 1.0, 0.0),
+            normal: Point3::new(0.0, 0.0, 1.0),
+            radius: 1.0,
+        };
+        let stretch = [Point3::new(0.0, -1.0, 0.0), Point3::new(0.0, 1.0, 0.0)];
+        let k = line([1.0, 0.0, 0.0], [1.0, 0.0, 1e-4]);
+        assert!(matches!(meet(e, k, stretch, TOL, SIN), Meet::Undecided));
+        // in the plane the tangent line is still decided, at its touching point
+        let Meet::Points(ps) = meet(e, line([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), stretch, TOL, SIN)
+        else {
+            panic!("decided");
+        };
+        assert_eq!(ps.len(), 1);
+        assert!((ps[0] - Point3::new(1.0, 0.0, 0.0)).length() <= 1e-12);
+        // and a line below the plane over the whole circle stays apart
+        let k = line([1.0, 0.0, -0.5], [1.0, 0.0, 1e-4]);
+        let Meet::Points(ps) = meet(e, k, stretch, TOL, SIN) else {
+            panic!("decided");
+        };
+        assert!(ps.is_empty());
+    }
+
+    #[test]
+    fn a_tilted_circle_is_flattened_only_within_the_tolerance() {
+        // a circle of the round's radius crossing it, tilted about the x axis by sin θ
+        let [a, _, b] = quarter();
+        let tilted = |sin: f64| {
+            let cos = (1.0 - sin * sin).sqrt();
+            Carrier::Circle {
+                origin: Point3::new(4.5, 248.0, 7.0),
+                x: Point3::new(1.0, 0.0, 0.0),
+                y: Point3::new(0.0, cos, sin),
+                normal: Point3::new(0.0, -sin, cos),
+                radius: 1.15,
+            }
+        };
+        // below the angle tolerance, but 2 r sin θ = 2.3e-4 strays past TOL: undecided
+        assert!(matches!(
+            meet(round(), tilted(1e-4), [a, b], TOL, SIN),
+            Meet::Undecided
+        ));
+        // 2 r sin θ = 2.3e-8: decided, with both crossings at x = 4.25 on the round
+        let Meet::Points(ps) = meet(round(), tilted(1e-8), [a, b], TOL, SIN) else {
+            panic!("decided");
+        };
+        assert_eq!(ps.len(), 2);
+        for p in ps {
+            assert!((p.x - 4.25).abs() <= 1e-12);
+            assert!(((p - Point3::new(4.0, 248.0, 7.0)).length() - 1.15).abs() <= 1e-12);
+        }
+        // an offset of the centre from the plane counts too
+        let lifted = Carrier::Circle {
+            origin: Point3::new(4.5, 248.0, 7.0 + 2.0 * TOL),
+            x: Point3::new(1.0, 0.0, 0.0),
+            y: Point3::new(0.0, 1.0, 0.0),
+            normal: Point3::new(0.0, 0.0, 1.0),
+            radius: 1.15,
+        };
+        assert!(matches!(
+            meet(round(), lifted, [a, b], TOL, SIN),
+            Meet::Undecided
+        ));
+    }
+
+    #[test]
+    fn a_face_with_a_wider_zone_meets_e_within_its_own_gap() {
+        let k = Kernel::default();
+        // Z's zone wider than the range's tolerance: the gap E may have from Z rules
+        let wide = z_tolerance(&k, TOL, 1e-6, 1e-4);
+        assert!((wide - xsect_tol_3d_from_zones(&k, 1e-6, 1e-4)).abs() <= 0.0);
+        assert!(wide > TOL);
+        // a narrower Z keeps the range's tolerance
+        assert!((z_tolerance(&k, TOL, 1e-9, 1e-9) - TOL).abs() <= 0.0);
+        // a K line through the quarter's interior 5 TOL off the round's plane: apart at the
+        // range's tolerance, met (so the witness refuses) at Z's
+        let [a, m, b] = quarter();
+        let kl = [Curve::new(CurveKind::Line(
+            crate::curve::line::Line::create_canonical(
+                Point3::new(0.0, 248.5, 7.0 + 5.0 * TOL),
+                Point3::new(1.0, 0.0, 0.0),
+            ),
+        ))];
+        let narrow = stretch_points(round(), &kl, [a, m, b], TOL, SIN).unwrap();
+        assert!(narrow.is_empty());
+        let at_z = stretch_points(round(), &kl, [a, m, b], wide, SIN).unwrap();
+        assert_eq!(at_z.len(), 1);
     }
 
     #[test]
