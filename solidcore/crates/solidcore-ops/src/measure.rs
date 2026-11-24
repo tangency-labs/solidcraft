@@ -377,6 +377,17 @@ pub struct EdgeRayPoint {
     pub distance: f64,
 }
 
+/// A point where a ray meets a face ([`Body::face_hits_by_ray`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceHit {
+    /// The record face.
+    pub face: usize,
+    /// The point on the ray where it meets the face.
+    pub point: [f64; 3],
+    /// The distance from the ray's origin to the point, along the ray.
+    pub distance: f64,
+}
+
 /// The first face a ray meets ([`Body::face_hit_by_ray`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FaceRayHit {
@@ -871,6 +882,49 @@ impl Body {
             uv: [hit.uv.x, hit.uv.y],
             distance: hit.distance,
         }))
+    }
+
+    /// Every point where the ray from `origin` along `direction` meets a face, nearest first
+    /// (the kernel's `query::brep::face_hits`): the face, the point and the distance. A hit is a
+    /// point on the body within its zone tolerance, as for [`Body::face_hit_by_ray`]. A face the
+    /// ray crosses twice gives two hits, a crossing on its seam or pole one; a ray through an
+    /// edge or a vertex meets each face there at one point and distance, those hits in `order`'s
+    /// face order, of which [`Body::face_hit_by_ray`] names one. A hit at the origin is at
+    /// distance 0; a stretch along a face is no hit. Empty where the ray meets no face. The
+    /// kernel's solves may add UV trim curves to the body.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a coordinate that is not finite or a direction of no length;
+    /// [`Error::Exception`] for a hit face `order` does not list (an order of another body); any
+    /// other kernel error.
+    pub fn face_hits_by_ray(
+        &self,
+        order: &Order,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Vec<FaceHit>> {
+        let ray = Ray::new(point(origin)?, point(direction)?).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_hits_by_ray", self, |k, b| {
+            solidcore::query::brep::face_hits(k, b, ray)
+        })?;
+        let mut hits = hits
+            .into_iter()
+            .map(|hit| {
+                let face = order
+                    .faces
+                    .iter()
+                    .position(|&f| f == hit.face)
+                    .ok_or(Error::Exception)?;
+                Ok(FaceHit {
+                    face,
+                    point: array(hit.point),
+                    distance: hit.distance,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // ties (one point, one distance) in the record's face order
+        hits.sort_by(|p, q| p.distance.total_cmp(&q.distance).then(p.face.cmp(&q.face)));
+        Ok(hits)
     }
 
     /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure

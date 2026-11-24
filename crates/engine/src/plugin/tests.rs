@@ -525,6 +525,58 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// A granted `file` command names a file by its grant's name; the reply names the real file.
+/// A read-only grant serves only input readers; a name the command may not use is refused first.
+#[test]
+fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-grant-paths-{}", std::process::id()));
+    let (outbox, input) = (root.join("outbox"), root.join("input"));
+    std::fs::create_dir_all(&outbox).unwrap();
+    std::fs::create_dir_all(&input).unwrap();
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: vec![outbox.clone()],
+        file_read_folders: vec![outbox.clone(), input.clone()],
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    host.session.plugin_state.file_grants = vec![
+        FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write: true },
+        FileGrant { name: "input".into(), folder: input.clone(), read: true, write: false },
+    ];
+    host.begin_transaction().unwrap();
+    s_box(&mut host);
+    let exported = host.run_command("file.export_step", &json!({"path":"grant:outbox/part.step"})).unwrap();
+    assert!(outbox.join("part.step").is_file());
+    assert_eq!(exported["path"], json!(outbox.join("part.step").to_string_lossy()), "the reply names the file where it is");
+    std::fs::copy(outbox.join("part.step"), input.join("part.step")).unwrap();
+    let inserted = host.run_command("file.insert_step", &json!({"path":"grant:input/part.step"}));
+    assert!(inserted.is_ok(), "an input reader uses a read-only grant: {inserted:?}");
+    for path in ["grant:input/copy.step", "grant:elsewhere/copy.step", "grant:outbox/../copy.step"] {
+        let refused = host.run_command("file.export_step", &json!({"path": path}));
+        assert!(matches!(&refused, Err(HostError::PermissionDenied { permission }) if permission.starts_with(path)), "{path}: {refused:?}");
+    }
+    // The rewritten path is then judged by the command's scope like any other (here Windows' rules
+    // for device names and streams), so the grant form reaches nothing a full path could not.
+    if cfg!(windows) {
+        for path in ["grant:outbox/nul.step", "grant:outbox/part.step:stream"] {
+            let refused = host.run_command("file.export_step", &json!({"path": path}));
+            assert!(
+                matches!(&refused, Err(HostError::CommandFailed { reason, .. }) if reason.contains("not allowed for this agent")),
+                "{path}: {refused:?}"
+            );
+        }
+    }
+    assert!(!input.join("copy.step").exists() && !root.join("copy.step").exists());
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees_only_its_folders() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-groups-{}", std::process::id()));
@@ -1965,6 +2017,52 @@ mod native {
         }
     }
 
+    /// A plugin saves into its folder by the grant's name; under a read-only grant nothing is written.
+    #[test]
+    fn a_plugin_saves_into_its_granted_folder_by_the_grants_name() {
+        for write in [true, false] {
+            let f = Fixture::new("call $box");
+            let outbox = f.0.join("outbox");
+            std::fs::create_dir_all(&outbox).unwrap();
+            let (command, args) = ("file.save_as", r#"{"path":"grant:outbox/part.sc"}"#);
+            let call = format!("      i32.const 2048 i32.const {} i32.const 3072 i32.const {} i32.const 0 call $run\n", command.len(), args.len());
+            let source = component_template()
+                .replace("      call $box\n      call $box\n", &call)
+                .replace("\"file.export\"", &format!("\"{command}\")\n    (data (i32.const 3072) \"{}\"", args.replace('"', "\\22")));
+            std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+            let mut m = manifest();
+            m["runtime"]["commands"] = json!([command]);
+            m["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"outbox","read":true,"write":write}]});
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+            s.plugin_state.grants.insert(
+                "sample".into(),
+                Grants {
+                    package_hash: Some(read_package(&f.path()).unwrap().approval),
+                    command_groups: BTreeSet::from(["file".into()]),
+                    folders: vec![FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write }],
+                    fuel: None,
+                    memory_mib: None,
+                    input_folder: false,
+                },
+            );
+            let saved = outbox.join("part.sc");
+            let result = f.run(&mut s);
+            if write {
+                result.unwrap();
+                assert!(saved.is_file(), "the design is saved in the granted folder");
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("`outbox` is not a folder this command may use")),
+                    "{error}"
+                );
+                assert!(!saved.exists(), "a read-only grant writes nothing");
+            }
+        }
+    }
+
     #[test]
     fn hand_installed_plugins_get_no_legacy_or_other_plugins_folder_grants() {
         let f = Fixture::new("call $box");
@@ -2378,6 +2476,30 @@ mod native {
         assert!(refused.contains("needs the storage capability"), "{refused}");
     }
     #[test]
+    fn cancelling_a_long_job_changes_nothing() {
+        let f = Fixture::new("call $box (loop br 0)");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","job":true}]);
+        m["runtime"]["limits"]["fuel"] = json!(u64::MAX / 2);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.plugin_limits.max_fuel = u64::MAX;
+        let before = s.doc.to_json();
+        // Cancelled from the operations panel (its watch), it stops and nothing of it lands. The
+        // job's own deadline is tested in the runtime crate.
+        let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
+        let stop = progress.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            stop.cancel();
+        });
+        let failure = solidcraft_doc::progress::watch(progress, || f.run(&mut s)).unwrap_err().to_string();
+        canceller.join().unwrap();
+        assert!(failure.contains("cancelled"), "{failure}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 0));
+    }
+
+    #[test]
     fn named_calls_preserve_input_pass_through() {
         let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
         let mut m = manifest();
@@ -2756,6 +2878,45 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), false).is_ok());
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), true).is_err());
     });
+}
+
+#[test]
+fn a_write_may_reach_a_missing_folder_exactly_when_its_nearest_existing_folder_is_in_scope() {
+    // #20493: under `--allow-path`, `New/Deep/x.json` in an allowed folder needs folders that do not exist yet.
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-new-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let outside = root.with_file_name(format!("solidcraft-plugin-new-outside-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut session = Session::default();
+    session.plugin_state.file_grants = vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }];
+    let host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.clone()])), || {
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), true).is_ok(), "two missing levels inside the scope");
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), false).is_err(), "a read still needs the path to exist");
+        assert!(host.authorize_file_path(&root.join("../elsewhere/New/x.json"), true).is_err(), "outside the scope");
+        assert!(host.authorize_file_path(&outside.join("New/Deep/x.json"), true).is_err(), "a missing folder under an out-of-scope one");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+            assert!(host.authorize_file_path(&root.join("link/New/Deep/x.json"), true).is_err(), "an existing link out of scope");
+        }
+    });
+    assert!(!root.join("New").exists() && !outside.join("New").exists(), "checking creates nothing");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&outside);
 }
 
 /// Importer plugins: an installed importer opens the files it claims as new, unsaved designs.
@@ -3455,6 +3616,32 @@ mod install_zip {
         assert!(!root.join("plugins").exists(), "even the plugins root and staging folders stay unwritten");
         assert!(s.plugin_state.grants.is_empty());
         assert!(s.plugin_state.packages.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// #20814: a write that finds another write in progress waits for it, so a job the app gave up on
+    /// never overlaps the next install or removal.
+    #[test]
+    fn a_package_write_waits_for_the_write_in_progress() {
+        let (_s, root) = session("write-lock");
+        let plugin = unpack(&gears("0.1.0")).unwrap();
+        let dir = root.join("plugins");
+        let held = crate::plugin::install::write_lock();
+        let (finished, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn({
+            let dir = dir.clone();
+            move || {
+                let result = crate::plugin::install::install(&plugin, &dir, false);
+                let _ = finished.send(());
+                result
+            }
+        });
+        assert!(done.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the second write started while the first held the lock");
+        assert!(!dir.exists(), "nothing was written yet");
+        drop(held);
+        assert!(done.recv_timeout(std::time::Duration::from_secs(60)).is_ok(), "the waiting write runs once the lock is free");
+        assert!(worker.join().unwrap().is_ok());
+        assert!(dir.join("gears").join("plugin.json").exists());
         let _ = std::fs::remove_dir_all(root);
     }
 

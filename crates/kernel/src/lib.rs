@@ -369,6 +369,7 @@ pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::MAX_TRIANGLES;
 pub use meshbody::mesh_body;
 pub use meshbody::mesh_body_with_normals;
+pub use meshbody::reduce_mesh;
 pub use native::body_from_smlib;
 pub use native::brep_record;
 pub use native::decode_native_body;
@@ -431,6 +432,9 @@ pub use solidcore_ops::member_turn::parallel_turn;
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
+/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
+/// stops with it (a sketch solve).
+pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;

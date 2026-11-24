@@ -54,6 +54,9 @@ pub struct PartsInsertParams {
     /// out of the face; with `point`, its +Z against `direction` (default false).
     #[serde(default)]
     pub flip: Option<bool>,
+    /// Physical material for the generated solid (default: "Steel").
+    #[serde(default)]
+    pub material: Option<String>,
 }
 
 /// Resolve bore picks before placing custom hardware. Each pick names its world body.
