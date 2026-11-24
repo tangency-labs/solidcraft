@@ -687,13 +687,10 @@ fn an_update_notice_never_overlaps_community_links_or_document_tabs() {
         if width == 1920.0 {
             assert!(rect("titlebar:update").is_some(), "wide title bar has a visible update offer");
         }
-        let visible: Vec<_> = [
-            "titlebar:kofi", "titlebar:discord", "titlebar:update",
-            "titlebar:report", "titlebar:version", "titlebar:assistant",
-        ]
-        .into_iter()
-        .filter_map(|id| rect(id).map(|bounds| (id, bounds)))
-        .collect();
+        let visible: Vec<_> = ["titlebar:kofi", "titlebar:discord", "titlebar:update", "titlebar:report", "titlebar:version", "titlebar:assistant"]
+            .into_iter()
+            .filter_map(|id| rect(id).map(|bounds| (id, bounds)))
+            .collect();
         for (i, (a, ra)) in visible.iter().enumerate() {
             for (b, rb) in visible.iter().skip(i + 1) {
                 assert!(!ra.intersects(*rb), "{width}: {a} overlaps {b}: {ra:?}, {rb:?}");
