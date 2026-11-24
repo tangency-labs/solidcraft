@@ -1480,7 +1480,7 @@ fn a_coordinate_system_on_a_vertex_follows_the_part() {
     // Made in a computation the app adopts (as its dialogs run), it starts hidden there too.
     let mut computed = s.scratch();
     run(&mut computed, "construct.coordinate_system", json!({"origin": [0, 0, 0], "name": "Later"}));
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert!(s.doc.find_feature("Later").is_some() && !s.construction_visible("Later"));
 }
 
