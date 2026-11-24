@@ -856,7 +856,7 @@ pub struct OpenParams {
     pub max_points: Option<MaxPoints>,
     /// The desktop app only (ignored elsewhere): open the file as a design in a new tab at this
     /// place among the tabs (0 the first, past the last at the end), never in place of the design
-    /// shown; a design already open shows its tab instead.
+    /// shown; a design already open shows its tab instead. Given with `new_tab`, the place wins.
     #[serde(default)]
     pub tab: Option<u64>,
 }

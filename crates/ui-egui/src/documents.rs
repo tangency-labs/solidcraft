@@ -5316,6 +5316,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// `doc.open` given both `tab` and `new_tab: true` opens the file at the place `tab` names, not
+    /// after the active tab where `new_tab` alone would put it.
+    #[test]
+    fn doc_open_with_a_tab_place_and_new_tab_opens_at_the_place() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-and-new-tab-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("first.sc");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let params = json!({"path": path.to_string_lossy(), "tab": 0, "new_tab": true});
+        let r = h.call_queued("engine.execute", json!({"command": "doc.open", "params": params})).0;
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle();
+        assert_eq!(tab_names(&h.app), ["first", "Untitled"], "at the place `tab` names, before the design shown");
+        assert_eq!(h.app.docs.active, 0, "the new tab is shown");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A blank design's tab stays when a file is opened beside it at a place: only an open
     /// without a place takes the blank design's place.
     #[test]
