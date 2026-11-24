@@ -5567,7 +5567,7 @@ fn voids(b: &Body) -> usize {
 }
 
 /// The operation of a feature that makes or changes bodies with one.
-fn feature_operation(f: &Feature) -> Option<Operation> {
+pub fn feature_operation(f: &Feature) -> Option<Operation> {
     Some(match &f.kind {
         FeatureKind::Extrude { operation, .. }
         | FeatureKind::Revolve { operation, .. }
@@ -14795,9 +14795,15 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Import { step, skip, records, .. } => {
+        FeatureKind::Import { file, step, skip, records, .. } => {
             #[cfg(test)]
             cost_tests::count(|c| c.imports_read += 1);
+            // A linked design's bodies left out of the file, and not read back when it opened.
+            if records.is_none() && step.is_empty() && doc.links.values().any(|link| link.feature == f.id) {
+                return Err(DocError::Invalid(format!(
+                    "the bodies of the linked design {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
+                )));
+            }
             let (imp, digest) = match records {
                 Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
                 None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
