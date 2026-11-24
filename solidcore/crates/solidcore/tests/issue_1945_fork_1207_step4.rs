@@ -32,7 +32,6 @@ use solidcore::{Kernel, Point3};
 const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
 
 fn sc_fixes(k: &mut Kernel) {
-    k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_knife_edge_rounds = true;

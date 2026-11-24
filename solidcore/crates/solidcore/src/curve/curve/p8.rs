@@ -338,6 +338,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 // has a point of the other within tolerance). Not certified (a curve kind
                 // without a speed bound, a point too far, the piece budget spent): the
                 // solution stays where upstream puts it.
+                k.work_counters.add_contact_stretch_certification();
                 let Some(within) = native_failure(curves_stay_within(
                     k,
                     end_curve,

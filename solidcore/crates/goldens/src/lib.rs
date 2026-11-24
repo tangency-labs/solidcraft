@@ -50,11 +50,11 @@ pub mod util;
 #[cfg(test)]
 mod uvtc_trim_rows;
 #[cfg(test)]
-mod wr469_replay;
-#[cfg(test)]
 pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr57_replay;
+#[cfg(test)]
+mod wr587_replay;
 
 pub use case::Case;
 pub use case::CaseContext;
@@ -72,15 +72,13 @@ pub use runner::RunOptions;
 pub use runner::UnitDiff;
 
 /// A runner's kernel: [`solidcore::Kernel::default`]. In this crate's tests it also
-/// carries the WR-57 and WR-469 substitution replays' seams while a `wr57_replay` or
-/// `wr469_replay` test has one installed on this thread (the seam state is the kernel's;
-/// the runners make their own kernels, so they take it from here).
+/// carries the WR-57 substitution replay's seam while a `wr57_replay` test has one
+/// installed on this thread (the seam state is the kernel's; the runners make their own
+/// kernels, so they take it from here).
 pub(crate) fn runner_kernel() -> solidcore::Kernel {
     let k = solidcore::Kernel::default();
     #[cfg(test)]
     let k = wr57_replay::with_seam(k);
-    #[cfg(test)]
-    let k = wr469_replay::with_seam(k);
     k
 }
 
