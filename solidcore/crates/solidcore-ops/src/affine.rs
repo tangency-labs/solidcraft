@@ -245,7 +245,11 @@ pub fn span_along(
 /// # Errors
 /// [`Error::Argument`] for a matrix with a number not finite, a NaN bound (an empty box's
 /// too), or a corner of a non-empty box that is not finite or does not map to finite numbers.
-pub fn transformed_box(matrix: &Matrix, lo: [f64; 3], hi: [f64; 3]) -> Result<([f64; 3], [f64; 3])> {
+pub fn transformed_box(
+    matrix: &Matrix,
+    lo: [f64; 3],
+    hi: [f64; 3],
+) -> Result<([f64; 3], [f64; 3])> {
     if !finite(matrix.as_flattened()) || lo.iter().chain(&hi).any(|v| v.is_nan()) {
         return Err(Error::Argument);
     }
@@ -477,7 +481,10 @@ mod tests {
             rect_of_aspect([0.0, 0.0], [40.0, 0.0], Some([20.0, 0.0]), 0.5),
             None
         );
-        assert_eq!(rect_of_aspect([f64::NAN, 0.0], [40.0, 0.0], None, 0.5), None);
+        assert_eq!(
+            rect_of_aspect([f64::NAN, 0.0], [40.0, 0.0], None, 0.5),
+            None
+        );
     }
 
     /// A 2:1 picture on a 40 mm edge in the XZ plane fits a frame 20 mm high, and one 30 mm high

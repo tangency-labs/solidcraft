@@ -2031,7 +2031,10 @@ pub(crate) mod tests {
             point_displacement([2.0, 2.0], [5.0, 6.0]).unwrap(),
             [3.0, 4.0]
         );
-        assert_eq!(centroid_and_mean_radius(&[[f64::NAN, 0.0]]), Err(Error::Argument));
+        assert_eq!(
+            centroid_and_mean_radius(&[[f64::NAN, 0.0]]),
+            Err(Error::Argument)
+        );
         assert_eq!(
             point_displacement([0.0, 0.0], [f64::INFINITY, 0.0]),
             Err(Error::Argument)

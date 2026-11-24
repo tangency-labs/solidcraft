@@ -671,7 +671,10 @@ pub fn centroid_and_mean_radius(points: &[Point2]) -> crate::error::Result<Point
         x += point.x;
         y += point.y;
         if !x.is_finite() || !y.is_finite() {
-            return Err(SolidError::invalid_input(OP_CENTROID, "point centroid overflows"));
+            return Err(SolidError::invalid_input(
+                OP_CENTROID,
+                "point centroid overflows",
+            ));
         }
     }
     let count = points.len() as f64;
@@ -687,7 +690,10 @@ pub fn centroid_and_mean_radius(points: &[Point2]) -> crate::error::Result<Point
     for point in points {
         let distance = point.distance(centroid);
         if !distance.is_finite() {
-            return Err(SolidError::invalid_input(OP_CENTROID, "point distance overflows"));
+            return Err(SolidError::invalid_input(
+                OP_CENTROID,
+                "point distance overflows",
+            ));
         }
         total_distance += distance;
         if !total_distance.is_finite() {
@@ -1231,12 +1237,16 @@ mod tests {
         assert!(centroid_and_mean_radius(&[]).is_err());
         assert!(centroid_and_mean_radius(&[Point2::new(f64::NAN, 0.0)]).is_err());
         assert!(centroid_and_mean_radius(&[Point2::new(0.0, f64::INFINITY)]).is_err());
-        assert!(
-            centroid_and_mean_radius(&[Point2::new(f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
-        );
-        assert!(
-            centroid_and_mean_radius(&[Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
-        );
+        assert!(centroid_and_mean_radius(&[
+            Point2::new(f64::MAX, 0.0),
+            Point2::new(f64::MAX, 0.0),
+        ])
+        .is_err());
+        assert!(centroid_and_mean_radius(&[
+            Point2::new(-f64::MAX, 0.0),
+            Point2::new(f64::MAX, 0.0),
+        ])
+        .is_err());
     }
 
     #[test]
