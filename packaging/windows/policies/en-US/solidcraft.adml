@@ -180,6 +180,38 @@ Disabled: the status bar is hidden.
 Not configured: each person chooses in Preferences.
 
 In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="MeshExportFormat">Mesh export format</string>
+      <string id="MeshExportFormat_Explain">The format File, Save As Mesh writes, and the format a design is sent to a slicer in.
+
+Enabled: every mesh is saved in the format chosen here, and people cannot change it. Export STL and Export 3MF open the dialog with this format too.
+
+Disabled or Not configured: each person chooses in the Save As Mesh dialog.
+
+In the Save As Mesh dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="MeshExportFormat_stl">STL</string>
+      <string id="MeshExportFormat_3mf">3MF</string>
+      <string id="MeshExportFormat_3mf_tagged">3MF with face tags</string>
+      <string id="MeshExportQuality">Mesh export quality</string>
+      <string id="MeshExportQuality_Explain">How closely a mesh saved with File, Save As Mesh follows curved faces.
+
+Enabled: every mesh is saved at the quality chosen here, and people cannot change it.
+
+Disabled or Not configured: each person chooses in the Save As Mesh dialog.
+
+In the Save As Mesh dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="MeshExportQuality_standard">Standard</string>
+      <string id="MeshExportQuality_fine">Fine</string>
+      <string id="MeshExportQuality_finest">Finest</string>
+      <string id="DxfOrigin">Zero point of DXF view exports</string>
+      <string id="DxfOrigin_Explain">Where File, Export Current View as DXF puts the drawing's 0,0: the point the camera looks at, or the model's origin as seen from the camera.
+
+Enabled: every export uses the zero point chosen here, and people cannot change it.
+
+Disabled or Not configured: each person chooses in the export dialog.
+
+In the export dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="DxfOrigin_target">Camera target</string>
+      <string id="DxfOrigin_origin">Model origin</string>
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
@@ -213,6 +245,15 @@ In Preferences the setting shows as set by the organization. The person's own ch
       <presentation id="DxfDashedHiddenLines" />
       <presentation id="RibbonLabels" />
       <presentation id="StatusBar" />
+      <presentation id="MeshExportFormat">
+        <dropdownList refId="MeshExportFormat" noSort="true" defaultItem="0">Format:</dropdownList>
+      </presentation>
+      <presentation id="MeshExportQuality">
+        <dropdownList refId="MeshExportQuality" noSort="true" defaultItem="0">Quality:</dropdownList>
+      </presentation>
+      <presentation id="DxfOrigin">
+        <dropdownList refId="DxfOrigin" noSort="true" defaultItem="0">Zero point:</dropdownList>
+      </presentation>
     </presentationTable>
   </resources>
 </policyDefinitionResources>

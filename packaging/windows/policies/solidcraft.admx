@@ -218,5 +218,69 @@
         <decimal value="0" />
       </disabledValue>
     </policy>
+    <policy name="MeshExportFormat" class="Both" displayName="$(string.MeshExportFormat)" explainText="$(string.MeshExportFormat_Explain)" presentation="$(presentation.MeshExportFormat)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <elements>
+        <enum id="MeshExportFormat" valueName="MeshExportFormat" required="true">
+          <item displayName="$(string.MeshExportFormat_stl)">
+            <value>
+              <string>stl</string>
+            </value>
+          </item>
+          <item displayName="$(string.MeshExportFormat_3mf)">
+            <value>
+              <string>3mf</string>
+            </value>
+          </item>
+          <item displayName="$(string.MeshExportFormat_3mf_tagged)">
+            <value>
+              <string>3mf-tagged</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="MeshExportQuality" class="Both" displayName="$(string.MeshExportQuality)" explainText="$(string.MeshExportQuality_Explain)" presentation="$(presentation.MeshExportQuality)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <elements>
+        <enum id="MeshExportQuality" valueName="MeshExportQuality" required="true">
+          <item displayName="$(string.MeshExportQuality_standard)">
+            <value>
+              <string>standard</string>
+            </value>
+          </item>
+          <item displayName="$(string.MeshExportQuality_fine)">
+            <value>
+              <string>fine</string>
+            </value>
+          </item>
+          <item displayName="$(string.MeshExportQuality_finest)">
+            <value>
+              <string>finest</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="DxfOrigin" class="Both" displayName="$(string.DxfOrigin)" explainText="$(string.DxfOrigin_Explain)" presentation="$(presentation.DxfOrigin)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <elements>
+        <enum id="DxfOrigin" valueName="DxfOrigin" required="true">
+          <item displayName="$(string.DxfOrigin_target)">
+            <value>
+              <string>target</string>
+            </value>
+          </item>
+          <item displayName="$(string.DxfOrigin_origin)">
+            <value>
+              <string>origin</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
   </policies>
 </policyDefinitions>

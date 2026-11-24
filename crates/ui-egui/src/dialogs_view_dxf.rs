@@ -29,13 +29,19 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
         });
     });
     crate::ui_kit::text(ui, app.tr("dxf.zero"), crate::ui_kit::Text::Note("zero"));
-    for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
-        let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
-        crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
-        if r.clicked() {
-            *zero_origin = value;
-        }
-    }
+    // DxfOrigin sets the zero point the same way.
+    let zero_locked = app.policy.locks("view_dxf_zero");
+    crate::policy::row(ui, zero_locked, |ui| {
+        ui.vertical(|ui| {
+            for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
+                let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
+                crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
+                if r.clicked() && !zero_locked {
+                    *zero_origin = value;
+                }
+            }
+        });
+    });
     crate::ui_kit::text(ui, app.tr("dxf.zero_help"), crate::ui_kit::Text::Note("zero help"));
     form_row(ui, "dxf.tolerance", |ui| {
         let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
@@ -64,7 +70,9 @@ pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) 
         app.preferences.view_dxf_dashed = dashed;
     }
     app.preferences.view_dxf_tolerance = tolerance;
-    app.preferences.view_dxf_zero = if zero_origin { "origin" } else { "target" }.into();
+    if !app.policy.locks("view_dxf_zero") {
+        app.preferences.view_dxf_zero = if zero_origin { "origin" } else { "target" }.into();
+    }
     let camera = app.cam;
     app.pick_save(&format!("{}-view.dxf", app.session.doc.name), &["dxf"], move |app, path| {
         if let Some(path) = path {

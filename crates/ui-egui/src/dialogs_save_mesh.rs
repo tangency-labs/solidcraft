@@ -44,11 +44,11 @@ const MAX_CUSTOM: usize = 24;
 /// The dialog's values.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaveMesh {
-    format: usize,
+    pub(crate) format: usize,
     /// Send to Slicer: only the bodies and the slicer are asked.
     open: bool,
     /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
-    quality: usize,
+    pub(crate) quality: usize,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
     slicer: String,
     /// The slicer list has not been read for this opening yet.
@@ -264,7 +264,9 @@ pub fn tick_wait(app: &mut SolveApp, ctx: &egui::Context) {
 /// File › Export STL… and Export 3MF…. The user can still change it in the dialog.
 pub fn start_with_format(app: &mut SolveApp, format: &str) {
     app.start("file.save_mesh");
-    if let Some(index) = FORMATS.iter().position(|f| f.1 == format)
+    // A format the organization set stays: Export STL… opens the dialog with it.
+    if !app.policy.locks("save_mesh_format")
+        && let Some(index) = FORMATS.iter().position(|f| f.1 == format)
         && let Some(Kind::SaveMesh(k)) = app.dialog.as_mut().map(|d| &mut d.kind)
     {
         k.format = index;
@@ -392,8 +394,18 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         });
     }
     if !k.open {
-        choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
-        choice_row(ui, "Quality", "sm_quality", &mut k.quality, &QUALITIES.map(|q| q.0));
+        // An organization's MeshExportFormat and MeshExportQuality policies set these.
+        // Greyed out and noted; a pick in a locked row changes nothing.
+        let (format_locked, quality_locked) = (app.policy.locks("save_mesh_format"), app.policy.locks("save_mesh_quality"));
+        let (mut format, mut quality) = (k.format, k.quality);
+        crate::policy::row(ui, format_locked, |ui| choice_row(ui, "Format", "sm_format", &mut format, &FORMATS.map(|f| f.0)));
+        crate::policy::row(ui, quality_locked, |ui| choice_row(ui, "Quality", "sm_quality", &mut quality, &QUALITIES.map(|q| q.0)));
+        if !format_locked {
+            k.format = format;
+        }
+        if !quality_locked {
+            k.quality = quality;
+        }
         return false;
     }
     if k.stale {
@@ -612,8 +624,12 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
     let (format, ext) = FORMATS.get(k.format).map_or(("stl", "stl"), |f| (f.1, f.2));
     let body = crate::selection::items(inputs, 0).body_names().into_iter().next();
     let name = crate::export_name::offered(app, body.as_deref(), body.as_deref().unwrap_or(&app.session.doc.name));
-    app.preferences.save_mesh_format = format.into();
-    app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
+    if !app.policy.locks("save_mesh_format") {
+        app.preferences.save_mesh_format = format.into();
+    }
+    if !app.policy.locks("save_mesh_quality") {
+        app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
+    }
     // The file dialog answers later; the dialog closes meanwhile, as for every export.
     app.pick_save(&format!("{name}.{ext}"), &[ext], move |app, path| {
         if let Some(path) = path {

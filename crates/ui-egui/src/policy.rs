@@ -50,7 +50,16 @@ enum Kind {
     Number { max: u32 },
     /// A `REG_SZ`: one of the agent permission modes (`ask`, `edits`, `all`).
     Permission,
+    /// A `REG_SZ`: one of these ids, in any case.
+    Choice(&'static [&'static str]),
 }
+
+/// `MeshExportFormat`: the formats the Save Mesh dialog offers.
+const MESH_FORMATS: &[&str] = &["stl", "3mf", "3mf-tagged"];
+/// `MeshExportQuality`: how closely an exported mesh follows curved faces.
+const MESH_QUALITIES: &[&str] = &["standard", "fine", "finest"];
+/// `DxfOrigin`: the zero point of Export Current View as DXF.
+const DXF_ORIGINS: &[&str] = &["target", "origin"];
 
 /// A preference an organization can set: the policy's value name, the preference's `ui.prefs`
 /// name, and what the value may be.
@@ -71,7 +80,10 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "ConnectAiApps", pref: "connect_ai_apps", kind: Kind::Switch },
     Lock { policy: "DefaultUnits", pref: "default_units", kind: Kind::Units },
     Lock { policy: "DxfDashedHiddenLines", pref: "view_dxf_dashed", kind: Kind::Switch },
+    Lock { policy: "DxfOrigin", pref: "view_dxf_zero", kind: Kind::Choice(DXF_ORIGINS) },
     Lock { policy: "Language", pref: "language", kind: Kind::Language },
+    Lock { policy: "MeshExportFormat", pref: "save_mesh_format", kind: Kind::Choice(MESH_FORMATS) },
+    Lock { policy: "MeshExportQuality", pref: "save_mesh_quality", kind: Kind::Choice(MESH_QUALITIES) },
     Lock { policy: "ReopenDesigns", pref: "reopen_designs", kind: Kind::Switch },
     Lock { policy: "RibbonLabels", pref: "ribbon_labels", kind: Kind::Switch },
     Lock { policy: "ShowDiscordButton", pref: "show_discord_button", kind: Kind::Switch },
@@ -215,6 +227,9 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
         (Kind::Permission, Value::Text(text)) if text.len() <= MAX_CHOICE => {
             crate::agent_chat::agents::Mode::parse(&text.trim().to_ascii_lowercase()).map(|mode| Setting::Text(mode.id().into()))
         }
+        (Kind::Choice(ids), Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            ids.iter().find(|id| id.eq_ignore_ascii_case(text.trim())).map(|id| Setting::Text((*id).into()))
+        }
         _ => None,
     }
 }
@@ -233,10 +248,13 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "language" => Setting::Text(p.language.clone()),
         "reopen_designs" => Setting::Switch(p.reopen_designs),
         "ribbon_labels" => Setting::Switch(p.ribbon_labels),
+        "save_mesh_format" => Setting::Text(p.save_mesh_format.clone()),
+        "save_mesh_quality" => Setting::Text(p.save_mesh_quality.clone()),
         "show_discord_button" => Setting::Switch(p.show_discord_button),
         "show_donate_button" => Setting::Switch(p.show_donate_button),
         "status_bar" => Setting::Switch(p.status_bar),
         "view_dxf_dashed" => Setting::Switch(p.view_dxf_dashed),
+        "view_dxf_zero" => Setting::Text(p.view_dxf_zero.clone()),
         _ => return None,
     })
 }
@@ -259,10 +277,13 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("language", Setting::Text(text)) => p.language.clone_from(text),
         ("reopen_designs", Setting::Switch(on)) => p.reopen_designs = *on,
         ("ribbon_labels", Setting::Switch(on)) => p.ribbon_labels = *on,
+        ("save_mesh_format", Setting::Text(text)) => p.save_mesh_format.clone_from(text),
+        ("save_mesh_quality", Setting::Text(text)) => p.save_mesh_quality.clone_from(text),
         ("show_discord_button", Setting::Switch(on)) => p.show_discord_button = *on,
         ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
         ("status_bar", Setting::Switch(on)) => p.status_bar = *on,
         ("view_dxf_dashed", Setting::Switch(on)) => p.view_dxf_dashed = *on,
+        ("view_dxf_zero", Setting::Text(text)) => p.view_dxf_zero.clone_from(text),
         _ => {}
     }
 }
@@ -929,6 +950,43 @@ mod tests {
     }
 
     #[test]
+    fn export_choices_are_set_by_the_policy_and_an_unknown_one_is_no_policy() {
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let p = &mut h.app.preferences;
+        (p.save_mesh_format, p.save_mesh_quality, p.view_dxf_zero) = ("stl".into(), "standard".into(), "target".into());
+        h.app.policy = Policy::from_json(r#"{"MeshExportFormat": "3MF", "MeshExportQuality": " finest ", "DxfOrigin": "origin"}"#);
+        h.frame();
+        let p = &h.app.preferences;
+        assert_eq!((p.save_mesh_format.as_str(), p.save_mesh_quality.as_str(), p.view_dxf_zero.as_str()), ("3mf", "finest", "origin"));
+        for (pref, own, other) in
+            [("save_mesh_format", "stl", "3mf-tagged"), ("save_mesh_quality", "standard", "fine"), ("view_dxf_zero", "target", "origin")]
+        {
+            assert_eq!(saved(&h.app)[pref], json!(own), "{pref} is saved as the person chose it");
+            let refused = h.call("ui.prefs", json!({ pref: other }));
+            assert_eq!(refused["ok"], json!(false), "{pref}: {refused}");
+        }
+        // Export STL… opens Save As Mesh with the organization's format, greyed out and noted.
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        crate::dialogs_save_mesh::start_with_format(&mut h.app, "stl");
+        h.frames(3);
+        let Some(crate::dialogs::Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the Save As Mesh dialog is open") };
+        assert_eq!((k.format, k.quality), (1, 2), "3MF at Finest");
+        assert!(h.widget("Set by your organization").is_some(), "the dialog says who set the format");
+        h.app.dialog = None;
+        // The View-to-DXF dialog keeps the model origin when the camera target is clicked.
+        h.app.start("file.export_view_dxf");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "dialog:dxf:zero_target"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ViewDxf { zero_origin: true, .. })));
+        // A value none of the choices is no policy: nothing is locked.
+        let policy = Policy::from_json(r#"{"MeshExportFormat": "obj", "MeshExportQuality": "", "DxfOrigin": "corner"}"#);
+        assert!(policy.locked().is_empty() && !policy.managed(), "{:?}", policy.locked());
+    }
+
+    #[test]
     fn without_a_policy_nothing_is_enforced_or_kept() {
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.default_units = "ft".into();
@@ -947,6 +1005,13 @@ mod tests {
         for name in LOCKS.iter().map(|lock| lock.policy).chain([ORGANIZATION_NAME, USAGE_STATISTICS]) {
             assert!(admx.contains(&format!(r#"valueName="{name}""#)), "{name} is missing from solidcraft.admx");
             assert!(adml.contains(&format!(r#"<string id="{name}">"#)), "{name} is missing from solidcraft.adml");
+        }
+        for lock in LOCKS {
+            if let Kind::Choice(ids) = lock.kind {
+                for id in ids {
+                    assert!(admx.contains(&format!("<string>{id}</string>")), "{} offers no {id}", lock.policy);
+                }
+            }
         }
         for unit in crate::prefs::UNITS {
             assert!(admx.contains(&format!("<string>{unit}</string>")), "DefaultUnits offers no {unit}");

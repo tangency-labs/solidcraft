@@ -36,6 +36,9 @@ can run it.
 | Show labels on the toolbar | `RibbonLabels` | `REG_DWORD` | `1`: the toolbar shows a label under each button. `0`: icons only (Preferences, Layout, Window, Toolbar). SolidCraft 0.48 or later. |
 | Show the status bar | `StatusBar` | `REG_DWORD` | `1`: the status bar shows and people cannot hide it. `0`: hidden (Preferences, Layout, Window, Status bar). SolidCraft 0.48 or later. |
 | Export hidden edges as dashed lines | `DxfDashedHiddenLines` | `REG_DWORD` | `1`: File, Export Current View as DXF writes hidden edges as dashed lines. `0`: it leaves them out. The export dialog shows the choice as set by the organization. SolidCraft 0.48 or later. |
+| Zero point of DXF view exports | `DxfOrigin` | `REG_SZ` | `target` (the point the camera looks at) or `origin` (the model's origin): where File, Export Current View as DXF puts the drawing's 0,0. SolidCraft 0.48 or later. |
+| Mesh export format | `MeshExportFormat` | `REG_SZ` | `stl`, `3mf` or `3mf-tagged` (3MF with face tags): the format File, Save As Mesh and Send to Slicer write; Export STL and Export 3MF open the dialog with it too. SolidCraft 0.48 or later. |
+| Mesh export quality | `MeshExportQuality` | `REG_SZ` | `standard`, `fine` or `finest`: how closely a saved mesh follows curved faces. SolidCraft 0.48 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 
