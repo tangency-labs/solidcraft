@@ -1896,14 +1896,18 @@ mod tests {
         assert!(run.found.is_empty(), "{}", run.found.join("\n"));
     }
 
-    /// The face properties' closure gate (review of #21381): a seam the properties
-    /// report in a direction they close at C1 is still moved when `IsPeriodic` is false
-    /// there, and the move keeps the B-rep valid (invariants 0-3 above); the same seam
-    /// reported closed only at C0, or at C1 but `closed_v` False, is no seam problem, so
-    /// nothing moves. The face covers V in `[0.5, 2.5]`, not the whole period, so the move is
-    /// out of the face (to the middle of the unused `[2.5, 4.5]`, snapped to knot 3). The
-    /// surface closes exactly, so the split and the rejoin at the old seam glue coincident
-    /// rows: no edge leaves the surface and no tolerance needs to grow.
+    /// The closure gate on a creased closure (review of #21381; #21491): the tube closes
+    /// exactly in V with a 90 degree crease, so `IsPeriodic` is false there. Its net's first
+    /// and last V lines are equal point for point (`net[i][0] == net[i][4]`), so the net
+    /// bounds the gap between its V boundary curves by exactly 0 (each term of
+    /// `BSplineSurface::boundary_gap_bound` is a length of a zero difference, times 0
+    /// weight spread), within any tolerance: V is closed whatever the face properties
+    /// report, and a seam reported there moves (#21491 drops the properties' sampled
+    /// closure grade from the gate). The face covers V in `[0.5, 2.5]`, not the whole
+    /// period, so the move is out of the face (to the middle of the unused `[2.5, 4.5]`,
+    /// snapped to knot 3). The surface closes exactly, so the split and the rejoin at the
+    /// old seam glue coincident rows: no edge leaves the surface and no tolerance needs to
+    /// grow (invariants 0-3 above hold for every row).
     #[test]
     fn move_seam_props_c1_closure_on_a_non_periodic_surface() {
         let (r, found, periodic_v) = move_seam_on_kinked_tube(Tri::True, ContinuityType::C1);
@@ -1920,10 +1924,16 @@ mod tests {
             (Tri::True, ContinuityType::C0),
             (Tri::False, ContinuityType::C1),
         ] {
-            let (r, found, _) = move_seam_on_kinked_tube(closed_v, val);
-            assert_eq!(r.u, fp1::FixSeamPlanType::NoChanges);
-            assert_eq!(r.v, fp1::FixSeamPlanType::NoChanges, "{closed_v:?} {val:?}");
-            assert!(found.is_empty(), "{}", found.join("\n"));
+            let run = move_seam_on(&kinked_tube(), closed_v, val);
+            // the proof: the net's V boundary lines are equal, so its gap bound is 0
+            assert_eq!(run.gap_v, Some(0.0), "{closed_v:?} {val:?}");
+            assert_eq!(run.result.u, fp1::FixSeamPlanType::NoChanges);
+            assert_eq!(
+                run.result.v,
+                fp1::FixSeamPlanType::MoveOutOfFace,
+                "{closed_v:?} {val:?}"
+            );
+            assert!(run.found.is_empty(), "{}", run.found.join("\n"));
         }
     }
 }
