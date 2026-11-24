@@ -4105,16 +4105,17 @@ pub struct DesignLink {
 }
 
 /// The importer a linked source was read with: enough to read the file again, or to say what is
-/// missing when it can't. A built-in reader names itself in `format` and has no `plugin`; an
-/// importer plugin names its package, so a different or missing one is told apart.
+/// missing when it can't. An importer plugin names its package, so a different or missing one is
+/// told apart. This build reads only records that name a plugin (Insert Design always writes
+/// one); a built-in reader for another format would add its own rule beside `format`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LinkImporter {
     /// What reads the file: an installed importer's id (`plugin.entry`), or a built-in format's.
     pub format: String,
-    /// The importer plugin's id; absent for a built-in importer.
+    /// The importer plugin's id. A record without one is not read again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
-    /// The version of the plugin that read the file; absent for a built-in importer.
+    /// The version of the plugin that read the file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     /// The options the importer was given, read again with the same ones. Null: none.

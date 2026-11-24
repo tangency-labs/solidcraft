@@ -1207,4 +1207,12 @@ fn a_link_names_its_importer_and_older_designs_load_without_one() {
     let old: DesignLink = serde_json::from_value(json!({"path": "part.sc", "feature": 3})).unwrap();
     assert!(old.importer.is_none() && old.is_design());
     assert!(serde_json::to_value(&old).unwrap().get("importer").is_none());
+    // A build that does not know the field ignores it: the design opens with its linked bodies.
+    let mut written: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for link in written["links"].as_object_mut().unwrap().values_mut() {
+        link.as_object_mut().unwrap().remove("importer");
+    }
+    let unaware = solidcraft_io::read_design(written.to_string().as_bytes()).unwrap();
+    assert!(unaware.links.values().all(|l| l.importer.is_none()) && unaware.links.len() == 2);
+    assert_eq!(unaware.features.len(), s.doc.features.len(), "the bodies' features are kept");
 }
