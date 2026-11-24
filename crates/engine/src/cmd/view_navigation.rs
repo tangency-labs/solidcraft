@@ -651,11 +651,13 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|v| v.is_finite() && v.len() <= 2.0)
             .and_then(|v| v.normalized())
             .ok_or_else(|| bad(cmd, "direction must be a finite nonzero vector of length at most 2"))?;
-        let heading = cam.yaw;
+        let (heading, roll) = (cam.yaw, cam.quarter_roll());
         cam = cam.looking_from(cam.from_frame(dir));
         if dir.x.abs() < 1e-9 && dir.y.abs() < 1e-9 {
             cam.yaw = square_heading(heading);
         }
+        // A view rolled on its side or upside down stays that way (#21480).
+        cam.roll = roll;
     } else {
         use std::f64::consts::FRAC_PI_2;
         let (r, u, b) = cam.basis();
@@ -1238,6 +1240,37 @@ mod tests {
             }
             assert_eq!(s.doc.to_json(), before);
             assert!(s.undo.is_empty());
+        }
+    }
+
+    /// #21480: a direction chosen on a navigator keeps the roll, rounded to the nearest quarter
+    /// turn. A view on its side or upside down stays that way; an upright view turns as before.
+    #[test]
+    fn a_chosen_direction_keeps_the_roll_to_the_nearest_quarter_turn() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let mut s = Session::default();
+        let mut look = |cam: Camera, dir: [f64; 3]| -> Camera {
+            let result = navigate(&mut s, &json!({"camera": cam, "direction": dir})).unwrap();
+            serde_json::from_value(result["camera"].clone()).unwrap()
+        };
+        let rolls = [(0.0, 0.0), (FRAC_PI_2, FRAC_PI_2), (PI, PI), (-FRAC_PI_2, 3.0 * FRAC_PI_2), (0.3, 0.0), (1.2, FRAC_PI_2), (-0.7, 0.0)];
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch) in [(0.0, 0.0), (-0.785, 0.615), (0.4, FRAC_PI_2), (2.0, -FRAC_PI_2)] {
+                for (roll, kept) in rolls {
+                    let cam = Camera { up, yaw, pitch, roll, ..Default::default() };
+                    for dir in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.3, -0.9]] {
+                        let to = look(cam, dir);
+                        let msg = format!("{dir:?} from {cam:?}");
+                        let d = Vec3::new(dir[0], dir[1], dir[2]).normalized().unwrap();
+                        assert!(to.back().dist(cam.from_frame(d)) < 2e-6, "looks from the direction: {msg}");
+                        assert!((to.roll - kept).abs() < 1e-9, "keeps roll {kept}, got {}: {msg}", to.roll);
+                        // Upright, the view is the one it always was; rolled, it is that view rolled.
+                        let upright = look(Camera { roll: 0.0, ..cam }, dir);
+                        assert_eq!(upright.roll, 0.0, "{msg}");
+                        assert_eq!(Camera { roll: kept, ..upright }, to, "{msg}");
+                    }
+                }
+            }
         }
     }
 

@@ -11752,6 +11752,8 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_v
             if frame.z.abs() > 0.5 {
                 to.yaw = nearest_quarter_turn(app.cam.yaw);
             }
+            // A view rolled on its side or upside down stays that way (#21480).
+            to.roll = app.cam.quarter_roll();
             app.animate_turn(to);
         }
         Some(crate::view_compass::ViewAction::Home) => app.animate_view("home"),
@@ -19856,6 +19858,37 @@ mod tests {
         assert!(!h.app.preferences.navigator_fit, "Navigation defaults restore the in-place turn");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.session.undo.len(), undo, "a view change edits nothing");
+    }
+
+    /// #21480: an axis end chosen on the axes navigator keeps a view's roll (to the nearest quarter
+    /// turn); an upright view still gets the upright views, Back from Top included.
+    #[test]
+    fn axis_tips_keep_the_views_roll() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
+        let front = Camera { yaw: 0.0, pitch: 0.0, roll: 0.0, ..h.app.cam };
+        let click = |h: &mut crate::scenario::Harness, from: Camera, axis: &str| -> Camera {
+            h.app.cam = from;
+            h.frames(2);
+            let p = crate::scenario::handle_at(axis).unwrap();
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.settle();
+            h.app.cam
+        };
+        for (roll, kept) in [(0.0, 0.0), (FRAC_PI_2, FRAC_PI_2), (PI, PI), (-FRAC_PI_2, 3.0 * FRAC_PI_2), (0.3, 0.0)] {
+            // From Front: the Front end again reverses to Back, still rolled.
+            for (axis, back) in [("axis_view:z", Vec3::Z), ("axis_view:x", Vec3::X), ("axis_view:-y", Vec3::Y)] {
+                let to = click(&mut h, Camera { roll, ..front }, axis);
+                let msg = format!("{axis} from roll {roll}");
+                assert!(to.back().dist(back) < 1e-6, "{msg}: looks from {:?}", to.back());
+                assert!((to.roll.rem_euclid(std::f64::consts::TAU) - kept).abs() < 1e-6, "{msg}: roll {}", to.roll);
+            }
+        }
+        // Back from an upright Top stays upright: the roll is kept, not the nearest picture.
+        let top = Camera { pitch: FRAC_PI_2 - 1e-6, ..front };
+        let back = click(&mut h, top, "axis_view:y");
+        assert!(back.back().dist(Vec3::Y) < 1e-6 && back.basis().1.dist(Vec3::Z) < 1e-6, "{back:?}");
     }
 
     #[test]

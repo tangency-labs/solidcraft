@@ -616,6 +616,14 @@ impl Camera {
         *self = fitted;
         true
     }
+    /// The roll rounded to the nearest quarter turn, in [0, 2π). A view chosen on a navigator
+    /// keeps it, so a view on its side or upside down stays that way while a small tilt squares
+    /// up (#21480). 0 when the roll isn't finite.
+    pub fn quarter_roll(&self) -> f64 {
+        let q = std::f64::consts::FRAC_PI_2;
+        let roll = (self.roll / q).round() * q;
+        if roll.is_finite() { roll.rem_euclid(std::f64::consts::TAU) } else { 0.0 }
+    }
     /// The same camera looking from direction `back` (target → eye). Straight up or down
     /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
     pub fn looking_from(&self, back: Vec3) -> Camera {
@@ -1144,6 +1152,31 @@ mod tests {
         assert!(c.is_valid());
         c.fit(&Bounds::EMPTY);
         assert!(c.is_valid());
+    }
+
+    /// #21480: the roll a navigator click keeps is the nearest quarter turn, in [0, 2π).
+    #[test]
+    fn quarter_roll_rounds_to_the_nearest_quarter_turn() {
+        use std::f64::consts::{FRAC_PI_2, PI, TAU};
+        for (roll, kept) in [
+            (0.0, 0.0),
+            (-0.0, 0.0),
+            (0.3, 0.0),
+            (-0.7, 0.0),
+            (FRAC_PI_2 - 0.2, FRAC_PI_2),
+            (FRAC_PI_2, FRAC_PI_2),
+            (PI + 0.1, PI),
+            (-FRAC_PI_2, 3.0 * FRAC_PI_2),
+            (TAU - 0.1, 0.0),
+            (TAU + FRAC_PI_2, FRAC_PI_2),
+            (-10.0 * TAU - PI, PI),
+            (f64::NAN, 0.0),
+            (f64::INFINITY, 0.0),
+            (f64::NEG_INFINITY, 0.0),
+        ] {
+            let got = Camera { roll, ..Camera::default() }.quarter_roll();
+            assert!((got - kept).abs() < 1e-9 && (0.0..TAU).contains(&got), "{roll} → {got}, expected {kept}");
+        }
     }
 
     /// #15633: a quarter turn about a screen axis glides about that axis, over the top too: from
