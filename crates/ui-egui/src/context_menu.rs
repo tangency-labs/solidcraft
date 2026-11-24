@@ -365,7 +365,7 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
         Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(&key),
         None => act("ui.repeat", "Repeat", "redo").key(&key).on(false),
     };
-    let delete = act("ui.delete", "Delete", "delete").key("Del").on(!app.session.has_selection() == false);
+    let delete = act("ui.delete", "Delete", "delete").key("Del").on(app.session.has_selection());
     if app.session.active_sketch.is_some() {
         return vec![
             repeat,

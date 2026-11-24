@@ -2699,7 +2699,7 @@ pub(crate) mod tests {
         h.frames(3);
         assert_eq!(h.app.cam, after);
         assert!(h.ctx.input(|i| i.modifiers.is_none()));
-        assert!(h.app.session.has_selection() == false);
+        assert!(!h.app.session.has_selection());
         assert!(h.app.viewport.boxsel.is_none());
     }
 

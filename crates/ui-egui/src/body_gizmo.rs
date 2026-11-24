@@ -510,7 +510,7 @@ mod tests {
         }
         assert_eq!(seen, 3, "three faces of the box show in the isometric view");
         assert_eq!(h.app.session.doc.to_json(), design, "looking at a face never edits the design");
-        assert!(h.app.session.has_selection() == false);
+        assert!(!h.app.session.has_selection());
     }
 
     #[test]

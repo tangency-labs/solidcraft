@@ -76,7 +76,7 @@ pub fn component_for_bodies(app: &SolveApp, bodies: &[String]) -> Option<u64> {
 }
 
 pub fn selected_component(app: &SolveApp) -> Option<u64> {
-    if app.session.has_selection() == false {
+    if !app.session.has_selection() {
         let [id] = app.tree.picked_components.as_slice() else { return None };
         return app.session.doc.parts.contains_key(id).then_some(*id);
     }

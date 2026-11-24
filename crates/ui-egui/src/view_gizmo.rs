@@ -821,7 +821,7 @@ mod tests {
             assert!(h.app.dialog.is_none());
         }
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.has_selection() == false, "a right-click on the navigator selects nothing");
+        assert!(!h.app.session.has_selection(), "a right-click on the navigator selects nothing");
     }
 
     #[test]

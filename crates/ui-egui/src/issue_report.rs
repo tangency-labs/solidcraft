@@ -1428,7 +1428,7 @@ mod tests {
         let error = app.session.model.result(fillet.id).and_then(|r| r.error.clone()).unwrap();
         let latest = app.session.doc.features.iter().rev().find(|f| reportable(f)).unwrap();
         assert_ne!(latest.id, fillet.id, "Fillet1 must not be the latest operation");
-        assert!(app.session.has_selection() == false);
+        assert!(!app.session.has_selection());
         let at = crate::now_ms() - 125_000.0;
         for i in 0..12 {
             app.messages.push(&format!("message number {i:02}"), i % 2 == 0, at);
