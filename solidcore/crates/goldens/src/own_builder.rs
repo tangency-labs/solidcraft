@@ -1604,8 +1604,8 @@ fn renumber_walk(src: &Brep, g: &Walk, conv: &Conventions<'_>) -> Result<Brep, H
         if let Some(s) = surface.as_mut().filter(|_| owned) {
             let _ = s.set_owner(Some((conv.face_owner)(new)));
         }
-        // the face surface's cache slot as the Rust read left it (its tree state and
-        // kept trimmed cache, renamed into the new ids): the copy stands for the same
+        // the face surface's cache slot as the Rust read left it (its kept trimmed
+        // cache, renamed into the new ids): the copy stands for the same
         // surface object, and `Surface::clone` gives it an empty slot
         if let (Some(s), Some(from)) = (surface.as_ref(), f.surface.as_ref()) {
             s.copy_cache_slot_of(from, |e| m.entity(e)).map_err(solid)?;

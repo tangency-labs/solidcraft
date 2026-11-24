@@ -149,6 +149,19 @@ pub struct PointAlongPathParams {
     pub common: ConstructionCommon,
 }
 
+/// Add a construction point at the average (the centroid) of two or more points.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PointAverageParams {
+    /// The points, in any order: vertices, construction points, sketch points, fixed points, or
+    /// the centres of circular edges, sketch circles or arcs, or spherical or toroidal faces. The
+    /// new point stays at their average as they move.
+    #[schemars(length(min = 2, max = 1000))]
+    pub points: Vec<GeoRefParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: ConstructionCommon,
+}
+
 /// Add a construction plane halfway between two planes: midway between parallel ones, else
 /// through the line where they meet, halving the angle between them.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -250,6 +263,20 @@ pub struct PlanePerpendicularParams {
     /// The line it holds: a straight edge, a sketch line, X, Y, Z or a construction axis (a
     /// circular edge or a cylinder, cone or torus face gives its axis), not square to `plane`.
     pub line: GeoRefParam,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
+}
+
+/// Add a construction plane that passes through a point and is square to a line.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneSquareToLineParams {
+    /// The line the new plane is square to: a straight edge, a sketch line, X, Y, Z or a
+    /// construction axis (a circular edge or a cylinder, cone or torus face gives its axis).
+    pub line: GeoRefParam,
+    /// The point the new plane passes through: a vertex, sketch point, construction point or
+    /// fixed point, on the line or off it.
+    pub point: GeoRefParam,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }

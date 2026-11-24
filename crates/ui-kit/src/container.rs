@@ -16,7 +16,7 @@ pub(super) struct BackingSlot {
 
 impl BackingSlot {
     pub(super) fn reserve(ctx: &Context, layer: egui::LayerId) -> Option<Self> {
-        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+        if !crate::blur::enabled() {
             return None;
         }
         let painter = ctx.layer_painter(layer);
@@ -41,7 +41,7 @@ pub(super) fn show_combo<R>(
     combo: egui::ComboBox,
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    if !crate::blur::enabled() || ui.ctx().viewport_id() != egui::ViewportId::ROOT {
+    if !crate::blur::enabled() {
         return combo.show_ui(ui, body);
     }
     let popup = widget.with("popup");
@@ -153,7 +153,7 @@ impl BackingModal {
         self
     }
     pub fn show<R>(self, ctx: &Context, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::ModalResponse<R> {
-        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+        if !crate::blur::enabled() {
             return self.modal.show(ctx, body);
         }
         // Blur the preceding UI before native dimming, then blur the dialog's immediate
@@ -577,6 +577,7 @@ pub struct Container {
     surface: Surface,
     layout: LayoutMode,
     joined: Option<DockEdges>,
+    see_through: bool,
 }
 
 impl Container {
@@ -585,7 +586,7 @@ impl Container {
     }
 
     pub fn for_layout(layout: LayoutMode, surface: Surface) -> Self {
-        Self { surface, layout, joined: None }
+        Self { surface, layout, joined: None, see_through: false }
     }
 
     /// Floating workspace cards retain their shared chrome even in compact ribbon layouts.
@@ -717,6 +718,19 @@ impl Container {
         self
     }
 
+    /// This surface is translucent only so the model shows through it, or because a host is
+    /// fading it (a dimmed bar, a Browser the user made see-through), never as a glass
+    /// material: it must not blur what is behind it. The theme's blur radius is untouched.
+    pub fn see_through(mut self) -> Self {
+        self.see_through = true;
+        self
+    }
+
+    /// Whether this adaptive surface is a glass material that blurs its backdrop.
+    pub fn blurs(self) -> bool {
+        self.adaptive() && !self.see_through
+    }
+
     /// Shell-owned placement policy, shared by current and future adaptive panels.
     pub fn floating(self) -> bool {
         matches!(self.surface, Surface::Panel | Surface::Feature | Surface::Palette | Surface::Chrome) && self.layout == LayoutMode::Floating
@@ -749,6 +763,16 @@ impl Container {
             Surface::Popup => Self::popup_frame(&ctx.global_style()).fill(fill),
             Surface::ApplicationBar | Surface::Canvas | Surface::Viewport | Surface::InputShield => flat,
         }
+    }
+
+    /// Compact completion notifications keep Toast's independent layout, with popup elevation
+    /// and the large (8-point) corner token. Ordinary status/progress toasts keep their shell frame.
+    pub fn completion_notice_frame(ctx: &Context) -> Frame {
+        let t = Tokens::get();
+        Self::new(ctx, Surface::Toast)
+            .frame(ctx, t.panel, Side::Left)
+            .corner_radius(t.radius_lg)
+            .shadow(Self::popup_frame(&ctx.global_style()).shadow)
     }
 
     /// Movable tool sheets round all exposed corners, joining only their right dock edge (or the
@@ -805,11 +829,7 @@ impl Container {
 
     /// Stock Frame path for backing cards; no additional inset chrome is introduced.
     pub fn show_backing<R>(ui: &mut egui::Ui, frame: Frame, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
-        if !crate::blur::enabled()
-            || frame.fill.a() == 0
-            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
-            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
-        {
+        if !crate::blur::enabled() || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible()) {
             return frame.show(ui, body);
         }
         let slot = ui.painter().add(egui::Shape::Noop);
@@ -831,11 +851,7 @@ impl Container {
         frame: Frame,
         body: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::InnerResponse<R> {
-        if !crate::blur::enabled()
-            || frame.fill.a() == 0
-            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
-            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
-        {
+        if !crate::blur::enabled() || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible()) {
             return panel.frame(frame).show(ui, body);
         }
         let slot = BackingSlot::reserve(ui.ctx(), ui.layer_id());
@@ -845,9 +861,9 @@ impl Container {
         })
     }
 
-    fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
+    fn background(self, _ctx: &Context, frame: Frame) -> Option<Background> {
         // Keep the off path to boundary checks only: no painter, shape slot or allocation.
-        if crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
+        if crate::blur::enabled() && !self.see_through && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
     }
 
     pub(super) fn show_frame_background<R>(
@@ -927,7 +943,7 @@ impl Container {
     /// Semantic manually painted workspace surface; HUDs keep `paint_frame`.
     pub fn paint_background(self, painter: &egui::Painter, frame: Frame, content: egui::Rect) {
         let shape = frame.paint(content);
-        painter.add(if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+        painter.add(if crate::blur::enabled() && !self.see_through { crate::blur::decorate(painter, frame, content, shape) } else { shape });
     }
 
     pub fn paint_panel_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {

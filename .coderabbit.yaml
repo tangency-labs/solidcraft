@@ -35,7 +35,7 @@ reviews:
           geometry, or a recipe in solidcore/crates/solidcore-ops if it only sequences kernel calls.
         - Flag a new dependency on any solidcore crate other than solidcore-ops, solidcore-tess and
           solidcore-record.
-        - Flag a new line in xtask/mesh-decisions.txt; that list only shrinks.
+        - Flag a new file in xtask/mesh-decisions/; that list only shrinks.
         - Flag a second implementation of something solidcore already has (STEP, meshing, SSI,
           tangent chains, frames).
 

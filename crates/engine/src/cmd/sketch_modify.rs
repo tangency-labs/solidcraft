@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two lines or arcs meeting at a corner (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids)", created_doc!())),
+        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open control point splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or control point spline side is cut back exactly to the tangent point and keeps its id (a conic's apex point moves with it; a spline keeps its degree and its knots past the cut, which becomes a knot). Refused: such a corner where it would have to stay as a virtual sharp corner (measured to, or a third curve ends there), a constraint on the cut curve other than a tangency at its far end, a held conic apex or a held spline control point that the cut moves, and a fit point spline (not supported yet). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids)", created_doc!())),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", crate::checked!("sketch.chamfer.equal_distance", chamfer_equal))
         .in_sketch_part()
         .contract(&CHAMFER_EQUAL_CONTRACT)
@@ -144,7 +144,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_scale")
         .enabled(in_sketch)
-        .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number; the driving length and radius dimensions wholly inside the selection scale too (a formula becomes `(formula) * factor`)"),
+        .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number; the driving length and radius dimensions wholly inside the selection scale too (a formula becomes `(formula) * factor`); a hold tying the selection to a point that stays is let go when the scale moves away from it"),
     CommandSpec::new("sketch.transform", "Transform", crate::checked!("sketch.transform", transform))
         .contract(&TRANSFORM_CONTRACT)
         .output(output_schema_for::<TransformResult>)
@@ -152,7 +152,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_move")
         .key("G")
         .enabled(in_sketch)
-        .params("entities: [curve/point ids], factor?: number (scale), angle?: degrees (turn), center?: [x,y] or point ref (what scales and turns stay put; default [0,0]), translate?: [dx,dy] (applied last); scales, turns and moves in one step"),
+        .params("entities: [curve/point ids], factor?: number (scale), angle?: degrees (turn), center?: [x,y] or point ref (what scales and turns stay put; default [0,0]), translate?: [dx,dy] (applied last); scales, turns and moves in one step; a free point held only to the picked geometry (a rounded rectangle's centre) goes with it; returns `released`: the constraints tying the picked geometry to what stays that the change let go, as {id, kind}"),
     CommandSpec::new("sketch.move", "Move/Copy Sketch Entities", crate::checked!("sketch.move", move_copy))
         .in_sketch_part()
         .contract(&MOVE_CONTRACT)
@@ -160,7 +160,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, z?: mm along the sketch's normal (3D sketches: the moved lines and fit-point splines become drawn 3D curves that far off the plane, and drawn picks move that far along it); rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; `wire@index` picks a drawn 3D point, a drawn curve's id the whole curve: they move with the rest, along the plane and by `z` along its normal; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", crate::checked!("sketch.mirror", mirror))
         .in_sketch_part()
         .contract(&MIRROR_CONTRACT)
@@ -701,10 +701,26 @@ fn released_family(kind: &CurveKind) -> Option<Released> {
 /// its offset's association.
 fn release_trim_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
     let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
+    let id = curve.id.clone();
+    // A trimmed chain offset's source: the offset's curves stay as ordinary geometry, and the
+    // dimension that drove them goes with the association (#12294).
+    if let Some(index) = sk.freeform_chain_offsets.iter().position(|record| record.sources.iter().any(|(source, _)| source == &id)) {
+        let record = sk.freeform_chain_offsets.remove(index);
+        sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
+        for output in &record.outputs {
+            if let Some(curve) = sk.curve_index(output).and_then(|i| sk.curves.get(i)) {
+                for i in curve.kind.point_ids() {
+                    if let Some(p) = sk.points.get_mut(i) {
+                        p.fixed = false;
+                    }
+                }
+            }
+        }
+        return Ok(record.outputs);
+    }
     if curve.infinite || sk.is_linked_curve(ci) || released_family(&curve.kind).is_none() {
         return Ok(Vec::new());
     }
-    let id = curve.id.clone();
     if let Some(curves) = sk.break_offset_topology(&id)? {
         return Ok(curves);
     }
@@ -759,9 +775,10 @@ fn release_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, mut affected
             })
             .cloned();
         let value = match dimension.as_ref().map(|c| &c.kind) {
-            Some(ConstraintKind::OffsetDistance { value, .. }) => *value,
+            Some(ConstraintKind::OffsetDistance { value, .. }) => value.abs(),
             _ => record.distance.abs(),
         };
+        let kept_param = dimension.as_ref().filter(|c| c.kind.value().is_none_or(|v| v >= 0.0)).and_then(|c| c.param.clone());
         sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
         for output in &record.outputs {
             let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset line"))?;
@@ -794,12 +811,13 @@ fn release_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, mut affected
                 }
                 _ => return Err(bad(cmd, "only offset lines, circles and arcs can be released")),
             };
-            let id = sk.add_constraint(kind.clone(), dimension.as_ref().and_then(|c| c.param.clone()))?;
+            let id = sk.add_constraint(kind.clone(), kept_param.clone())?;
             if let Some(dimension) = &dimension
                 && let Some(added) = sk.constraints.iter_mut().find(|c| c.id == id)
             {
                 let mut kept = dimension.clone();
                 kept.id = if index == 0 { dimension.id.clone() } else { id };
+                kept.param = kept_param.clone();
                 kept.kind = kind;
                 *added = kept;
             }
@@ -2007,10 +2025,7 @@ fn uses(c: &Curve, p: usize) -> bool {
 /// rounded or cut like a corner drawn through one point. Only a partner held by nothing but that
 /// constraint is welded; anything else is left as it is.
 fn weld_corner(sk: &mut Sketch, p: &Value) {
-    let ends = |sk: &Sketch, c: usize| match sk.curves.get(c).map(|c| &c.kind) {
-        Some(CurveKind::Line { a, b }) | Some(CurveKind::Arc { a, b, .. }) => Some([*a, *b]),
-        _ => None,
-    };
+    let ends = |sk: &Sketch, c: usize| sk.curves.get(c).and_then(|c| c.kind.ends()).map(|(a, b)| [a, b]);
     let q = if let Some(r) = str_(p, "point") {
         sk.resolve_point(r)
     } else {
@@ -2043,7 +2058,9 @@ fn weld_corner(sk: &mut Sketch, p: &Value) {
                 !matches!(other.kind, ConstraintKind::Coincident { .. }) && points.contains(&o) && points.contains(&q)
             });
             let linked = (0..sk.curves.len()).any(|c| sk.is_linked_curve(c) && sk.curves.get(c).is_some_and(|x| x.kind.uses(o)));
-            (o != 0 && !twice && !linked).then_some(o)
+            // A partner with a place of its own (fixed, or set by an expression) would lose it.
+            let placed = sk.points.get(o).is_some_and(|pt| pt.fixed || pt.exprs.is_some());
+            (o != 0 && !twice && !linked && !placed).then_some(o)
         });
         let Some(o) = partner else { return };
         for c in sk.curves.iter_mut() {
@@ -2254,7 +2271,74 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
     Ok(())
 }
 
-/// A corner of two lines: (line a, line b, corner point, far end of a, far end of b).
+/// What a curve is called in a message about a corner's sides.
+fn kind_name(c: &Curve) -> &'static str {
+    match c.kind {
+        CurveKind::Line { .. } => "a line",
+        CurveKind::Arc { .. } => "an arc",
+        CurveKind::Circle { .. } => "a circle",
+        CurveKind::Ellipse { .. } => "an ellipse",
+        CurveKind::Conic { .. } => "a conic",
+        CurveKind::Spline { periodic: true, .. } => "a closed spline",
+        CurveKind::Spline { control: true, .. } => "a control point spline",
+        CurveKind::Spline { .. } => "a fit point spline",
+    }
+}
+
+/// Whether curve `c` can be a side of a corner the command rounds or cuts: fillets take lines,
+/// arcs, conics and open control point splines (`round_corner` and `round_freeform_corner` take
+/// the curved ones), chamfers lines only.
+fn takes_side(sk: &Sketch, c: usize, cmd: &str) -> bool {
+    sk.curves.get(c).is_some_and(|c| match c.kind {
+        CurveKind::Line { .. } => true,
+        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, control: true, .. } => cmd == "sketch.fillet",
+        _ => false,
+    })
+}
+
+/// The refusal of a corner whose side `c` is of a kind the command does not round or cut. The
+/// message names the curve and its kind.
+fn wrong_side(sk: &Sketch, c: usize, cmd: &str) -> crate::EngineError {
+    let curve = sk.curves.get(c);
+    let what = curve.map(kind_name).unwrap_or("no curve");
+    let id = curve.map(|c| c.id.as_str()).unwrap_or("?");
+    if cmd == "sketch.fillet" {
+        bad(cmd, format!("fillets work on lines, arcs, conics and control point splines: `{id}` is {what}"))
+    } else {
+        bad(cmd, format!("chamfers work on lines: `{id}` is {what}"))
+    }
+}
+
+/// The refusal of corner point `q` where the lines alone make no corner. It names the first
+/// curve at the corner (one that ends there, or a closed curve that runs through it) of a kind
+/// the command does not take. Otherwise the corner joins too many or too few curves (named as
+/// lines when all of them are lines, as before fillets took conics and splines).
+fn not_two_lines(sk: &Sketch, q: usize, cmd: &str) -> crate::EngineError {
+    let pq = sk.point(q);
+    let through =
+        |i: usize| pq.is_some_and(|pq| sk.exact_pieces(i).iter().any(|s| s.point_at(s.closest_param(pq)).dist(pq) <= 1e-9 * (1.0 + pq.len())));
+    let at: Vec<usize> = (0..sk.curves.len())
+        .filter(|i| {
+            !sk.is_linked_curve(*i)
+                && !sk.is_ellipse_axis(*i)
+                && sk.curves.get(*i).is_some_and(|c| match c.kind.ends() {
+                    Some((a, b)) => a == q || b == q,
+                    None => c.kind.uses(q) && through(*i),
+                })
+        })
+        .collect();
+    let at: Vec<usize> = if at.len() == 2 { at } else { at.into_iter().filter(|i| sk.curves.get(*i).is_some_and(|c| !c.construction)).collect() };
+    let lines = at.iter().all(|i| sk.curves.get(*i).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. })));
+    match at.into_iter().find(|i| !takes_side(sk, *i, cmd)) {
+        Some(wrong) => wrong_side(sk, wrong, cmd),
+        None if cmd == "sketch.fillet" && !lines => bad(cmd, "the corner must join exactly two curves (or give the two curves as `a` and `b`)"),
+        None => bad(cmd, "the corner must join exactly two lines (or give the two lines as `a` and `b`)"),
+    }
+}
+
+/// A corner of two lines: (line a, line b, corner point, far end of a, far end of b). A fillet
+/// with an arc, a conic or a control point spline as a side goes on to `round_freeform_corner`
+/// and `round_corner` after this error.
 fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usize, usize)> {
     let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => Some((*a, *b)),
@@ -2263,16 +2347,23 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
     let (la, lb) = if let Some(r) = str_(p, "point") {
         let q = sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown point `{r}`")))?;
         // An ellipse's construction axis is never a side: it would round a line into the axis.
-        let lines: Vec<usize> = (0..sk.curves.len())
-            .filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i) && !sk.is_ellipse_axis(*i))
+        let at: Vec<usize> = (0..sk.curves.len())
+            .filter(|i| {
+                sk.curves.get(*i).is_some_and(|c| c.kind.ends().is_some_and(|(a, b)| a == q || b == q))
+                    && !sk.is_linked_curve(*i)
+                    && !sk.is_ellipse_axis(*i)
+            })
             .collect();
-        // A construction line ending there too (a diagonal that centres something) is not one of
-        // the corner's sides: it keeps its end on the virtual sharp corner (#1026).
+        // A construction curve ending there too (a diagonal that centres something) is not one of
+        // the corner's sides: it keeps its end on the virtual sharp corner (#1026). Curves of
+        // every kind count here, so a line, a conic and a construction line make a corner of the
+        // line and the conic (#9178).
         let sides: Vec<usize> =
-            if lines.len() == 2 { lines } else { lines.into_iter().filter(|i| sk.curves.get(*i).is_some_and(|c| !c.construction)).collect() };
-        match sides[..] {
+            if at.len() == 2 { at } else { at.into_iter().filter(|i| sk.curves.get(*i).is_some_and(|c| !c.construction)).collect() };
+        let lines: Vec<usize> = sides.into_iter().filter(|i| ends(*i).is_some()).collect();
+        match lines[..] {
             [a, b] => (a, b),
-            _ => return Err(bad(cmd, "the corner must join exactly two lines (or give the two lines as `a` and `b`)")),
+            _ => return Err(not_two_lines(sk, q, cmd)),
         }
     } else {
         let a = str_(p, "a").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`a` must be a line"))?;
@@ -2280,10 +2371,16 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
         if sk.is_ellipse_axis(a) || sk.is_ellipse_axis(b) {
             return Err(bad(cmd, "an ellipse's axis is not a side of a corner"));
         }
+        if let Some(wrong) = [a, b].into_iter().find(|c| !takes_side(sk, *c, cmd)) {
+            return Err(wrong_side(sk, wrong, cmd));
+        }
         (a, b)
     };
-    let (a0, a1) = ends(la).ok_or_else(|| bad(cmd, "fillets and chamfers work on two lines"))?;
-    let (b0, b1) = ends(lb).ok_or_else(|| bad(cmd, "fillets and chamfers work on two lines"))?;
+    // Past here a side that is not a line is one a fillet takes: an arc, a conic or a spline
+    // that shares no end with the other side, when `round_corner` and `round_freeform_corner`
+    // find no corner either.
+    let (a0, a1) = ends(la).ok_or_else(|| bad(cmd, "the curves must share a corner point"))?;
+    let (b0, b1) = ends(lb).ok_or_else(|| bad(cmd, "the curves must share a corner point"))?;
     let shared = [a0, a1].into_iter().find(|x| *x == b0 || *x == b1).ok_or_else(|| bad(cmd, "the lines must share a corner point"))?;
     let fa = if a0 == shared { a1 } else { a0 };
     let fb = if b0 == shared { b1 } else { b0 };
@@ -2449,6 +2546,116 @@ fn corner_list(p: &Value, cmd: &str) -> Result<Vec<Value>> {
     }
 }
 
+/// The point a corner entry names: the point `point` references, or the shared end of the two
+/// lines `a` and `b` name.
+fn corner_point(sk: &Sketch, q: &Value) -> Option<usize> {
+    if let Some(r) = str_(q, "point") {
+        return sk.resolve_point(r);
+    }
+    let ends = |id: Option<&str>| {
+        id.and_then(|i| sk.curve_index(i)).and_then(|l| match sk.curves.get(l).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+            _ => None,
+        })
+    };
+    let (Some((a0, a1)), Some((b0, b1))) = (ends(str_(q, "a")), ends(str_(q, "b"))) else { return None };
+    if a0 == b0 || a0 == b1 {
+        Some(a0)
+    } else if a1 == b0 || a1 == b1 {
+        Some(a1)
+    } else {
+        None
+    }
+}
+
+/// The corners symmetric to the one at point `p`, with the line each mirrors about: a Symmetry
+/// constraint ties a point to its mirror image, so the corner tied to the one being rounded is
+/// rounded with it (#18075).
+fn symmetric_twins(sk: &Sketch, p: usize) -> Vec<(usize, usize)> {
+    sk.constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            ConstraintKind::Symmetric { p: a, q: b, l } if a == p && b != p => Some((b, l)),
+            ConstraintKind::Symmetric { p: a, q: b, l } if b == p && a != p => Some((a, l)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The two ordinary lines that meet at the corner `twin` symmetric to the corner at `corner`, in
+/// the order that mirrors the sides `la` and `lb` of the corner they mirror: the side the mirror
+/// of `la` runs along comes first. None when the counterpart is not a corner two ordinary lines
+/// make.
+fn twin_sides(sk: &Sketch, corner: usize, twin: usize, la: usize, lb: usize, axis: usize) -> Option<(String, String)> {
+    let lines: Vec<usize> = (0..sk.curves.len())
+        .filter(|i| {
+            matches!(sk.curves.get(*i).map(|c| &c.kind), Some(CurveKind::Line { .. }))
+                && sk.curves[*i].kind.uses(twin)
+                && !sk.is_linked_curve(*i)
+                && !sk.is_ellipse_axis(*i)
+        })
+        .collect();
+    // A construction line ending there too (a diagonal that centres something) is not one of the
+    // corner's sides, as in [`corner`].
+    let sides: Vec<usize> = if lines.len() == 2 { lines } else { lines.into_iter().filter(|i| !sk.curves[*i].construction).collect() };
+    let [a, b] = sides[..] else { return None };
+    // The corners the command refuses when they are named: an infinite line has no corner, and an
+    // offset's output follows its source rather than being cut.
+    let ordinary = |l: usize| sk.curves.get(l).is_some_and(|c| !c.infinite && sk.offset_distance(&c.id).is_none());
+    if !ordinary(a) || !ordinary(b) || sk.curves.iter().any(|c| c.infinite && c.kind.uses(twin)) {
+        return None;
+    }
+    // The far end of a side: the one that is not the corner.
+    let far = |l: usize, at: usize| -> Option<Vec2> {
+        let CurveKind::Line { a, b } = sk.curves.get(l).map(|c| &c.kind)? else { return None };
+        let other = if *a == at { *b } else { *a };
+        sk.point(other)
+    };
+    // A point reflected about the symmetry line, as the Mirror tool reflects it.
+    let mirrored = |p: Vec2| -> Option<Vec2> {
+        let Shape::Line { a, b } = sk.shape(axis)? else { return None };
+        let u = (b - a).normalized()?;
+        let foot = a + u * (p - a).dot(u);
+        Some(foot * 2.0 - p)
+    };
+    // The sides in the order that mirrors the corner's own: the side the mirror of `la` runs
+    // along comes first, so a chamfer that measures different distances along its two sides keeps
+    // them on the mirrored sides.
+    let order = match (far(la, corner), far(lb, corner), far(a, twin), far(b, twin)) {
+        (Some(pa), Some(pb), Some(fa), Some(fb)) => match mirrored(pa).zip(mirrored(pb)) {
+            Some((ma, mb)) if ma.dist(fa) + mb.dist(fb) > ma.dist(fb) + mb.dist(fa) => (b, a),
+            _ => (a, b),
+        },
+        _ => (a, b),
+    };
+    let (first, second) = order;
+    Some((sk.curves.get(first)?.id.clone(), sk.curves.get(second)?.id.clone()))
+}
+
+/// The corners a fillet or chamfer works on, and the corners symmetric to them: a corner tied to
+/// another by a Symmetry constraint is cut with its counterpart, so the mirrored part of a sketch
+/// keeps the shape the other side has (#18075). The Mirror tool ties every copied point to its
+/// source that way, and a Symmetry constraint between two corners of one outline says the same.
+/// A counterpart that is not a corner two ordinary lines make is left alone, so a command that
+/// worked on its own still works.
+fn symmetric_corners(sk: &Sketch, corners: &[Value], cmd: &str) -> Vec<Value> {
+    let mut out = corners.to_vec();
+    let mut named: Vec<usize> = corners.iter().filter_map(|q| corner_point(sk, q)).collect();
+    for q in corners {
+        let Some(c) = corner_point(sk, q) else { continue };
+        let Ok((la, lb, _, _, _)) = corner(sk, q, cmd) else { continue };
+        for (twin, axis) in symmetric_twins(sk, c) {
+            if named.contains(&twin) {
+                continue;
+            }
+            let Some((a, b)) = twin_sides(sk, c, twin, la, lb, axis) else { continue };
+            named.push(twin);
+            out.push(json!({ "a": a, "b": b }));
+        }
+    }
+    out
+}
+
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = req_expr(cmd, p, "radius")?;
@@ -2459,6 +2666,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         if !(r > 1e-9 && r < 1e8) {
             return Err(bad(cmd, "radius must be positive"));
         }
+        // A corner symmetric to another is rounded with it (#18075).
+        let corners = symmetric_corners(sk, &corners, cmd);
         let released = release_corner_offsets(sk, doc, &corners, cmd)?;
         let pname = if on_sheet { r_expr.to_string() } else { doc.new_model_param(&r_expr, "mm") };
         // The arcs by id: a fillet that takes a whole line removes it, which renumbers the curves.
@@ -2516,9 +2725,20 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     meet_lines(sk, p, cmd)?;
     let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
         Ok(x) => x,
-        // Not two lines: a corner with an arc.
-        Err(e) => return round_corner(sk, p, r, cmd)?.ok_or(e),
+        // Not two lines: a corner with a conic or a control point spline (#9178), or with an arc.
+        // The free-form corner goes first: it leaves out construction curves that end there too.
+        Err(e) => {
+            if let Some((arc, cons)) = super::sketch_corner_freeform::round_freeform_corner(sk, p, r, cmd)? {
+                return Ok((arc, cons, CornerKept::default()));
+            }
+            return round_corner(sk, p, r, cmd)?.ok_or(e);
+        }
     };
+    // A spline's tangent handle is a construction line from a fit point, never a side. Where one
+    // ends at the corner, the spline has handles (#9178).
+    if let Some(spline) = [la, lb].into_iter().find_map(|l| sk.curves.get(l).and_then(|c| c.spline_handle_of.clone())) {
+        return Err(bad(cmd, format!("`{spline}` has tangent handles: reset them first (sketch.spline.reset_handles)")));
+    }
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
     let u = (pa - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
@@ -2684,6 +2904,8 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
 fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<(f64, f64)>) -> Result<Value> {
     let corners = corner_list(p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        // A corner symmetric to another is cut with it (#18075).
+        let corners = symmetric_corners(sk, &corners, cmd);
         let released = release_corner_offsets(sk, doc, &corners, cmd)?;
         // Every corner is cut alike, in one edit: a corner that can't be cut refuses them all.
         // A corner named twice (its point, then its two lines, say) would be cut again where
@@ -3113,11 +3335,6 @@ struct Side {
     constraints: Vec<String>,
     association: Option<String>,
     param: Option<String>,
-    /// Set when the offset is not linked to its source: a free-form curve whose plain offset
-    /// folds over a tight bend or crosses itself (trimmed), or a chain of curves that
-    /// includes free-form ones. Its curves then have no association and no distance to
-    /// drive, and this names the source curves they were made from.
-    unlinked_sources: Option<Vec<String>>,
 }
 
 /// The signed distances an offset runs at. One side is the distance as given. `symmetric` is the
@@ -3154,14 +3371,7 @@ fn offset_side(sk: &mut Sketch, cmd: &str, order: &[(usize, bool)], sources: &[(
                 cons.push(add_c(sk, ConstraintKind::Parallel { a, b })?);
             }
         }
-        return Ok(Side {
-            distance: d,
-            curves: created.curves,
-            constraints: cons,
-            association: Some(created.association),
-            param: None,
-            unlinked_sources: None,
-        });
+        return Ok(Side { distance: d, curves: created.curves, constraints: cons, association: Some(created.association), param: None });
     }
     let pieces: Vec<Piece> =
         order.iter().map(|(c, f)| offset_piece(sk, *c, *f, d)).collect::<Option<_>>().ok_or_else(|| bad(cmd, "the offset collapses an arc"))?;
@@ -3261,7 +3471,7 @@ fn offset_side(sk: &mut Sketch, cmd: &str, order: &[(usize, bool)], sources: &[(
         sk.offsets.push(solidcraft_sketch::OffsetChain { sources: sources.to_vec(), outputs: outputs.clone(), distance: d, closed, topology: None });
         sk.refresh_offsets()?;
     }
-    Ok(Side { distance: d, curves: outputs, constraints: cons, association: None, param: None, unlinked_sources: None })
+    Ok(Side { distance: d, curves: outputs, constraints: cons, association: None, param: None })
 }
 
 /// Numbers remain millimetres for programmatic callers; expressions use design units.
@@ -3355,7 +3565,7 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
                 closed: true,
                 topology: None,
             });
-            sides.push(Side { distance: r - nr, curves: outputs, constraints: Vec::new(), association: None, param: None, unlinked_sources: None });
+            sides.push(Side { distance: r - nr, curves: outputs, constraints: Vec::new(), association: None, param: None });
         }
         return Ok(sides);
     }
@@ -3409,34 +3619,29 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
         // A smooth free-form entity is offset from exact pieces. One curve gets a linked
         // offset where its plain offset is smooth and simple; otherwise (a fold or a
         // crossing to trim, or a chain with corners) the offset is the trimmed parallel
-        // boundary, rounded at outer corners, and not linked to its source.
-        let source_ids = order
-            .iter()
-            .map(|(i, _)| sk.curves.get(*i).map(|c| c.id.clone()).ok_or_else(|| bad(cmd, "offset source vanished")))
-            .collect::<Result<Vec<_>>>()?;
+        // boundary, rounded at outer corners. A trimmed offset is kept with the sources it
+        // was made from, so the distance that drives it rebuilds it when it changes (#12294).
         let unlinked = |sk: &Sketch, dd: f64, curves: &[usize]| Side {
             distance: dd,
             curves: ids_of(sk, curves),
             constraints: Vec::new(),
             association: None,
             param: None,
-            unlinked_sources: Some(source_ids.clone()),
         };
         for dd in runs {
             let side = match order.as_slice() {
                 [(source, forward)] => match sk.offset_freeform(*source, *forward, dd)? {
-                    solidcraft_sketch::FreeformOffsetOutput::Linked(output) => Side {
-                        distance: dd,
-                        curves: ids_of(sk, &[output]),
-                        constraints: Vec::new(),
-                        association: None,
-                        param: None,
-                        unlinked_sources: None,
-                    },
-                    solidcraft_sketch::FreeformOffsetOutput::Unlinked(curves) => unlinked(sk, dd, &curves),
+                    solidcraft_sketch::FreeformOffsetOutput::Linked(output) => {
+                        Side { distance: dd, curves: ids_of(sk, &[output]), constraints: Vec::new(), association: None, param: None }
+                    }
+                    solidcraft_sketch::FreeformOffsetOutput::Unlinked(curves) => {
+                        sk.record_freeform_chain_offset(&[(*source, *forward)], &curves, dd)?;
+                        unlinked(sk, dd, &curves)
+                    }
                 },
                 _ => {
                     let curves = sk.offset_freeform_chain(&order, dd)?;
+                    sk.record_freeform_chain_offset(&order, &curves, dd)?;
                     unlinked(sk, dd, &curves)
                 }
             };
@@ -3477,7 +3682,12 @@ fn offset_rung(
         .find(|o| o.owns_output(output))
         .map(|o| o.sources.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>())
         .or_else(|| sk.freeform_offsets.iter().find(|o| o.output == *output).map(|o| vec![o.source.clone()]))
-        .or_else(|| group.iter().find_map(|side| side.unlinked_sources.clone()))
+        .or_else(|| {
+            sk.freeform_chain_offsets
+                .iter()
+                .find(|o| o.outputs.iter().any(|id| id == output))
+                .map(|o| o.sources.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>())
+        })
         .ok_or_else(|| bad(cmd, "offset association is missing"))?;
     // An offset of infinite lines is infinite lines too (#1359).
     let infinite = sources.iter().all(|id| sk.curve_index(id).and_then(|c| sk.curves.get(c)).is_some_and(|c| c.infinite));
@@ -3492,10 +3702,6 @@ fn offset_rung(
         }
     }
     for (index, side) in group.iter_mut().enumerate() {
-        // A trimmed offset is not linked to its source: it has no distance to drive.
-        if side.unlinked_sources.is_some() {
-            continue;
-        }
         let name = names.get(index).or_else(|| names.first()).ok_or_else(|| bad(cmd, "offset has no driving dimension"))?;
         let output = side.curves.first().ok_or_else(|| bad(cmd, "offset produced no curves"))?;
         side.constraints.push(sk.add_constraint(
@@ -3592,10 +3798,6 @@ fn offset_ladder(
     }
     Ok((sides, sources))
 }
-
-/// What the offset reply says when a distance names a parameter that drives nothing (#12294).
-const UNLINKED_OFFSET: &str =
-    "the offset is trimmed and not linked to its source, so its distance expression does not drive it: changing the parameter will not move it";
 
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.offset";
@@ -3700,10 +3902,6 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         [(_, only)] => only.association.clone(),
         _ => None,
     };
-    // A trimmed offset (a spline with another curve) is not linked to its source, so a distance
-    // that names a parameter drives nothing: say so instead of leaving `param` null unexplained (#12294).
-    let ignored = |expression: &str, param: &Option<String>| param.is_none() && !solidcraft_doc::expr::references(expression).is_empty();
-    let warning = (ignored(&expression, &param) || expression2.as_deref().is_some_and(|e| ignored(e, &param2))).then(|| UNLINKED_OFFSET.to_string());
     reply(
         cmd,
         OffsetResult {
@@ -3715,7 +3913,6 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
             instances,
             param2,
             association,
-            warning,
             created: None,
             param_warnings: Vec::new(),
         },
@@ -3734,7 +3931,8 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
             .filter_map(|record| record.topology.as_ref())
             .any(|record| record.id == output || record.roles.iter().any(|role| role.output == output));
         let analytic = sk.offsets.iter().any(|o| o.outputs.iter().any(|id| id == output));
-        if record.is_none() && !topology && !analytic {
+        let chain = sk.freeform_chain_offsets.iter().position(|record| record.outputs.iter().any(|id| id == output));
+        if record.is_none() && !topology && !analytic && chain.is_none() {
             return Err(bad(cmd, "curve is not an offset output"));
         }
         // A parameter edit may have changed the evaluated source without
@@ -3790,6 +3988,23 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
                             && sk.curves.iter().all(|c| !c.kind.uses(i) || record.outputs.contains(&c.id))
                             && let Some(p) = sk.points.get_mut(i)
                         {
+                            p.fixed = false;
+                        }
+                    }
+                }
+            }
+            return Ok((output.to_string(), Some(record.outputs)));
+        }
+        if let Some(index) = chain {
+            // A trimmed chain offset: its curves stay as ordinary geometry, with their points
+            // free to edit, and the dimension that drove them goes.
+            let record = sk.freeform_chain_offsets.remove(index);
+            sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
+            for id in &record.outputs {
+                if let Some(curve) = sk.curve_index(id).and_then(|i| sk.curves.get(i)) {
+                    let points = curve.kind.point_ids();
+                    for i in points {
+                        if let Some(p) = sk.points.get_mut(i) {
                             p.fixed = false;
                         }
                     }
@@ -3934,6 +4149,22 @@ fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
         }
     }
     out
+}
+
+/// The free points that ride on the moved points alone (#15697): on no curve, neither fixed nor
+/// linked, and held only by constraints whose other points all move, like a rounded rectangle's
+/// centre kept at the middle of its construction diagonal. They move too: left behind, the solve
+/// drags the moved shape back toward them and bends it.
+fn riders(sk: &Sketch, moved: &[usize]) -> Vec<usize> {
+    (0..sk.points.len())
+        .filter(|q| !moved.contains(q))
+        .filter(|&q| sk.points.get(q).is_some_and(|p| !p.fixed && p.link.is_none()))
+        .filter(|&q| !sk.curves.iter().any(|c| c.kind.point_ids().contains(&q)))
+        .filter(|&q| {
+            let mut tied = sk.constraints.iter().map(|c| sk.constraint_points(&c.kind)).filter(|pts| pts.contains(&q)).peekable();
+            tied.peek().is_some() && tied.all(|pts| pts.iter().all(|p| *p == q || moved.contains(p)))
+        })
+        .collect()
 }
 
 /// Copy curves and points through `f`. `flip` reverses arcs (mirroring). `keep(p)`: reuse the
@@ -4299,7 +4530,57 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
     let ang = if p.get("angle").is_some() { num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 0.0 }.to_radians();
     let copy = bool_(p, "copy").unwrap_or(false);
+    let z = match p.get("z") {
+        None => 0.0,
+        Some(v) => v.as_f64().filter(|z| z.is_finite() && z.abs() <= 1e6).ok_or_else(|| bad(cmd, "`z` must be a distance in mm"))?,
+    };
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
+    let state = if s.sheet_sketching() {
+        None
+    } else {
+        let sketch = sketch_store::target(s, p, cmd)?;
+        s.model.state().sketch(sketch).map(|ss| ss.sketch.clone())
+    };
+    let wires: Vec<String> = state.as_ref().map(|sk| sk.wires.iter().map(|w| w.id.clone()).collect()).unwrap_or_default();
+    let (mut moved_drawn, mut plane_picks) = (Vec::new(), Vec::new());
+    for e in string_list(cmd, p, "entities")? {
+        match e.split_once('@') {
+            Some((w, i)) if wires.iter().any(|x| x == w) => {
+                moved_drawn.push((w.to_string(), Some(i.parse::<usize>().map_err(|_| bad(cmd, format!("`{e}`: no such drawn point")))?)))
+            }
+            None if wires.contains(&e) => moved_drawn.push((e, None)),
+            _ => plane_picks.push(e),
+        }
+    }
+    if copy && moved_drawn.iter().any(|(_, index)| index.is_some()) {
+        return Err(bad(cmd, "not supported yet: copying drawn 3D points"));
+    }
+    let mut p = p.clone();
+    if let (false, Some(o)) = (copy, p.as_object_mut()) {
+        o.insert("entities".into(), json!(plane_picks));
+    }
+    let p = &p;
+    let mut moved_ids: Vec<String> = Vec::new();
+    for (w, _) in moved_drawn.iter().filter(|_| !copy) {
+        if !moved_ids.contains(w) {
+            moved_ids.push(w.clone());
+        }
+    }
+    if !copy && !moved_drawn.is_empty() {
+        let c = match (p.get("center"), &state) {
+            (Some(_), Some(sk)) => point_or_ref(sk, p, "center", cmd)?,
+            _ => Vec2::ZERO,
+        };
+        let rot = rotate(c, ang);
+        let (_, info) = super::sketch_3d::move_drawn(s, p, cmd, &moved_drawn, z, &|q: Vec2| rot(q) + t)?;
+        if plane_picks.is_empty() {
+            let curves = moved_ids;
+            return reply(
+                cmd,
+                MoveResult { curves, released: Vec::new(), added: Vec::new(), sketch: info, created: None, param_warnings: Vec::new() },
+            );
+        }
+    }
     let selection = string_list(cmd, p, "entities")?;
     let (planar, drawn) = if copy { drawn_copy_selection(s, p, selection)? } else { (selection, Vec::new()) };
     // Only drawn 3D curves name the sketch they join in; a drawing's sheet sketch has none.
@@ -4326,23 +4607,31 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         for link in links {
             text_curves.extend(super::sketch_create::move_text(sk, &link, t, ang, c, copy)?);
         }
+        // The points picked on their own (not as part of a picked curve): off the plane they
+        // move too, each by itself.
+        let own: Vec<usize> = ps.iter().copied().filter(|q| !cs.iter().any(|c| sk.curves.get(*c).is_some_and(|c| c.kind.uses(*q)))).collect();
+        let point_ids = |sk: &Sketch, qs: &[usize]| qs.iter().filter_map(|q| sk.points.get(*q).map(|x| x.id.clone())).collect::<Vec<_>>();
         if copy {
-            let (mut m, _) = copy_through(sk, &cs, &ps, &f, false, &|_| false, 1.0)?;
+            let (mut m, map) = copy_through(sk, &cs, &ps, &f, false, &|_| false, 1.0)?;
             m.extend(text_curves);
-            let mut ids = ids_of(sk, &m);
-            let mut wires = Vec::new();
+            let copies: Vec<usize> = own.iter().filter_map(|q| map.iter().find(|(old, _)| old == q).map(|(_, new)| *new)).collect();
+            let ids = ids_of(sk, &m);
+            // Drawn copies are already 3D: they go `z` up along the normal, and their ids are
+            // returned apart from the plane ids (which lift turns into drawn curves).
+            let mut drawn_ids = Vec::new();
             for (wire, plane) in &drawn {
-                let fit: Vec<_> = wire.fit.iter().map(|&q| plane.to_world(f(plane.to_local(q))) + plane.normal() * plane.height(q)).collect();
-                wires.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
+                let fit: Vec<_> = wire.fit.iter().map(|&q| plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)).collect();
+                drawn_ids.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
             }
             // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
-            if let Some(target) = target.filter(|_| !wires.is_empty()) {
-                super::sketch_3d::join_in(sk, doc, target, &wires)?;
+            if let Some(target) = target.filter(|_| !drawn_ids.is_empty()) {
+                super::sketch_3d::join_in(sk, doc, target, &drawn_ids)?;
             }
-            ids.extend(wires);
-            return Ok(ids);
+            return Ok((ids, point_ids(sk, &copies), drawn_ids));
         }
         with_ellipse_axes(sk, &mut cs);
+        let riding = riders(sk, &involved_points(sk, &cs, &ps));
+        ps.extend(riding);
         let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         // Broken external holds must not make the rectangle's replacement relations look redundant.
@@ -4352,10 +4641,21 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             added = rotate_axis_constraints(sk, doc, &moved, ang)?;
         }
         cs.extend(text_curves);
-        Ok(ids_of(sk, &cs))
+        Ok((ids_of(sk, &cs), point_ids(sk, &own), Vec::new()))
     })?;
+    let (out, moved_points, drawn_copies) = out;
     s.doc_mut().prune_model_params();
-    reply(cmd, MoveResult { curves: out, released, added, sketch: info, created: None, param_warnings: Vec::new() })
+    if z != 0.0 {
+        // Off the plane: what moved (or its copy) becomes drawn 3D curves `z` along the normal.
+        let id = sketch_store::target(s, p, cmd)?;
+        let n = s.world_state()?.sketch(id).map(|ss| ss.plane.normal()).ok_or_else(|| bad(cmd, "the sketch has no plane"))?;
+        let (mut wires, info) = super::sketch_3d::lift(s, p, cmd, &out, &moved_points, n * z)?;
+        wires.extend(drawn_copies);
+        wires.extend(moved_ids);
+        return reply(cmd, MoveResult { curves: wires, released, added, sketch: info, created: None, param_warnings: Vec::new() });
+    }
+    let curves: Vec<String> = out.into_iter().chain(drawn_copies).chain(moved_ids).collect();
+    reply(cmd, MoveResult { curves, released, added, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// Scale, turn and move the entities in one step: scaled about `center`, then turned about it,
@@ -4371,6 +4671,7 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         None => 0.0,
     };
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
+    let mut released = Vec::new();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
@@ -4393,15 +4694,21 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
             text_curves.extend(super::sketch_create::transform_text(sk, cmd, &link, &f, ang, k, false)?);
         }
         with_ellipse_axes(sk, &mut cs);
+        let riding = riders(sk, &involved_points(sk, &cs, &ps));
+        ps.extend(riding);
+        // As Move does (#2980): what ties the picked geometry to what stays and no longer holds
+        // after the turn is let go, else the solve drags the shape back and bends it (#15697).
+        let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         let moved = involved_points(sk, &cs, &ps);
         let _ = rotate_axis_constraints(sk, doc, &moved, ang)?;
         scale_dimensions(sk, doc, &cs, &moved, k)?;
+        released = release_broken(sk, &held);
         cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    reply(cmd, TransformResult { curves: out, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, TransformResult { curves: out, released, sketch: info, param_warnings: Vec::new() })
 }
 
 /// The driving lengths wholly inside a transformed selection scale with it. Keep formulas
@@ -4516,10 +4823,15 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
         with_ellipse_axes(sk, &mut cs);
         let b = if p.get("base").is_some() { point_or_ref(sk, p, "base", cmd)? } else { Vec2::ZERO };
         let f = move |q: Vec2| b + (q - b) * k;
+        // A constraint tying the selection to a point that stays (a fillet's virtual corner on
+        // the curves' extensions, the sketch origin) is let go when the scale moves the selection
+        // away from it, else the solve bends the profile back toward it (#16611).
+        let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         // The dimensions go with the geometry, else the solve pulls it back to the old sizes (#14411).
         let moved = involved_points(sk, &cs, &ps);
         scale_dimensions(sk, doc, &cs, &moved, k)?;
+        release_broken(sk, &held);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();

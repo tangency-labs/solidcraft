@@ -153,10 +153,19 @@ old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the dri
 
 SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan has a
 graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
-graphics, virtual machines, Remote Desktop). A Vulkan device that fails to start falls back to
-Direct3D 12, then to software rendering. From 0.11.1 until this change Direct3D 12 came first;
-before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together. If the Vulkan driver
-crashes the app while it starts, choose **Direct3D 12** below.
+graphics, virtual machines, Remote Desktop), each only with a graphics card, and software
+rendering only after both. A Vulkan device that fails to start falls back to Direct3D 12, then to
+software rendering, and later launches of that version go straight to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
+before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together.
+
+If a graphics driver crashes the app while it starts a graphics API, the next launch knows
+which API it was and skips it on this computer, going on in the same order. Safe mode and
+software rendering leave it out too, so that driver is not loaded again (unless every API has
+crashed, when all are tried again). A new SolidCraft version tries it once more. Choosing the API in **Preferences > Graphics > Graphics
+API**, or setting `WGPU_BACKEND`, still starts it. This works the same on every system.
+Only a crash after SolidCraft started loading a graphics API counts, and only against an API
+the platform supports (never Metal or Direct3D 12 on Linux). A start that stops earlier, such as one
+missing a system library the window needs, blames no API.
 
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
 The page shows the current API separately from the saved choice. **Automatic** keeps

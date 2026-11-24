@@ -30,14 +30,29 @@ impl<'a> OccurrenceTree<'a> {
     /// order. A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`]
     /// placements.
     pub(crate) fn placements_with(&self, transform: impl Fn(&Occurrence) -> Mat) -> Vec<(u64, Vec<u64>, Mat)> {
-        let mut out = vec![(0, Vec::new(), IDENTITY)];
-        let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(0, Vec::new(), IDENTITY)];
+        self.placements_from(0, transform)
+    }
+
+    /// [`OccurrenceTree::placements_with`] from `root` instead of the design's root: every
+    /// placement inside `root`, `root` itself first, each path and transform relative to `root`.
+    pub(crate) fn placements_from(&self, root: u64, transform: impl Fn(&Occurrence) -> Mat) -> Vec<(u64, Vec<u64>, Mat)> {
+        self.walk_from(root, transform).0
+    }
+
+    /// [`OccurrenceTree::placements_from`], and whether the walk reached every placement: false
+    /// when it stopped at [`MAX_PLACEMENTS`] or left a branch past [`MAX_PLACEMENT_DEPTH`].
+    pub(crate) fn walk_from(&self, root: u64, transform: impl Fn(&Occurrence) -> Mat) -> (Vec<(u64, Vec<u64>, Mat)>, bool) {
+        let mut out = vec![(root, Vec::new(), IDENTITY)];
+        let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(root, Vec::new(), IDENTITY)];
+        let mut complete = true;
         while let Some((comp, path, m)) = stack.pop() {
             if out.len() > MAX_PLACEMENTS {
+                complete = false;
                 break;
             }
             // Only this branch stops past the depth limit; the others are still walked.
             if path.len() > MAX_PLACEMENT_DEPTH {
+                complete &= self.children(comp).is_empty();
                 continue;
             }
             for o in self.children(comp) {
@@ -48,7 +63,7 @@ impl<'a> OccurrenceTree<'a> {
                 stack.push((o.component, p, w));
             }
         }
-        out
+        (out, complete)
     }
 }
 

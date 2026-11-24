@@ -1,5 +1,5 @@
 //! Sheet metal dialogs: Flange (base from profiles, edge flanges from picked edges, contour from
-//! open sketch lines; the picks decide which), Hem, Unfold and Refold, Convert to Sheet Metal,
+//! open sketch lines; the picks decide which), Tab (profiles on a face of a sheet join it), Hem, Unfold and Refold, Convert to Sheet Metal,
 //! Sheet Metal Rules (the rule manager) and Create Flat Pattern (a flat view of the part with
 //! its bend lines, the bend table and DXF export).
 
@@ -108,6 +108,9 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::SheetPath { radius, .. }) {
             radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
         } => json!({});
+        Tab("sheet.tab", "ui.sheet_tab_title", [("Profile", PROFILES, true)],
+            FeatureKind::SheetTab { .. }) {
+        } => json!({});
         ; custom {
             /// Base, edge or contour flange (`ty` follows the picks: profiles, edges, sketch lines).
             Flange {
@@ -173,6 +176,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 angles: usize,
                 active: bool,
                 loaded: Option<usize>,
+                /// The material the rule is for (a label; #18304).
+                material: String,
             },
             /// The flat pattern of the picked (or last) sheet body.
             FlatPattern {
@@ -249,7 +254,19 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
             let pick = active.and_then(|a| rules.iter().position(|r| r.name == a)).unwrap_or(0);
-            (Sm::Rules { pick, name: String::new(), values: Vec::new(), relief: 0, angles: 0, active: true, loaded: None }, vec![])
+            (
+                Sm::Rules {
+                    pick,
+                    name: String::new(),
+                    values: Vec::new(),
+                    relief: 0,
+                    angles: 0,
+                    active: true,
+                    loaded: None,
+                    material: String::new(),
+                },
+                vec![],
+            )
         }
         "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         _ => Sm::simple_start(id)?,
@@ -547,6 +564,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             crate::ui_kit::caption(ui, "Flanges", solidcraft_ui_text::tr_label("set by the sketch's lines"));
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
         }
+        Sm::Tab {} => {
+            // No thickness to set: the tab takes the sheet's own.
+            form_row(ui, "Thickness", |ui| {
+                ui.label(solidcraft_ui_text::tr_label("from the rule"));
+            });
+        }
         Sm::Unfold { .. } => {}
         Sm::Convert { rule, side, thin } => {
             rule_combo(app, ui, "sm_conv_rule", rule);
@@ -586,7 +609,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             rule_combo(app, ui, "sm_rec_rule", rule);
             enter |= hint_row(ui, "New Rule", new_rule, solidcraft_ui_text::tr_label("none: the rule above"));
         }
-        Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
+        Sm::Rules { pick, name, values, relief, angles, active, loaded, material } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
                 ui, "sm_rules", rules, pick, name, active, loaded;
@@ -607,8 +630,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.corner_relief_shape.trim())).unwrap_or(0);
                     *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(base.angle_display.trim())).unwrap_or(0);
                     *active = app.session.doc.sheet_rule(None).name == base.name || *pick >= rules.len();
+                    material.clone_from(&base.material);
                 },
                 fields: {
+                    crate::ui_kit::text_row(ui, "Material", material, "Material");
                     for ((key, label), v) in RULE_FIELDS.iter().zip(values.iter_mut()) {
                         if *key == "corner_relief" {
                             // The shape goes with its size, the row below.
@@ -1108,6 +1133,18 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("radius", radius)]);
             ("sheet.path_flange", p)
         }
+        Sm::Tab {} => {
+            let ps: Vec<(u64, usize)> = items(inputs, 0).profiles();
+            match ps.first().map(|x| x.0) {
+                Some(sketch) => {
+                    let idx: Vec<usize> = ps.iter().filter(|x| x.0 == sketch).map(|x| x.1).collect();
+                    ("sheet.tab", json!({"sketch": sketch, "profiles": idx}))
+                }
+                // An edited tab of all its sketch's profiles keeps them (in `extra`).
+                None if extra.contains_key("sketch") => ("sheet.tab", json!({})),
+                None => return Err("select the tab's profile: a closed sketch on a flat face of the sheet".into()),
+            }
+        }
         Sm::Perforate { margin, .. } => {
             let mut p = json!({});
             put(&mut p, &[("margin", margin)]);
@@ -1195,10 +1232,16 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             ("sheet.convert", p)
         }
-        Sm::Rules { pick, name, values, relief, angles, active, .. } => {
+        Sm::Rules { pick, name, values, relief, angles, active, material, .. } => {
             let rules = rule_list(app);
             let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values);
             let mut p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
+            // Sent when there is one, or to clear the one the rule has or a new rule would take from
+            // the active rule (#18304).
+            let inherited = rules.get(*pick).map_or_else(|| app.session.doc.sheet_rule(None).material, |r| r.material.clone());
+            if !material.trim().is_empty() || !inherited.is_empty() {
+                p["material"] = json!(material.trim());
+            }
             p["corner_relief_shape"] = json!(RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch"));
             p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
             ("sheet.manage_rules", p)
@@ -1353,8 +1396,24 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             return Some((Kind::Sheet(k), ins, extra));
         }
+        FeatureKind::SheetTab { sketch, profiles, body } => {
+            if let Some(b) = body {
+                extra.insert("body".into(), json!(b));
+            }
+            let ps = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            let (_, mut ins) = start(app, "sheet.tab")?;
+            if let Some(i) = ins.first_mut() {
+                i.items = ps.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+            }
+            // Profiles stay a profile selection (`All` keeps them all).
+            if matches!(profiles, ProfileSel::All) && ins.first().is_some_and(|i| i.items.is_empty()) {
+                extra.insert("sketch".into(), json!(sketch.0));
+                extra.insert("profiles".into(), json!("all"));
+            }
+            return Some((Kind::Sheet(Sm::simple_restore(kind)?), ins, extra));
+        }
         FeatureKind::SheetPerforate { body, .. } => (Sm::simple_restore(kind)?, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect()),
-        FeatureKind::SheetUnfold { body, refold } => {
+        FeatureKind::SheetUnfold { body, refold, .. } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }
         FeatureKind::SheetConvert { body, face, faces, rule, bends, engrave, direction } => {

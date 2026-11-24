@@ -51,13 +51,33 @@ pub(crate) struct Meshing {
     first_shown: bool,
     /// The parts placed more than once, made ahead for the scenes that draw them as instances.
     parts: crate::viewport::WarmedParts,
+    /// What the viewport drew with when it started ([`Caps`]): a viewport that changes (its GPU
+    /// pipelines ready after the design opened) meshes again for the new one.
+    caps: Caps,
+}
+
+/// What a viewport draws bodies from, which the meshing makes ahead: display plans (`plans`),
+/// shared vertices (`shared`, a GPU viewport) and instances' shared edges (`edges`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Caps {
+    plans: bool,
+    shared: bool,
+    edges: bool,
+}
+
+impl Caps {
+    fn of(app: &SolveApp) -> Caps {
+        let gpu = app.viewport.gpu;
+        Caps { plans: gpu.is_some_and(|g| g.tess), shared: gpu.is_some(), edges: gpu.is_some_and(|g| g.edges) }
+    }
 }
 
 impl Meshing {
     /// `plans`: the bodies are drawn from their display plans; `shared`: large meshes and parts
     /// placed more than once are drawn from shared vertices (a GPU viewport), made here too, with
     /// the parts' shared edges when the renderer draws instances' edges (`edges`).
-    fn start(world: Arc<ModelState>, plans: bool, shared: bool, edges: bool) -> Meshing {
+    fn start(world: Arc<ModelState>, caps: Caps) -> Meshing {
+        let Caps { plans, shared, edges } = caps;
         let n = world.bodies.len();
         let ready = Arc::new(Mutex::new(Vec::with_capacity(n)));
         let (done, stop) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
@@ -115,6 +135,7 @@ impl Meshing {
             began: None,
             first_shown: false,
             parts,
+            caps,
         }
     }
 
@@ -133,9 +154,7 @@ impl Drop for Meshing {
 /// the bodies' outlines; `remember`: then draw the Home picture of that file.
 pub(crate) fn start(app: &mut SolveApp, remember: Option<String>) {
     app.open_meshing_next = false;
-    let plans = app.viewport.gpu.is_some_and(|g| g.tess);
-    let edges = app.viewport.gpu.is_some_and(|g| g.edges);
-    let mut meshing = Meshing::start(crate::open_meshing::session_world(&app.session), plans, app.viewport.gpu.is_some(), edges);
+    let mut meshing = Meshing::start(crate::open_meshing::session_world(&app.session), Caps::of(app));
     meshing.remember = remember;
     app.open_meshing = Some(meshing);
     app.fit_view();
@@ -201,16 +220,18 @@ pub(crate) fn framing(app: &SolveApp) -> bool {
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(m) = app.open_meshing.as_ref() else { return };
     let world = crate::open_meshing::session_world(&app.session);
-    if !Arc::ptr_eq(&world, &m.world) {
-        if m.complete {
-            // The design changed after its open: the viewport draws it as ever.
-            app.open_meshing = None;
-            return;
-        }
-        // The design changed (an edit, an undo): mesh the new world; what is made is kept.
+    let caps = Caps::of(app);
+    let changed = !Arc::ptr_eq(&world, &m.world);
+    if changed && m.complete {
+        // The design changed after its open: the viewport draws it as ever.
+        app.open_meshing = None;
+        return;
+    }
+    if changed || (m.caps != caps && !m.complete) {
+        // The design changed (an edit, an undo), or the viewport did (its GPU pipelines ready
+        // after the open started): mesh the new world for it; what is made is kept.
         let (framed, remember) = (m.framed, m.remember.clone());
-        let plans = app.viewport.gpu.is_some_and(|g| g.tess);
-        let mut next = Meshing::start(world.clone(), plans, app.viewport.gpu.is_some(), app.viewport.gpu.is_some_and(|g| g.edges));
+        let mut next = Meshing::start(world.clone(), caps);
         (next.framed, next.remember) = (framed, remember);
         app.open_meshing = Some(next);
     }
@@ -228,6 +249,18 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         // Framed from outlines and not moved since: frame the meshes.
         if framed == Some(app.cam) {
             app.fit_view();
+        }
+        // Start one large visible scan's triangle index ahead of the pointer. Starting
+        // every scan here would let their BVH builders allocate scratch at the same time.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((scan, _)) = world
+            .bodies
+            .iter()
+            .filter(|body| app.body_visible(&body.name))
+            .filter_map(|body| body.body.triangle_mesh().map(|(_, triangles)| (body, triangles.len())))
+            .max_by_key(|(_, count)| *count)
+        {
+            app.viewport.pick_index.prefetch(&scan.mesh_in_place().0);
         }
         crate::frame_watch::step(app, "frame the meshes");
         if let Some(key) = remember {
@@ -251,10 +284,22 @@ pub(crate) fn placement_error(s: &solidcraft_engine::Session) -> Option<String> 
     s.world_state().err().map(|e| e.to_string())
 }
 
+/// The session's world for a reader that runs at every frame and reads only what a joint drag
+/// does not move (the feature that made a face, a sketch, a dimension): while a drag is drawn by
+/// moving its bodies, the world the drag began on. Asking the session then would place the drag's
+/// frame, every moved body again, at every frame (#6325).
+pub(crate) fn still_world(app: &SolveApp) -> std::sync::Arc<solidcraft_engine::doc::ModelState> {
+    crate::viewport::joint_motions::world(app).unwrap_or_else(|| session_world(&app.session))
+}
+
 /// The world the viewport draws: while an opened design is being meshed, the bodies meshed so
 /// far (the picture grows a few times a second), then all of them, in the order they came, until
 /// the design changes; otherwise the session's ([`session_world`]).
 pub(crate) fn shown_world(app: &SolveApp) -> Arc<ModelState> {
+    // A joint drag drawn by moving its bodies shows the world it began on, they moved on the GPU.
+    if let Some(w) = crate::viewport::joint_motions::world(app) {
+        return w;
+    }
     let world = session_world(&app.session);
     let Some(m) = app.open_meshing.as_ref() else { return world };
     if !Arc::ptr_eq(&world, &m.world) {
@@ -280,8 +325,18 @@ pub(crate) fn refresh(app: &mut SolveApp, now: f64) {
         return;
     }
     let began = *m.began.get_or_insert(now);
-    let mut st = (*m.world).clone();
-    st.bodies = order.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect();
+    // Bodies are only ever added to `order`: the picture before holds its first bodies. Where
+    // nothing else holds that picture any more, the new bodies are added to it; otherwise the
+    // bodies so far are copied, never the world's every body (copying the world and dropping its
+    // bodies again took most of a second over the open of a design of 56 000 bodies).
+    let before = m.shown.take().and_then(|(n, st)| Arc::try_unwrap(st).ok().map(|st| (n, st)));
+    let st = match before {
+        Some((n, mut st)) if n <= done && st.bodies.len() == n => {
+            st.bodies.extend(order.get(n..).unwrap_or_default().iter().filter_map(|&i| m.world.bodies.get(i).cloned()));
+            st
+        }
+        _ => m.world.with_bodies(order.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect()),
+    };
     if !m.first_shown && !st.bodies.is_empty() {
         m.first_shown = true;
         if profiling() {
@@ -318,8 +373,9 @@ pub(crate) fn warm(
 ) {
     use solidcraft_engine::doc::display_quality::DisplayQuality;
     let (mesh, _) = b.mesh_in_place();
-    if shared {
-        crate::viewport::warm_shared_tris(&mesh);
+    // A part placed more than once has its shared vertices made with its part ([`warm_part`]).
+    if shared && b.placed_definition().is_none_or(|id| !repeated.contains(&id)) {
+        crate::viewport::warm_shared_tris(&mesh, b);
     }
     // Its box, which framing the view reads for every body once they are all shown: worked out
     // there, on the window thread, it moved every point of every placement (a second for a
@@ -338,7 +394,7 @@ pub(crate) fn warm(
 fn warm_part(b: &ModelBody, parts: &crate::viewport::WarmedParts, edges: bool, q: solidcraft_engine::doc::display_quality::DisplayQuality) {
     use solidcraft_engine::doc::display_quality::DisplayQuality;
     let mesh = if q == DisplayQuality::Normal { b.mesh_in_place().0 } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()).0 };
-    crate::viewport::warm_part(parts, &mesh, edges);
+    crate::viewport::warm_part(parts, &mesh, edges, Some(b));
 }
 
 /// The parts the design being opened made ahead, while it is the one shown.
@@ -366,9 +422,18 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn show_only(app: &mut SolveApp, shown: &[usize]) {
     let Some(m) = app.open_meshing.as_mut() else { return };
-    let mut st = (*m.world).clone();
-    st.bodies = shown.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect();
+    let st = m.world.with_bodies(shown.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect());
     m.shown = Some((shown.len(), Arc::new(st)));
+}
+
+/// Mark the bodies `ready` of the world being opened (by their index in it, in that order) as
+/// the ones meshed so far, as the meshing thread does.
+#[cfg(test)]
+pub(crate) fn set_ready(app: &mut SolveApp, ready: &[usize]) {
+    let Some(m) = app.open_meshing.as_mut() else { return };
+    if let Ok(mut r) = m.ready.lock() {
+        *r = ready.to_vec();
+    }
 }
 
 /// Run `f` as the web build runs: meshing cannot start a thread.

@@ -880,6 +880,140 @@ pub fn closest_point(curve: &Curve, p: [f64; 3], tolerance: f64) -> Result<Optio
     })?
 }
 
+/// Point and unit tangent sampled along a free curve at a given arc length
+/// ([`point_at_arc_length`], [`samples_at_fractions`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveSample {
+    /// Parameter on the record's curve (radians on a circle or ellipse).
+    pub parameter: f64,
+    /// Point on the curve.
+    pub point: [f64; 3],
+    /// Unit tangent along the curve when the derivative is non-zero and finite.
+    pub tangent: Option<[f64; 3]>,
+    /// `true` when the requested distance reached past the interval's end.
+    pub past_end: bool,
+}
+
+fn checked_interval(curve: &Curve, interval: Option<[f64; 2]>) -> Result<[f64; 2]> {
+    if check_curve(curve, &mut Budget::input()).is_err() {
+        return Err(Error::Argument);
+    }
+    let range = match interval {
+        Some([lo, hi]) if lo.is_finite() && hi.is_finite() && lo <= hi => [lo, hi],
+        Some(_) => return Err(Error::Argument),
+        None => own_range(curve).ok_or(Error::Argument)?,
+    };
+    Ok(range)
+}
+
+/// Exact arc length of `curve` over `interval` (or its natural range when `None`), via
+/// [`solidcore::query::api_queries::curve_arc_length`].
+///
+/// # Errors
+/// [`Error::Argument`] for an invalid curve or interval; the kernel's status otherwise.
+pub fn arc_length(curve: &Curve, interval: Option<[f64; 2]>) -> Result<f64> {
+    let range = checked_interval(curve, interval)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::arc_length", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        Ok(
+            solidcore::query::api_queries::curve_arc_length(k, &made.curve, &made.interval)
+                .map_err(crate::error::status),
+        )
+    })?
+}
+
+/// Sample `curve` over `interval` (or its natural range when `None`) at `distance` arc length from
+/// its start (or from its end when `from_end` is `true`), via
+/// [`solidcore::query::api_queries::curve_point_at_arc_length`].
+///
+/// # Errors
+/// [`Error::Argument`] for invalid inputs or negative `distance`; the kernel's status otherwise.
+pub fn point_at_arc_length(
+    curve: &Curve,
+    interval: Option<[f64; 2]>,
+    from_end: bool,
+    distance: f64,
+) -> Result<CurveSample> {
+    if !distance.is_finite() || distance < 0.0 {
+        return Err(Error::Argument);
+    }
+    let range = checked_interval(curve, interval)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::point_at_arc_length", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let s = match solidcore::query::api_queries::curve_point_at_arc_length(
+            k,
+            &made.curve,
+            &made.interval,
+            from_end,
+            distance,
+        ) {
+            Ok(s) => s,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        Ok(Ok(CurveSample {
+            parameter: record_parameter(&record, range, s.parameter, s.point),
+            point: [s.point.x, s.point.y, s.point.z],
+            tangent: s.tangent.map(|t| [t.x, t.y, t.z]),
+            past_end: s.past_end,
+        }))
+    })?
+}
+
+/// Measure `curve`'s total arc length over `interval` (or its natural range when `None`) and
+/// sample it at each fraction in `fractions` (clamped to `[0, 1]`), building the kernel curve once.
+///
+/// # Errors
+/// [`Error::Argument`] for invalid inputs or non-finite fractions; the kernel's status otherwise.
+pub fn samples_at_fractions(
+    curve: &Curve,
+    interval: Option<[f64; 2]>,
+    fractions: &[f64],
+) -> Result<(f64, Vec<CurveSample>)> {
+    if fractions.iter().any(|f| !f.is_finite()) {
+        return Err(Error::Argument);
+    }
+    let range = checked_interval(curve, interval)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::samples_at_fractions", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let (total, samples) = match solidcore::query::api_queries::curve_samples_at_fractions(
+            k,
+            &made.curve,
+            &made.interval,
+            fractions,
+        ) {
+            Ok(res) => res,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let out = samples
+            .into_iter()
+            .map(|s| CurveSample {
+                parameter: record_parameter(&record, range, s.parameter, s.point),
+                point: [s.point.x, s.point.y, s.point.z],
+                tangent: s.tangent.map(|t| [t.x, t.y, t.z]),
+                past_end: s.past_end,
+            })
+            .collect();
+        Ok(Ok((total, out)))
+    })?
+}
+
 /// Where two free curves cross ([`crossings`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Crossing {
@@ -1076,6 +1210,43 @@ pub fn plane_crossings(
     })?
 }
 
+/// Isolated plane intersections of ordered curve pieces, retaining the first hit
+/// when pieces meet within the kernel's zone tolerance. This is the same
+/// tolerance and inclusive comparison used by the kernel's single-curve
+/// [`api_intersectors::curve_plane_crossings`]. Distances are measured by the kernel.
+///
+/// # Errors
+/// The errors of [`plane_crossings`] for any piece.
+pub fn piece_plane_crossings(
+    pieces: &[(&Curve, [f64; 2])],
+    plane: &solidcore_record::Plane,
+) -> Result<Vec<solidcore_record::Vec2>> {
+    let tolerance = run("curve::piece_plane_crossings_tolerance", |k| {
+        Ok(solidcore::geom::tol::zone_tol3d(
+            k,
+            solidcore::geom::tol::USE_DEFAULT,
+        ))
+    })?;
+    let mut points: Vec<solidcore_record::Vec2> = Vec::new();
+    for (curve, interval) in pieces {
+        for hit in plane_crossings(curve, *interval, plane)? {
+            let mut duplicate = false;
+            for point in &points {
+                let distance =
+                    crate::measure::point_distance([point.x, point.y, 0.0], [hit.x, hit.y, 0.0])?;
+                if distance.value <= tolerance {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if !duplicate {
+                points.push(hit);
+            }
+        }
+    }
+    Ok(points)
+}
+
 pub use solidcore::curve::stretch::Stretch;
 
 /// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
@@ -1164,6 +1335,77 @@ pub fn stretch_cvs(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn piece_plane_crossings_keep_shared_endpoints_once() {
+        use solidcore_record::Plane;
+
+        let a = Curve::Line {
+            start: [-1.0, -1.0, 0.0],
+            end: [0.0, 0.0, 0.0],
+        };
+        let b = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [1.0, 1.0, 0.0],
+        };
+        let c = Curve::Line {
+            start: [2.0, -1.0, 0.0],
+            end: [2.0, 1.0, 0.0],
+        };
+        let hits = piece_plane_crossings(
+            &[(&a, [0.0, 1.0]), (&b, [0.0, 1.0]), (&c, [0.0, 1.0])],
+            &Plane::XZ,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits[0].x.abs() < 1e-7 && hits[0].y.abs() < 1e-7);
+        assert!((hits[1].x - 2.0).abs() < 1e-7 && hits[1].y.abs() < 1e-7);
+        assert!(piece_plane_crossings(&[], &Plane::XZ).unwrap().is_empty());
+    }
+
+    #[test]
+    fn piece_plane_crossings_follow_the_kernel_zone_boundary() {
+        use solidcore_record::Plane;
+
+        let tolerance = run("test::plane_crossing_tolerance", |k| {
+            Ok(solidcore::geom::tol::zone_tol3d(
+                k,
+                solidcore::geom::tol::USE_DEFAULT,
+            ))
+        })
+        .unwrap();
+        let a = Curve::Line {
+            start: [-1.0, -1.0, 0.0],
+            end: [0.0, 0.0, 0.0],
+        };
+        let b = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [1.0, 1.0, 0.0],
+        };
+        // The first two pieces share an endpoint. The third crosses at a
+        // known distance below, on, or above the kernel's coincidence boundary.
+        for (factor, expected) in [(0.5, 1), (1.0, 1), (1.5, 2)] {
+            let offset = factor * tolerance;
+            let c = Curve::Line {
+                start: [offset, -1.0, 0.0],
+                end: [offset, 1.0, 0.0],
+            };
+            let hits = piece_plane_crossings(
+                &[(&a, [0.0, 1.0]), (&b, [0.0, 1.0]), (&c, [0.0, 1.0])],
+                &Plane::XZ,
+            )
+            .unwrap();
+            assert_eq!(
+                hits.len(),
+                expected,
+                "distance = {factor} times zone tolerance"
+            );
+            assert_eq!(hits[0], solidcore_record::Vec2::ZERO);
+            if expected == 2 {
+                assert_eq!(hits[1], solidcore_record::Vec2::new(offset, 0.0));
+            }
+        }
+    }
 
     #[test]
     fn plane_crossings_keep_line_endpoints_and_refuse_hostile_inputs() {

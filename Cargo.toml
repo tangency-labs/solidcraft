@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.45.0-rc.4"
+version = "0.48.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -34,8 +34,12 @@ solidcraft-io = { path = "crates/io" }
 # A saved design's picture and summary for file browsers, without the kernel (apps/solidcraft-quicklook)
 solidcraft-design-preview = { path = "crates/design-preview" }
 solidcraft-engine = { path = "crates/engine" }
-solidcraft-ui-egui = { path = "crates/ui-egui" }
+# Without its default features, so an app built with `--no-default-features` leaves out what
+# they bring (usage statistics); each app turns them on in its own defaults.
+solidcraft-ui-egui = { path = "crates/ui-egui", default-features = false }
 solidcraft-ui-kit = { path = "crates/ui-kit" }
+# The app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values
+solidcraft-panel-layout = { path = "crates/panel-layout" }
 solidcraft-look = { path = "crates/look" }
 solidcraft-ui-registry = { path = "crates/ui-registry" }
 solidcraft-color = { path = "crates/color" }
@@ -43,6 +47,7 @@ solidcraft-display-units = { path = "crates/display-units" }
 solidcraft-ui-text = { path = "crates/ui-text" }
 solidcraft-theme = { path = "crates/theme" }
 solidcraft-viewport = { path = "crates/viewport" }
+solidcraft-views = { path = "crates/views" }
 solidcraft-viewport-egui = { path = "crates/viewport-egui" }
 solidcraft-viewport-gpu = { path = "crates/viewport-gpu" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
@@ -123,16 +128,17 @@ gethostname = "1"
 # FreeCAD and Rhino import (Apache-2.0, pure Rust; native and browser builds).
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
 # features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
-# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
+# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through;
+# `iges` writes IGES when "Export STEP and IGES with cadmpeg" is on (no IGES import route).
 cadmpeg-core = "=0.6.12"
 cadmpeg-ir = "=0.6.12"
-cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "rhino", "step", "usd"] }
+cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "iges", "rhino", "step", "usd"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
 
 # Ends a process group with the system call (MIT; already in the tree through zip).
-nix = { version = "0.31", default-features = false, features = ["signal"] }
+nix = { version = "0.31", default-features = false, features = ["signal", "user"] }
 
 # images
 image = { version = "0.25", default-features = false, features = ["png", "hdr"] }
@@ -175,11 +181,16 @@ type_complexity = "allow"
 # `!(x > tol)` is our idiom for "not a usable number" (NaN-safe).
 neg_cmp_op_on_partial_ord = "allow"
 
+# Dev builds keep line tables only, so backtraces still name file:line. Full debug info made the
+# app binary 4.9 GB and every relink slow. For a debugger, override it:
+# `CARGO_PROFILE_DEV_DEBUG=2`.
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
 
 # Tests and lints (`cargo xtask ci`, GitHub CI): quick to build, quick enough to run. Light
 # optimisation, line tables only (file:line in backtraces), no LTO, no debug assertions.
@@ -205,6 +216,14 @@ codegen-units = 16
 # binary). See docs/crash-reports.md.
 debug = "line-tables-only"
 
+# Local performance work: release without its thin LTO, incremental. A rebuild after an edit
+# drops from 1.5-2 minutes to 3-10 seconds (the thin LTO link of the app was most of it), for
+# about 4-7% more CPU time when running. Measure with it while iterating, and take the final numbers with
+# --release. See docs/perf.md.
+[profile.profiling]
+inherits = "release"
+lto = false
+incremental = true
 
 # Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
 [patch.crates-io]

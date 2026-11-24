@@ -53,6 +53,23 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Whether a stored trim's control hull leaves a periodic direction's base range.
+/// This is a topology-edit request, not permission to clamp or discard a piece of a trim.
+/// A billionth of a period at the ends allows only parameter rounding.
+pub fn leaves_base_period(domain: Domain, trim: &Curve2) -> bool {
+    points(trim).iter().any(|p| {
+        p.iter()
+            .zip(domain.range)
+            .zip(domain.period)
+            .any(|((x, range), period)| match (range, period) {
+                (Some((lo, hi)), Some(period)) => {
+                    !x.is_finite() || *x < lo - 1e-9 * period || *x > hi + 1e-9 * period
+                }
+                _ => false,
+            })
+    })
+}
+
 impl From<EvalError> for Error {
     fn from(e: EvalError) -> Self {
         match e {
@@ -87,6 +104,162 @@ pub struct EdgeUse<'a> {
     pub tolerance: f64,
     /// The use's exact pcurve where the producer holds one.
     pub given: Option<&'a Curve2>,
+}
+
+/// One face leaving an edge, with its pcurve on the edge's own parameter interval.
+/// The loop direction is relative to the surface's natural normal.
+#[derive(Clone, Copy, Debug)]
+pub struct RadialFace<'a> {
+    /// The face's surface in the pcurve's parameters.
+    pub surface: &'a Surface,
+    /// The edge's curve in the face's surface parameters.
+    pub pcurve: &'a Curve2,
+    /// Whether the face's loop follows the edge's positive curve direction.
+    pub forward: bool,
+}
+
+/// Orders faces counter-clockwise about an edge's positive tangent, starting at the
+/// first face. This is the radial-edge construction (Weiler, 1988): at an interior
+/// point, each face leaves the edge along `(S_u × S_v) × tangent`, reversed when
+/// its loop runs backwards. The pcurve selects that point on the surface; a face's
+/// extent beyond the edge has no part in its order.
+/// The caller supplies a valid edge with regular, distinct inward directions along
+/// its interior: their cyclic order cannot change without a coincidence or a
+/// singularity. This computes that order; it does not certify the whole edge.
+///
+/// With the first inward ray `b` as reference, the polar coordinates are
+/// `x = b.dot(ray)` and `y = tangent.dot(b.cross(ray))`. Omitting normalization
+/// scales every y coordinate by the same positive factor, preserving cyclic order.
+/// The surface derivatives are evaluated directly, with no stepped probes or
+/// geometric angular tolerance. Faces sharing a ray (up to [`RAY_ROUNDING`]) are ordered
+/// by [`bend`], and refused only where that is equal too.
+///
+/// # Errors
+/// Malformed or unevaluable geometry, a vanishing tangent or inward ray, or faces
+/// whose radial directions and bends cannot be distinguished.
+pub fn radial_order(
+    curve: &Curve,
+    interval: [f64; 2],
+    faces: &[RadialFace<'_>],
+) -> Result<Vec<usize>> {
+    let [lo, hi] = interval;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(Error::Invalid("invalid radial edge interval".into()));
+    }
+    let t = lo.midpoint(hi);
+    let (_, tangent) = CurveEval::new(curve)?
+        .derivs(t)
+        .ok_or_else(|| Error::Failed("cannot evaluate the radial edge tangent".into()))?;
+    if !tangent.is_finite() || tangent.len2() == 0.0 {
+        return Err(Error::Failed("the radial edge tangent vanishes".into()));
+    }
+    let mut reference = None;
+    let mut angles = Vec::new();
+    for (i, face) in faces.iter().enumerate() {
+        let [u, v] = face
+            .pcurve
+            .eval(t)
+            .ok_or_else(|| Error::Failed("cannot evaluate a radial face's pcurve".into()))?;
+        let surface = SurfaceEval::new(face.surface)?;
+        let (_, du, dv) = surface
+            .derivs(u, v)
+            .ok_or_else(|| Error::Failed("cannot evaluate a radial face's normal".into()))?;
+        let ray = du.cross(dv).cross(tangent);
+        let ray = if face.forward { ray } else { -ray };
+        let b = *reference.get_or_insert(ray);
+        let (x, y) = (b.dot(ray), tangent.dot(b.cross(ray)));
+        if !(x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0)) {
+            return Err(Error::Failed(
+                "a radial face's inward direction is undefined".into(),
+            ));
+        }
+        let angle = y.atan2(x);
+        let angle = if angle < 0.0 {
+            angle + std::f64::consts::TAU
+        } else {
+            angle
+        };
+        let angle = if std::f64::consts::TAU - angle <= RAY_ROUNDING {
+            0.0
+        } else {
+            angle
+        };
+        angles.push((i, angle, 0.0, (surface, [u, v], du, dv, ray)));
+    }
+    let snapped: Vec<f64> = angles
+        .iter()
+        .map(|a| {
+            angles
+                .iter()
+                .map(|b| b.1)
+                .filter(|b| (a.1 - b).abs() <= RAY_ROUNDING)
+                .fold(a.1, f64::min)
+        })
+        .collect();
+    for (entry, angle) in angles.iter_mut().zip(snapped) {
+        entry.1 = angle;
+    }
+    let tangent_faces = || {
+        Error::Failed(
+            "tangent faces do not determine a radial order from their inward directions or bends"
+                .into(),
+        )
+    };
+    let tied: Vec<f64> = angles
+        .iter()
+        .filter(|a| angles.iter().filter(|b| b.1 == a.1).count() > 1)
+        .map(|a| a.1)
+        .collect();
+    let same_bend = |a: f64, b: f64| (a - b).abs() <= RAY_ROUNDING * a.abs().max(b.abs());
+    let mut reference_bend = None;
+    for entry in &mut angles {
+        if !tied.contains(&entry.1) {
+            continue;
+        }
+        let (surface, [u, v], du, dv, ray) = &entry.3;
+        entry.2 = bend(surface, *u, *v, *du, *dv, *ray, tangent).ok_or_else(tangent_faces)?;
+        // A face sharing the reference ray that bends back from it lies just short of a full turn.
+        if entry.1 == 0.0 {
+            let reference = *reference_bend.get_or_insert(entry.2);
+            if reference > entry.2 && !same_bend(reference, entry.2) {
+                entry.1 = std::f64::consts::TAU;
+            }
+        }
+    }
+    angles.sort_unstable_by(|a, b| a.1.total_cmp(&b.1).then(a.2.total_cmp(&b.2)));
+    for pair in angles.windows(2) {
+        if matches!(pair, [a, b] if a.1 == b.1 && same_bend(a.2, b.2)) {
+            return Err(tangent_faces());
+        }
+    }
+    Ok(angles.into_iter().map(|(i, ..)| i).collect())
+}
+
+/// Rays this close in angle (radians) are one ray, and bends this close (relative) one bend: the
+/// rounding of this function's own arithmetic (S0332: 8.7e-17), far below any geometric gap.
+const RAY_ROUNDING: f64 = 64.0 * f64::EPSILON;
+
+/// How fast a face turns about the edge tangent, counter-clockwise, as it leaves the edge along
+/// `ray`: `t̂ · (r̂ × κ)`, with `κ` the surface's second derivative along the unit ray. A face
+/// leaving at angle θ is at θ + bend·s/2 a distance s out, so faces sharing a ray are ordered by it.
+fn bend(
+    surface: &SurfaceEval,
+    u: f64,
+    v: f64,
+    du: Vec3,
+    dv: Vec3,
+    ray: Vec3,
+    tangent: Vec3,
+) -> Option<f64> {
+    let (uu, uv, vv) = surface.second(u, v)?;
+    let (g11, g12, g22) = (du.dot(du), du.dot(dv), dv.dot(dv));
+    let det = g11 * g22 - g12 * g12;
+    let (p, q) = (du.dot(ray), dv.dot(ray));
+    let (a, b) = ((g22 * p - g12 * q) / det, (g11 * q - g12 * p) / det);
+    let curl = uu * (a * a) + uv * (2.0 * a * b) + vv * (b * b);
+    let scale = ray.len2() * ray.len2().sqrt() * tangent.len2().sqrt();
+    let bend = tangent.dot(ray.cross(curl)) / scale;
+    (det != 0.0 && bend.is_finite()).then_some(bend)
 }
 
 /// Knot spans a fitted pcurve may have (the schema takes 4096 control points).
@@ -606,13 +779,29 @@ impl On {
             points: vec![a, b],
         };
         let mut candidates = Vec::new();
-        let ends = (self.project_in(p0, exact), self.project_in(p1, exact));
+        let middle = self.project_in(pm, exact);
+        // Each end on the sheet of the edge's middle: an end on the seam of a closed form projects
+        // to either side of it, and on the far side the segment between the ends runs the wrong
+        // way round. A segment that missed for that left the ones below, whose ends are placed
+        // from the middle, to fit the edge within the tolerance with ends off its vertices.
+        let sheet = |mut q: [f64; 2]| {
+            if let Some(m) = middle {
+                for ((x, near), period) in q.iter_mut().zip(m).zip(self.dom.period) {
+                    *x = uv::unwrap(*x, near, period);
+                }
+            }
+            q
+        };
+        let ends = (
+            self.project_in(p0, exact).map(sheet),
+            self.project_in(p1, exact).map(sheet),
+        );
         if let (Some(a), Some(b)) = ends {
             candidates.push(line(a, b));
         }
         // One parameter fixed where the edge's middle is (an end on a seam or at an apex may
         // project anywhere along it), the other from the ends.
-        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, self.project_in(pm, exact)) {
+        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, middle) {
             candidates.push(line([m[0], a[1]], [m[0], b[1]]));
             candidates.push(line([a[0], m[1]], [b[0], m[1]]));
         }
@@ -707,11 +896,18 @@ impl On {
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
-    /// loop order and direction), then all together into the surface's base period where the
-    /// loop's lowest point allows. Where uses meet at a pole (within `tol`) the periodic
-    /// parameter is free: there the offsets that turn the loop counter-clockwise in (u, v) (a
-    /// face boundary seen from the natural normal) by more than rounding are taken, else the
-    /// nearest. A seam used twice from pole to pole thus encloses its face, never nothing.
+    /// loop order and direction), then all together into the surface's base period. Which
+    /// translate depends on whether the loop's control hull fits in the surface's range, to
+    /// within how far its uses miss each other at its vertices away from a pole and a billionth
+    /// of the period at each end. A loop that fits goes where its lowest point allows; one that
+    /// lies outside the range there but within it a period lower, to that rounding, goes there
+    /// (and may start below the range by that). A loop wider than that, which no translate puts
+    /// in the range, goes where its hull's midpoint allows: a small overrun at either seam must
+    /// not move the rest of a full-period loop one whole period outside the patch.
+    /// Where uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets
+    /// that turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural
+    /// normal) by more than rounding are taken, else the nearest. A seam used twice from pole to
+    /// pole thus encloses its face, never nothing.
     fn close(&self, uses: &mut [(Curve2, bool)], tol: f64) -> Result<()> {
         let n = uses.len();
         let mut ends = Vec::new();
@@ -829,16 +1025,88 @@ impl On {
                 .copied()
                 .flatten()
                 .map_or(0.0, |(a, b)| a.min(b));
-            let low = uses
+            let (low, high) = uses
                 .iter()
                 .zip(&shift)
                 .flat_map(|((c, _), s)| points(c).into_iter().map(move |q| at(q, d) + s))
-                .fold(f64::INFINITY, f64::min);
-            let base = if low.is_finite() {
-                ((low - lo) / period + 1e-9).floor() * period
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
+                    (a.min(x), b.max(x))
+                });
+            // Its uses meet at its vertices only to within their rounding: how far apart they
+            // are there, short of whole periods, but at a pole, where the parameter is free.
+            let slack = (0..n)
+                .filter(|&k| !at_pole.get(k).copied().unwrap_or(true))
+                .filter_map(|k| {
+                    let before = k.checked_sub(1).or_else(|| n.checked_sub(1))?;
+                    let (start, _) = ends.get(k)?;
+                    let (_, end) = ends.get(before)?;
+                    let gap = at(*start, d) + shift.get(k)? - at(*end, d) - shift.get(before)?;
+                    Some((gap - (gap / period).round() * period).abs())
+                })
+                .fold(0.0, f64::max);
+            let hi = self
+                .dom
+                .range
+                .get(d)
+                .copied()
+                .flatten()
+                .map_or(lo + period, |(a, b)| a.max(b));
+            let room = slack + 1e-9 * period;
+            // A loop that fits in the range to that rounding is placed by its lowest point; one
+            // wider, which no translate puts in the range, by its midpoint, so an overrun at
+            // either seam leaves the rest of it in the range (#19560).
+            let anchor = if high - low <= hi - lo + 2.0 * room {
+                low
+            } else {
+                0.5 * low + 0.5 * high
+            };
+            let mut base = if anchor.is_finite() {
+                ((anchor - lo) / period + 1e-9).floor() * period
             } else {
                 0.0
             };
+            // A loop that lies outside the range where its lowest point puts it, but within it a
+            // period lower to that rounding and the base's own (above), lies there: its lowest
+            // point is a rounding short of a period's start (#19315).
+            let inside = |by: f64| low - by >= lo - room && high - by <= hi + room;
+            if low.is_finite() && !inside(base) && inside(base + period) {
+                base += period;
+            } else if low.is_finite() && high.is_finite() && !inside(base) {
+                // Within neither: a period lower, where the loop runs past the range by less than
+                // where its lowest point puts it, and by a step that moves the surface within
+                // `tol`: each point past an end moves along `d` by at most that end's overrun,
+                // within the strip from the end to the overrun and across the loop's span, which
+                // a certified bound on the surface's speed there encloses
+                // (`SurfaceEval::strip_shift_bound`); where no bound is decided it stays. A loop
+                // that starts on the range's start, its lowest point a writer's rounding below
+                // it, stays on the range rather than moving a whole period on; one farther below
+                // stays where its lowest point puts it.
+                let spill = |by: f64| (lo - (low - by)).max(0.0) + ((high - by) - hi).max(0.0);
+                let lower = base + period;
+                if spill(lower) < spill(base) {
+                    let (below, above) = (
+                        (lo - (low - lower)).max(0.0),
+                        ((high - lower) - hi).max(0.0),
+                    );
+                    let across = uses
+                        .iter()
+                        .flat_map(|(c, _)| points(c).into_iter().map(|q| at(q, 1 - d)))
+                        .fold([f64::INFINITY, f64::NEG_INFINITY], |[a, b], x| {
+                            [a.min(x), b.max(x)]
+                        });
+                    let shift = |along: [f64; 2], o: f64| -> Option<f64> {
+                        if o > 0.0 {
+                            self.surface.strip_shift_bound(d, along, across, o).ok()
+                        } else {
+                            Some(0.0)
+                        }
+                    };
+                    let moved = shift([lo - below, lo], below).zip(shift([hi, hi + above], above));
+                    if moved.is_some_and(|(x, y)| x.max(y) <= tol) {
+                        base = lower;
+                    }
+                }
+            }
             for (((c, _), s), (st, en)) in uses.iter_mut().zip(&shift).zip(ends.iter_mut()) {
                 let by = s - base;
                 if by != 0.0 {

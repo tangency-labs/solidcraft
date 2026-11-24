@@ -89,6 +89,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("theme", Class::Shared),
     // the UI kit and its components (ribbon, app bar, history and navigation bars, view compass, window chrome, theme files), drawn from host data (#14251)
     ("ui-kit", Class::Shared),
+    // the app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values (#17363)
+    ("panel-layout", Class::Shared),
     // SolidCraft's look, ready to install into the kit: icon masters and roles, code-drawn glyphs, IBM Plex faces, built-in themes
     ("look", Class::Shared),
     // the control channel: the per-launch token and its files, what a request still running does (#12946)
@@ -101,11 +103,15 @@ pub const TABLE: &[(&str, Class)] = &[
     ("viewport-gpu", Class::Shared),
     // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
     ("viewport-egui", Class::Shared),
+    // the views of a design as plain data: kinds, the set a design keeps open, the saved form (no UI toolkit)
+    ("views", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
     ("quicklook", Class::Exempt),
     ("web", Class::Exempt),
+    // the UI kit's component gallery (docs.solidcraft.io/kit/), desktop and browser
+    ("ui-kit-gallery", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

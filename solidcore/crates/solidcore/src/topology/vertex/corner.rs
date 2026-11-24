@@ -25,8 +25,10 @@
 //!   tolerance constructed first, then doubled, as `SmTol`). A vertex outside any
 //!   B-rep (`GetBrep()` null, which upstream dereferences) returns
 //!   [`SolidError::InvalidInput`]. `SmTol::GetApproxTol3d(GetContext())` reads the
-//!   zone tolerance of the vertex's context, the B-rep's: the kernel's context
-//!   (`context_approx_tol_3d(k, Some(&k.context), ..)`, as the B-rep constructor reads it).
+//!   zone tolerance of the vertex's context, the B-rep's, which upstream describes the
+//!   model being worked on: here half the zone tolerance of the B-rep's own model size
+//!   estimate (`approx_tol3d(k, 0.5 * brep_size_zone_tol_3d(k, b))`, the kernel
+//!   context's when the B-rep stores the default), as the B-rep constructor reads it.
 //! - **Temporary point.** `SmTemporaryChangeValue<SmPoint3d>` (the parallel-face branch
 //!   of `CalcCornerFromFaces`) sets the vertex point and restores it afterwards; it is
 //!   restored before any error is returned too.
@@ -46,6 +48,7 @@
 //!   `SM_DEBUG_CODE` blocks are compiled out of the reference build.
 //! - No input-driven recursion.
 
+use crate::error::topology::TopologyFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::tol;
 use crate::intersect::surface_intersector::p1::{IntersectionPointType, SurfaceIntersector};
@@ -336,8 +339,9 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
         return Ok(out);
     }
 
-    let approx_tol_3d =
-        tol::context_approx_tol_3d(k, Some(&k.context), tol::SmallTopoType::NormalSize);
+    // (upstream asks the B-rep's context, there this model's: half the zone tolerance
+    // of this B-rep's own model size estimate)
+    let approx_tol_3d = tol::approx_tol3d(k, 0.5 * tol::brep_size_zone_tol_3d(k, b));
 
     let parallel = has_parallel_faces(k, b, v, Some(tol::ANG_TOL_DEG))?;
 
@@ -516,9 +520,9 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
 
         _ => {
             // SM_DBG_WARN: unexpected number of TgtFaces
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the vertex has more than three faces",
+                TopologyFailure::TooManyTangentFaces,
             ));
         }
     }

@@ -619,19 +619,28 @@ fn on_material(s: Vec2, e: Vec2, regions: &[Region2]) -> Vec<(Vec2, Vec2)> {
 }
 
 /// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
-/// line from its point: the least and the greatest. `None` where it doesn't. Read off the curves
+/// line from its point: the least and the greatest. `None` where it doesn't. See
+/// [`crossings_across`].
+pub(crate) fn extent_across(r: &Region2, line: (Vec2, Vec2)) -> Option<(f64, f64)> {
+    let at = crossings_across(r, line);
+    at.first().copied().zip(at.last().copied())
+}
+
+/// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
+/// line from its point, in order: the line runs inside the region from the first to the second,
+/// from the third to the fourth, and so on. Read off the curves
 /// themselves: an outline crosses where it passes from the line's left to its right or back, a
 /// point on the line counted with its right, and each segment ending where the next one starts
 /// (see [`crate::sheet_surface_cuts::holds`]). A line's crossing is found in closed form, and an
 /// arc's, in pieces between its circle's points furthest to either side of the line, along each
 /// of which it only nears the line or only leaves it; any other curve's by
 /// [`solidcraft_develop::crossings`], each crossing of its chords followed onto the curve itself.
-pub(crate) fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f64)> {
+pub(crate) fn crossings_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Vec<f64> {
     use std::f64::consts::PI;
     let n = u.perp();
     let side = |q: Vec2| (q - p).dot(n);
-    let mut out: Option<(f64, f64)> = None;
-    let mut take = |along: f64| out = Some(out.map_or((along, along), |(lo, hi)| (lo.min(along), hi.max(along))));
+    let mut out: Vec<f64> = Vec::new();
+    let mut take = |along: f64| out.push(along);
     for l in std::iter::once(&r.outer).chain(&r.holes) {
         let ends = l.segs.iter().skip(1).chain(l.segs.first()).map(Seg2::start);
         for (s, end) in l.segs.iter().zip(ends) {
@@ -689,6 +698,7 @@ pub(crate) fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f
             }
         }
     }
+    out.sort_by(f64::total_cmp);
     out
 }
 
@@ -805,9 +815,42 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
         let flat = |p: Vec2| ((p - an.origin).dot(an.dir), base + sign * (p - an.origin).dot(into));
         // Each loop's segments in order, its lines laid out (a curve, `None`, has no line to
         // carry on, and keeps its place: the side beside an edge is its neighbour in the loop).
+        // Pieces of one straight side are one line: a cut-out with a corner on the side splits it
+        // there, which is no corner of the outline.
         let lines: Vec<Vec<Option<((f64, f64), (f64, f64))>>> = std::iter::once(&region.outer)
             .chain(&region.holes)
-            .map(|l| l.segs.iter().map(|g| if let Seg2::Line { a: p, b: q } = *g { Some((flat(p), flat(q))) } else { None }).collect())
+            .map(|l| {
+                let mut out: Vec<Option<((f64, f64), (f64, f64))>> = Vec::new();
+                for g in &l.segs {
+                    let next = if let Seg2::Line { a: p, b: q } = *g { Some((flat(p), flat(q))) } else { None };
+                    if let (Some(Some((a, b))), Some((c, d))) = (out.last().copied(), next) {
+                        let (u, v) = ((b.0 - a.0, b.1 - a.1), (d.0 - c.0, d.1 - c.1));
+                        let len = (u.0.hypot(u.1)).max(v.0.hypot(v.1));
+                        let on = (b.0 - c.0).hypot(b.1 - c.1) <= tol;
+                        if on && u.0 * v.0 + u.1 * v.1 > 0.0 && (u.0 * v.1 - u.1 * v.0).abs() <= tol * len {
+                            if let Some(last) = out.last_mut() {
+                                *last = Some((a, d));
+                            }
+                            continue;
+                        }
+                    }
+                    out.push(next);
+                }
+                // The side may be split where the loop starts: its last piece runs on into its first.
+                if out.len() > 2
+                    && let (Some(Some((a, b))), Some(Some((c, d)))) = (out.last().copied(), out.first().copied())
+                {
+                    let (u, v) = ((b.0 - a.0, b.1 - a.1), (d.0 - c.0, d.1 - c.1));
+                    let len = (u.0.hypot(u.1)).max(v.0.hypot(v.1));
+                    if (b.0 - c.0).hypot(b.1 - c.1) <= tol && u.0 * v.0 + u.1 * v.1 > 0.0 && (u.0 * v.1 - u.1 * v.0).abs() <= tol * len {
+                        out.pop();
+                        if let Some(first) = out.first_mut() {
+                            *first = Some((a, d));
+                        }
+                    }
+                }
+                out
+            })
             .collect();
         // Where a line meets the tangent line, near the end.
         let meets = |(p, q): ((f64, f64), (f64, f64))| -> Option<f64> {
@@ -863,10 +906,19 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
             if (through - end).abs() > tol || hi < tangent.min(base) - tol || lo > tangent.max(base) + tol {
                 continue;
             }
-            found = meets((p, q)).or(found);
+            // A side that crosses the tangent line wins over a line that only touches it there
+            // (the edge of a cut-out with a corner on the crossing).
+            if let Some(s) = meets((p, q)) {
+                let across = crosses((p, q));
+                if across || !found.is_some_and(|(_, c)| c) {
+                    found = Some((s, across));
+                }
+            }
         }
-        // With no edge on its anchor, the panel's material past the end is not read here.
-        found.map(|s| (s, false))
+        // With no edge on its anchor (its sharp drawn inside its edge, the band taking what lies
+        // past it), the side through the end bounds the panel there all the same: it crosses
+        // the tangent line where it runs on across it.
+        found
     };
     (side(&b.a, b.a.dir.perp(), 0.0, -1.0, -setback), side(&b.b, -b.b.dir.perp(), width - 2.0 * setback, 1.0, width - setback))
 }
@@ -2612,14 +2664,15 @@ pub(crate) fn settle(
                     // Where both panels' sides run on across their tangent lines, neither panel
                     // runs on past the end: all either has past the zone's end in the bend's band
                     // is the corner its side cuts off between its tangent line and its anchor,
-                    // which the zone's end takes the place of (the blank's outline runs from the
-                    // one side along the zone's end to the other). Kept, it stays flat out to the
+                    // which the zone's end takes the place of. Kept, it stays flat out to the
                     // sharp past the bend's end; where the two sides slant alike (two walls of a
                     // hopper meeting at a corner, their rims level), both corners reach the sharp
                     // there, inside each other's metal. So past the end both panels stop at their
-                    // tangent lines, as at a notch, and no bend relief is cut: no panel runs on.
+                    // tangent lines, and no bend relief is cut: no panel runs on. The zone's end
+                    // is what the two sides make of it under the bend, carried into the zone
+                    // square through the sheet (`Relief::Outline`).
                     if let (Some((_, true)), Some((_, true))) = (n, f) {
-                        slot.2 = Relief::Notch;
+                        slot.2 = Relief::Outline;
                     }
                 }
             }
@@ -3252,12 +3305,6 @@ pub struct SurfaceSheet {
     /// a rim on one is made by that line (see [`RimEdge::Sketch`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketch_curves: Vec<(String, String, Vec2, Vec2)>,
-    /// Each straight rim of its flat panels as last laid out: the panel, its edge in the panel's
-    /// chart and its name there (see [`crate::sheet::FaceNamer`]). A pick is named by them and
-    /// found again by its name, so a feature reads them here rather than laying the sheet out
-    /// again.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rims: Vec<(usize, Vec2, Vec2, String)>,
     /// What each face of its body was made for, as it was last built (see [`SheetFace`]): what it
     /// reports to the model, which names its faces from it (#7990). Never a name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3489,6 +3536,13 @@ struct Pushed {
     ends: [[Vec2; 2]; 2],
 }
 
+impl Pushed {
+    /// Whether the piece is a roll: a circular arc's panel is a cylinder, a line's a plane.
+    fn roll(&self) -> bool {
+        matches!(self.surface, Surface::Cylinder { .. })
+    }
+}
+
 /// Piece `seg` of a contour flange's profile in `plane` pushed out `width` along the plane's
 /// normal, the piece as drawn the sheet's surface and its material on the right of the travel (on
 /// the left when `flip`); the joints at its ends run from the height `z0` above the plane to `z1`.
@@ -3592,7 +3646,6 @@ impl SurfaceSheet {
             perforations: Vec::new(),
             perforation_joints: Vec::new(),
             sketch_curves: Vec::new(),
-            rims: Vec::new(),
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
@@ -3702,6 +3755,15 @@ impl SurfaceSheet {
             // How far the profile turns where the two meet, from their own ways there.
             let (da, db) = (a.ways[1], b.ways[0]);
             let angle = da.cross(db).len().atan2(da.dot(db));
+            // A roll's edge cannot take a bend (the develop lays out no bend on one), so an arc
+            // that does not run on into the curve beside it is refused here, naming the arc: the
+            // sheet would bend on the edge of the roll.
+            if angle > SMOOTH && (a.roll() || b.roll()) {
+                let id = if a.roll() { curves.get(i) } else { curves.get(i + 1) }.map_or("", |(c, _)| c.as_str());
+                return err(format!(
+                    "not supported yet: the arc `{id}` is not tangent to the curve beside it: make it tangent, or draw a line there for a bend (#15576)"
+                ));
+            }
             // The joint on each panel, as its chart has it, from where it starts.
             let anchor = |panel: usize, [from, to]: [Vec2; 2]| (to - from).normalized().map(|dir| Anchor { panel, origin: from, dir });
             let (Some(on_a), Some(on_b)) = (anchor(i, a.ends[1]), anchor(i + 1, b.ends[0])) else {
@@ -3783,7 +3845,6 @@ impl SurfaceSheet {
             perforations: Vec::new(),
             perforation_joints: Vec::new(),
             sketch_curves,
-            rims: Vec::new(),
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
@@ -4175,8 +4236,7 @@ impl SurfaceSheet {
     /// `body` with the sheet's bores cut from it, each from its panel where `frames` put it.
     fn bored(&self, mut body: Body, frames: &[Option<Rigid3>]) -> Result<Body> {
         for b in &self.bores {
-            let frame =
-                b.panel.and_then(|p| frames.get(p).copied().flatten()).ok_or_else(|| DocError::Invalid("a bored panel has no place".into()))?;
+            let frame = frames.get(b.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a bored panel has no place".into()))?;
             let axis = frame.vector(b.axis);
             let base = frame.point(b.base);
             let Some(plane) = axis.normalized().and_then(|a| Plane::new(base, a.any_perp(), a.cross(a.any_perp()))) else { continue };
@@ -4192,9 +4252,15 @@ impl SurfaceSheet {
     /// `body` with the sheet's recesses cut from it, each from its panel where `frames` put it.
     fn recessed(&self, mut body: Body, frames: &[Option<Rigid3>]) -> Result<Body> {
         let t = self.sheet.thickness;
-        // Past the face it opens from, a hair, so that no face of the cut lies on the sheet's.
-        let margin = t * 1e-3;
         for r in &self.recesses {
+            // Past the face it opens from, a hair, so that no face of the cut lies on the sheet's:
+            // a thousandth of the thickness clear of both bodies' tolerances. Within the larger of
+            // them two places are one, and the tool's corners, as far off the sheet's edges as the
+            // hair, must stay off their balls: twice the body's tolerance covers the tool's own,
+            // made at the kernel's (2e-5), no larger. A sheet's body is held to a millionth of
+            // its size (1.02e-3 for a 1000 x 200 plate), past a thousandth of a 1 mm thickness
+            // (#20769).
+            let margin = t * 1e-3 + 2.0 * body.record().tolerance;
             let frame = frames.get(r.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a recessed panel has no place".into()))?;
             let plane = Plane::new(frame.shift, frame.x, frame.y).ok_or_else(|| DocError::Invalid("a recessed panel has no plane".into()))?;
             let (from, to) = if r.far { (t - r.depth, t + margin) } else { (-margin, r.depth) };
@@ -4293,9 +4359,8 @@ impl SurfaceSheet {
     }
 
     /// Keeps the flat `regions` of the development `dev` (joined from its `pieces`), with its
-    /// bends and their tabs, rolls and their lines, and its panels' rims.
+    /// bends and their tabs, and rolls and their lines.
     fn laid_out(&mut self, dev: &Development, pieces: &[(Piece, Region2)], regions: Vec<Region2>) -> Result<()> {
-        self.rims = crate::sheet::rims(&self.sheet, dev, pieces, &self.sketch_curves, &self.recipes);
         self.bends = dev
             .zones
             .iter()
@@ -4347,6 +4412,60 @@ mod tests {
     use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
     use super::extent_across;
+
+    /// A plate whose side runs at a slant to its bend has the side cut in two where it crosses the
+    /// tangent line (a cut-out's corner there). The two pieces are one line, wherever the loop
+    /// starts: with the cut the loop's first vertex they are its last segment and its first, and
+    /// read either way the side crosses the tangent line, so the end follows the outlines. The
+    /// plate's sharp runs along x from the origin, its material above; 2 mm sheet, R 2, a right
+    /// angle toward the material, so its tangent line lies at y = (R + T) tan 45° = 4, which its
+    /// side x = −0.75 y crosses at x = −3. The flange's side carries the plate's on across the
+    /// sharp and crosses the flange's tangent line 3 along.
+    #[test]
+    fn a_side_split_where_its_loop_starts_still_crosses_the_tangent_line() {
+        use solidcore_record::Vec3;
+        use solidcraft_develop::{Anchor, Bend, Datum, Panel, Relief, Sheet, Tail, ZoneEnds};
+
+        use super::{BendEdge, outline_ends};
+        let poly =
+            |pts: &[(f64, f64)]| Region2 { outer: Loop2::polygon(&pts.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>()), holes: Vec::new() };
+        let flange = Panel { name: "flange".into(), region: poly(&[(0.0, 0.0), (15.0, -20.0), (100.0, -20.0), (100.0, 0.0)]), ..Panel::default() };
+        let bend = Bend {
+            angle: PI / 2.0,
+            radius: 2.0,
+            toward_material: true,
+            datum: Datum::Sharp,
+            length: 100.0,
+            ends: ZoneEnds { near: (0.0, 100.0), far: (0.0, 100.0) },
+            tails: (Tail::Keep, Tail::Keep),
+            relief: (Relief::None, Relief::None),
+        };
+        let edge = BendEdge {
+            joint: 0,
+            ends: [Vec3::new(0.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0)],
+            normals: (Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0)),
+            toward: true,
+            len: 100.0,
+            a: Anchor { panel: 0, origin: Vec2::new(0.0, 0.0), dir: Vec2::new(1.0, 0.0) },
+            b: Anchor { panel: 1, origin: Vec2::new(0.0, 0.0), dir: Vec2::new(1.0, 0.0) },
+            setback: 4.0,
+            radius: 2.0,
+        };
+        let read = |plate: &[(f64, f64)]| {
+            let sheet = Sheet {
+                thickness: 2.0,
+                k_factor: 0.44,
+                panels: vec![Panel { name: "plate".into(), region: poly(plate), ..Panel::default() }, flange.clone()],
+                ..Sheet::default()
+            };
+            outline_ends(&sheet, &edge, &bend, 0.0, 1e-9)
+        };
+        let starts_at_the_cut = read(&[(-3.0, 4.0), (0.0, 0.0), (100.0, 0.0), (100.0, 60.0), (-45.0, 60.0)]);
+        let cut_inside = read(&[(100.0, 0.0), (100.0, 60.0), (-45.0, 60.0), (-3.0, 4.0), (0.0, 0.0)]);
+        let near = |got: Option<(f64, bool)>, want: f64| got.is_some_and(|(s, across)| (s - want).abs() < 1e-9 && across);
+        assert!(near(starts_at_the_cut.0, -3.0) && near(starts_at_the_cut.1, 3.0), "{starts_at_the_cut:?}");
+        assert_eq!(starts_at_the_cut, cut_inside);
+    }
 
     /// Where a line crosses an outline is read off its curves. A disc of radius 2 round the
     /// origin (two half turns), crossed along x through (−5, 1): its circle meets y = 1 at

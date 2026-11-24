@@ -1,5 +1,5 @@
 //! `solid.cell_grid`: fill the closed profiles of a sketch with cells of one shape and cut them
-//! out of the bodies (#14044). The cells are planned by solidcore and cut in one operation; the
+//! out of the bodies, or with `mode: raised` stand them on the sketch plane and join them (#14044). The cells are planned by solidcore and cut in one operation; the
 //! feature is `FeatureKind::CellGrid`, evaluated in `crates/doc/src/eval_cell_grid.rs`.
 
 use serde_json::Value;
@@ -16,7 +16,7 @@ use crate::{Result, Session};
 
 const CELL_GRID_CONTRACT: TypedContract<CellGridParams> = TypedContract::new();
 
-const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon (default hexagon); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap); keepout_clip?: whole|snap|free (the same for the edges of loops inside the field, the keep-outs; default: the value of clip, so one mode serves every loop; a cell that meets both kinds is dropped if either is whole, else trimmed if either is free); snap_inset?: expr (with clip snap, a whole number of lattice lines each straight field edge moves in after it snaps, so the edge cells are whole and the rim thicker by whole grid rows; default 0; keep-outs are not moved); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut (the only mode so far); name?. Cuts at most ";
+const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon (default hexagon); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap); keepout_clip?: whole|snap|free (the same for the edges of loops inside the field, the keep-outs; default: the value of clip, so one mode serves every loop; a cell that meets both kinds is dropped if either is whole, else trimmed if either is free); snap_inset?: expr (with clip snap, a whole number of lattice lines each straight field edge moves in after it snaps, so the edge cells are whole and the rim thicker by whole grid rows; default 0; keep-outs are not moved); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut|raised (default cut; raised adds the cells as material standing `depth` from the sketch plane in `direction`, joined to the targets, or a new body if there is none; not with through_all; the sketch plane is where they stand, so the sketch on the face they rise from and direction away from the body); name?. Cuts or raises at most ";
 const HELP_TAIL: &str = " cells in one operation; not for sheet metal (use sheet.perforate). The faces cut have no stable names yet";
 const HELP_LEN: usize = HELP_HEAD.len() + decimal_len(MAX_CUT_CELLS) + HELP_TAIL.len();
 const HELP_BYTES: [u8; HELP_LEN] = help_bytes();
@@ -62,6 +62,7 @@ const fn help_bytes() -> [u8; HELP_LEN] {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.cell_grid", "Cell Grid", crate::checked!("solid.cell_grid", cell_grid))
+    .begins_edit()
     .icon("perforate")
     .contract(&CELL_GRID_CONTRACT)
     .output(output_schema_for::<FeatureResult>)
@@ -90,7 +91,7 @@ fn keyword<T: serde::de::DeserializeOwned>(p: &Value, key: &str, cmd: &str, defa
 fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.cell_grid";
     let sketch = feature_sketch(s, p, cmd)?;
-    let mode: CellGridMode = keyword(p, "mode", cmd, CellGridMode::Cut, "cut (the only mode so far)")?;
+    let mode: CellGridMode = keyword(p, "mode", cmd, CellGridMode::Cut, "cut or raised")?;
     let shape = keyword(p, "shape", cmd, solidcore_record::cell_grid::CellShape::Hexagon, "hexagon, square, triangle, circle or polygon")?;
     let dot_grid = keyword(p, "dot_grid", cmd, solidcore_record::cell_grid::DotGrid::Hexagonal, "hexagonal or square")?;
     let clip = keyword(p, "clip", cmd, solidcore_record::cell_grid::Clip::Snap, "whole, snap or free")?;
@@ -153,6 +154,9 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     let through_all = bool_(p, "through_all").unwrap_or(false);
+    if through_all && mode == CellGridMode::Raised {
+        return Err(bad(cmd, "`through_all` cuts through bodies: a raised grid stands `depth` high, so give `depth`"));
+    }
     let depth = if through_all {
         None
     } else {

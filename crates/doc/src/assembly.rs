@@ -444,7 +444,8 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::AlongPath { .. }
-        | PlaneRef::Perpendicular { .. } => {
+        | PlaneRef::Perpendicular { .. }
+        | PlaneRef::SquareToLine { .. } => {
             for r in p.refs_mut() {
                 map_geo_ref(m, r);
             }
@@ -459,34 +460,58 @@ fn map_geo_ref(m: &Mat, g: &mut crate::construct::GeoRef) {
 /// Map a point given as expressions by `m`: numbers stay numbers; a coordinate that is an
 /// expression stays one (`m · (x, y, z) + t`, written out), so it still follows its parameters.
 pub fn map_point_expr(m: &Mat, p: &mut crate::PointExpr) {
+    map_exprs(m, p, " mm");
+}
+
+/// [`map_point_expr`] for coordinates read with `unit` after a bare number (" mm" for lengths, ""
+/// for the unitless components of a direction).
+///
+/// A length's constant under 1e-12 mm is rounding left by the matrix and is dropped. A
+/// direction has no scale of its own (it is normalized when evaluated), so its constant is
+/// dropped only when it is that small next to the numbers it came from: an axis whose only
+/// number is 1e-20 keeps it (#18822).
+fn map_exprs(m: &Mat, p: &mut crate::PointExpr, unit: &str) {
     let num = |e: &crate::Expr| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
     if let [Some(x), Some(y), Some(z)] = [num(&p[0]), num(&p[1]), num(&p[2])] {
         *p = crate::point_expr(apply_point(m, Vec3::new(x, y, z)));
         return;
     }
+    let direction = unit.is_empty();
+    let scale = if direction { p.iter().filter_map(num).fold(0.0_f64, |a, v| a.max(v.abs())) } else { 1.0 };
     let old = p.clone();
     for (row, out) in p.iter_mut().enumerate() {
         let mut constant = m[3][row];
         let mut terms: Vec<String> = Vec::new();
         for (col, e) in old.iter().enumerate() {
             let c = m[col][row];
-            if c.abs() < 1e-12 {
-                continue;
-            }
             match num(e) {
-                Some(v) => constant += c * v,
+                // A direction's numbers count at any size; a length's below the cutoff are noise.
+                Some(v) if direction || c.abs() >= 1e-12 => constant += c * v,
+                Some(_) => {}
+                None if c.abs() < 1e-12 => {}
                 None if (c - 1.0).abs() < 1e-12 => terms.push(format!("({e})")),
                 None => terms.push(format!("{c} * ({e})")),
             }
         }
+        let kept = constant != 0.0 && constant.abs() >= 1e-12 * scale;
+        // A direction's number is written short (`1e-20`, not 20 zeros), and its rounding
+        // noise is 0 whether or not an expression is left beside it.
+        let text = |v: f64| if direction { short_number(if kept { v } else { 0.0 }) } else { format!("{v}") };
         let mut e = terms.join(" + ");
         if terms.is_empty() {
-            e = format!("{constant} mm");
-        } else if constant.abs() >= 1e-12 {
-            e = format!("{e} {} {} mm", if constant < 0.0 { '-' } else { '+' }, constant.abs());
+            e = format!("{}{unit}", text(constant));
+        } else if kept {
+            e = format!("{e} {} {}{unit}", if constant < 0.0 { '-' } else { '+' }, text(constant.abs()));
         }
         *out = e.into();
     }
+}
+
+/// `v` as an expression reads it back exactly: plainly when that is short, else with an
+/// exponent (`1e-300`).
+fn short_number(v: f64) -> String {
+    let plain = format!("{v}");
+    if plain.len() <= 24 { plain } else { format!("{v:e}") }
 }
 
 /// Map a displacement given as length expressions, retaining its parameter dependencies.
@@ -495,6 +520,14 @@ pub fn map_vector_expr(m: &Mat, v: &mut crate::PointExpr) {
     let mut rotation = *m;
     rotation[3] = [0.0, 0.0, 0.0, 1.0];
     map_point_expr(&rotation, v);
+}
+
+/// Map a direction given as unitless expressions (a primitive's axis) by `m`'s rotation, keeping
+/// its parameter dependencies; the frame's translation doesn't move it.
+pub fn map_dir_expr(m: &Mat, d: &mut crate::DirExpr) {
+    let mut rotation = *m;
+    rotation[3] = [0.0, 0.0, 0.0, 1.0];
+    map_exprs(&rotation, d, "");
 }
 
 impl FeatureKind {
@@ -508,6 +541,7 @@ impl FeatureKind {
             Geo::Plane(p) => map_plane_ref(m, p),
             Geo::Construct(r) => map_geo_ref(m, r),
             Geo::Placement(e) => map_point_expr(m, e),
+            Geo::DirExpr(d) => map_dir_expr(m, d),
             // An Emboss cylinder is picked in its component's frame (`EmbossFace`).
             Geo::Pinned(_) | Geo::Profiles(..) => {}
         });
@@ -557,6 +591,52 @@ impl Document {
         transform_through(component, |c| self.occurrence_of(c))
     }
 
+    /// Ancestor chain of `component` from itself up to root (bounded by [`MAX_PLACEMENT_DEPTH`]).
+    fn component_ancestors(&self, mut component: u64) -> Vec<u64> {
+        let mut chain = vec![component];
+        for _ in 0..MAX_PLACEMENT_DEPTH {
+            let Some(occ) = self.occurrence_of(component) else { break };
+            if chain.contains(&occ.parent) {
+                break;
+            }
+            component = occ.parent;
+            chain.push(component);
+        }
+        chain
+    }
+
+    /// Lowest common ancestor of two components (`0` / root when they share no closer ancestor).
+    pub fn common_ancestor(&self, a: u64, b: u64) -> u64 {
+        if a == 0 || b == 0 {
+            return 0;
+        }
+        if a == b {
+            return a;
+        }
+        let ancestors_a = self.component_ancestors(a);
+        for c in self.component_ancestors(b) {
+            if ancestors_a.contains(&c) {
+                return c;
+            }
+        }
+        0
+    }
+
+    /// Rigid transform of `component` relative to `ancestor` (`IDENTITY` when `component == ancestor`
+    /// or `ancestor` is not above `component`).
+    pub fn component_transform_in(&self, mut component: u64, ancestor: u64) -> Mat {
+        let mut m = IDENTITY;
+        for _ in 0..MAX_PLACEMENT_DEPTH {
+            if component == ancestor {
+                break;
+            }
+            let Some(occ) = self.occurrence_of(component) else { break };
+            m = mat_mul(&occ.transform, &m);
+            component = occ.parent;
+        }
+        m
+    }
+
     /// One placement: the component the occurrence `path` from the root leads to (the root for
     /// an empty path) and its world transform. `None` when the path no longer exists.
     pub fn path_placement(&self, path: &[u64]) -> Option<(u64, Mat)> {
@@ -582,6 +662,26 @@ impl Document {
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
         crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
+    }
+
+    /// [`Document::placements`] with some occurrences' transforms (in their parents) replaced:
+    /// moves not captured yet, or a joint drag's frame, drawn without copying the design.
+    pub fn placements_moved(&self, moves: &std::collections::BTreeMap<u64, Mat>) -> Vec<(u64, Vec<u64>, Mat)> {
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| moves.get(&o.id).copied().unwrap_or(o.transform))
+    }
+
+    /// Every placement inside `component`, `component` itself first: (component, occurrence
+    /// path ids from `component`, transform into `component`'s frame). Limited as
+    /// [`Document::placements`] is.
+    pub fn placements_within(&self, component: u64) -> Vec<(u64, Vec<u64>, Mat)> {
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_from(component, |o| o.transform)
+    }
+
+    /// [`Document::placements_within`], or `None` when the walk stopped at a limit before it
+    /// reached every placement.
+    pub fn all_placements_within(&self, component: u64) -> Option<Vec<(u64, Vec<u64>, Mat)>> {
+        let (placements, complete) = crate::occurrence_tree::OccurrenceTree::new(self).walk_from(component, |o| o.transform);
+        complete.then_some(placements)
     }
 
     /// Whether [`Document::placements`] reaches every placement. Its walk stops at
