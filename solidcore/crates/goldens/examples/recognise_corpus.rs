@@ -76,11 +76,7 @@ fn main() {
                     None => Record::Spline {
                         u_knots,
                         v_knots,
-                        points: b
-                            .points
-                            .iter()
-                            .map(|r| r.iter().map(|p| [p.x, p.y, p.z]).collect())
-                            .collect(),
+                        points: b.points.iter().map(|r| r.to_vec()).collect(),
                     },
                     Some(w) => Record::RationalSpline {
                         u_knots,
@@ -92,7 +88,7 @@ fn main() {
                             .map(|(r, wr)| {
                                 r.iter()
                                     .zip(wr)
-                                    .map(|(p, &w)| [p.x * w, p.y * w, p.z * w, w])
+                                    .map(|(p, &w)| [p[0] * w, p[1] * w, p[2] * w, w])
                                     .collect()
                             })
                             .collect(),
