@@ -2391,7 +2391,7 @@ mod bstuv {
         let s = c.brep.face(face).unwrap().surface.as_ref().unwrap();
         let rec = c.brep.edge(e).unwrap();
         let (curve, tol) = (rec.curve.as_ref().unwrap(), rec.tolerance);
-        let ends = crate::bstuv_trim_rows::trim_end_spans(&k, s, curve, w);
+        let ends = crate::bstuv_trim_rows::trim_end_spans(&k, s, curve, w, tol);
         let CurveKind::BSpline(bw) = w.kind() else {
             panic!("the trim is not a B-spline")
         };
@@ -2402,7 +2402,7 @@ mod bstuv {
             .unwrap();
         eprintln!("BSTUV {name}: {ends:?}, whole trim {full:e} (tolerance {tol:e})");
         assert_eq!(ends.n, 48, "the row's trim");
-        for b in ends.bound.into_iter().chain([full]) {
+        for b in ends.bound.into_iter().chain(ends.degen.iter().map(|d| d.1)).chain([full]) {
             assert!(b <= tol, "the trim is {b:e} off the rail");
         }
     }

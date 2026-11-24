@@ -10,8 +10,9 @@
 //! - **UV curves with a 3D partner** (silhouette and intersection curves, the fillet
 //!   rail). These are certified on their partners with
 //!   `curve_surface_gap::trim_image_gap_bound`, a rounded-interval Hausdorff bound between
-//!   `C` and `S(W)`, over each end span of the trim: the spans the change keeps. The
-//!   bound must be within the operation's tolerance.
+//!   `C` and `S(W)`, over each end span of the trim and over every interval upstream's
+//!   `remove_degen_segs` would have cut anywhere on the curve (`degen_segs`): the parts
+//!   the change keeps. The bound must be within the operation's tolerance.
 //! - **B-rep trims** (the fillet removal and the two offsets). These are certified on
 //!   their edges within the edge's tolerance (`trims_on_edges::certify_edgeuse`).
 //!
@@ -67,16 +68,29 @@ const ROWS: [(&str, &str); 7] = [
 pub(crate) struct EndSpans {
     /// The UV curve's control point count.
     pub(crate) n: usize,
-    /// Proved bounds on the Hausdorff distance between `C` and `S(W)` over each of them.
+    /// Proved bounds on the Hausdorff distance between `C` and `S(W)` over the first and
+    /// the last knot span.
     pub(crate) bound: [f64; 2],
+    /// Every interval upstream's cleanup could cut (`degen_segs`), with its proved bound.
+    pub(crate) degen: Vec<([f64; 2], f64)>,
 }
 
-/// Certifies the end spans of the UV curve `w` on its 3D partner `c` on `surface`. It
-/// encloses the Hausdorff distance between `C` and `S(W)` over the first and the last knot
-/// span of `w`, through `trim_image_gap_bound`. The two curves share their parameters, as
-/// the trace builds them. Panics when a curve is not a B-spline or a bound is not
-/// enclosed.
-pub(crate) fn trim_end_spans(k: &Kernel, surface: &Surface, c: &Curve, w: &Curve) -> EndSpans {
+/// Certifies the UV curve `w` on its 3D partner `c` on `surface` wherever the retired
+/// cleanup could have changed it. It encloses the Hausdorff distance between `C` and
+/// `S(W)`, through `trim_image_gap_bound`, over the first and the last knot span of `w`
+/// and over every interval `degen_segs(cleanup_tol)` reports. Those intervals are
+/// exactly what `remove_degen_segs(cleanup_tol)` cuts out, anywhere on the curve; away
+/// from them it only reparameterises. `cleanup_tol` must be at least the zone tolerance
+/// the trim passed (a larger one reports a superset). The two curves share their
+/// parameters, as the trace builds them. Panics when a curve is not a B-spline or a bound
+/// is not enclosed.
+pub(crate) fn trim_end_spans(
+    k: &Kernel,
+    surface: &Surface,
+    c: &Curve,
+    w: &Curve,
+    cleanup_tol: f64,
+) -> EndSpans {
     let CurveKind::BSpline(bw) = w.kind() else {
         panic!("the UV curve is not a B-spline")
     };
@@ -91,9 +105,16 @@ pub(crate) fn trim_end_spans(k: &Kernel, surface: &Surface, c: &Curve, w: &Curve
             .unwrap()
             .expect("the bound is enclosed")
     };
+    let degen = nw
+        .degen_segs(cleanup_tol)
+        .unwrap()
+        .into_iter()
+        .map(|(a, b)| ([a, b], bound([a, b])))
+        .collect();
     EndSpans {
         n: nw.n(),
         bound: [bound(head), bound(tail)],
+        degen,
     }
 }
 

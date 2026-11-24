@@ -3251,6 +3251,7 @@ mod tests {
     /// point counts, the ones the row records.
     #[test]
     fn bstuv_intersection_kept_spans_lie_on_their_curves() {
+        use solidcore::geom::tol::{zone_tol_3d, SmallTopoType};
         let name = "ssi_adv_ssi_clasic_ruled_f0_f0";
         let case = crate::case::regression_case(&Runner, name);
         let input: Inputs = case.parse().unwrap();
@@ -3274,10 +3275,11 @@ mod tests {
             let uv = [&r.surface1_uv_curves[j], &r.surface2_uv_curves[j]];
             for (side, (s, w)) in [&first, &second].into_iter().zip(uv).enumerate() {
                 let w = w.as_ref().expect("a UV curve");
-                let ends = crate::bstuv_trim_rows::trim_end_spans(&k, s, &r.curves_3d[j], w);
+                let cleanup = tol.max(zone_tol_3d(&k, SmallTopoType::NormalSize));
+                let ends = crate::bstuv_trim_rows::trim_end_spans(&k, s, &r.curves_3d[j], w, cleanup);
                 eprintln!("BSTUV {name} curve {j} side {side}: {ends:?} (tolerance {tol:e})");
                 assert_eq!(ends.n, n, "curve {j} side {side}: the row's UV curve");
-                for b in ends.bound {
+                for b in ends.bound.into_iter().chain(ends.degen.iter().map(|d| d.1)) {
                     assert!(b <= tol, "curve {j} side {side}: an end span {b:e} off its curve");
                 }
             }

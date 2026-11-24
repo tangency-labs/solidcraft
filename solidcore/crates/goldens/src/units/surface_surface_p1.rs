@@ -1542,6 +1542,7 @@ mod tests {
     /// records.
     #[test]
     fn bstuv_silhouette_kept_spans_lie_on_their_curves() {
+        use solidcore::geom::tol::{zone_tol_3d, SmallTopoType};
         let moved: [(&str, &[(usize, usize)]); 2] = [
             ("sil0048", &[(4, 1389)]),
             ("sil_adv_20_torus_f0", &[(2, 96), (3, 96), (5, 108)]),
@@ -1564,10 +1565,11 @@ mod tests {
                 .unwrap();
             let tol = tol.expect("a trace tolerance");
             for &(j, n) in curves {
-                let ends = crate::bstuv_trim_rows::trim_end_spans(&k, &s, &c3[j], &cuv[j]);
+                let cleanup = tol.max(zone_tol_3d(&k, SmallTopoType::NormalSize));
+                let ends = crate::bstuv_trim_rows::trim_end_spans(&k, &s, &c3[j], &cuv[j], cleanup);
                 eprintln!("BSTUV {name} curve {j}: {ends:?} (tolerance {tol:e})");
                 assert_eq!(ends.n, n, "{name} curve {j}: the row's UV curve");
-                for b in ends.bound {
+                for b in ends.bound.into_iter().chain(ends.degen.iter().map(|d| d.1)) {
                     assert!(b <= tol, "{name} curve {j}: an end span {b:e} off its curve");
                 }
             }
