@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::DEFAULT_DPI;
+use solidcraft_doc::drawing::projection_symbol::title_block_paper;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Exploded, ViewDirection, ViewOverrides};
 use solidcraft_geom::cell::Projection;
@@ -91,6 +92,47 @@ pub(crate) fn nest(s: &mut Session, level: u64) {
     // From JSON, so a field another change adds to occurrences takes its default here.
     let occurrence = json!({"id": 5000 + level, "component": component, "parent": parent, "name": name});
     doc.occurrences.push(serde_json::from_value(occurrence).unwrap());
+}
+
+/// `change` run on the model with the drawing open closed, as the model can only be changed then,
+/// and the drawing opened again; what `change` gave. Both through the commands, so the lines a
+/// close keeps for the reopen are kept.
+pub(crate) fn with_the_model<R>(s: &mut Session, change: impl FnOnce(&mut Session) -> R) -> R {
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(s, "drawing.close", json!({}));
+    let changed = change(s);
+    run(s, "drawing.open", json!({"drawing": drawing}));
+    changed
+}
+
+/// Model command `id` run with `p` as [`with_the_model`] runs a change: its reply.
+pub(crate) fn in_the_model(s: &mut Session, id: &str, p: Value) -> Value {
+    with_the_model(s, |s| run(s, id, p))
+}
+
+/// `s` saved to a file called `file` (its extension picks the form) and opened from it in a new
+/// session, with its drawing `drawing` open there.
+pub(crate) fn reopened(s: &mut Session, drawing: u64, file: &str) -> Session {
+    // A folder of each call's own: tests run side by side in one process.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let folder = crate::tests::Folder::new(&format!("reopened-{}", CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let path = folder.path(file);
+    run(s, "file.save", json!({"path": path}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": path}));
+    run(&mut opened, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    opened
+}
+
+/// The drawing milestone's plate (acceptance case 84, #4894) by its script: 100 x 80 x 20 mm with
+/// two bores of 10, sized from its parameters, and a drawing of it, open, with a top view at 1:2 on
+/// its A3 sheet. The session and the top view's reply.
+pub(crate) fn milestone_plate_script() -> (Session, Value) {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let mut made = s.run_script(&script).unwrap();
+    let top = made.pop().unwrap();
+    (s, top)
 }
 
 /// Part `Part` with a 10 mm cube `Cube` from the origin, placed twice: the second copy 30 mm along
@@ -555,7 +597,8 @@ fn a_sheets_title_block_is_drawn_after_its_views() {
     assert_eq!(scene.groups.iter().map(|g| (g.object, g.kind)).collect::<Vec<_>>(), expected);
     let d = s.drawing("test").unwrap();
     let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
-    let drawn = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap().paper(sheet, Projection::Third);
+    let placed = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap();
+    let drawn = title_block_paper(&placed, sheet, Projection::Third);
     assert_eq!(serde_json::to_string(&without_text(scene.groups.last().unwrap())).unwrap(), serde_json::to_string(&drawn).unwrap());
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let schema = output_schema_for::<SheetSceneResult>();
@@ -581,7 +624,7 @@ fn the_title_blocks_symbol_follows_the_drawings_projection() {
         let d = s.drawing("test").unwrap();
         let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
         let border = record.border.as_ref().unwrap().layout(&record.sheet).unwrap();
-        serde_json::to_string(&record.title_block.as_ref().unwrap().layout(&border).unwrap().paper(sheet, projection)).unwrap()
+        serde_json::to_string(&title_block_paper(&record.title_block.as_ref().unwrap().layout(&border).unwrap(), sheet, projection)).unwrap()
     };
     let third = settled(&mut s, sheet);
     assert_eq!(serde_json::to_string(&without_text(third.scene.groups.last().unwrap())).unwrap(), block_of(&s, Projection::Third));
@@ -773,6 +816,137 @@ fn a_moved_group_moves_its_picture() {
     assert_eq!(moved(&group, Vec2::new(50.0, -2.0)).items, [picture(Vec2::new(51.0, 0.0), Vec2::new(61.0, 5.0))]);
 }
 
+/// A frustum (radius 10 below, 2.5 on top, 15 high) less a hole of 4 across along Y through x 6.5,
+/// z 6, from #19751: its hidden lines hold pieces far shorter than a unit in the last place at the
+/// sheet's 160 mm. Moved onto the sheet, such a piece's ends are one point. The front view draws at
+/// 1:1 and 2:1.
+#[test]
+fn a_view_with_pieces_too_short_to_see_draws() {
+    for scale in ["1:1", "2:1"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cone", json!({"radius": 10, "top_radius": 2.5, "height": 15, "body_name": "Cone"}));
+        let hole = json!({"radius": 2, "height": 30, "base": [6.5, -15, 6], "axis": "Y", "operation": "cut", "targets": ["Cone"]});
+        run(&mut s, "solid.cylinder", hole);
+        run(&mut s, "drawing.create", json!({}));
+        let sheet = s.drawing("test").unwrap().sheets[0].id;
+        let made = run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": scale, "position_mm": [150, 150]}));
+        let view = ids::decode(made["view"].as_str().unwrap()).unwrap();
+        settled(&mut s, sheet);
+        let status = built(&s, sheet).views.into_iter().find(|v| v.view == view).map(|v| v.status);
+        assert_eq!(status, Some(Status::Drawn), "at {scale}");
+    }
+}
+
+/// A piece the shift onto the sheet leaves with its ends at one point is left out: from a stroke
+/// (which still closes when it did), from a fill's loop, and a stroke of nothing else is left out
+/// whole. The pieces left are moved exactly, and the scene takes the group.
+#[test]
+fn a_moved_group_leaves_out_a_piece_the_shift_makes_one_point() {
+    let by = Vec2::new(150.0, 150.0);
+    // 1e-14 is under half a unit in the last place at 160, so 160 + 1e-14 is 160.
+    let (a, b, c) = (Vec2::new(10.0, -7.5), Vec2::new(10.0 + 1e-14, -7.5), Vec2::new(0.0, 0.0));
+    let line = |a, b| Seg2::Line { a, b };
+    let triangle = vec![line(c, a), line(a, b), line(b, c)];
+    let stroke = |path: Vec<Seg2>, closed| Item::Stroke { path, closed, width_mm: 0.5, pattern: None };
+    let fill = Item::Fill { region: Region2 { outer: Loop2 { segs: triangle.clone() }, holes: Vec::new() } };
+    let items = vec![stroke(triangle.clone(), true), stroke(vec![line(a, b)], false), fill];
+    let group = Group { object: 7, kind: ObjectKind::View, items };
+    let placed = moved(&group, by);
+    let shifted = |p: Vec2| p + by;
+    let kept = vec![line(shifted(c), shifted(a)), line(shifted(b), shifted(c))];
+    assert_eq!(placed.items, [stroke(kept.clone(), true), Item::Fill { region: Region2 { outer: Loop2 { segs: kept }, holes: Vec::new() } }]);
+    assert_eq!(Scene::new(Vec2::new(420.0, 297.0), vec![placed]).validate(), Ok(()));
+}
+
+/// The shift leaves out a curve of any kind whose points it rounds to one point: a cubic, a conic
+/// and a Bézier. A piece the scene refused before the shift, and one the shift takes past the
+/// paper's 1e5 mm, stay for the scene to refuse and name.
+#[test]
+fn a_moved_group_leaves_out_a_curve_of_any_kind_the_shift_makes_one_point() {
+    let by = Vec2::new(150.0, 150.0);
+    let (a, b) = (Vec2::new(10.0, -7.5), Vec2::new(10.0 + 1e-14, -7.5));
+    let mut controls = [a; solidcore_record::MAX_BEZIER_CTRL];
+    controls[1] = b;
+    let gone = [Seg2::Cubic { p0: a, p1: b, p2: a, p3: b }, Seg2::Conic { a, apex: b, b: a, w: 1.0 }, Seg2::Bezier { n: 4, p: controls }];
+    let far = Seg2::Line { a, b: Vec2::new(99_990.0, -7.5) };
+    let refused = Seg2::Line { a, b: Vec2::new(f64::NAN, -7.5) };
+    for seg in gone {
+        let group =
+            Group { object: 7, kind: ObjectKind::View, items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None }] };
+        assert_eq!(moved(&group, by).items, [], "{seg:?}");
+    }
+    for seg in [far, refused] {
+        let group =
+            Group { object: 7, kind: ObjectKind::View, items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None }] };
+        assert_eq!(moved(&group, by).items.len(), 1, "{seg:?}");
+    }
+}
+
+/// On a sheet whose pieces the paper scene all takes, moving a group is what it was before pieces
+/// could be left out: every point plus the offset, byte for byte, for views, dimensions and the
+/// border alike.
+#[test]
+fn a_moved_group_of_good_pieces_is_every_point_moved() {
+    let (mut s, sheet, ..) = holed();
+    let by = Vec2::new(20.0, -20.0);
+    let scene = settled(&mut s, sheet).scene;
+    let groups = scene.groups.iter().filter(|g| g.items.iter().any(|i| matches!(i, Item::Stroke { .. })));
+    let mut strokes = 0;
+    for group in groups {
+        let segs = |path: &[Seg2]| path.iter().map(|seg| seg.mapped(|p| p + by, ArcMap::turn(0.0, false))).collect::<Vec<_>>();
+        let every_point = group.items.iter().map(|item| match item {
+            Item::Stroke { path, closed, width_mm, pattern } => {
+                strokes += 1;
+                Item::Stroke { path: segs(path), closed: *closed, width_mm: *width_mm, pattern: pattern.clone() }
+            }
+            Item::Fill { region } => Item::Fill {
+                region: Region2 {
+                    outer: Loop2 { segs: segs(&region.outer.segs) },
+                    holes: region.holes.iter().map(|l| Loop2 { segs: segs(&l.segs) }).collect(),
+                },
+            },
+            Item::Text(run) => Item::Text(TextRun { origin: run.origin + by, ..run.clone() }),
+            Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),
+        });
+        let every_point = Group { object: group.object, kind: group.kind, items: every_point.collect() };
+        assert_eq!(bytes_of(&moved(group, by)), bytes_of(&every_point), "{:?}", group.kind);
+    }
+    assert!(strokes > 20, "{strokes} strokes: the border, the views and the dimension");
+}
+
+/// A view the sheet still can't take names the line it can't draw and what is wrong with it, and
+/// suggests no scale: here an edge past the paper's 1e5 mm once moved to its centre.
+#[test]
+fn a_view_the_sheet_refuses_names_the_line() {
+    let (s, ..) = front_and_top();
+    let record = s.drawing("test").unwrap().sheets[0].clone();
+    let line = |a: [f64; 2], b: [f64; 2]| Seg2::Line { a: Vec2::new(a[0], a[1]), b: Vec2::new(b[0], b[1]) };
+    let stroke = |seg| Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None };
+    let items = vec![stroke(line([0.0, 0.0], [10.0, 0.0])), stroke(line([0.0, 0.0], [99_990.0, 0.0]))];
+    let shown = Shown { index: 0, path: Vec::new(), body: "Block".into(), reference: false };
+    let owners = Owners {
+        bodies: vec![shown],
+        items: vec![Some((0, Source::Edge { edge: 2, tangent: false })), Some((0, Source::Edge { edge: 5, tangent: false }))],
+    };
+    let drawn = Drawn {
+        hatches: Vec::new(),
+        group: Some(Arc::new(Group { object: 7, kind: ObjectKind::View, items })),
+        status: Status::Drawn,
+        stats: None,
+        boundary: None,
+        frame: None,
+        owners: Some(Arc::new(owners)),
+        why: None,
+    };
+    let (_, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, Vec2::new(150.0, 150.0), &drawn)].into_iter())
+        .unwrap()
+        .finish()
+        .unwrap();
+    let status = states.into_iter().find(|v| v.view == 7).map(|v| v.status);
+    let why = "paper scene: non-finite or excessive coordinate";
+    assert_eq!(status, Some(Status::Failed(format!("Block's edge 5 can't be drawn on the sheet: {why}"))));
+}
+
 /// After a model change (going back to a checkpoint taken before a tower was added) both views are
 /// out of date and the last scene still shows. Each step draws one view from the model as it is
 /// now, and a view listed as up to date always draws as the built scene does.
@@ -911,6 +1085,9 @@ fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
     settled(&mut s, sheet);
     let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}});
     let added = run(&mut s, "drawing.dimension.add", p)["dimension"].as_str().and_then(ids::decode).unwrap();
+    // The search's answer for this character is held back until the reads below have been made, so
+    // they see the text waiting however fast the search thread is.
+    let hold = solidcraft_sketch::fallback::gate::hold('\u{30f7}');
     // Its text through edit, which lays nothing out: add asks for a font itself (it never waits), and
     // the read this test watches must be the first to ask.
     run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(added), "set": {"override_text": "\u{30f7} 100"}}));
@@ -922,9 +1099,9 @@ fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
     assert!(!step(&mut s), "it is read again by extract, not by a step");
     // Still waiting, nothing changed: the sheet isn't put together again.
     let again = extract(&mut s, sheet).unwrap();
-    if again.waiting_for_fonts {
-        assert_eq!(again.generation, first.generation);
-    }
+    assert!(again.waiting_for_fonts, "the answer is held back, so the text still waits");
+    assert_eq!(again.generation, first.generation);
+    drop(hold);
     assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
     assert!(!s.drawing_scenes.dimensions[&added].drawn.pending);
 }
@@ -1000,18 +1177,24 @@ fn a_title_blocks_text_follows_the_model_state_alone() {
     assert_ne!(shown(&s), with_tower, "the mass read from the model's state as it is");
 }
 
-/// Closing the drawing drops its scenes and the world states they hold, and keeps each view's lines.
-/// Opened again with nothing changed, its views show those lines, up to date, and none is drawn:
-/// only its dimensions are read again.
+/// Closing the drawing drops its scenes and the world states they hold, and keeps each view's lines,
+/// and each dimension's, with no world state. Opened again with nothing changed, its views show those
+/// lines, up to date, and none is drawn: only its dimensions are read again.
 #[test]
 fn closing_the_drawing_keeps_its_lines_for_when_it_opens_again() {
     let (mut s, sheet, [front, _]) = front_and_top();
     top_edge(&mut s, front);
-    let drawing = ids::encode(s.open_drawing.unwrap());
+    let id = s.open_drawing.unwrap();
+    let drawing = ids::encode(id);
     let before = settled(&mut s, sheet);
+    let state = s.world_state().unwrap();
     run(&mut s, "drawing.close", json!({}));
     let cache = &s.drawing_scenes;
     assert!(cache.views.is_empty() && cache.dimensions.is_empty() && cache.last.is_none() && cache.shown.is_none() && cache.drawing.is_none());
+    let kept = cache.kept.of(id).expect("kept at the close");
+    assert_eq!((kept.views.len(), kept.dimensions.len()), (2, 1));
+    let mut states = kept.views.values().map(|e| &e.state).chain(kept.dimensions.values().map(|e| &e.state));
+    assert!(states.all(|held| !Arc::ptr_eq(held, &state) && held.bodies.is_empty()), "a closed drawing holds no model");
     assert!(!step(&mut s));
     run(&mut s, "drawing.open", json!({"drawing": drawing}));
     let reopened = extract(&mut s, sheet).unwrap();
@@ -1020,6 +1203,37 @@ fn closing_the_drawing_keeps_its_lines_for_when_it_opens_again() {
     assert_eq!(reopened.stale_dimensions.len(), 1);
     let after = settled(&mut s, sheet);
     assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
+}
+
+/// The lines kept at a close come back numbered from the reopened cache's serial, which starts over:
+/// so a view drawn again after the reopen never gets back the number it has in the scene assembled
+/// then, and the sheet shows its new lines, not that scene again. The front view is drawn as many
+/// times after the reopen as before the close, which would give it its old number back.
+#[test]
+fn a_view_drawn_again_after_a_reopen_shows_its_new_lines() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    let scale = |s: &mut Session, to: &str| run(s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": to}}));
+    settled(&mut s, sheet);
+    for to in ["1:3", "1:4", "1:5"] {
+        scale(&mut s, to);
+        settled(&mut s, sheet);
+    }
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "drawing.open", drawing);
+    let reopened = extract(&mut s, sheet).unwrap();
+    let assembled = s.drawing_scenes.views[&front].serial;
+    // Drawn again, with no read of the sheet between, until its number reaches the one assembled.
+    for to in ["1:6", "1:8", "1:10", "1:20", "1:25", "1:50"] {
+        scale(&mut s, to);
+        while step(&mut s) {}
+        if s.drawing_scenes.views[&front].serial >= assembled {
+            break;
+        }
+    }
+    let now = extract(&mut s, sheet).unwrap();
+    assert!(now.generation > reopened.generation, "a new scene, not the one assembled at the reopen");
+    assert_eq!(bytes(&now.scene), bytes(&built(&s, sheet).scene));
 }
 
 /// Opened again with nothing changed, before any sheet is drawn, `drawing.status` says its views are
@@ -1990,10 +2204,8 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
         let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
-        let (empty, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>())
-            .unwrap()
-            .finish()
-            .unwrap();
+        let (empty, ..) =
+            assemble(&record, Projection::Third, &labels(&record), &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
         assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
         // The block's text and its fonts count too.
         let fonts = |scene: &Scene| Scene::new(scene.size_mm, Vec::new()).font_records_beyond(&scene.fonts);
@@ -2002,7 +2214,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
         let views = [lines(left - 22), lines(30), lines(18)];
         let centre = Vec2::new(100.0, 100.0);
         let views = views.iter().enumerate().map(|(i, v)| (i as u64, centre, v));
-        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], views).unwrap().finish().unwrap();
+        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], views).unwrap().finish().unwrap();
         let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
         assert_eq!(statuses, ["drawn", "failed", "drawn"]);
         let records = scene.groups.iter().map(Group::records).sum::<usize>() + fonts(&scene);
@@ -2375,7 +2587,7 @@ fn a_views_box_is_what_it_draws() {
             why: None,
         };
         let (_, _, objects, _, _, _) =
-            assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
+            assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
     }
@@ -2610,13 +2822,10 @@ fn out_of_date_dimensions(reply: &Value) -> Vec<Value> {
 fn held_after(mark: fn(&mut Session, u64) -> u64, change: impl FnOnce(&mut Session)) -> (Session, u64, u64) {
     let (mut s, sheet, [front, _]) = front_and_top();
     let id = mark(&mut s, front);
-    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     settled(&mut s, sheet);
-    run(&mut s, "drawing.close", json!({}));
-    change(&mut s);
-    run(&mut s, "drawing.open", drawing);
+    with_the_model(&mut s, change);
     (s, sheet, id)
 }
 
@@ -2786,7 +2995,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let (notes, _) = sheet_texts(&s, &d, sheet, &lettering, true);
     let mut prepared = PreparedBodies::default();
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, &mut prepared, *id, view)));
-    let mut assembly = assemble(record, d.projection, &text, &[], &[], &[], drawn).unwrap();
+    let mut assembly = assemble(record, d.projection, &text, &[], &[], drawn).unwrap();
     let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);
     let wanted = dimensions_on(&d, on.iter().map(|(id, ..)| *id));
@@ -2916,7 +3125,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         why: None,
     };
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };
     let dimension = |id, items| DrawnDimension {
         dimension: id,
@@ -2981,7 +3190,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let (a, b, too_big) = (text(1, "11", 0), text(2, "22", 0), text(3, "77", MAX_RECORDS));
     let shared = glyphs(&a) + glyphs(&b);
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
     assembly.add_dimensions([&a, &too_big, &b].into_iter());
     let (scene, _, objects, states, _, _) = assembly.finish().unwrap();
     assert!(states[0].drawn && !states[1].drawn && states[2].drawn, "{states:?}");
@@ -2993,7 +3202,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
 
     // Past the limit only with its font's records: its group alone would fit. Without them, it joins.
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let room = MAX_RECORDS - assembly.records;
     let records = |one: &DrawnDimension| one.group.as_ref().unwrap().records();
     let (bare, per_line) = (text(4, "8", 0), records(&text(4, "8", 1)) - records(&text(4, "8", 0)));
@@ -3456,13 +3665,132 @@ fn cube_on_block() -> (Session, u64, Value) {
     (s, sheet, cube)
 }
 
-/// Runs model command `id` with the drawing closed, as the model can only be changed then, and
-/// opens the drawing again.
-fn in_the_model(s: &mut Session, id: &str, p: Value) {
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", json!({"drawing": drawing}));
+fn two_live_drawing_pages() -> (Session, [(u64, u64); 2]) {
+    let (s, first_sheet, _) = front_and_top();
+    let first = s.open_drawing.unwrap();
+    let (mut s, second_sheet, [second_front, _]) = front_and_top_of(s);
+    let second = s.open_drawing.unwrap();
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(second_front),"set":{"scale":"1:4"}}));
+    let context = crate::ViewContext::new(
+        vec![
+            crate::ViewDescriptor { id: 1, kind: solidcraft_views::ViewKind::Model, window: 0, subject: None },
+            crate::ViewDescriptor {
+                id: 2,
+                kind: solidcraft_views::ViewKind::Sheet,
+                window: 0,
+                subject: Some(format!("{}/{}", ids::encode(first), ids::encode(first_sheet))),
+            },
+            crate::ViewDescriptor {
+                id: 3,
+                kind: solidcraft_views::ViewKind::Sheet,
+                window: 1,
+                subject: Some(format!("{}/{}", ids::encode(second), ids::encode(second_sheet))),
+            },
+        ],
+        2,
+        vec![2, 3, 1],
+    )
+    .unwrap();
+    s.set_view_context(context).unwrap();
+    (s, [(first, first_sheet), (second, second_sheet)])
+}
+
+#[test]
+fn jobs_for_two_live_drawings_finish_in_their_own_caches_after_other_pages_paint() {
+    let (mut s, pages) = two_live_drawing_pages();
+    let original = (s.doc.to_json(), s.undo.len(), s.revision);
+    for _ in 0..4 {
+        for (index, (drawing, sheet)) in pages.iter().copied().enumerate() {
+            s.open_drawing = Some(drawing);
+            extract(&mut s, sheet).unwrap();
+            if let Some(job) = begin(&mut s) {
+                let (other, other_sheet) = pages[1 - index];
+                s.open_drawing = Some(other);
+                extract(&mut s, other_sheet).unwrap();
+                assert!(finish(&mut s, job.run()), "painting another drawing preserves this request");
+                assert_eq!(s.open_drawing, Some(other), "worker acceptance restores the focused receiver");
+            }
+        }
+    }
+    for (drawing, sheet) in pages {
+        s.open_drawing = Some(drawing);
+        let shown = extract(&mut s, sheet).unwrap();
+        assert!(shown.stale.is_empty());
+        assert_eq!(bytes(&shown.scene), bytes(&built(&s, sheet).scene));
+        assert!(begin(&mut s).is_none());
+        assert_eq!(s.drawing_scenes.projections, 2, "each drawing's two views complete once");
+        assert!(s.drawing_scenes.parked.values().all(|cache| cache.parked.is_empty()));
+    }
+    assert_eq!((s.doc.to_json(), s.undo.len(), s.revision), original);
+}
+
+#[test]
+fn parallel_drawing_requests_keep_cancellation_and_latest_request_scoped_to_their_drawing() {
+    let (mut s, [(first, first_sheet), (second, second_sheet)]) = two_live_drawing_pages();
+    s.open_drawing = Some(first);
+    extract(&mut s, first_sheet).unwrap();
+    let cancelled = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(second);
+    extract(&mut s, second_sheet).unwrap();
+    let second_done = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(first);
+    cancel(&mut s);
+    assert!(finish(&mut s, second_done), "cancelling one drawing preserves another's independent request");
+    assert_eq!(s.open_drawing, Some(first));
+    assert!(!finish(&mut s, cancelled));
+    let earlier = begin(&mut s).unwrap().run();
+    let latest = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(second);
+    extract(&mut s, second_sheet).unwrap();
+    assert!(!finish(&mut s, earlier));
+    assert!(finish(&mut s, latest));
+    assert_eq!(s.open_drawing, Some(second));
+    s.open_drawing = Some(first);
+    extract(&mut s, first_sheet).unwrap();
+    let stale = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(second);
+    run(&mut s, "drawing.set", json!({"name":"Changed during the worker"}));
+    assert!(!finish(&mut s, stale), "parked results retain the existing source-revision guard");
+    assert_eq!(s.open_drawing, Some(second));
+}
+
+#[test]
+fn closed_drawing_tiles_release_live_requests_and_parked_exports_use_their_own_lines() {
+    let (mut s, [(first, first_sheet), (second, second_sheet)]) = two_live_drawing_pages();
+    for (drawing, sheet) in [(first, first_sheet), (second, second_sheet)] {
+        s.open_drawing = Some(drawing);
+        extract(&mut s, sheet).unwrap();
+        while let Some(job) = begin(&mut s) {
+            assert!(finish(&mut s, job.run()));
+        }
+    }
+    s.open_drawing = Some(first);
+    let copied = s.scratch_as_shown();
+    let view = s.doc.drawing(first).unwrap().views[0].id;
+    assert_eq!(copied.drawing_scenes.views.get(&view).unwrap().view, s.doc.drawing(first).unwrap().resolve_view(view).unwrap());
+    assert!(copied.drawing_scenes.parked.is_empty());
+    extract(&mut s, first_sheet).unwrap();
+    // A changed view supplies a fresh request without changing its owning tile.
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(view),"set":{"scale":"1:3"}}));
+    extract(&mut s, first_sheet).unwrap();
+    let retired = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(second);
+    extract(&mut s, second_sheet).unwrap();
+    let context = crate::ViewContext::new(
+        vec![crate::ViewDescriptor {
+            id: 3,
+            kind: solidcraft_views::ViewKind::Sheet,
+            window: 1,
+            subject: Some(format!("{}/{}", ids::encode(second), ids::encode(second_sheet))),
+        }],
+        3,
+        vec![3],
+    )
+    .unwrap();
+    s.set_view_context(context).unwrap();
+    assert!(!finish(&mut s, retired));
+    assert!(!s.drawing_scenes.parked.contains_key(&first));
+    assert!(s.drawing_scenes.kept.of(first).is_some(), "closed tiles retain the existing last-line fallback without world states");
 }
 
 /// Lines worked out beside the window (#4892 B7) on another thread are taken once they come back,
@@ -3748,11 +4076,11 @@ fn notes_are_drawn_on_the_sheet_and_on_their_views() {
     let (texts, tips) = text_and_tips(group_of(&built.scene, edge));
     assert_eq!(texts, vec!["Deburr".to_string()]);
     assert!(tips.len() == 1 && tips[0].dist(Vec2::new(150.0, 145.0)) < 1e-9, "{tips:?}");
-    // Its text centred on its place from the view's centre, (150, 150) + (60, -40): one line, its
-    // capitals 3.5 mm high, so its baseline 1.75 mm below the middle.
+    // Its text starts at its place from the view's centre, (150, 150) + (60, -40), as a new note's
+    // does (left): one line, its capitals 3.5 mm high, so its baseline 1.75 mm below the middle.
     let starts: Vec<Vec2> =
         group_of(&built.scene, edge).items.iter().filter_map(|i| if let Item::Text(run) = i { Some(run.origin) } else { None }).collect();
-    assert!(starts.len() == 1 && (starts[0].y - 108.25).abs() < 1e-9 && starts[0].x < 210.0, "{starts:?}");
+    assert!(starts.len() == 1 && (starts[0].y - 108.25).abs() < 1e-9 && (starts[0].x - 210.0).abs() < 1e-9, "{starts:?}");
     assert!(built.notes.iter().all(|n| n.drawn && n.status == solidcraft_doc::drawing::dimension::Status::Ok), "{:?}", built.notes);
     assert_eq!(built.notes.last().map(|n| (n.note, n.view)), Some((general, None)));
 
@@ -3767,7 +4095,11 @@ fn notes_are_drawn_on_the_sheet_and_on_their_views() {
     assert!(notes.contains(&(json!(ids::encode(general)), None)) && notes.contains(&(json!(ids::encode(edge)), Some(json!(ids::encode(front))))));
     let export = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
     assert_eq!(export["notes"], reply["notes"]);
-    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [60.0, 40.0]}));
+    // The general note starts at its place, (60, 40), so the middle of its text is half its width on.
+    let ends =
+        group_of(&built.scene, general).items.iter().filter_map(|i| if let Item::Text(run) = i { Some(run.origin.x + run.reach()) } else { None });
+    let middle = 60.0 + (ends.fold(0.0, f64::max) - 60.0) / 2.0;
+    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [middle, 40.0]}));
     assert_eq!((&hit["hit"]["object"], &hit["hit"]["kind"]), (&json!(ids::encode(general)), &json!("note")), "{hit}");
 }
 
@@ -3975,9 +4307,6 @@ fn sheet_sketch_provider_extract_is_read_only_and_steps_one_sketch_at_a_time() {
     let line = run(&mut s, "sketch.line", json!({"points":[[0,0],[40,0]]}))["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5}));
-    run(&mut s, "sketch.edit", json!({"sketch":model_sketch}));
-    run(&mut s, "sketch.drag", json!({"entity":format!("{line}.end"),"from":[40,0],"to":[45,3],"live":true}));
-    assert!(s.model.is_stale(), "the source model has an unfinished live gesture");
     let drawing = run(&mut s, "drawing.create", json!({}));
     let first = run(&mut s, "drawing.sketch.create", json!({"owner":drawing["sheets"][0]["id"]}));
     let first = ids::decode(first["sketch"].as_str().unwrap()).unwrap();
@@ -3988,6 +4317,13 @@ fn sheet_sketch_provider_extract_is_read_only_and_steps_one_sketch_at_a_time() {
     let second = ids::decode(second["sketch"].as_str().unwrap()).unwrap();
     run(&mut s, "sketch.line", json!({"points":[[20,30],[60,30]],"infer":false}));
     run(&mut s, "sketch.finish", json!({}));
+    s.model_focus = true;
+    run(&mut s, "sketch.edit", json!({"sketch":model_sketch}));
+    run(&mut s, "sketch.drag", json!({"entity":format!("{line}.end"),"from":[40,0],"to":[45,3],"live":true}));
+    assert!(s.model.is_stale(), "the source model has an unfinished live gesture");
+    assert_eq!(s.active_sketch, Some(model_sketch));
+    assert!(s.active_sheet_sketch.is_none(), "the fixture keeps exactly one active editor");
+    assert_eq!(s.open_drawing, Some(ids::decode(drawing["id"].as_str().unwrap()).unwrap()), "Model focus retains the Drawing receiver");
     let doc = s.doc.clone();
     let model = s.model.state();
     let history = (s.undo.len(), s.redo.len(), s.evaluations, s.revision);
@@ -4016,6 +4352,8 @@ fn sheet_sketch_provider_extract_is_read_only_and_steps_one_sketch_at_a_time() {
     assert_eq!((s.drawing_scenes.sketch_solves, s.drawing_scenes.projections), (2, 0));
     assert!(Arc::ptr_eq(&doc, &s.doc) && Arc::ptr_eq(&model, &s.model.state()));
     assert_eq!((s.undo.len(), s.redo.len(), s.evaluations, s.revision), history);
+    // The model sketch is entered after the sheet sketches here, so nothing finished it: the
+    // extracts ran with its live gesture still open.
     assert!(s.model.is_stale() && s.active_sketch == Some(model_sketch));
 }
 
@@ -4121,6 +4459,99 @@ fn sheet_sketch_provider_keeps_mixed_paper_order_and_reuses_view_moves_and_edito
     let editing_ended = extract(&mut s, sheet).unwrap();
     assert!(editing_ended.stale_sketches.is_empty() && Arc::ptr_eq(&editing_ended.scene, &moved.scene));
     assert_eq!((s.drawing_scenes.projections, s.drawing_scenes.sketch_solves), counts);
+}
+
+/// A view's sketch is in model millimetres in the view's plane (#5425). On paper it is drawn through
+/// its view: at the view's scale, with the view's line width, where the view puts that plane, over
+/// the view's lines. Moving or rescaling the view takes the sketch with it, solving nothing again.
+#[test]
+fn a_views_sketch_is_drawn_through_its_view_and_goes_with_it_without_solving_again() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner":ids::encode(front)}));
+    assert_eq!((made["sheet"].as_str(), made["view"].as_str()), (Some(&*ids::encode(sheet)), Some(&*ids::encode(front))));
+    let id = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[50,0]],"infer":false}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Where the view puts its plane's origin: its frame's map, then its centre, as its dimensions go.
+    let placed = |s: &mut Session| {
+        let shown = settled(s, sheet);
+        assert_eq!(bytes(&shown.scene), bytes(&built(s, sheet).scene));
+        let d = s.drawing("test").unwrap().clone();
+        let centre = views_on(&d, sheet).unwrap().into_iter().find(|(view, ..)| *view == front).unwrap().2;
+        let origin = s.drawing_scenes.views[&front].drawn.frame.unwrap().paper_map().apply(Vec2::ZERO) + centre;
+        let (path, _, width) = stroke_path(&cached_sketch_group(&shown.scene, id).items[0]);
+        let order: Vec<_> = shown.scene.groups.iter().map(|group| (group.object, group.kind)).collect();
+        let at = |one| order.iter().position(|o| *o == one).unwrap();
+        assert!(at((id, ObjectKind::Sketch)) > at((front, ObjectKind::View)), "over its view's lines");
+        (path[0].start().dist(origin), path[0].length(), width)
+    };
+    let (off, length, width) = placed(&mut s);
+    assert!(off < 1e-9 && (length - 25.0).abs() < 1e-9, "50 mm at 1:2 is 25 mm, from the plane's origin: {off} {length}");
+    let line_group = s.drawing("test").unwrap().resolve_view(front).unwrap().line_group.value;
+    assert_eq!(width, LineKind::Visible.width_mm(line_group), "a paper width, not scaled");
+    let solves = s.drawing_scenes.sketch_solves;
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(front),"set":{"place":{"at":[200,160]}}}));
+    let (off, length, _) = placed(&mut s);
+    assert!(off < 1e-9 && (length - 25.0).abs() < 1e-9, "with its view: {off} {length}");
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(front),"set":{"scale":"1:1"}}));
+    let (off, length, _) = placed(&mut s);
+    assert!(off < 1e-9 && (length - 50.0).abs() < 1e-9, "at its new scale: {off} {length}");
+    assert_eq!(s.drawing_scenes.sketch_solves, solves, "a move or a new scale solves nothing again");
+}
+
+/// A view's sketch whose view isn't drawn on the sheet says so; the sheet's own sketch still draws.
+#[test]
+fn a_views_sketch_whose_view_isnt_drawn_says_so_and_the_sheets_own_still_draws() {
+    let (s, sheet, _) = front_and_top();
+    let d = s.drawing("test").unwrap();
+    let record = d.sheets.iter().find(|record| record.id == sheet).unwrap();
+    let stroke = |id| Group {
+        object: id,
+        kind: ObjectKind::Sketch,
+        items: vec![Item::Stroke {
+            path: vec![Seg2::Line { a: Vec2::new(10.0, 10.0), b: Vec2::new(20.0, 10.0) }],
+            closed: false,
+            width_mm: 0.5,
+            pattern: None,
+        }],
+    };
+    let sketches = [
+        DrawnSketch { group: Some(stroke(101)), status: SketchStatus::Drawn, view: Some(10) },
+        DrawnSketch { group: Some(stroke(102)), status: SketchStatus::Drawn, view: None },
+    ];
+    let drawn = sketches.iter().enumerate().map(|(i, drawn)| (101 + i as u64, drawn));
+    let (scene, _, _, states) = assemble_with_sketches(record, Projection::Third, &[], std::iter::empty::<(u64, Vec2, Drawn)>(), drawn).unwrap();
+    assert!(matches!(&states[0].status, SketchStatus::Failed(why) if why.contains(NOT_DRAWN)), "{:?}", states[0].status);
+    assert_eq!(states[1].status, SketchStatus::Drawn);
+    assert_eq!(scene.groups.iter().filter(|group| group.kind == ObjectKind::Sketch).map(|group| group.object).collect::<Vec<_>>(), [102]);
+}
+
+/// A view's sketch reaches paper through its view's frame stroke by stroke: an item of another kind
+/// (text, a fill, a picture) would stay in the plane's coordinates, so its sketch is refused and says
+/// why. The view's other sketches still draw.
+#[test]
+fn a_views_sketch_holding_anything_but_strokes_is_refused_and_says_why() {
+    let (s, sheet, [front, _]) = front_and_top();
+    let d = s.drawing("test").unwrap();
+    let record = d.sheets.iter().find(|record| record.id == sheet).unwrap();
+    let frame = ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap();
+    let group = Some(Arc::new(Group { object: front, kind: ObjectKind::View, items: Vec::new() }));
+    let view = Drawn { group, status: Status::Drawn, stats: None, boundary: None, frame: Some(frame), owners: None, why: None, hatches: Vec::new() };
+    let stroke = Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::X }], closed: false, width_mm: 0.5, pattern: None };
+    let style = solidcraft_sketch::TextStyle::default();
+    let (runs, _) = solidcraft_sketch::paper_text("A", None, "", Vec2::ZERO, 3.5, 0.0, &style).unwrap().unwrap();
+    let sketch = |id, items| DrawnSketch {
+        group: Some(Group { object: id, kind: ObjectKind::Sketch, items }),
+        status: SketchStatus::Drawn,
+        view: Some(front),
+    };
+    let sketches = [sketch(101, vec![stroke.clone(), Item::Text(runs[0].clone())]), sketch(102, vec![stroke])];
+    let drawn = sketches.iter().enumerate().map(|(i, drawn)| (101 + i as u64, drawn));
+    let (scene, _, _, states) =
+        assemble_with_sketches(record, Projection::Third, &[], std::iter::once((front, Vec2::new(100.0, 100.0), &view)), drawn).unwrap();
+    assert!(matches!(&states[0].status, SketchStatus::Failed(why) if why.contains("not supported yet")), "{:?}", states[0].status);
+    assert_eq!(states[1].status, SketchStatus::Drawn);
+    assert_eq!(scene.groups.iter().filter(|group| group.kind == ObjectKind::Sketch).map(|group| group.object).collect::<Vec<_>>(), [102]);
 }
 
 #[test]
@@ -4274,8 +4705,8 @@ fn sheet_sketch_assembly_budget_names_only_the_excluded_sketch_and_can_recover()
         why: None,
     };
     let sketches = [
-        DrawnSketch { group: Some(group(101, ObjectKind::Sketch, 10)), status: SketchStatus::Drawn },
-        DrawnSketch { group: Some(group(102, ObjectKind::Sketch, 8)), status: SketchStatus::Drawn },
+        DrawnSketch { group: Some(group(101, ObjectKind::Sketch, 10)), status: SketchStatus::Drawn, view: None },
+        DrawnSketch { group: Some(group(102, ObjectKind::Sketch, 8)), status: SketchStatus::Drawn, view: None },
     ];
     let drawn = || sketches.iter().enumerate().map(|(i, drawn)| (101 + i as u64, drawn));
     let (scene, views, _, states) =
@@ -4954,6 +5385,99 @@ fn sheet_centerline_refusal_preserves_exportable_strokes_and_history() {
     }
 }
 
+/// [`front_and_top`] with the top view placed apart at (300, 220), so it has its label: the session,
+/// the sheet and the top view.
+fn top_apart() -> (Session, u64, u64) {
+    let (mut s, sheet, [_, top]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"place": {"at": [300.0, 220.0]}}}));
+    (s, sheet, top)
+}
+
+/// A linear dimension on view `view` from `a` to `b` (model mm), `offset` from them: its id.
+fn linear_on(s: &mut Session, view: u64, a: [f64; 3], b: [f64; 3], offset: f64) -> u64 {
+    let added = run(s, "drawing.dimension.add", json!({"view": ids::encode(view), "kind": {"linear": {"a": a, "b": b}}}));
+    let id = ids::decode(added["dimension"].as_str().unwrap()).unwrap();
+    run(s, "drawing.dimension.edit", json!({"dimension": ids::encode(id), "set": {"offset_mm": offset}}));
+    id
+}
+
+/// The box of `kind` `object` among `shown`'s objects.
+fn box_of(shown: &SheetScene, kind: ObjectKind, object: u64) -> Aabb2 {
+    shown.objects.iter().find(|o| o.kind == kind && o.object == object).map(|o| o.bounds_mm).unwrap()
+}
+
+/// A view's label keeps clear of what is drawn for its view (#17853): with the length of the top
+/// view's back edge dimensioned above it, where the label went, the label sits above that dimension,
+/// still centred on the view; with a second dimension stacked above the first, above both. `build`
+/// and the provider give the same bytes, and `drawing.view.inspect` gives the box the sheet draws.
+#[test]
+fn a_views_label_sits_above_the_dimensions_over_its_view() {
+    let (mut s, sheet, top) = top_apart();
+    let alone = box_of(&built(&s, sheet), ObjectKind::ViewLabel, top);
+    let near = linear_on(&mut s, top, [0.0, 50.0, 20.0], [100.0, 50.0, 20.0], 6.0);
+    let shown = built(&s, sheet);
+    let (label, dimension) = (box_of(&shown, ObjectKind::ViewLabel, top), box_of(&shown, ObjectKind::Dimension, near));
+    assert!(dimension.overlaps(&alone), "the case: the dimension {dimension:?} is where the label {alone:?} went");
+    // Its gap above the dimension, as above a view: the same distance, as where it went alone.
+    assert!(
+        label.min.y >= dimension.max.y + LABEL_GAP_MM - 1e-9 && (label.center().x - alone.center().x).abs() < 1e-9,
+        "{label:?} over {dimension:?}"
+    );
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&shown.scene));
+    let inspected = run(&mut s, "drawing.view.inspect", json!({"view": ids::encode(top)}));
+    let corner = |at: &Value| Vec2::new(at[0].as_f64().unwrap(), at[1].as_f64().unwrap());
+    let reported = Aabb2 { min: corner(&inspected["label"]["box_mm"]["min"]), max: corner(&inspected["label"]["box_mm"]["max"]) };
+    assert!(reported.min.dist(label.min) < 1e-6 && reported.max.dist(label.max) < 1e-6, "inspect {reported:?}, drawn {label:?}");
+
+    let far = linear_on(&mut s, top, [0.0, 50.0, 20.0], [100.0, 50.0, 20.0], 16.0);
+    let shown = built(&s, sheet);
+    let label = box_of(&shown, ObjectKind::ViewLabel, top);
+    let highest = [near, far].map(|id| box_of(&shown, ObjectKind::Dimension, id).max.y).into_iter().fold(f64::MIN, f64::max);
+    assert!(label.min.y > highest, "{label:?} under a dimension reaching {highest}");
+}
+
+/// What doesn't lie under a view's label leaves it where it was (#17853): a dimension right of the
+/// view, and a note of the view right of the label at its height, don't lift it. A label moved to an
+/// offset stays at its offset over a dimension.
+#[test]
+fn a_views_label_stays_put_beside_dimensions_and_at_its_offset() {
+    let (mut s, sheet, top) = top_apart();
+    let alone = box_of(&built(&s, sheet), ObjectKind::ViewLabel, top);
+    let beside = linear_on(&mut s, top, [100.0, 0.0, 20.0], [100.0, 50.0, 20.0], 6.0);
+    let note = id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(top)}, "at": [45, 17], "content": "Side"})), "note");
+    let shown = built(&s, sheet);
+    let noted = box_of(&shown, ObjectKind::Note, note);
+    assert!(!box_of(&shown, ObjectKind::Dimension, beside).overlaps(&alone), "the case: beside, not under");
+    assert!(!noted.overlaps(&alone) && noted.min.y < alone.max.y && noted.max.y > alone.min.y, "the case: {noted:?} level with {alone:?}");
+    assert_eq!(box_of(&shown, ObjectKind::ViewLabel, top), alone);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"label": {"offset": [0.0, 15.0]}}}));
+    let moved = box_of(&built(&s, sheet), ObjectKind::ViewLabel, top);
+    linear_on(&mut s, top, [0.0, 50.0, 20.0], [100.0, 50.0, 20.0], 6.0);
+    assert_eq!(box_of(&built(&s, sheet), ObjectKind::ViewLabel, top), moved);
+}
+
+/// A detail view's label keeps clear of the detail's own dimensions, and `drawing.view.inspect` gives
+/// the box the sheet draws: both lay the dimensions out through the detail's frame, centred on its
+/// region, not on the model (#17853). A detail of the front view's top edge, its region centred 10 mm
+/// above the model's middle, with that edge's length dimensioned above the region, where the label went.
+#[test]
+fn a_detail_views_label_box_is_where_the_sheet_draws_it() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let region = json!({"rectangle": {"min": [-5.0, 10.0], "max": [105.0, 30.0]}});
+    let made = run(&mut s, "drawing.view.detail", json!({"parent": ids::encode(front), "boundary": region, "place": {"at": [300.0, 100.0]}}));
+    let detail = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    let alone = box_of(&built(&s, sheet), ObjectKind::ViewLabel, detail);
+    let near = linear_on(&mut s, detail, [0.0, 0.0, 20.0], [100.0, 0.0, 20.0], 12.0);
+    let shown = built(&s, sheet);
+    let (label, dimension) = (box_of(&shown, ObjectKind::ViewLabel, detail), box_of(&shown, ObjectKind::Dimension, near));
+    assert!(dimension.overlaps(&alone), "the case: the dimension {dimension:?} is where the label {alone:?} went");
+    assert!(label.min.y >= dimension.max.y, "{label:?} over {dimension:?}");
+    let inspected = run(&mut s, "drawing.view.inspect", json!({"view": ids::encode(detail)}));
+    let corner = |at: &Value| Vec2::new(at[0].as_f64().unwrap(), at[1].as_f64().unwrap());
+    let reported = Aabb2 { min: corner(&inspected["label"]["box_mm"]["min"]), max: corner(&inspected["label"]["box_mm"]["max"]) };
+    assert!(reported.min.dist(label.min) < 1e-6 && reported.max.dist(label.max) < 1e-6, "inspect {reported:?}, drawn {label:?}");
+}
+
 /// A rule's K-factor changes the flat pattern: after the change, the plate's flat view is out of date
 /// and draws again, beside its base view. A change the flat doesn't show (a sketch: a new world state
 /// that adds no body) keeps it, as it keeps every view.
@@ -5301,6 +5825,33 @@ fn a_step_draws_a_pictures_bands_within_its_budget() {
     }
 }
 
+/// A view's pictures share one pixel-test limit on the page, as in the files: on a limit the first
+/// fits and the two don't, the reference parts' picture, set up first, is drawn, and the model's is
+/// refused with the files' message. Refused, it is current, so it isn't tried again.
+#[test]
+fn a_views_second_picture_is_refused_past_its_limit() {
+    let page = |limit: Option<u64>| {
+        let (mut design, over) = under_and_over();
+        run(&mut design, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
+        let (mut s, sheet, [front, _]) = front_and_top_of(design);
+        let set = json!({"visual_style": "shaded", "reference_style": "shaded", "reference_shown_percent": 100});
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": set}));
+        s.drawing_scenes.max_pixel_tests = limit;
+        let answer = settled(&mut s, sheet);
+        let tests: u64 = s.drawing_scenes.views[&front].pixels.values().map(|p| p.tests).sum();
+        let pictures: Vec<SheetPicture> = answer.pictures.iter().filter(|p| p.view == front).cloned().collect();
+        (front, tests, pictures)
+    };
+    let (front, both, pictures) = page(None);
+    assert!(pictures.len() == 2 && pictures.iter().all(|p| p.rows.is_some() && p.why.is_none()), "within the renderer's limit: {pictures:?}");
+    let limit = both - 1;
+    let (_, _, pictures) = page(Some(limit));
+    let [under, model] = &pictures[..] else { panic!("{pictures:?}") };
+    assert!(under.source != front && under.rows.is_some() && under.why.is_none() && !under.stale, "{under:?}");
+    assert_eq!((model.source, model.rows.is_none(), model.stale), (front, true, false), "{model:?}");
+    assert_eq!(model.why.as_deref(), Some(over_budget(limit).as_str()));
+}
+
 /// Once a shaded view's lines are drawn, `begin` hands on its picture's setup to do beside the
 /// window, its triangles placed there too, and `step` then only draws its bands. A setup done for a
 /// design changed since is dropped and asked for again; once one is taken, `begin` has nothing more,
@@ -5326,6 +5877,70 @@ fn a_pictures_setup_is_a_job_beside_the_window() {
     let rows = only_picture(&settled(&mut s, sheet)).rows.clone().unwrap();
     let (mut alone, sheet, _) = shaded_front([200.0, 150.0]);
     assert!(*only_picture(&settled(&mut alone, sheet)).rows.clone().unwrap() == *rows, "the pixels step alone draws");
+}
+
+/// The kind of work the provider does next on the sheet last extracted ([`Next`]), or none.
+fn next_kind(s: &mut Session) -> Option<&'static str> {
+    let (d, on, state) = drawable(s)?;
+    next(s, &d, &on, &state).map(|next| match next {
+        Next::View(..) => "view",
+        Next::Dimensions(_) => "dimensions",
+        Next::Fills => "fills",
+        Next::Sketches => "sketches",
+        Next::PictureSetup(_) => "picture setup",
+        Next::Bands => "bands",
+    })
+}
+
+/// The kinds of work taken as the window's tick takes them, until none waits, each listed once in a
+/// row: [`begin`]'s job when it hands one out, which must be of the next kind, or else a [`step`].
+fn taken(s: &mut Session) -> Vec<&'static str> {
+    let mut kinds: Vec<&'static str> = Vec::new();
+    for _ in 0..10_000 {
+        let Some(kind) = next_kind(s) else { return kinds };
+        match begin(s) {
+            Some(job) => {
+                let handed = if matches!(job.0, Work::View(_)) { "view" } else { "picture setup" };
+                assert_eq!(handed, kind, "begin hands out the next work");
+                assert!(finish(s, job.run()));
+            }
+            None => {
+                assert!(matches!(kind, "dimensions" | "fills" | "sketches" | "bands"), "begin hands out no {kind} work");
+                step(s);
+            }
+        }
+        if kinds.last() != Some(&kind) {
+            kinds.push(kind);
+        }
+    }
+    panic!("the work never ended: {kinds:?}");
+}
+
+/// `begin` and `step` take the provider's work in its one order ([`Next`], #5624): views out of date,
+/// then dimensions, then fills and sketches, then a picture's setup, then its bands, and `begin` hands
+/// out only the long kinds.
+/// A dimension edited, a new sheet sketch with a fill and a new dpi leave all four waiting together:
+/// the dimension is read first, then the fill, then the sketch, and `begin` hands out nothing until
+/// they are.
+#[test]
+fn begin_and_step_take_the_work_in_one_order() {
+    let (mut s, sheet, id) = shaded_front([200.0, 150.0]);
+    let dimension = top_edge(&mut s, id);
+    extract(&mut s, sheet).unwrap();
+    // A view's job reads its dimensions with its lines.
+    assert_eq!(taken(&mut s), ["view", "picture setup", "bands"]);
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(sheet)}));
+    let sketch = made["sketch"].clone();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [15, 10], "p1": [55, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let boundary = run(&mut s, "drawing.fill.profiles", json!({"sketch": sketch}))["fill_profiles"]["boundaries"][0].clone();
+    run(&mut s, "drawing.sketch.fill", json!({"sketch": sketch, "boundary": boundary, "paint": {"kind": "solid"}}));
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(dimension), "set": {"offset_mm": 20.0}}));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "dpi": DEFAULT_DPI / 2.0}));
+    let answer = extract(&mut s, sheet).unwrap();
+    assert!(answer.stale.is_empty() && !answer.stale_dimensions.is_empty() && answer.drawing_pictures, "a dimension and the picture wait");
+    assert!(!answer.stale_fills.is_empty() && !answer.stale_sketches.is_empty(), "a fill and a sketch wait");
+    assert_eq!(taken(&mut s), ["dimensions", "fills", "sketches", "picture setup", "bands"]);
 }
 
 /// A view of lines hands no picture, nothing waits for one, and no bodies are read for pictures.
@@ -5355,6 +5970,26 @@ fn a_fine_sheet_draws_the_page_picture_coarser() {
         assert_eq!(window_grid(&rect(100.0, 20.0), dpi).unwrap().pitch, 25.4 / (dpi / k), "{dpi}");
     }
     assert!(window_grid(&rect(5000.0, 5000.0), 2400.0).unwrap().pixels() <= WINDOW_PICTURE_PIXELS, "the largest paper at the finest dpi fits");
+}
+
+/// A shaded view closed and opened again with nothing changed comes back whole: its lines up to date,
+/// none drawn, and its picture's last pixels shown at once, the same rows, until it settles on the
+/// same pixels.
+#[test]
+fn a_reopened_drawing_shows_its_kept_lines_and_pixels_at_once() {
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let before = settled(&mut s, sheet);
+    let last = only_picture(&before).rows.clone().unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "drawing.open", drawing);
+    let reopened = extract(&mut s, sheet).unwrap();
+    assert!(reopened.stale.is_empty(), "{:?}", reopened.stale);
+    assert!(only_picture(&reopened).rows.as_ref().is_some_and(|rows| Arc::ptr_eq(rows, &last)), "the kept pixels show at once");
+    let after = settled(&mut s, sheet);
+    assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
+    let picture = only_picture(&after);
+    assert!(!picture.stale && **picture.rows.as_ref().unwrap() == *last, "{picture:?}");
 }
 
 /// Only the drawing closed last keeps its pictures' pixels: once another closes, the first keeps its

@@ -517,7 +517,7 @@ mod imp {
                 }
                 e => failed(what, "operation", e),
             })?;
-            // Checked here unless the evaluation's validation mode leaves it to the feature's end
+            // Checked here when the evaluation's validation mode checks each step
             // (`crate::validation`).
             let step = crate::validation::step();
             if step == crate::validation::Step::Check {

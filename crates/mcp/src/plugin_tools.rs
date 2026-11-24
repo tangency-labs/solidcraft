@@ -2,7 +2,8 @@
 //! listed beside the built-in tools as `<plugin>.<entry>`, read afresh from `plugin.tools` at each
 //! `tools/list` and each call, so a plugin turned off or removed is gone from the next listing and
 //! can no longer be called. A command entry runs as its `<plugin>.<entry>` command (no dialog, one
-//! undo step, the plugin's existing grants); an importer entry opens its file with `file.import`.
+//! undo step, the plugin's existing grants); an importer entry opens its file with `file.import`,
+//! and an exporter entry writes the open design with `file.export`.
 //! Each definition carries a `plugin` field, and the plugin's own text reaches the agent marked
 //! as plugin text.
 
@@ -64,6 +65,15 @@ fn definition(t: &Value) -> Option<Value> {
         .map(|e| format!(".{}", plugin_text(e)))
         .collect();
     let (title, what, annotation) = match kind {
+        "exporter" => (
+            format!("Export {} files with {plugin_name}", extensions.join(", ")),
+            format!(
+                "Writes the open design as a {} file with this exporter (`file.export` with format `{name}`). \
+                 Arguments: `path`, and `options` as the exporter declares them.",
+                extensions.join(" or ")
+            ),
+            Effect::Files,
+        ),
         "importer" => (
             format!("Open {} files with {plugin_name}", extensions.join(", ")),
             format!(
@@ -106,7 +116,7 @@ pub fn definition_for(b: &mut dyn Backend, name: &str) -> Option<Value> {
 }
 
 /// Run plugin tool `name`: its arguments checked against the entry's declared schema, then the
-/// command entry by name or the importer through `file.import`.
+/// command entry by name, the importer through `file.import`, or the exporter through `file.export`.
 pub fn call(b: &mut dyn Backend, name: &str, args: &Map<String, Value>) -> Result<Value, String> {
     let tools = listed(b, Some(name))?;
     let Some(t) = tools.iter().find(|t| t.get("name").and_then(Value::as_str) == Some(name)) else {
@@ -120,6 +130,10 @@ pub fn call(b: &mut dyn Backend, name: &str, args: &Map<String, Value>) -> Resul
     }
     let exec = |b: &mut dyn Backend, command: &str, params: Value| b.call("engine.execute", json!({"command": command, "params": params}));
     match str_field(t, "kind") {
+        "exporter" => {
+            let options = args.get("options").cloned().unwrap_or_else(|| json!({}));
+            exec(b, "file.export", json!({"path": args.get("path"), "format": name, "options": options}))
+        }
         "importer" => {
             let options = args.get("options").cloned().unwrap_or_else(|| json!({}));
             exec(b, "file.import", json!({"path": args.get("path"), "format": name, "options": options, "named": true}))

@@ -1218,6 +1218,7 @@
   "cmd.motion_list": "Seznam pohybových studií",
   "cmd.motion_play": "Přehrát pohybovou studii",
   "cmd.motion_plot": "Graf pohybové studie",
+  "cmd.motion_simulate": "Simulovat pohyb",
   "cmd.motion_study": "Pohybová studie",
   "cmd.motion_trace": "Stopa pohybu",
   "cmd.motion_trace_edit": "Upravit stopu pohybu",

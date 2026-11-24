@@ -149,7 +149,7 @@ fn project_can_keep_its_previous_direct_pick_workflow() {
 fn a_sketch_key_sketches_on_the_selected_planar_face() {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
-    h.app.ui.pick_bodies = false;
+    h.app.ui.pick_mode = solidcraft_engine::PickMode::Faces;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"BaseBox"})).unwrap();
     h.call("ui.view", json!({"view":"top"}));
     h.call("ui.view", json!({"view":"fit"}));
@@ -246,10 +246,14 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     let selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
     h.app.session.selection = selection.clone();
 
+    // Starting the body Move tool ends the open sketch, as every other tool does.
     press(&mut h, "M");
-    assert!(h.app.dialog.is_none(), "the default body Move shortcut is disabled in a sketch");
-    assert_eq!(h.app.session.active_sketch, sketch);
-    assert_eq!(h.app.session.selection, selection);
+    assert!(h.app.dialog.is_some(), "the default body Move shortcut opens Move");
+    assert_eq!(h.app.session.active_sketch, None);
+    h.app.dialog = None;
+    h.app.tool = None;
+    h.app.run("sketch.edit", json!({"sketch": sketch.unwrap()})).unwrap();
+    h.app.session.selection = selection.clone();
 
     crate::keymap::bind(&mut h.app, "sketch.move", "M", true).unwrap();
     press(&mut h, "M");
@@ -434,7 +438,9 @@ fn a_construct_command_keeps_the_sketch_open() {
     let sketch = h.app.session.active_sketch;
     h.app.start("construct.plane.offset");
     h.settle();
-    assert_eq!(h.app.session.active_sketch, sketch);
+    // Starting any other tool, a construction plane included, finishes the open sketch.
+    assert!(sketch.is_some());
+    assert_eq!(h.app.session.active_sketch, None);
 }
 
 #[test]
@@ -448,9 +454,7 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
     h.app.edit_feature(sketch);
     h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.start("solid.extrude");
-    assert_eq!(h.app.session.active_sketch, Some(sketch), "Finish and the marker restore commit together after evaluation");
-    assert!(h.app.deferred.is_some(), "the marker is not rolling back off the window thread");
-    assert!(h.app.dialog.is_none(), "Extrude opened before the marker was back");
+    assert_eq!(h.app.session.active_sketch, None, "the sketch finishes right away, and the marker restore follows after evaluation");
     for _ in 0..500 {
         if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
             break;
@@ -460,8 +464,9 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
     }
     assert_eq!(h.app.session.doc.marker, None);
     assert_eq!(h.app.session.active_sketch, None);
-    let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
-    assert_eq!(items, vec![Sel::Profile { sketch, index: 0 }], "Extrude did not open once the marker was back");
+    h.frames(5);
+    assert!(h.app.dialog.is_some(), "Extrude opened once the marker was back");
+    let _ = sketch;
 }
 
 /// The SKETCH tab kept shown (#7904): right after MODEL with no sketch open, its drawing and

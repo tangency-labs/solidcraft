@@ -25,9 +25,19 @@ pub mod sweeps;
 pub mod trace;
 pub mod trim;
 
-pub use check::{CheckLevel, CheckReport};
-pub use measure::{MEASURE_ACCURACY, MassProperties, PointClass};
-pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS, Turn};
+pub use check::CheckLevel;
+pub use check::CheckReport;
+pub use measure::MEASURE_ACCURACY;
+pub use measure::MassProperties;
+pub use measure::PointClass;
+pub use ops::Blend;
+pub use ops::BooleanOp;
+pub use ops::ChamferSecond;
+pub use ops::Hole;
+pub use ops::HoleEdge;
+pub use ops::MAX_POINTS;
+pub use ops::MAX_UNION_BREPS;
+pub use ops::Turn;
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq)]
@@ -75,6 +85,11 @@ pub enum Error {
     WallFolds { largest: Option<f64> },
     /// SMLib cannot build this operation exactly.
     Unsupported,
+    /// A draft refused by the kernel whose drafted face would cut through a face it does not
+    /// meet (solidcore's `drafted_through`): a hole's wall within the draft of the side. `at` is a
+    /// point of that face between the face's plane and its drafted plane, `depth` how far it
+    /// lies past the drafted plane.
+    DraftCutsThrough { at: [f64; 3], depth: f64 },
     /// A face move whose tangent blends cannot follow the moved faces, with solidcore's reason
     /// (`SmOffsetFacesExecutive`'s refusal comment): `exact` false where the blend cannot be taken
     /// off and put back ([`Error::Unsupported`] without a reason), true where following it needs a
@@ -136,7 +151,8 @@ pub enum Error {
 
 /// Why a blend has no room, and what the largest size that builds a refused blend sizes
 /// ([`Error::TooLarge`]): ops' own, as its refusal gives them.
-pub use solidcore_ops::{FitKind, RoomReason};
+pub use solidcore_ops::FitKind;
+pub use solidcore_ops::RoomReason;
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -186,6 +202,10 @@ impl std::fmt::Display for Error {
                 }
             }
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
+            Error::DraftCutsThrough { at: [x, y, z], depth } => write!(
+                f,
+                "a drafted face would cut through the face at ({x:.3}, {y:.3}, {z:.3}), which reaches {depth:.3} past it and meets no edge of it"
+            ),
             Error::CornerUnsupported { why, at } => {
                 write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends")?;
                 if let Some([x, y, z]) = at {
