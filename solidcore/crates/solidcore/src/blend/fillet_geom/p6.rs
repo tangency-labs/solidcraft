@@ -32,7 +32,7 @@
 //!   object or record the kernel built that is not there, a vertex not processed yet, a
 //!   chain that does not reach its edge, a drop of a point the kernel placed on what it is
 //!   dropped onto that found nothing, a rail that does not follow the fillet surface's
-//!   parametrization, geometries with different solvers) is a [`BlendFailure::Defect`]
+//!   parametrization) is a [`BlendFailure::Defect`]
 //!   whose reason (one of the named `const`s at the end of the file) says why, built where
 //!   it happens (its origin is that file and line, or the caller's for the helpers that
 //!   take the operation) and keeping upstream's status for the goldens:
@@ -49,8 +49,11 @@
 //!   constructions not built are named: a fillet end from a vertex not classified to a
 //!   side edge use ([`BlendFailure::FilletEndVertexOffSideEdge`]) and a squeeze at an end
 //!   that is not a rail/edge-use vertex ([`BlendFailure::SqueezeEndNotRailEdgeuse`]).
-//!   `copy_geom` with different solvers stays [`BlendFailure::StageFailed`] (`SM_ERR`),
-//!   not reviewed yet: its only production caller cannot reach it.
+//!   A copy between fillet geometries with different solvers (`copy_geom`,
+//!   `copy_geom_with_solver`) is the caller's set-up: both are public and take the two
+//!   geometries from the caller, so
+//!   [`BlendFailure::FilletSetUpInvalid`]`(`[`FilletSetUp::CopySourceSolver`]`)`, keeping
+//!   upstream's `SM_ERR` (it checks the solvers, it does not dereference them).
 //! - **Object model.** As in parts 1 and 3, `this` is an id of the pseudo B-rep
 //!   [`FilletBrep`] (`self`); the B-rep being filleted is `target` (the fillet edges'
 //!   original edges and faces, the vertices' classification objects, the solvers' edge
@@ -126,7 +129,7 @@ use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::line::Line;
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, FilletSetUp};
 use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::geom::extent1d::Extent1d;
@@ -1885,7 +1888,8 @@ impl FilletBrep {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when the geometries have different solvers; `SM_ERR_NULL_POINTER`
+    /// [`FilletSetUp::CopySourceSolver`] (`SM_ERR`) when the geometries have different
+    /// solvers; `SM_ERR_NULL_POINTER`
     /// (leaving the copies made so far) when `other` has no B-spline fillet surface or
     /// centre line, or a rail curve copy is not a B-spline;
     /// [`SolidError::InvalidInput`] without solver, rails or a solver missing from
@@ -1899,7 +1903,7 @@ impl FilletBrep {
     ) -> Result<()> {
         // check state
         if self.geom(g)?.fillet_solver() != self.geom(other)?.fillet_solver() {
-            return Err(stage_failed(OP_COPY));
+            return Err(copy_other_solver());
         }
         let solver_id = self
             .geom(g)?
@@ -1922,7 +1926,7 @@ impl FilletBrep {
     ) -> Result<()> {
         // check state
         if self.geom(g)?.fillet_solver() != self.geom(other)?.fillet_solver() {
-            return Err(defect(OP_COPY, COPY_OTHER_SOLVER));
+            return Err(copy_other_solver());
         }
         // locals: m_pFilletSolver->m_crContext
         if self.geom(g)?.fillet_solver().is_none() {
@@ -3193,11 +3197,17 @@ fn side_edge_not_b_spline(edge: EdgeId, curve: &Curve, status: i32) -> SolidErro
     .into_error()
 }
 
-/// A step that could not go on, not reviewed yet: a stage failure keeping `SM_ERR`
-/// (#15034 rule 2).
+/// The two fillet geometries of a copy have different solvers: the caller's set-up
+/// ([`FilletSetUp::CopySourceSolver`]), keeping upstream's `SM_ERR` (it checks the
+/// solvers, it does not dereference them).
 #[track_caller]
-fn stage_failed(op: &'static str) -> SolidError {
-    SolidError::blend(op, BlendFailure::StageFailed)
+fn copy_other_solver() -> SolidError {
+    Failure::new(
+        OP_COPY,
+        BlendFailure::FilletSetUpInvalid(FilletSetUp::CopySourceSolver),
+    )
+    .with_status(SM_ERR)
+    .into_error()
 }
 
 /// A defect ([`BlendFailure::Defect`]) with the status `SM_ERR` of the `SER` it replaces.
@@ -3277,9 +3287,6 @@ const RAIL_NOT_ISO: &str = "the rail without a UV curve runs along neither v iso
 const SET_BACK_END_NO_DROP: &str = "the drop of an end of the set-back rail onto the rail it is \
      cut from found no point within ten times the solver's tolerance, though the kernel placed \
      that end on that rail";
-/// Why the geometries to copy have different solvers.
-const COPY_OTHER_SOLVER: &str = "the geometry copied into has another solver than the geometry \
-     copied, though every caller makes the copy with the copied geometry's solver";
 /// Why a side edge use lies on neither rail's face.
 const SIDE_EU_OFF_RAILS: &str = "the side edge use lies on neither rail's original face, nor \
      does its radial use or a rolled rail's face, though side edge uses are taken from the faces \
@@ -3384,7 +3391,7 @@ mod tests {
     use super::*;
     use crate::blend::fillet_solver::p1::FilletExecutiveRef;
     use crate::error::blend::BlendFailure;
-    use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
+    use crate::error::{ErrorKind, SM_ERR, SM_ERR_NULL_POINTER};
     use crate::geom::attribute::ObjectKey;
     use crate::geom::context::ALL_MARKS;
     use crate::nurbs::math::{CPoint, NOW};
@@ -3671,13 +3678,20 @@ mod tests {
         let (b, rails_b) = two_rail_geom(&mut fb, &k);
         let solvers = [solver(false)];
 
-        // different solvers
+        // different solvers: the caller's set-up, upstream's SM_ERR, through both entry
+        // points (the second is checked before it reads its solver)
         fb.geom_mut(b).unwrap().solver = Some(FilletSolverId(1));
-        let err = fb.copy_geom(&k, b, a, &solvers).unwrap_err();
-        assert_eq!(
-            failure(&err),
-            (Some(&BlendFailure::StageFailed), Some(SM_ERR))
-        );
+        let set_up = BlendFailure::FilletSetUpInvalid(FilletSetUp::CopySourceSolver);
+        for err in [
+            fb.copy_geom(&k, b, a, &solvers).unwrap_err(),
+            fb.copy_geom_with_solver(&k, b, a, &solvers[0]).unwrap_err(),
+        ] {
+            assert_eq!(failure(&err), (Some(&set_up), Some(SM_ERR)));
+            assert_eq!(err.kind(), ErrorKind::InvalidInput);
+            assert!(!err.is_defect());
+        }
+        // nothing was copied
+        assert!(fb.geom(b).unwrap().fillet_surface(None).unwrap().is_none());
         fb.geom_mut(b).unwrap().solver = Some(FilletSolverId(0));
 
         // no fillet surface to copy: NULL, SM_ERR_NULL_POINTER
