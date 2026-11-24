@@ -4880,6 +4880,7 @@ impl SolveApp {
                 continue;
             };
             self.run_control(ctx, req);
+            control::post_request_open_close(self);
         }
         self.control_rx = rx;
     }

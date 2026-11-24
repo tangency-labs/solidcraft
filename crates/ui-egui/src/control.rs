@@ -75,9 +75,20 @@ pub(crate) fn publish_design(app: &mut SolveApp, watch: &DocumentWatch) {
         app.open_designs_seen = None;
         return;
     }
+    // The opened and closed events go first: a connection woken by the publish sends what is
+    // posted by then, so they come ahead of this frame's `design.changed`.
+    post_open_close(app, watch);
     let revision = app.session.design_revision();
     watch.publish(&app.session.document_id, revision);
-    post_open_close(app, watch);
+}
+
+/// Compares the open designs after one control request, so a design that one request opens and
+/// the next closes in the same frame is reported too. `design.changed` still goes out once a frame.
+pub(crate) fn post_request_open_close(app: &mut SolveApp) {
+    let watch = app.design_watch;
+    if watch.subscribed() {
+        post_open_close(app, watch);
+    }
 }
 
 /// The open designs as `(document_id, path, read_only)`, in tab order.
@@ -106,10 +117,14 @@ fn post_open_close(app: &mut SolveApp, watch: &DocumentWatch) {
 
 /// Posts `design.saved` after a save of the design file finished on success. `document_id` is the
 /// saved design's; `previous` is the path it had before the save.
-pub(crate) fn post_design_saved(app: &SolveApp, document_id: &str, previous: Option<String>) {
-    if !app.design_watch.subscribed() {
+pub(crate) fn post_design_saved(app: &mut SolveApp, document_id: &str, previous: Option<String>) {
+    let watch = app.design_watch;
+    if !watch.subscribed() {
         return;
     }
+    // A design opened since the last comparison is reported first, so its save never comes before
+    // its `design.opened` (a script that starts a design and saves it, a save held behind a load).
+    post_open_close(app, watch);
     let path = app.session.path.clone();
     // The old file is named only when the design moved to another path.
     let previous_path = previous.filter(|old| match path.as_deref() {
@@ -117,7 +132,7 @@ pub(crate) fn post_design_saved(app: &SolveApp, document_id: &str, previous: Opt
         None => true,
     });
     let disk = app.session.disk.as_ref().map(|d| json!({"len": d.len, "modified_ns": d.modified_ns.map(|n| n.to_string())}));
-    app.design_watch.post("design.saved", json!({"document_id": document_id, "path": path, "previous_path": previous_path, "disk": disk}));
+    watch.post("design.saved", json!({"document_id": document_id, "path": path, "previous_path": previous_path, "disk": disk}));
 }
 
 pub enum Outcome {
@@ -3248,6 +3263,56 @@ pub(crate) mod tests {
         drop(sub);
     }
 
+    /// Two requests run in one frame: a tab the first opens and the second closes is still
+    /// reported opened and then closed.
+    #[test]
+    fn a_tab_opened_and_closed_in_one_frame_is_reported() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        // A blank active design would be reused by `new` instead of a tab opening.
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}));
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        h.frames(1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.app.control_rx = Some(rx);
+        let (open, opened) = ControlRequest::new("ui.documents", json!({"action": "new"}));
+        let (close, closed) = ControlRequest::new("ui.documents", json!({"action": "close", "index": 1}));
+        tx.send(open).unwrap();
+        tx.send(close).unwrap();
+        h.frame();
+        let answered = |reply: Result<Value, _>| reply.map(|v| v["ok"].clone()).ok();
+        assert_eq!((answered(opened.try_recv()), answered(closed.try_recv())), (Some(json!(true)), Some(json!(true))), "both in one frame");
+        let events = events_since(&WATCH, &mut cursor);
+        let (new, gone) = (named(&events, "design.opened"), named(&events, "design.closed"));
+        assert_eq!((new.len(), gone.len()), (1, 1), "{events:?}");
+        assert_eq!(new[0]["document_id"], gone[0]["document_id"], "{events:?}");
+        drop(sub);
+    }
+
+    /// A design that one script starts and saves is reported opened before its save.
+    #[test]
+    fn a_design_is_reported_opened_before_its_save() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let dir = std::env::temp_dir().join(format!("solidcraft-design-events-order-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        h.frames(1);
+        let path = dir.join("order.solidcraft");
+        let steps = json!([{"command": "file.new", "params": {}}, {"command": "file.save_as", "params": {"path": path.to_string_lossy()}}]);
+        let v = h.call("engine.script", json!({"commands": steps}));
+        assert_eq!(v["ok"], true, "{v}");
+        let events = events_since(&WATCH, &mut cursor);
+        let at = |name: &str| events.iter().position(|e| e["event"] == name);
+        assert!(at("design.opened").is_some_and(|opened| at("design.saved").is_some_and(|saved| opened < saved)), "{events:?}");
+        assert_eq!(named(&events, "design.opened")[0]["document_id"], named(&events, "design.saved")[0]["document_id"], "{events:?}");
+        drop(sub);
+    }
+
     /// `design.saved`: the first save of an untitled design has no `previous_path`; a Save As to
     /// another file names the file the design left.
     #[test]
@@ -3312,8 +3377,11 @@ pub(crate) mod tests {
         let sub = WATCH.join();
         let mut cursor = sub.from();
         h.frames(1);
-        // The unknown command is the failing step; its reply is not what this test checks.
-        h.call("engine.batch", json!({"commands": [{"command": "file.new", "params": {}}, {"command": "no.such.command", "params": {}}]}));
+        // The extrude's distance fails when the step runs, after `file.new` has run (an unknown
+        // command would be refused before any step).
+        let steps = json!([{"command": "file.new", "params": {}}, {"command": "solid.extrude", "params": {"distance": "bogus +"}}]);
+        let v = h.call("engine.batch", json!({"commands": steps}));
+        assert_eq!((&v["result"]["completed"], &v["result"]["rolled_back"]), (&json!(1), &json!(true)), "{v}");
         h.frames(1);
         let events = events_since(&WATCH, &mut cursor);
         assert!(named(&events, "design.opened").is_empty(), "{events:?}");

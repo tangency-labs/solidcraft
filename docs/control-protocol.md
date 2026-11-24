@@ -881,9 +881,15 @@ closes or is saved (#21184):
 - These events are one-off, in order, and never combined: each is a line of its own. The opened,
   closed and saved events from a moment come before the `design.changed` line for it. Only
   `design.changed` is coalesced.
-- A client can get an event for a state it has already read, but it never misses one. So it
-  subscribes first, then reads `ui.documents` for its starting point. No event comes before the
-  subscribe reply.
+- A client can get an event for a state it has already read, but it never misses one, except as
+  the next point says. So it subscribes first, then reads `ui.documents` for its starting point.
+  No event comes before the subscribe reply.
+- The open designs are compared after each request, before each save is reported, and at the end
+  of each frame, so a design's `design.opened` always comes before its `design.saved`. A design
+  that the steps of one `engine.script` or `engine.batch` open and close again without saving it
+  gives no event. A rolled-back batch that saved nothing sends none. One that saved a file reports
+  the saved design as opened, saved and closed, since the file was written, and a design it
+  replaced as closed and opened again.
 - A connection more than 256 events behind is sent `{"event":"events.dropped","params":{"count":N}}`
   before the events it still gets. The client then reads `ui.documents` again to catch up.
 - Nothing sends these events for autosave or recovery files, exports, `document.saved` (which
