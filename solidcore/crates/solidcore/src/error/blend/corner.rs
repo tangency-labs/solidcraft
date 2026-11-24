@@ -129,8 +129,9 @@ pub enum CornerInput {
     /// A chamfer facet event with no normal.
     FacetNormalNotSet,
     /// A fill given to a setback containment bound that is not one the setback split
-    /// builds: two one-span patches per round with positive weights, and a round and a face
-    /// per edge.
+    /// builds: two one-span patches per round with positive weights (of degree 2 or more
+    /// across a face it lies on), and a round and a face per edge, its faces among those
+    /// given.
     FillNotFromSetbackSplit,
     /// A corner patch step given no fillet B-rep.
     FilletBrepNotGiven,
@@ -326,6 +327,9 @@ pub enum CornerStep {
     /// two directions' product is not finite), so the corner's side of the section is
     /// undecided. Degenerate.
     RailSquareToEdge,
+    /// A round's least normal curvature along its end section has no lower bound the
+    /// setback fill certifies (none down to `-2^64 / r`). Not found.
+    RoundEndCurvatureUnbounded,
     /// A setback fill's round is not one Bezier span along its rails beside its end
     /// section once its knots there are raised (a span of no length, or rows past its
     /// net). Unsupported.
@@ -336,9 +340,24 @@ pub enum CornerStep {
     /// A setback fill's round has a fillet surface with no B-spline form to take its end
     /// section from. Unsupported.
     RoundSurfaceNotBSpline,
+    /// A setback fill's base points, one per round, all coincide: its interior map's domain
+    /// has no size. Degenerate.
+    SetbackBasePointsCoincide,
+    /// A setback fill's base polygon has its two sides at a base point along parallel
+    /// directions, so the interior part there has no frame. Degenerate.
+    SetbackBaseSidesParallel,
+    /// A point of a setback fill's solved net that lies on a face is farther than the
+    /// tolerance from that face's plane. Not within tolerance.
+    SetbackFacePointOffFace,
+    /// The faces of a setback corner of mixed convexity have planes that meet in no one
+    /// point, the vertex its containment's saddle test is taken about. Degenerate.
+    SetbackFacesMeetInNoPoint,
     /// A setback fill's normal is not certified regular and to one side of its rounds'
     /// (the fill may fold). Unsupported.
     SetbackFillMayFold,
+    /// No setback fill up to degree 9 is certified at the corner's setbacks (convex beside
+    /// planes, ruling (a) beside a curved face). Not found.
+    SetbackFillNotCertified,
     /// A G2 setback fill whose every interior map up to degree 9 that meets its setback
     /// patches' conditions leaves a patch whose control net turns back. Unsupported.
     SetbackG2NetTurnsBack,
@@ -346,6 +365,12 @@ pub enum CornerStep {
     /// the scale its growth certified (the setback vertices placed afresh from the trials'
     /// last positions). Not within tolerance.
     SetbackGrowthUnplaced,
+    /// A setback fill's margin programme (the probe of how far its fill stands from
+    /// failing) is shown to have no solution from its rows. Not found.
+    SetbackMarginInfeasible,
+    /// A setback fill's margin programme stopped without a solution and without a proof that
+    /// there is none (its step limit, or no progress within it). Not found.
+    SetbackMarginUnresolved,
     /// No interior map of a setback fill up to degree 9 meets its setback patches'
     /// conditions. Not found.
     SetbackNoInteriorMap,
@@ -354,6 +379,17 @@ pub enum CornerStep {
     SetbackPatchMissesInterior,
     /// A patch of a setback fill has a weight that is not positive. Degenerate.
     SetbackPatchWeightNotPositive,
+    /// A curved setback fill's rail ends all coincide: the corner has no size to measure
+    /// its rounding by. Degenerate.
+    SetbackRailEndsCoincide,
+    /// A spring curve's two ends on a cylinder or cone are a half turn or more apart about
+    /// its axis. Unsupported.
+    SetbackSpringEndsHalfTurnApart,
+    /// A spring curve's end on a sphere is at the pole of the sphere's parameter plane
+    /// (opposite the frame's origin). Degenerate.
+    SetbackSpringPointAtPole,
+    /// A spring curve's end on a cylinder or cone lies on its axis. Degenerate.
+    SetbackSpringPointOnAxis,
     /// A setback fill's spring meets the side of its round farther than the tolerance from
     /// the end of the rail it springs from. Not within tolerance.
     SetbackSpringSideOffRailEnd,
@@ -421,15 +457,27 @@ impl CornerStep {
             Self::EndSideFaceMissesCap => ErrorKind::NotFound,
             Self::OpenSetbackRailsParallel => ErrorKind::Degenerate,
             Self::RailSquareToEdge => ErrorKind::Degenerate,
+            Self::RoundEndCurvatureUnbounded => ErrorKind::NotFound,
             Self::RoundEndSpanNotBezier => ErrorKind::Unsupported,
             Self::RoundSectionOffsetsApart => ErrorKind::NotWithinTolerance,
             Self::RoundSurfaceNotBSpline => ErrorKind::Unsupported,
+            Self::SetbackBasePointsCoincide => ErrorKind::Degenerate,
+            Self::SetbackBaseSidesParallel => ErrorKind::Degenerate,
+            Self::SetbackFacePointOffFace => ErrorKind::NotWithinTolerance,
+            Self::SetbackFacesMeetInNoPoint => ErrorKind::Degenerate,
             Self::SetbackFillMayFold => ErrorKind::Unsupported,
+            Self::SetbackFillNotCertified => ErrorKind::NotFound,
             Self::SetbackG2NetTurnsBack => ErrorKind::Unsupported,
             Self::SetbackGrowthUnplaced => ErrorKind::NotWithinTolerance,
+            Self::SetbackMarginInfeasible => ErrorKind::NotFound,
+            Self::SetbackMarginUnresolved => ErrorKind::NotFound,
             Self::SetbackNoInteriorMap => ErrorKind::NotFound,
             Self::SetbackPatchMissesInterior => ErrorKind::NotWithinTolerance,
             Self::SetbackPatchWeightNotPositive => ErrorKind::Degenerate,
+            Self::SetbackRailEndsCoincide => ErrorKind::Degenerate,
+            Self::SetbackSpringEndsHalfTurnApart => ErrorKind::Unsupported,
+            Self::SetbackSpringPointAtPole => ErrorKind::Degenerate,
+            Self::SetbackSpringPointOnAxis => ErrorKind::Degenerate,
             Self::SetbackSpringSideOffRailEnd => ErrorKind::NotWithinTolerance,
             Self::SideEdgeOffSolverFaces => ErrorKind::NotFound,
             Self::SweptArcNotFound => ErrorKind::NotFound,
@@ -469,15 +517,27 @@ impl CornerStep {
             Self::EndSideFaceMissesCap => "a side face of the End does not meet the cap's plane between the cap edge's ends",
             Self::OpenSetbackRailsParallel => "an open setback corner's rails meet the fill's end section along parallel directions",
             Self::RailSquareToEdge => "a setback round's rail is square to its edge at the end section",
+            Self::RoundEndCurvatureUnbounded => "a round's least normal curvature along its end section has no certified lower bound",
             Self::RoundEndSpanNotBezier => "a setback fill's round is not one Bezier span along its rails beside its end section",
             Self::RoundSectionOffsetsApart => "a round's end section has its offset points farther apart than the tolerance",
             Self::RoundSurfaceNotBSpline => "a setback fill's round has a fillet surface with no B-spline form",
+            Self::SetbackBasePointsCoincide => "a setback fill's base points all coincide",
+            Self::SetbackBaseSidesParallel => "a setback fill's base polygon has two sides along parallel directions at a base point",
+            Self::SetbackFacePointOffFace => "a point of a setback fill's solved net on a face is farther than the tolerance from it",
+            Self::SetbackFacesMeetInNoPoint => "a setback corner's face planes meet in no one point",
             Self::SetbackFillMayFold => "a setback fill's normal is not certified regular and to one side of its rounds' (the fill may fold)",
+            Self::SetbackFillNotCertified => "no setback fill up to degree 9 is certified at the corner's setbacks",
             Self::SetbackG2NetTurnsBack => "every G2 setback fill up to degree 9 has a patch whose control net turns back",
             Self::SetbackGrowthUnplaced => "a setback corner grown beside a curved face does not place its rounds' ends at the scale it certified",
+            Self::SetbackMarginInfeasible => "a setback fill's margin programme has no solution",
+            Self::SetbackMarginUnresolved => "a setback fill's margin programme stopped without a solution or a proof that it has none",
             Self::SetbackNoInteriorMap => "no interior map of a setback fill up to degree 9 meets its setback patches' conditions",
             Self::SetbackPatchMissesInterior => "a setback patch does not meet the fill's interior within the tolerance",
             Self::SetbackPatchWeightNotPositive => "a patch of a setback fill has a weight that is not positive",
+            Self::SetbackRailEndsCoincide => "a curved setback fill's rail ends all coincide",
+            Self::SetbackSpringEndsHalfTurnApart => "a spring curve's ends on a cylinder or cone are a half turn or more apart about its axis",
+            Self::SetbackSpringPointAtPole => "a spring curve's end on a sphere is at the pole of its parameter plane",
+            Self::SetbackSpringPointOnAxis => "a spring curve's end on a cylinder or cone lies on its axis",
             Self::SetbackSpringSideOffRailEnd => "a setback fill's spring meets its round's side farther than the tolerance from the rail's end",
             Self::SideEdgeOffSolverFaces => "no fillet surface lies on the face of the side edge the ball is sized on",
             Self::SweptArcNotFound => "the Swept turn's torus has no boundary curve for the corner's arc edge",

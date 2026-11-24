@@ -2630,6 +2630,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.rotate_member"
                 | "frame.gusset"
                 | "frame.member"
+                | "frame.trim"
                 | "frame.plate"
         );
     if !constructor {
