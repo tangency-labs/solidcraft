@@ -2689,7 +2689,19 @@ impl Session {
                 let vals = self.doc.evaluation_values();
                 let mut trial = sk.clone();
                 let offset_err = match self.doc.apply_dimension_values(&vals, &mut trial) {
-                    Ok(()) => trial.refresh_offsets().err().map(|e| e.to_string()),
+                    Ok(()) => {
+                        let mut solved_trial = sk.clone();
+                        self.doc
+                            .solve_sketch_with_analysis(
+                                &vals,
+                                &mut solved_trial,
+                                &sk.driving_values(),
+                                Some(sk),
+                                solidcraft_sketch::Analysis::StatusOnly,
+                            )
+                            .err()
+                            .map(|e| e.to_string())
+                    }
                     Err(e) => {
                         let msg = e.to_string();
                         msg.contains("offset dimension").then_some(msg)

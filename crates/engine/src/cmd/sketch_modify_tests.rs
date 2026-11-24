@@ -6958,4 +6958,23 @@ fn offset_negative_user_param_symmetric_ladder_and_refusal() {
         let curves = side_curves(&o, index);
         assert!(box_is(&sk, &curves, [inset, inset], [40.0 - inset, 30.0 - inset]), "ring {}: {:?}", index + 1, bounds(&sk, &curves));
     }
+
+    // 5. Combined source + offset edit that collapses the offset against the solved source
+    // geometry (circle r=10 -> 3, inward offset 2 -> 5) is refused cleanly without wiping the
+    // sketch.
+    let mut s = new_sketch();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let dim_r = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": "radius", "value": 10}))["param"].as_str().unwrap().to_string();
+    let o = run(&mut s, "sketch.offset", json!({"curves": [circle], "distance": 2, "side": [0, 0]}));
+    let dim_off = o["param"].as_str().unwrap().to_string();
+    let before = s.doc.to_json();
+    let e_combined = s.execute("parameters.change", &json!({"changes": {dim_r.clone(): "3 mm", dim_off: "5 mm"}})).unwrap_err().to_string();
+    assert!(e_combined.contains("the values were not changed"), "{e_combined}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.world_state().unwrap().sketch(1).is_some());
+    // Shrinking only the source circle below the existing inward offset is also refused cleanly.
+    let e_shrink = s.execute("parameters.change", &json!({"name": dim_r, "expression": "1 mm"})).unwrap_err().to_string();
+    assert!(e_shrink.contains("the values were not changed"), "{e_shrink}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.world_state().unwrap().sketch(1).is_some());
 }
