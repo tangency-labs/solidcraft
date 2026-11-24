@@ -7,6 +7,7 @@
 # blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_p10, topology.face_p3: main's files with the rows #17739's healed vertex tolerances move (a vertex covers twice its gap, tangency-labs/solidcraft#18667)
 # blend.fillet_executive_p3: main's file with the halved span's early stop (#13692): sweep5-nurb_box1-all-r0.5's edge [0, 18.0943] listed 24th instead of 1st, the topology and geometry blocks that follow it, and four mass-properties entries an ulp or two off (summation order)
 # offset.offset_executive_p2, surface.surface_cache_p1: main's files with the three rows the retired zero-row-batch flags move (surface_cache_p1 gen0168 and gen0222, the lowest continuity of the V knots; offset_executive_p2 boolean_domain_problemShell12_face0_round, result.geometry[3] by 1.3e-16)
+# surface.surface_p5: main's file with five fixed parameters outside the requested region refused (#20378)
 # surface.surface_point_solve_p2: main's file without the lines of gen0072 and gen0546, Solve maxima a witness grid refutes, now known failing (#13684)
 # surface.surface_point_solve_p3: main's file without the lines of 51 global point solves a witness grid refutes, now known failing (#13684)
 # blend.fillet_executive_p3, offset.offset_geometry_creation, topology.api_files, topology.brep_local_operation, topology.edgeuse_p3, topology.face_p3: main's file with the rows #18490 moves (the sphere drop subdivides the spans proved off its curve)
@@ -242,7 +243,7 @@ surface.surface_p11	4813228760084e49
 surface.surface_p2	be0e87faaf6b9c35
 surface.surface_p3	dd67a7038520b511
 surface.surface_p4	08286ee77b021cb0
-surface.surface_p5	4053a16013112073
+surface.surface_p5	042c445fcc24a14e
 surface.surface_p6	2b213a42de8cade5
 surface.surface_p7	6619493f96d9d624
 surface.surface_p8	8c429b3fc714a3d3
