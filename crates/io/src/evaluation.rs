@@ -8,9 +8,11 @@
 //! `SOLIDCRAFT_SOURCE_COMMIT`: the commit, recorded with the cache. Both are "unknown" without git
 //! (a source tarball), which never trusts a cache.
 //!
-//! A working tree with uncommitted changes has a digest of its own: the trees below are the
-//! *committed* ones, so without the marker a build from a changed tree would carry the digest of
-//! the commit it sits on, and could write a cache that a clean build of that commit trusts.
+//! A working tree with uncommitted changes has a digest of its own, of those changes: the trees
+//! below are the *committed* ones, so without them a build from a changed tree would carry the
+//! digest of the commit it sits on, and could write a cache that a clean build of that commit (or a
+//! build with other changes) trusts. The build script reruns when a file under [`watched`]
+//! changes, so the digest follows the working tree in an incremental build too.
 //!
 //! This file is included by `build.rs` (`#[path = "src/evaluation.rs"]`), so it must build as a
 //! build script module too: standard library and `sha2` only.
@@ -127,16 +129,49 @@ pub fn source(root: &Path) -> Option<String> {
     digest.update(workspace_settings(&git(root, &["show", "HEAD:./Cargo.toml"])?));
     // The committed trees above are the commit's; a working tree with changes of its own computes
     // a model this digest would otherwise say is the commit's (#7168's own hazard).
-    if dirty(root) {
-        digest.update(b"dirty\n");
-    }
+    working_changes(root, &mut digest)?;
     Some(digest.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Whether the working tree has changes to tracked files. Untracked files are not asked about:
-/// a build ignores them, so they cannot change the model it computes.
-fn dirty(root: &Path) -> bool {
-    git(root, &["status", "--porcelain", "--untracked-files=no"]).is_some()
+/// What in the working tree computes models, relative to the workspace root: the build script
+/// reruns when any of it changes, and its uncommitted changes are part of the digest. Wider than
+/// the committed scope above where that is simpler (a test or a note there only rebuilds this
+/// crate), never narrower.
+pub fn watched() -> Vec<String> {
+    let mut paths: Vec<String> = EVALUATION_CRATES.iter().map(|c| format!("crates/{c}")).collect();
+    paths.extend(EVALUATION_FILES.iter().map(|f| f.to_string()));
+    paths.extend(["solidcore/crates", "solidcore/Cargo.toml", "solidcore/Cargo.lock", "vendor", "Cargo.lock", "Cargo.toml"].map(String::from));
+    paths
+}
+
+/// Add the working tree's own changes under [`watched`] to `digest`: the diff of tracked files
+/// against the commit, and every untracked, not ignored file with its content (a new module is
+/// an untracked file until it is added). Nothing is added for a clean tree, so it keeps the
+/// commit's digest; `None` when git cannot say.
+fn working_changes(root: &Path, digest: &mut Sha256) -> Option<()> {
+    let paths = watched();
+    let mut diff = vec!["diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--no-color", "--"];
+    diff.extend(paths.iter().map(String::as_str));
+    let changed = run(root, &diff)?;
+    let mut others = vec!["ls-files", "--others", "--exclude-standard", "-z", "--"];
+    others.extend(paths.iter().map(String::as_str));
+    let untracked = run(root, &others)?;
+    if !changed.is_empty() {
+        digest.update(b"working tree\n");
+        digest.update(changed);
+    }
+    for file in untracked.split(|&b| b == 0).filter(|f| !f.is_empty()) {
+        let path = String::from_utf8_lossy(file);
+        digest.update(format!("untracked {path}\n"));
+        digest.update(std::fs::read(root.join(path.as_ref())).unwrap_or_default());
+    }
+    Some(())
+}
+
+/// `git` in `root`, its raw output even when empty; `None` when it fails.
+fn run(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    let out = Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
+    out.status.success().then_some(out.stdout)
 }
 
 #[cfg(test)]
@@ -217,19 +252,31 @@ mod tests {
 
     /// A working tree with uncommitted changes has a digest of its own, and the committed one comes
     /// back when they are reverted: a build from a changed tree cannot write a cache a clean build
-    /// of the same commit trusts.
+    /// of the same commit trusts. Two different changes have different digests, so a build with
+    /// one cannot write a cache a build with the other trusts, and a new file a change adds counts.
     #[test]
     fn a_changed_working_tree_has_its_own_digest() {
         let root = repo("dirty");
         let clean = source(&root).expect("a clean digest");
         write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() { edited }\n");
-        assert_ne!(source(&root).as_deref(), Some(clean.as_str()), "a changed working tree is not the commit");
+        let one = source(&root).expect("a digest");
+        assert_ne!(one, clean, "a changed working tree is not the commit");
+        write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() { other }\n");
+        let other = source(&root).expect("a digest");
+        assert_ne!(other, clean, "a changed working tree is not the commit");
+        assert_ne!(other, one, "two changes are two digests");
         write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() {}\n");
         assert_eq!(source(&root).as_deref(), Some(clean.as_str()), "reverting restores the commit's digest");
-        // A change to a file the model is not computed from still marks the tree: it is not the
-        // commit, and the marker can only invalidate more.
+        write(&root, "crates/kernel/src/new.rs", "pub fn one() {}\n");
+        let added = source(&root).expect("a digest");
+        assert_ne!(added, clean, "an untracked file in a crate that computes models counts");
+        write(&root, "crates/kernel/src/new.rs", "pub fn two() {}\n");
+        assert_ne!(source(&root).as_deref(), Some(added.as_str()), "and so does its content");
+        fs::remove_file(root.join("crates/kernel/src/new.rs")).unwrap();
+        // A change outside what computes models keeps the commit's digest, as a commit of it does.
         write(&root, "solidcore/docs/reference.md", "# changed\n");
-        assert_ne!(source(&root).as_deref(), Some(clean.as_str()), "any tracked change is not the commit");
+        write(&root, "crates/viewport/src/lib.rs", "pub fn camera() { edited }\n");
+        assert_eq!(source(&root).as_deref(), Some(clean.as_str()), "the interface and the notes compute no model");
         let _ = fs::remove_dir_all(&root);
     }
 

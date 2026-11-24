@@ -19,5 +19,9 @@ fn main() {
     if let Some(dir) = evaluation::git(&crate_dir, &["rev-parse", "--git-dir"]) {
         println!("cargo:rerun-if-changed={}/logs/HEAD", dir.trim());
     }
+    // An edit to what computes models restamps it too: the digest carries uncommitted changes.
+    for path in evaluation::watched() {
+        println!("cargo:rerun-if-changed={}", root.join(path).display());
+    }
     println!("cargo:rerun-if-changed=build.rs");
 }
