@@ -34,7 +34,7 @@ use solidcore::topology::brep::validation;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::FaceId;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, EntityRef, Kernel, SolidError};
 
 /// An upstream test file, read and arena-named as the goldens reader does.
 fn read(k: &mut Kernel, file: &str) -> Option<Brep> {
@@ -273,7 +273,7 @@ fn the_three_rounds_of_fillet1019_as_one_feature_leave_the_frustum() {
 }
 
 /// The trimmed faces containing a point, including their boundaries.
-fn faces_at(k: &Kernel, b: &mut Brep, p: solidcore::Vec3) -> Vec<solidcore::FaceId> {
+fn faces_at(k: &Kernel, b: &mut Brep, p: solidcore::Vec3) -> Vec<FaceId> {
     use solidcore::query::face::p1::point_on_face;
 
     bp1::faces(b, None)

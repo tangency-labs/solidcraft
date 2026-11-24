@@ -158,7 +158,7 @@ const FEATURE_BREP_GONE: &str = "the feature B-rep is gone, though partitioning 
 const PATCH_GONE: &str = "a patch id a loop recorded has no patch in the executive's list, \
      though a patch is added before its id is recorded and is taken out only while it is \
      validated";
-/// Why an extended loop has no base patch when its two closed patches are compared.
+/// Why a rebuilt loop has no base patch during the crossing check.
 const LOOP_BASE_PATCH_GONE: &str = "a rebuilt loop has no base patch, though extending \
      each loop records its patch before the closed pair is compared";
 /// Why a chain start of the chained loop curves is past them.
@@ -1194,6 +1194,9 @@ fn build_patches(
 ) -> Result<()> {
     if let Err(e) = build_base_patches(k, base, feature, patches) {
         return keep_unported(Err(e));
+    }
+    if !feature.is_partitioned {
+        return Ok(());
     }
     // A successful empty face/face intersection leaves the individual caps in
     // place. A failure to classify the sheets is a solver error, not an empty
