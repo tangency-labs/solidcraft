@@ -2407,6 +2407,70 @@ fn a_nearly_straight_rational_spline_far_from_the_origin_is_not_a_circle() {
     assert!(swept::spline_circle(&broken).is_none());
 }
 
+/// A circle is accepted on the whole of the spline, not at sample points: a quarter circle with
+/// knots 0.1, 0.101, 0.102 and 0.103 inserted is still its circle, and with the one control
+/// point whose basis function lives on [0.1, 0.103] moved 1 mm out of the circle, or out of its
+/// plane, it is not. That point is zero at every one of the 65 samples k/64 (6/64 < 0.1 and
+/// 0.103 < 7/64), so the moved spline matches the circle at all of them and departs from it
+/// only between two of them.
+#[test]
+fn a_spline_that_departs_from_its_circle_between_the_samples_is_not_a_circle() {
+    let (r, o) = (500.0, [700.0, 200.0, 50.0]);
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let mut knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let mut h: Vec<[f64; 4]> = vec![[o[0] + r, o[1], o[2], 1.0], [(o[0] + r) * w, (o[1] + r) * w, o[2] * w, w], [o[0], o[1] + r, o[2], 1.0]];
+    // Boehm's insertion of one knot into the degree 2 spline, on homogeneous points.
+    for t in [0.1, 0.101, 0.102, 0.103] {
+        let k = knots.iter().rposition(|u| *u <= t).unwrap();
+        let mut next = Vec::with_capacity(h.len() + 1);
+        for i in 0..=h.len() {
+            next.push(if i + 2 <= k {
+                h[i]
+            } else if i > k {
+                h[i - 1]
+            } else {
+                let a = (t - knots[i]) / (knots[i + 2] - knots[i]);
+                std::array::from_fn(|c| a * h[i][c] + (1.0 - a) * h[i - 1][c])
+            });
+        }
+        h = next;
+        knots.insert(k + 1, t);
+    }
+    let spline = |h: &[[f64; 4]]| crate::geom::BSplineCurve {
+        degree: 2,
+        points: h.iter().map(|q| [q[0] / q[3], q[1] / q[3], q[2] / q[3]]).collect(),
+        weights: Some(h.iter().map(|q| q[3]).collect()),
+        knots: vec![0.0, 0.1, 0.101, 0.102, 0.103, 1.0],
+        multiplicities: vec![3, 1, 1, 1, 1, 3],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let circle = spline(&h);
+    let Some((Curve::Circle { radius, .. }, _)) = swept::spline_circle(&circle) else { panic!("the quarter circle with knots inserted is a circle") };
+    assert!((radius - r).abs() <= 1e-9 * r, "radius {radius}");
+    // Point 3's basis function is the one on knots 0.1 to 0.103.
+    assert_eq!(&knots[3..=6], &[0.1, 0.101, 0.102, 0.103]);
+    let q = h[3];
+    let p = [q[0] / q[3], q[1] / q[3], q[2] / q[3]];
+    let out = [p[0] - o[0], p[1] - o[1]];
+    let reach = out[0].hypot(out[1]);
+    for (name, by) in [("out of the circle", [out[0] / reach, out[1] / reach, 0.0]), ("out of its plane", [0.0, 0.0, 1.0])] {
+        let mut moved = h.clone();
+        moved[3] = [(p[0] + by[0]) * q[3], (p[1] + by[1]) * q[3], (p[2] + by[2]) * q[3], q[3]];
+        let moved = spline(&moved);
+        for k in 0..=64 {
+            let s = f64::from(k) / 64.0;
+            let (a, b) = (circle.point(s).unwrap(), moved.point(s).unwrap());
+            assert!(a.iter().zip(b).all(|(a, b)| (a - b).abs() <= 1e-12 * r), "{name}: sample {k} moved");
+        }
+        let (a, b) = (circle.point(0.1015).unwrap(), moved.point(0.1015).unwrap());
+        assert!(a.iter().zip(b).map(|(a, b)| (a - b) * (a - b)).sum::<f64>() > 0.25, "{name}: the spline departs between the samples");
+        assert!(swept::spline_circle(&moved).is_none(), "a spline moved {name} between the samples is a circle");
+    }
+}
+
 #[test]
 fn a_closed_edge_on_a_spline_that_runs_on_past_a_full_turn_is_the_turn_between_its_passes() {
     // Five quarters from (2, 0): the curve passes (0, 2) at 1 and again at 5, its end. A
