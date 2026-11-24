@@ -2570,6 +2570,23 @@ fn surface_drop_curve<O: SolutionObject>(
     })
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Plane {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            position,
+            anal_uv_domain,
+            uv_scale,
+        } = self;
+        d.tag(0x91A);
+        base.content(d)?;
+        position.content(d)?;
+        anal_uv_domain.content(d)?;
+        uv_scale.content(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

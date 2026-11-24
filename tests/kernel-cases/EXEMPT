@@ -79,6 +79,7 @@ diagnostics.profile               timing: where a command's time goes
 diagnostics.report_issue          problem reports: tested in issue_report.rs
 diagnostics.report_issue_status   problem reports: tested in issue_report.rs
 diagnostics.validation            a setting: when the body check runs
+doc.info                          the open design's file: crates/engine/src/schema/inspect_tests.rs, plugin/tests.rs
 doc.open                          opening and recovering documents
 doc.recover                       opening and recovering documents
 doc.recovery_discard              opening and recovering documents
@@ -529,6 +530,10 @@ timeline.inspect                  a listing of the timeline
 timeline.play                     plays the history back in the view: no new geometry
 timeline.rename                   a feature name
 timeline.rename_group             a group name
+timeline.roll_to_end              a marker move; tested in crates/engine/src/cmd/edit_tests.rs
+timeline.roll_to_start            a marker move; tested in crates/engine/src/cmd/edit_tests.rs
+timeline.step_back                a marker move; tested in crates/engine/src/cmd/edit_tests.rs
+timeline.step_forward             a marker move; tested in crates/engine/src/cmd/edit_tests.rs
 ui.appBarCustomize                the view: opens the app bar tray (validation only when called programmatically); tested in crates/engine/src/cmd/edit_tests.rs
 ui.appBarReset                    the view: restores the app bar's default layout; tested in crates/engine/src/cmd/edit_tests.rs
 ui.assistant                      the view: camera, layout, display

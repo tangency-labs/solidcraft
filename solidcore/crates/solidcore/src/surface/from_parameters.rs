@@ -404,8 +404,7 @@ fn plane(
     if !(a.is_finite() && b.is_finite() && a > 0.0 && b > 0.0) {
         return Err(SolidError::invalid_input(OP, "a plane axis has no length"));
     }
-    // square to the rounding of the dot product
-    if du.dot(dv).abs() > gamma(3) * a * b {
+    if !plane_axes_square(du, dv) {
         return Err(SolidError::invalid_input(
             OP,
             "the plane's axes are not square: the kernel's plane cannot hold a skew parametrisation",
@@ -418,6 +417,13 @@ fn plane(
     let n = du.cross(dv);
     let normal = n / n.length();
     Ok((Surface::from(p), Implicit::Plane { origin, normal }, [a, b]))
+}
+
+/// Whether a record plane's axes are square to the rounding of their dot product, as
+/// [`plane`] requires: the kernel's plane cannot hold a skew parametrisation.
+#[must_use]
+pub(crate) fn plane_axes_square(du: Vec3, dv: Vec3) -> bool {
+    du.dot(dv).abs() <= gamma(3) * du.length() * dv.length()
 }
 
 /// How far a plane's parameter runs along its unit axis for a unit of the record's along

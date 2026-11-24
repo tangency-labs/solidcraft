@@ -516,6 +516,20 @@ impl Axis2Placement {
     }
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Axis2Placement {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            origin,
+            x_axis,
+            y_axis,
+        } = self;
+        origin.content(d)?;
+        x_axis.content(d)?;
+        y_axis.content(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
