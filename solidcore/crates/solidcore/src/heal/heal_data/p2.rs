@@ -98,6 +98,7 @@
 //!   Test #82 shows the ball reaching no topology the vertex does not bound.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
+use crate::error::heal::HealFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -3454,13 +3455,14 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when coincident edges are listed.
+    /// [`HealFailure::CoincidentEdgesUnfixed`] (`SM_ERR`) when coincident edges are
+    /// listed.
     pub fn fix_coin_edges(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_coin_edges.base.is_empty() {
-            return Err(SolidError::heal_failed(
+            return Err(SolidError::heal(
                 "heal::heal_data::p2::HealData::fix_coin_edges",
-                "coincident edges cannot be fixed",
+                HealFailure::CoincidentEdgesUnfixed,
             ));
         }
         Ok(())
@@ -3477,13 +3479,14 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when missed intersections are listed.
+    /// [`HealFailure::MissedEdgeIntersectionsUnfixed`] (`SM_ERR`) when missed
+    /// intersections are listed.
     pub fn fix_missed_edge_xsects(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_missed_edge_xsects.base.is_empty() {
-            return Err(SolidError::heal_failed(
+            return Err(SolidError::heal(
                 "heal::heal_data::p2::HealData::fix_missed_edge_xsects",
-                "missed edge intersections cannot be fixed",
+                HealFailure::MissedEdgeIntersectionsUnfixed,
             ));
         }
         Ok(())

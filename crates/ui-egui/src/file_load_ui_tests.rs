@@ -595,6 +595,69 @@ fn reloading_a_point_cloud_on_a_network_location_asks_first() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `doc.open` with `new_tab` over the control channel lands in a tab of its own, even where the
+/// shown design is blank (an ordinary open replaces that one), and one that fails opens no tab.
+#[test]
+fn a_control_open_with_new_tab_lands_in_a_tab_of_its_own() {
+    let dir = scratch("control-new-tab");
+    let paths: Vec<String> = [("a", 5), ("b", 6)]
+        .into_iter()
+        .map(|(name, side)| {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": side, "width": side, "height": side})).unwrap();
+            let path = dir.join(format!("{name}.solidcraft")).to_string_lossy().into_owned();
+            s.execute("file.save", &json!({"path": path})).unwrap();
+            path
+        })
+        .collect();
+    let mut w = Win::new();
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let open = |w: &mut Win, params: serde_json::Value| {
+        let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": params}));
+        tx.send(req).unwrap();
+        for _ in 0..100_000 {
+            w.frame(vec![]);
+            if let Ok(reply) = reply.try_recv() {
+                return reply;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("no reply");
+    };
+
+    let blank = w.app.session.document_id.clone();
+    let reply = open(&mut w, json!({"path": paths[0], "new_tab": true}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (2, 1), "the blank design keeps its tab");
+    assert_eq!(w.app.session.path.as_deref(), Some(paths[0].as_str()));
+    let reply = open(&mut w, json!({"path": paths[1], "new_tab": true}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (3, 2));
+    assert_eq!(w.app.session.path.as_deref(), Some(paths[1].as_str()));
+    let shown: Vec<_> = crate::documents::open_sessions(&w.app).iter().map(|s| (s.document_id.clone(), s.path.clone())).collect();
+    assert_eq!(shown[0], (blank, None), "the design that was open is as it was");
+    assert_eq!(shown[1].1.as_deref(), Some(paths[0].as_str()));
+
+    let missing = dir.join("missing.solidcraft").to_string_lossy().into_owned();
+    let reply = open(&mut w, json!({"path": missing, "new_tab": true}));
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (3, 2), "a failed open opens no tab");
+
+    // Without it a blank design is replaced, as before.
+    let mut w = Win::new();
+    let (tx2, rx2) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx2);
+    let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": {"path": paths[0]}}));
+    tx2.send(req).unwrap();
+    while reply.try_recv().is_err() {
+        w.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(w.app.docs.count(), 1, "the blank design was replaced");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A control-channel (MCP) open is answered when the file is in, with the synchronous
 /// command's reply, and the window draws frames while it waits. Commands sent meanwhile wait.
 #[test]
@@ -1114,6 +1177,49 @@ fn a_newer_design_opens_with_a_notice_and_no_dialog() {
     assert!(app.dialog.is_none() && !app.ui.palette_open);
 }
 
+#[test]
+fn newer_drawing_notices_put_the_name_in_the_translated_sentence() {
+    use solidcraft_engine::doc::format::DRAWING;
+
+    let dir = scratch("newer_drawing_notice");
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+    design.execute("drawing.create", &json!({"name": "Plate {format}"})).unwrap();
+    let source = serde_json::from_str::<serde_json::Value>(&design.doc.to_json()).unwrap();
+    for newer_format in [true, false] {
+        let mut file = source.clone();
+        let drawing = &mut file["drawings"][0];
+        drawing["future_ink_type"] = json!("unreadable");
+        let expected = if newer_format {
+            let format = DRAWING.current() + 1;
+            drawing["format"] = json!(DRAWING.format_string(format));
+            format!("Format {format}")
+        } else {
+            let mut pending = DRAWING.pending_names();
+            pending.push("future-ink".into());
+            drawing["format_pending"] = json!(pending);
+            "Änderung `future-ink`".into()
+        };
+        let path = dir.join(format!("drawing-{newer_format}.json"));
+        std::fs::write(&path, file.to_string()).unwrap();
+
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.language = "de".into();
+        let _lang = solidcraft_ui_text::scope("de");
+        app.open_path_with(&path.to_string_lossy(), &Default::default()).unwrap();
+
+        let (text, _, error) = app.status.as_ref().unwrap();
+        assert!(!error && text.starts_with("Die Zeichnung „Plate {format}“") && text.contains(&expected), "{text}");
+        assert!(app.messages.iter().any(|message| {
+            !message.error
+                && message.text.starts_with("SolidCraft konnte")
+                && message.text.contains("future_ink_type")
+                && message.text.contains("in der Zeichnung „Plate {format}“")
+        }));
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A design with the data of a plugin that isn't installed opens as usual: the status line names
 /// the plugin, and the data is kept as it came.
 #[test]
@@ -1504,6 +1610,28 @@ fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
     w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Off;
     opened(&mut w);
     assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A scenario's `settle` waits for the stand-up estimate too, not only for the open's meshing:
+/// on a busy machine the estimate's thread can finish frames after the meshing, and a test that
+/// read the offer then found none (`tests/stand_up_offer.rs`, under full CI load).
+#[test]
+fn settle_waits_for_the_stand_up_estimate_after_the_bodies_are_meshed() {
+    let dir = scratch("stand-up-settle");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let mut h = crate::scenario::Harness::new();
+    // Still running for more frames than `settle` ran once the meshing was done.
+    crate::stand_up::hold_estimate(30);
+    h.app.open_path_async(&path);
+    h.settle();
+    assert!(h.app.stand_up_later.is_none(), "settled with the estimate still being made");
+    assert!(h.app.stand_up.is_some() && h.app.stand_up_note, "the note is offered once settled");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -10,7 +10,7 @@ When a kernel operation fails for a user, three things must reach whoever fixes 
 
 | Piece | Where | What it gives |
 |---|---|---|
-| `ErrorKind` | `crates/solidcore/src/error.rs` | A stable numeric code per kind of failure: 1 to 9 general, 90 and up solidcore's own, 100 to 131 the blend classes, 200 and up offset. Codes never change meaning once released. |
+| `ErrorKind` | `crates/solidcore/src/error.rs` | A stable numeric code per kind of failure: 1 to 9 general, 90 and up solidcore's own, 100 to 133 the blend classes, 200 and up offset. Codes never change meaning once released. |
 | `SolidError::operation()` | same | The `&'static str` path of the routine that failed (`"blend::fillet_executive::…"`). |
 | `SolidError::site()` | same, `Site` | The edge, face or vertex of the caller's body the failure is about, and the point, where the error names one. |
 | ops `Error` | `crates/solidcore-ops/src/error.rs` | What applications see. `status()` maps every `SolidError` to it. |
@@ -101,11 +101,13 @@ Every failure ends up as one of three things:
 - **a defect**: the area's `Defect { why }`, a failure that is the kernel's fault.
 
 Three kinds of site are not there yet. Tests count them per file, and each count only goes down:
-- **phrase causes**: variants that carry only a sentence, such as `SurfaceFailure::Failed("...")`, and the helpers that build them (`SolidError::surface_failed(`). The blend's list is `PINNED` in `src/error/phrase_sites.rs`. Each other area's list is in its own error file's tests (`src/error/<area>.rs`). The generic `Reason::Failed` list is in `src/error.rs`'s tests.
+- **phrase causes**: variants that carry only a sentence, such as `SurfaceFailure::Failed("...")`, and the helpers that build them (`SolidError::surface_failed(`). The blend's counts are pin files in `src/error/pins/phrase/` (`src/error/phrase_sites.rs`). Each other area's list is in its own error file's tests (`src/error/<area>.rs`). The generic `Reason::Failed` list is in `src/error.rs`'s tests.
 - **bare statuses**: `SolidError::sm_err(`, `null_pointer(`, `Upstream {` and `nl_ser(`. The lists are in each area's error file (`assert_waiting`).
-- **unreviewed stage failures**: an area's `StageFailed`, and the helpers that build one (`SolidError::curve_stage_failed(`). The list is `PINNED` in `src/error/stage_sites.rs`.
+- **unreviewed stage failures**: an area's `StageFailed`, and the helpers that build one (`SolidError::curve_stage_failed(`). The counts are pin files in `src/error/pins/stage/` (`src/error/stage_sites.rs`).
 
 A call of a local wrapper counts once for each call, and so does each use of its name as a value (`ok_or_else(fail)`). `src/error/site_scan.rs` says exactly what counts. A PR that converts sites lowers its files' counts in the same PR. A file whose count reaches 0 loses its line. The test failure prints the list as found.
+
+The phrase-cause and stage-failure counts are one file per library file: `src/error/pins/<kind>/<path>.pin`, where `<path>` is the file's path from `crates/` (`pins/phrase/solidcore/src/blend/hcr.rs.pin` holds the count for `solidcore/src/blend/hcr.rs`). Write the new count into the pin, delete the pin when the count reaches 0, and create one if code moves into a new file. The test failure names each pin to change. Two PRs that convert sites in different files touch different pins, so they never conflict.
 
 ### 1. Keep the status
 

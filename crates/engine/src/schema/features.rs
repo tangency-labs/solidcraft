@@ -16,10 +16,10 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs, FacesParam,
-    FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef,
-    StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
+    AngleExpr, AxisDir, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation,
+    FaceRefs, FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName,
+    LengthExpr, NumberExpr, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
+    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -310,10 +310,13 @@ pub struct CylinderParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction from the bottom to the top. Default: Z.
+    /// The direction from the bottom to the top: X, Y, Z or `[x, y, z]`, each a number or an
+    /// expression with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the cylinder follows as
+    /// the parameters change. A parameter added as a plain number is a length: divide it by its
+    /// unit (`"n / 1 mm"`). Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "AxisDirExpr")]
+    pub axis: Option<AxisDirExpr>,
     /// Up to two straight edges of the face it stands on, each `{edge: [x, y, z], distance: expr}`
     /// (as `solid.hole`'s): the base centre goes that far from each edge's line, in the face's
     /// plane, and follows the edges. With a numeric `base` only.
@@ -469,6 +472,20 @@ pub struct SweepParams {
     /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
     #[serde(default)]
     pub exact_regions: Option<bool>,
+    /// A point on a planar body face to sweep instead of a sketch profile.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The body whose face to use, where faces of several bodies meet at `face`.
+    #[serde(default)]
+    pub face_body: Option<String>,
+    /// With `face`: the face's plane as a fixed plane, as `solid.extrude`'s.
+    #[serde(default)]
+    pub fixed: Option<bool>,
+    /// With `face`, among placed instances: the body whose placement `face` is read in (read by
+    /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
+    /// body nearest the point.
+    #[serde(default)]
+    pub body: Option<String>,
     /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
@@ -1198,10 +1215,9 @@ impl JsonSchema for PatternDir {
     }
 }
 
+// `count1` and `spacing1` are not required: one of them is worked out with an extent.
 fn rectangular_required(schema: &mut Schema) {
-    for key in ["dir1", "count1", "spacing1"] {
-        require(schema, key);
-    }
+    require(schema, "dir1");
 }
 
 /// Copy features, bodies or components in a row, or a grid with a second direction. Give one of
@@ -1218,19 +1234,20 @@ pub struct PatternRectangularParams {
     /// The components to place more of, by id or name. The reply then lists the new occurrences.
     #[serde(default)]
     pub components: Option<NameList>,
-    // `dir1`, `count1` and `spacing1` are optional in the type and required in the schema: left
-    // out, the handler refuses the call with its own message ("`dir1` must be [x, y, z]"), which
-    // the check would otherwise replace with "`dir1` is required".
+    // `dir1` is optional in the type and required in the schema: left out, the handler refuses
+    // the call with its own message ("`dir1` must be [x, y, z]"), which the check would otherwise
+    // replace with "`dir1` is required". `count1` and `spacing1` are read as `dir1`; the
+    // handler requires the ones `distance1` uses.
     /// The first direction.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PatternDir")]
     pub dir1: Option<PatternDir>,
     /// How many along the first direction, the original included: a whole number or an
-    /// expression that gives one.
+    /// expression that gives one. Not needed with `spacing_extent`.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "NumberExpr")]
     pub count1: Option<NumberExpr>,
-    /// The step between neighbours along the first direction.
+    /// The step between neighbours along the first direction. Not needed with `count_extent`.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "LengthExpr")]
     pub spacing1: Option<LengthExpr>,
@@ -1262,8 +1279,75 @@ pub struct PatternRectangularParams {
     #[serde(default, deserialize_with = "pattern_reversed2", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed2: Option<bool>,
+    /// What sets the first direction's copies: `count_spacing` (the default: `count1` and
+    /// `spacing1`), `count_extent` (`count1` and `extent1`; the spacing is the extent divided by
+    /// one less than the count) or `spacing_extent` (`spacing1` and `extent1`; as many copies as
+    /// fit, none past the extent's end).
+    #[serde(default, deserialize_with = "pattern_distance1")]
+    pub distance1: Option<PatternDistanceParam>,
+    /// What sets the second direction's copies, as `distance1`.
+    #[serde(default, deserialize_with = "pattern_distance2")]
+    pub distance2: Option<PatternDistanceParam>,
+    /// The distance from the first copy to the last along the first direction, greater than
+    /// zero, for `count_extent` and `spacing_extent`.
+    #[serde(default)]
+    pub extent1: Option<LengthExpr>,
+    /// The extent along the second direction.
+    #[serde(default)]
+    pub extent2: Option<LengthExpr>,
+    /// `spacing_extent`: one more copy exactly at the extent's end when the spacing doesn't divide
+    /// it, so only the last gap is shorter. Default false.
+    #[serde(default, deserialize_with = "copy_at_end1")]
+    pub copy_at_end1: Option<bool>,
+    /// As `copy_at_end1`, along the second direction.
+    #[serde(default, deserialize_with = "copy_at_end2")]
+    pub copy_at_end2: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// A rectangular pattern direction's distance type, as `features::pattern_direction` reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternDistanceParam {
+    CountSpacing,
+    CountExtent,
+    SpacingExtent,
+}
+
+/// A distance type under `key`, with the handler's message; `null` is read as left out.
+fn distance_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<PatternDistanceParam>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => serde_json::from_value(v)
+            .map(Some)
+            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be count_spacing, count_extent or spacing_extent")))),
+    }
+}
+
+/// A Copy at the end flag under `key`, with the handler's message; `null` is read as left out.
+fn copy_at_end_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole(format!("`{key}` must be true or false")))),
+    }
+}
+
+fn pattern_distance1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<PatternDistanceParam>, D::Error> {
+    distance_at(d, "distance1")
+}
+
+fn pattern_distance2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<PatternDistanceParam>, D::Error> {
+    distance_at(d, "distance2")
+}
+
+fn copy_at_end1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    copy_at_end_at(d, "copy_at_end1")
+}
+
+fn copy_at_end2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    copy_at_end_at(d, "copy_at_end2")
 }
 
 /// The most curves a pattern path lists, as `features::pattern_path` reads it.
@@ -1368,6 +1452,13 @@ pub struct PatternPathParams {
     /// The length along the path from the first copy to the last, instead of `spacing`.
     #[serde(default)]
     pub distance: Option<LengthExpr>,
+    /// The start point: how far along the path the original sits, the copies measured on from
+    /// there. Default 0, the path's start. Give this or `start_fraction`, not both.
+    #[serde(default)]
+    pub start: Option<LengthExpr>,
+    /// The start point as a fraction, 0 to 1, of the path's length, kept as the path changes.
+    #[serde(default)]
+    pub start_fraction: Option<NumberExpr>,
     /// How each copy is turned. Default: identical.
     #[serde(default)]
     pub orientation: Option<PathOrientationParam>,

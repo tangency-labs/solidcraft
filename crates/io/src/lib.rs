@@ -9,6 +9,10 @@
 #![forbid(unsafe_code)]
 
 mod airfoil;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(dead_code)]
+#[path = "../build.rs"]
+mod build_script;
 pub mod catalog;
 mod design;
 pub mod design_lock;
@@ -22,35 +26,99 @@ mod gerber;
 mod gerber_area;
 mod gerber_set;
 mod glb;
-pub use design::{
-    DesignCompression, DesignContainerReader, DesignFile, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
-    ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus, ProvenanceSummary, SignatureSource, Signer,
-    THUMBNAIL_SIZE, design_text, file_kind, has_design_provenance, is_design_container, large_file_text, read_design_file, read_design_file_once,
-    read_design_geometry, read_design_preview, read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file,
-    read_design_provenance_file, read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail,
-    read_design_thumbnail_file, read_design_with_model, read_drawing, read_drawing_file, write_design_container, write_design_container_with_cache,
-    write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_provenance,
-    write_design_container_with_thumbnail, write_drawing_container,
-};
-pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
+pub use design::DesignCompression;
+pub use design::DesignContainerReader;
+pub use design::DesignFile;
+pub use design::DesignPreview;
+pub use design::FileKind;
+pub use design::ImportCache;
+pub use design::OpenPgpSignature;
+pub use design::OpenPgpSigner;
+pub use design::ProvenanceChain;
+pub use design::ProvenanceRecord;
+pub use design::ProvenanceReport;
+pub use design::ProvenanceSave;
+pub use design::ProvenanceSigner;
+pub use design::ProvenanceStatus;
+pub use design::ProvenanceSummary;
+pub use design::SignatureSource;
+pub use design::Signer;
+pub use design::THUMBNAIL_SIZE;
+pub use design::design_text;
+pub use design::file_kind;
+pub use design::has_design_provenance;
+pub use design::is_design_container;
+pub use design::large_file_text;
+pub use design::read_design_file;
+pub use design::read_design_file_once;
+pub use design::read_design_geometry;
+pub use design::read_design_preview;
+pub use design::read_design_provenance;
+pub use design::read_design_provenance_chain;
+pub use design::read_design_provenance_chain_file;
+pub use design::read_design_provenance_file;
+pub use design::read_design_provenance_file_checked;
+pub use design::read_design_provenance_summary_file;
+pub use design::read_design_thumbnail;
+pub use design::read_design_thumbnail_file;
+pub use design::read_design_with_model;
+pub use design::read_drawing;
+pub use design::read_drawing_file;
+pub use design::write_design_container;
+pub use design::write_design_container_with_cache;
+pub use design::write_design_container_with_compression;
+pub use design::write_design_container_with_preview;
+pub use design::write_design_container_with_provenance;
+pub use design::write_design_container_with_thumbnail;
+pub use design::write_drawing_container;
+pub use glb::DEFAULT_COLOR as GLB_DEFAULT_COLOR;
+pub use glb::GlbOptions;
+pub use glb::MAX_GLB_BYTES;
+pub use glb::export_glb;
 mod legacy_dir;
+pub mod library;
 pub mod library_files;
 pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
-pub use native_cad::{
-    NATIVE_CAD_EXTS, NativeDesign, USD_EXTS, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path,
-    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step, usd_records,
-};
+pub use native_cad::CadmpegOptions;
+pub use native_cad::DecalPlan;
+pub use native_cad::Hidden;
+pub use native_cad::NATIVE_CAD_EXTS;
+pub use native_cad::NativeDesign;
+pub use native_cad::OpticsPlan;
+pub use native_cad::RecordsRead;
+pub use native_cad::SurfaceMap;
+pub use native_cad::SurfacePlan;
+pub use native_cad::USD_EXTS;
+pub use native_cad::cadmpeg_export;
+pub use native_cad::cadmpeg_iges_records;
+pub use native_cad::cadmpeg_step_records;
+pub use native_cad::detects_freecad;
+pub use native_cad::is_freecad_path;
+pub use native_cad::is_native_cad_path;
+pub use native_cad::is_usd_path;
+pub use native_cad::native_cad_design;
+pub use native_cad::native_cad_records;
+pub use native_cad::native_cad_to_step;
+pub use native_cad::read_usd;
+pub use native_cad::usd_from_design;
+pub use native_cad::usd_records;
 pub mod paper;
 mod pat;
 mod pcd;
 mod ply;
 mod ply_complex;
-pub use ply::{ply_counts, read_ply_mesh};
+pub use ply::ply_counts;
+pub use ply::read_ply_mesh;
 mod point_cloud;
-pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
+pub use point_cloud::CloudFile;
+pub use point_cloud::DEFAULT_MAX_POINTS;
+pub use point_cloud::MAX_POINT_CLOUD_BYTES;
+pub use point_cloud::is_ply_path;
+pub use point_cloud::is_point_cloud_path;
+pub use point_cloud::read_point_cloud;
 pub mod safe_write;
 pub mod safe_zip;
 pub mod sdf;
@@ -59,48 +127,154 @@ mod svg;
 /// Explicit development-test seams; absent from ordinary production builds.
 #[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]
 pub mod test_support {
-    pub use crate::dxf_out::{DxfEntity, DxfLayer, legacy_dxf_baseline};
+    pub use crate::dxf_out::DxfEntity;
+    pub use crate::dxf_out::DxfLayer;
+    pub use crate::dxf_out::legacy_dxf_baseline;
 }
 mod threemf;
 pub mod urdf;
 pub mod vfs;
 
-pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
-pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf_file_with_profile, write_dxf, write_dxf_entities, write_dxf_opts};
-pub use dxf_out::{
-    DXF_PROFILE_FORMAT, DXF_PROFILE_VERSION, DxfEntity, DxfEntityWeight, DxfExportProfile, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds,
-    DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle, DxfRole, DxfRoleStyle, DxfShape, DxfSourceBlock, DxfStandardWeight,
-    DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex, MAX_DXF_PROFILE_BYTES, admit_path,
-    loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_as,
-    write_dxf_file_with_text_bounds,
-};
-pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
-pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
-pub use gerber_set::{
-    BOARD_EXTENSIONS, BoardJob, GerberSet, MAX_SET_FILES, SetFile, SetRole, classify_set, is_zip_path, read_gerber_set, zip_entries,
-};
-pub use legacy_dir::{APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
-pub use pat::{PatImportOptions, PatUnits, read_pat};
-pub use safe_write::{backup_path, write_atomic};
-pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{CurveWarning, SvgDrawing, decode_svg, read_svg, read_svg_drawing, svg_nothing_to_import, svg_sheet};
+pub use airfoil::Airfoil;
+pub use airfoil::AirfoilFormat;
+pub use airfoil::MAX_AIRFOIL_BYTES;
+pub use airfoil::MAX_AIRFOIL_POINTS;
+pub use airfoil::read_airfoil;
+pub use dxf::DxfReadProfile;
+pub use dxf::DxfWriteOptions;
+pub use dxf::read_dxf;
+pub use dxf::read_dxf_file;
+pub use dxf::read_dxf_file_with_profile;
+pub use dxf::write_dxf;
+pub use dxf::write_dxf_entities;
+pub use dxf::write_dxf_opts;
+pub use dxf_out::DXF_PROFILE_FORMAT;
+pub use dxf_out::DXF_PROFILE_VERSION;
+pub use dxf_out::DxfEntity;
+pub use dxf_out::DxfEntityWeight;
+pub use dxf_out::DxfExportProfile;
+pub use dxf_out::DxfFile;
+pub use dxf_out::DxfFileEntity;
+pub use dxf_out::DxfFileLayer;
+pub use dxf_out::DxfGeometryBounds;
+pub use dxf_out::DxfLayer;
+pub use dxf_out::DxfLayerId;
+pub use dxf_out::DxfLinetype;
+pub use dxf_out::DxfPath;
+pub use dxf_out::DxfPathStyle;
+pub use dxf_out::DxfRole;
+pub use dxf_out::DxfRoleStyle;
+pub use dxf_out::DxfShape;
+pub use dxf_out::DxfSourceBlock;
+pub use dxf_out::DxfStandardWeight;
+pub use dxf_out::DxfTextHorizontalAlignment;
+pub use dxf_out::DxfTextRecordKind;
+pub use dxf_out::DxfTextSource;
+pub use dxf_out::DxfTextVerticalAlignment;
+pub use dxf_out::DxfVertex;
+pub use dxf_out::MAX_DXF_PROFILE_BYTES;
+pub use dxf_out::admit_path;
+pub use dxf_out::loop_lwpolyline;
+pub use dxf_out::loop_lwpolyline_scaled;
+pub use dxf_out::path_shapes;
+pub use dxf_out::write_dxf_drawing_units;
+pub use dxf_out::write_dxf_file;
+pub use dxf_out::write_dxf_file_as;
+pub use dxf_out::write_dxf_file_with_text_bounds;
+pub use excellon::DrillArc;
+pub use excellon::DrillHit;
+pub use excellon::DrillSlot;
+pub use excellon::Drills;
+pub use excellon::read_excellon;
+pub use gerber::GerberLayer;
+pub use gerber::GerberOutline;
+pub use gerber::read_gerber_layer;
+pub use gerber::read_gerber_outline;
+pub use gerber_set::BOARD_EXTENSIONS;
+pub use gerber_set::BoardJob;
+pub use gerber_set::GerberSet;
+pub use gerber_set::MAX_SET_FILES;
+pub use gerber_set::SetFile;
+pub use gerber_set::SetRole;
+pub use gerber_set::classify_set;
+pub use gerber_set::is_zip_path;
+pub use gerber_set::read_gerber_set;
+pub use gerber_set::zip_entries;
+pub use legacy_dir::APP_ID;
+pub use legacy_dir::PREVIOUS_APP_IDS;
+pub use legacy_dir::adopt_legacy_dir;
+pub use legacy_dir::legacy_flatpak_paths;
+pub use pat::PatImportOptions;
+pub use pat::PatUnits;
+pub use pat::read_pat;
+pub use safe_write::backup_path;
+pub use safe_write::write_atomic;
+pub use sketch2d::Geom2;
+pub use sketch2d::MAX_DRAWING_BYTES;
+pub use svg::CurveWarning;
+pub use svg::SvgDrawing;
+pub use svg::decode_svg;
+pub use svg::read_svg;
+pub use svg::read_svg_drawing;
+pub use svg::svg_nothing_to_import;
+pub use svg::svg_sheet;
 mod gltf_in;
-pub use gltf_in::{GltfImport, Loader, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
+pub use gltf_in::GltfImport;
+pub use gltf_in::Loader;
+pub use gltf_in::MeshPlan;
+pub use gltf_in::PlanPlace;
+pub use gltf_in::glb_container;
+pub use gltf_in::is_gltf_path;
+pub use gltf_in::read_gltf;
 mod kicad_in;
-pub use kicad_in::{
-    DEFAULT_BOARD_COLOR, KicadBoard, KicadCopper, KicadDrill, KicadFootprint, KicadImport, KicadLoader, KicadModel, KicadModelFile, KicadOptions,
-    KicadPad, KicadRepresentation, KicadStroke, KicadText, KicadVia, KicadZone, MAX_KICAD_BYTES, is_kicad_path, kicad_board_mesh, kicad_board_path,
-    kicad_board_thickness, parse_kicad_board, parse_kicad_board_with, read_kicad,
-};
+pub use kicad_in::DEFAULT_BOARD_COLOR;
+pub use kicad_in::KicadBoard;
+pub use kicad_in::KicadCopper;
+pub use kicad_in::KicadDrill;
+pub use kicad_in::KicadFootprint;
+pub use kicad_in::KicadImport;
+pub use kicad_in::KicadLoader;
+pub use kicad_in::KicadModel;
+pub use kicad_in::KicadModelFile;
+pub use kicad_in::KicadOptions;
+pub use kicad_in::KicadPad;
+pub use kicad_in::KicadRepresentation;
+pub use kicad_in::KicadStroke;
+pub use kicad_in::KicadText;
+pub use kicad_in::KicadVia;
+pub use kicad_in::KicadZone;
+pub use kicad_in::MAX_KICAD_BYTES;
+pub use kicad_in::is_kicad_path;
+pub use kicad_in::kicad_board_mesh;
+pub use kicad_in::kicad_board_path;
+pub use kicad_in::kicad_board_thickness;
+pub use kicad_in::parse_kicad_board;
+pub use kicad_in::parse_kicad_board_with;
+pub use kicad_in::read_kicad;
 mod obj;
 pub use obj::read_obj;
-pub use sdf::{SdfDecal, SdfOptions, SdfPackage, sdf_model};
-pub use threemf::{
-    MAX_3MF_BYTES, MeshObject, model_xml, model_xml_parts, model_xml_with, read_3mf, weld, write_3mf, write_3mf_parts, write_3mf_with,
-};
-pub use urdf::{UrdfOptions, UrdfPackage, urdf};
+pub use sdf::SdfDecal;
+pub use sdf::SdfOptions;
+pub use sdf::SdfPackage;
+pub use sdf::sdf_model;
+pub use threemf::MAX_3MF_BYTES;
+pub use threemf::MeshObject;
+pub use threemf::model_xml;
+pub use threemf::model_xml_parts;
+pub use threemf::model_xml_with;
+pub use threemf::read_3mf;
+pub use threemf::weld;
+pub use threemf::write_3mf;
+pub use threemf::write_3mf_parts;
+pub use threemf::write_3mf_with;
+pub use urdf::UrdfOptions;
+pub use urdf::UrdfPackage;
+pub use urdf::urdf;
 mod vrml_in;
-pub use vrml_in::{MAX_VRML_BYTES, VrmlMesh, is_vrml_path, read_vrml};
+pub use vrml_in::MAX_VRML_BYTES;
+pub use vrml_in::VrmlMesh;
+pub use vrml_in::is_vrml_path;
+pub use vrml_in::read_vrml;
 
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};
@@ -184,7 +358,8 @@ pub fn is_iges_path(path: &str) -> bool {
 /// nothing), so the caller chooses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StepNames {
-    /// Keep meaningful solid names; replace placeholders with the nearest named product.
+    /// Keep meaningful solid names; use a shared face label for `NONE`, otherwise replace
+    /// placeholders with the nearest named product.
     #[default]
     Auto,
     /// The solid's own name in the file, else the name of the product that holds it.
@@ -229,6 +404,7 @@ fn generic_name(n: &str) -> bool {
 fn body_name(b: &solidcraft_kernel::ImportedBody, names: StepNames) -> String {
     let usable = |n: &&String| !generic_name(n);
     let chosen = match names {
+        StepNames::Auto if b.name.trim().eq_ignore_ascii_case("none") => b.common_face_name.as_ref().filter(usable),
         StepNames::Auto if !generic_name(&b.name) => Some(&b.name),
         StepNames::Auto => b.path.iter().rev().find(usable).or_else(|| b.instance.as_ref().filter(usable)),
         StepNames::Solid => None,
@@ -422,11 +598,14 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     step_import_feature_read(bytes, file, names, StepReader::SolidCraft)
 }
 
-/// [`step_import_feature_named`], a STEP, FreeCAD or Rhino file read by `reader`.
+/// [`step_import_feature_named`], a STEP, IGES, FreeCAD or Rhino file read by `reader`.
 pub fn step_import_feature_read(bytes: &[u8], file: &str, names: StepNames, reader: StepReader) -> Result<StepFeature> {
     let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
-    if reader == StepReader::Cadmpeg && is_step_path(file) && !is_iges_path(file) && !is_native_cad_path(file) {
+    if reader == StepReader::Cadmpeg && is_iges_path(file) {
+        return records_import_feature(cadmpeg_iges_records(bytes, file).map_err(IoError::Invalid)?, file, names);
+    }
+    if reader == StepReader::Cadmpeg && is_step_path(file) && !is_native_cad_path(file) {
         return records_import_feature(cadmpeg_step_records(bytes, file).map_err(IoError::Invalid)?, file, names);
     }
     if reader == StepReader::Cadmpeg && is_native_cad_path(file) {
@@ -505,7 +684,8 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
     let _span = solidcraft_profile::span("import", "usd_import_feature");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     let (records, warnings, y_up) = usd_records(bytes, file).map_err(IoError::Invalid)?;
-    Ok((records_import_feature((records, warnings, false), file, names)?, y_up))
+    let read = RecordsRead { records, warnings, freecad: false, preprocessor: String::new(), description: String::new() };
+    Ok((records_import_feature(read, file, names)?, y_up))
 }
 
 /// A file read with [`StepReader::Cadmpeg`] (FreeCAD, Rhino or STEP) into an Import feature that
@@ -514,11 +694,19 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
 /// shows only through its body's own shape) are not built, unless nothing else is; a Rhino file's
 /// hidden objects are its user's own choice, so they are built and start hidden. The format is
 /// the one cadmpeg detects in the contents, not the file's name.
-fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, bool), file: &str, names: StepNames) -> Result<StepFeature> {
-    let (records, decode_warnings, freecad) = read;
+fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Result<StepFeature> {
+    let RecordsRead { records, warnings: decode_warnings, freecad, preprocessor, description } = read;
     let text = solidcraft_kernel::records_text(&records)?;
     design::check_step_importable(&text)?;
-    let imp = solidcraft_kernel::records_import_shared(&records)?;
+    let mut imp = solidcraft_kernel::records_import_shared(&records)?;
+    // The rest of a STEP header, which the records do not keep, as a STEP import has it: with the
+    // program (the records' `system`) it says whether the file has Y up. A copy, so the shared
+    // import other reads of the same records find is not changed.
+    if imp.preprocessor != preprocessor || imp.description != description {
+        let mut own = (*imp).clone();
+        (own.preprocessor, own.description) = (preprocessor, description);
+        imp = std::sync::Arc::new(own);
+    }
     // Not one body made of the records: no feature, as a STEP file with no solids is refused.
     if imp.bodies.is_empty() {
         let why = imp.warnings.last().map(|w| format!(" ({w})")).unwrap_or_default();
@@ -710,8 +898,15 @@ pub enum Format {
     /// and decal images; written by the engine, since it is several files.
     Sdf,
     /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
-    /// file's extension ([`usd_from_step`]); written by the engine from the STEP it writes.
+    /// file's extension ([`usd_from_design`]); written from the design, which holds the
+    /// components and looks.
     Usd,
+    /// Rhino `.3dm`, written by cadmpeg from the design ([`cadmpeg_export`]): each body's exact
+    /// shape where cadmpeg's Rhino writer can write it, else its mesh.
+    Rhino,
+    /// FreeCAD `.FCStd`: named so that `file.export` can say why it is not written yet (cadmpeg
+    /// cannot write a new FreeCAD file; [`cadmpeg_export`] refuses it).
+    FreeCad,
 }
 
 impl Format {
@@ -730,6 +925,8 @@ impl Format {
             "glb" => Format::Glb,
             "sdf" => Format::Sdf,
             "usd" | "usda" | "usdc" | "usdz" => Format::Usd,
+            "3dm" => Format::Rhino,
+            "fcstd" => Format::FreeCad,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -1609,6 +1806,8 @@ pub fn export_with_parts_noted(
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
         Format::Sdf => return Err(IoError::Format("sdf (a model folder; use file.export)".into())),
         Format::Usd => return Err(IoError::Format("usd (the file's extension picks its encoding; use file.export)".into())),
+        Format::Rhino => return Err(IoError::Format("3dm (written from the design by cadmpeg; use file.export)".into())),
+        Format::FreeCad => return Err(IoError::Invalid(native_cad::FREECAD_REFUSED.into())),
     };
     Ok((bytes, notes))
 }
@@ -1740,7 +1939,7 @@ pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
             binary.join(" and ")
         )));
     }
-    Ok(doc.to_json().into_bytes())
+    Ok(doc.to_json_checked()?.into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.
@@ -2340,6 +2539,30 @@ mod tests {
         assert_eq!(names(&generic, StepNames::Solid), ["Body1", "Body 2 (3)", "Body 2 (3)"]);
         let named = generic.replace("'Body1'", "'Body housing'");
         assert_eq!(names(&named, StepNames::Auto), ["Body housing", "Post", "Post"]);
+        // Some surface exports label only the faces, leaving their owning models `NONE`.
+        let faces = text.replace("ADVANCED_FACE('',", "ADVANCED_FACE('Inspection surface',");
+        assert_ne!(faces, text, "the fixture has named faces");
+        assert_eq!(names(&faces, StepNames::Auto), ["Cut-Extrude3", "Boss-Extrude1", "Boss-Extrude1"]);
+        let surfaces = faces.replace("'Cut-Extrude3'", "' nOnE '").replace("'Boss-Extrude1'", "'NONE'");
+        assert_eq!(names(&surfaces, StepNames::Auto), ["Inspection surface", "Inspection surface", "Inspection surface"]);
+        assert_eq!(names(&surfaces, StepNames::Solid), ["nOnE", "NONE", "NONE"]);
+        assert_eq!(names(&surfaces, StepNames::Product), ["Plate", "Post", "Post"]);
+        assert_eq!(names(&surfaces, StepNames::Instance), ["Plate-1", "Post-1", "Post-2"]);
+        let mixed = surfaces.replacen("ADVANCED_FACE('Inspection surface',", "ADVANCED_FACE('Other surface',", 1);
+        assert_eq!(names(&mixed, StepNames::Auto), ["nOnE", "Inspection surface", "Inspection surface"]);
+        let missing = surfaces.replacen("ADVANCED_FACE('Inspection surface',", "ADVANCED_FACE('',", 1);
+        assert_eq!(names(&missing, StepNames::Auto), ["nOnE", "Inspection surface", "Inspection surface"]);
+        for label in ["Body1", " NoNe ", "  "] {
+            let unnamed = surfaces.replace("ADVANCED_FACE('Inspection surface',", &format!("ADVANCED_FACE('{label}',"));
+            assert_eq!(names(&unnamed, StepNames::Auto), ["nOnE", "NONE", "NONE"]);
+        }
+        let mut body = step_import_feature(mixed.as_bytes(), "frame.step").unwrap().import.bodies[0].clone();
+        assert_eq!(body.common_face_name, None);
+        body.path = vec!["Part".into()];
+        body.instance = Some("Part-1".into());
+        assert_eq!(body_name(&body, StepNames::Auto), "nOnE", "without a shared face name, preserve the source label");
+        body.path.clear();
+        assert_eq!(body_name(&body, StepNames::Auto), "nOnE", "an instance does not replace an unchanged source label");
         // The timeline entry is the root product's name whatever the bodies are called.
         for choice in [StepNames::Auto, StepNames::Solid, StepNames::Product, StepNames::Instance] {
             assert_eq!(step_import_feature_named(text.as_bytes(), "frame.step", choice).unwrap().name, "Frame");
@@ -2405,7 +2628,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::new(80.0, 0.0, 0.0)),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
@@ -2550,7 +2773,7 @@ mod tests {
         });
         add(FeatureKind::Cylinder {
             base: point_expr(Vec3::new(40.0, 0.0, 0.0)),
-            axis: solidcraft_doc::Dir(Vec3::Z),
+            axis: solidcraft_doc::dir_expr(Vec3::Z),
             radius: "6".into(),
             height: "15".into(),
             operation: Operation::NewBody,
@@ -2590,7 +2813,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::ZERO),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,

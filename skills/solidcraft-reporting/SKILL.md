@@ -40,7 +40,7 @@ Shrink while the same failure, with the same message, still happens. Re-run afte
 - Re-run the final minimal script from scratch once more. Its output goes into the report as it is.
 
 ## 5. Privacy
-- Never attach, upload or quote the user's design, a crash report's `design.sc`, or file contents without asking. The minimal synthetic script is the default attachment.
+- Never attach, upload or quote the user's design, a crash report's `design.sc`, or file contents without asking. The minimal synthetic script is the default evidence: paste it into the report body as a fenced `json` block, so the report needs no attachment.
 - GitHub does not accept `.sc` attachments. A design the user agrees to share goes up as a `.zip`: a `.sc` file is a ZIP already, so copy or rename it to `name.sc.zip`, or zip it. SolidCraft opens either kind of `.zip`.
 - Strip home folders, user names, part and project names and file paths from messages and logs (`/home/alice/clients/acme/bracket.sc` → `bracket.sc`).
 - Check screenshots for other windows, file names and anything personal.
