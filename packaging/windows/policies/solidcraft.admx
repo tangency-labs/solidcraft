@@ -282,5 +282,23 @@
         </enum>
       </elements>
     </policy>
+    <policy name="Layout" class="Both" displayName="$(string.Layout)" explainText="$(string.Layout_Explain)" presentation="$(presentation.Layout)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <elements>
+        <enum id="Layout" valueName="Layout" required="true">
+          <item displayName="$(string.Layout_floating)">
+            <value>
+              <string>floating</string>
+            </value>
+          </item>
+          <item displayName="$(string.Layout_compact)">
+            <value>
+              <string>compact</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
   </policies>
 </policyDefinitions>

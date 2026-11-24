@@ -60,6 +60,8 @@ const MESH_FORMATS: &[&str] = &["stl", "3mf", "3mf-tagged"];
 const MESH_QUALITIES: &[&str] = &["standard", "fine", "finest"];
 /// `DxfOrigin`: the zero point of Export Current View as DXF.
 const DXF_ORIGINS: &[&str] = &["target", "origin"];
+/// `Layout`: the workspace layouts (Preferences › Interface › Panel style).
+const LAYOUTS: &[&str] = &["floating", "compact"];
 
 /// A preference an organization can set: the policy's value name, the preference's `ui.prefs`
 /// name, and what the value may be.
@@ -82,6 +84,7 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "DxfDashedHiddenLines", pref: "view_dxf_dashed", kind: Kind::Switch },
     Lock { policy: "DxfOrigin", pref: "view_dxf_zero", kind: Kind::Choice(DXF_ORIGINS) },
     Lock { policy: "Language", pref: "language", kind: Kind::Language },
+    Lock { policy: "Layout", pref: "layout", kind: Kind::Choice(LAYOUTS) },
     Lock { policy: "MeshExportFormat", pref: "save_mesh_format", kind: Kind::Choice(MESH_FORMATS) },
     Lock { policy: "MeshExportQuality", pref: "save_mesh_quality", kind: Kind::Choice(MESH_QUALITIES) },
     Lock { policy: "ReopenDesigns", pref: "reopen_designs", kind: Kind::Switch },
@@ -246,6 +249,7 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "connect_ai_apps" => Setting::Switch(p.connect_ai_apps),
         "default_units" => Setting::Text(p.default_units.clone()),
         "language" => Setting::Text(p.language.clone()),
+        "layout" => Setting::Text(layout_id(p.layout).into()),
         "reopen_designs" => Setting::Switch(p.reopen_designs),
         "ribbon_labels" => Setting::Switch(p.ribbon_labels),
         "save_mesh_format" => Setting::Text(p.save_mesh_format.clone()),
@@ -275,6 +279,9 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("connect_ai_apps", Setting::Switch(on)) => p.connect_ai_apps = *on,
         ("default_units", Setting::Text(text)) => p.default_units.clone_from(text),
         ("language", Setting::Text(text)) => p.language.clone_from(text),
+        ("layout", Setting::Text(text)) => {
+            p.layout = if text == "compact" { crate::ui_kit::LayoutMode::Docked } else { crate::ui_kit::LayoutMode::Floating };
+        }
         ("reopen_designs", Setting::Switch(on)) => p.reopen_designs = *on,
         ("ribbon_labels", Setting::Switch(on)) => p.ribbon_labels = *on,
         ("save_mesh_format", Setting::Text(text)) => p.save_mesh_format.clone_from(text),
@@ -285,6 +292,14 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("view_dxf_dashed", Setting::Switch(on)) => p.view_dxf_dashed = *on,
         ("view_dxf_zero", Setting::Text(text)) => p.view_dxf_zero.clone_from(text),
         _ => {}
+    }
+}
+
+/// The id of `layout`, as `ui.prefs` and the `Layout` policy name it.
+fn layout_id(layout: crate::ui_kit::LayoutMode) -> &'static str {
+    match layout {
+        crate::ui_kit::LayoutMode::Floating => "floating",
+        crate::ui_kit::LayoutMode::Docked => "compact",
     }
 }
 
@@ -409,6 +424,10 @@ fn enforce_keeping(app: &mut SolveApp, keep_own: bool) {
     }
     if units {
         crate::prefs::default_units_changed(app);
+    }
+    // The workspace shows the layout in force (an embedded window still docks its panels).
+    if app.policy.locks("layout") {
+        app.ui.layout = app.preferences.layout;
     }
 }
 
@@ -984,6 +1003,37 @@ mod tests {
         // A value none of the choices is no policy: nothing is locked.
         let policy = Policy::from_json(r#"{"MeshExportFormat": "obj", "MeshExportQuality": "", "DxfOrigin": "corner"}"#);
         assert!(policy.locked().is_empty() && !policy.managed(), "{:?}", policy.locked());
+    }
+
+    #[test]
+    fn the_workspace_layout_is_set_by_the_policy_and_the_layout_command_keeps_it() {
+        use crate::ui_kit::LayoutMode;
+        use egui::accesskit::Role;
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        (h.app.preferences.layout, h.app.ui.layout) = (LayoutMode::Floating, LayoutMode::Floating);
+        h.app.policy = Policy::from_json(r#"{"Layout": " Compact "}"#);
+        h.frame();
+        assert_eq!((h.app.preferences.layout, h.app.ui.layout), (LayoutMode::Docked, LayoutMode::Docked), "the workspace is docked");
+        assert_eq!(saved(&h.app)["layout"], json!("floating"), "the layout is saved as the person chose it");
+        let refused = h.call("ui.prefs", json!({"layout": "compact"}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        // The toolbar's layout switch and an agent's view.layout leave the organization's layout.
+        drop(h.app.run("view.layout", json!({"mode": "floating"})));
+        h.frame();
+        assert_eq!((h.app.preferences.layout, h.app.ui.layout), (LayoutMode::Docked, LayoutMode::Docked));
+        // Preferences shows the Panel style greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.frames(3);
+        let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+        let compact: Vec<_> = tree.nodes.iter().filter(|(_, n)| n.role() == Role::Button && n.label() == Some("Compact")).collect();
+        assert!(compact.iter().any(|(_, n)| n.is_disabled() && n.toggled() == Some(egui::accesskit::Toggled::True)), "{compact:?}");
+        assert!(h.widget("Set by your organization").is_some());
+        // A layout none of the choices is no policy.
+        assert!(Policy::from_json(r#"{"Layout": "docked"}"#).locked().is_empty());
     }
 
     #[test]

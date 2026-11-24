@@ -228,16 +228,19 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui,
                 |ui| {
                     ui_kit::settings_form(ui, t.form_label_width + t.space_16, |ui| {
+                        let locked = app.policy.locks("layout");
                         ui_kit::row(ui, app.tr("ui.panel_layout.panel_style"), |ui| {
-                            let mut selected = usize::from(app.ui.layout == crate::ui_kit::LayoutMode::Docked);
-                            if ui_kit::segmented(
-                                ui,
-                                &mut selected,
-                                &[solidcraft_ui_text::tr("ui.layout_floating"), solidcraft_ui_text::tr("ui.layout_compact")],
-                                ui_kit::Segments { intrinsic: true, ..Default::default() },
-                            ) {
-                                let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
-                            }
+                            crate::policy::row(ui, locked, |ui| {
+                                let mut selected = usize::from(app.ui.layout == crate::ui_kit::LayoutMode::Docked);
+                                if ui_kit::segmented(
+                                    ui,
+                                    &mut selected,
+                                    &[solidcraft_ui_text::tr("ui.layout_floating"), solidcraft_ui_text::tr("ui.layout_compact")],
+                                    ui_kit::Segments { intrinsic: true, ..Default::default() },
+                                ) {
+                                    let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
+                                }
+                            });
                         });
                         let locked = app.policy.locks("ribbon_labels");
                         ui_kit::row(ui, app.tr("prefs.toolbar"), |ui| {

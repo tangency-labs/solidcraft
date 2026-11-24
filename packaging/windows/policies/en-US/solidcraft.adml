@@ -212,6 +212,16 @@ Disabled or Not configured: each person chooses in the export dialog.
 In the export dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
       <string id="DxfOrigin_target">Camera target</string>
       <string id="DxfOrigin_origin">Model origin</string>
+      <string id="Layout">Workspace layout</string>
+      <string id="Layout_Explain">Whether the panels float over the model or are docked around it (Preferences, Layout, Window, Panel style).
+
+Enabled: the workspace uses the layout chosen here, and people cannot change it.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="Layout_floating">Floating</string>
+      <string id="Layout_compact">Compact</string>
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
@@ -253,6 +263,9 @@ In the export dialog the setting shows as set by the organization. The person's 
       </presentation>
       <presentation id="DxfOrigin">
         <dropdownList refId="DxfOrigin" noSort="true" defaultItem="0">Zero point:</dropdownList>
+      </presentation>
+      <presentation id="Layout">
+        <dropdownList refId="Layout" noSort="true" defaultItem="0">Layout:</dropdownList>
       </presentation>
     </presentationTable>
   </resources>

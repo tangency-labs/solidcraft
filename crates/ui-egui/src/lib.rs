@@ -2024,7 +2024,8 @@ impl SolveApp {
                 };
                 render_workspace::selection_editor(self, &selected);
             }
-            if id == "view.layout" {
+            // The organization's layout stays; the command changes nothing while a policy sets it.
+            if id == "view.layout" && !self.policy.locks("layout") {
                 let layout =
                     if v.get("mode").and_then(Value::as_str) == Some("compact") { ui_kit::LayoutMode::Docked } else { ui_kit::LayoutMode::Floating };
                 self.preferences.layout = layout;
