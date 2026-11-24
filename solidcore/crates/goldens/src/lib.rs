@@ -48,7 +48,7 @@ pub(crate) mod trim_hook;
 pub(crate) mod trims_on_edges;
 pub mod util;
 #[cfg(test)]
-mod wr450_rows;
+pub(crate) mod wr450_rows;
 #[cfg(test)]
 mod wr469_replay;
 #[cfg(test)]

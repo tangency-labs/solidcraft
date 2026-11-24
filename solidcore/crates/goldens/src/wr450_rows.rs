@@ -31,12 +31,19 @@
 //!   is not the source's there);
 //! - `copy+trims`: both seams' choices differ somewhere in the row's run (the class is
 //!   per row: the hook does not tie a copy to a split, so a copy and a kept trim may be on
-//!   different faces); each kept trim that differs from main's is certified
-//!   ([`kept_trims_are_certified`]);
+//!   different faces); each kept trim that differs from main's, or whose face's surface
+//!   differs from main's (an exact copy where main had the analytic), is certified against
+//!   the edge's curve on the face's surface as committed ([`kept_trims_are_certified`]), so
+//!   the certificate does not rest on the grid's sampled same-parameterisation check;
 //! - `trims`: the analytic is kept (it gives the source's points within the tolerance at
 //!   every grid point) and the new face keeps the split face's trims instead of dropping
 //!   and rebuilding them; each kept trim that differs from main's is certified over its
 //!   whole edge ([`kept_trims_are_certified`]), not on the grid.
+//!
+//! The certificate is the interval bound of `certify::trim_tolerance` on any surface with an
+//! exact net: an edge curve on a surface is enclosed through its own UV curve and surface
+//! (`crv_on_surf_trim_gap_bound`), and a B-spline trim whose domain ends a few ulps inside
+//! the edge's interval (evaluated clamped there) through `clamped_trim_gap_bound`.
 //!
 //! [`DATA`] was made by [`record`] with main's expected files (`WR450_MAIN`, a directory
 //! of main's `expected/*.jsonl` at [`MAIN_COMMIT`]). **When a later change moves one of
@@ -140,6 +147,26 @@ fn with_mains_choices(u: &dyn UnitDiff, case: &crate::Case) -> (Value, Flips) {
     );
     let flips = *flips.lock().unwrap();
     (line, flips)
+}
+
+/// Runs `f` with main's choices at both WR-450 seams when `case` of `unit_id` is a row of
+/// [`DATA`] (a row this retirement moved), else as is: for the other replays that rebuild
+/// main's run of a row (main's row hash), which since this retirement differs from this
+/// branch's through these two choices as well (the WR-493 retirement's
+/// `wr493_rows::without_classified_trims` precedent). [`replay_unit`] proves those rows move
+/// only through these choices.
+pub(crate) fn with_mains_choices_for<R>(unit_id: &str, case: &str, f: impl FnOnce() -> R) -> R {
+    if !DATA.iter().any(|r| r.0 == unit_id && r.1 == case) {
+        return f();
+    }
+    with_hook(
+        |c: Call<'_>| match c.seam {
+            Seam::AnalyticCopy => Ok(vec![0]),
+            Seam::SplitTrims => Ok(c.input.to_vec()),
+            _ => c.own,
+        },
+        f,
+    )
 }
 
 /// Replays every row of `unit_id` in [`DATA`]; returns the row count per class.
@@ -285,15 +312,24 @@ fn data_covers_the_moved_rows() {
 const WITHIN_RULE: &[(&str, &str)] = &[];
 
 /// The UV trims of `b`'s edge `e`, one per edge use, as their debug text (`None` where the
-/// use keeps none).
-fn use_trims(b: &solidcore::topology::Brep, e: solidcore::topology::EdgeId) -> Vec<Option<String>> {
+/// use keeps none), each with the debug text of the surface of the use's face (`None`
+/// where it has none): a trim is this change's where either differs from main's.
+fn use_trims(
+    b: &solidcore::topology::Brep,
+    e: solidcore::topology::EdgeId,
+) -> Vec<(Option<String>, Option<String>)> {
     b.edge(e)
         .expect("edge")
         .edgeuses
         .iter()
         .map(|&eu| {
             let trim = b.edgeuse(eu).expect("edge use").uv_trim_curve.as_ref();
-            trim.map(|t| format!("{t:?}"))
+            let face = solidcore::topology::edgeuse::p1::face(b, eu).expect("face");
+            let surface = face.and_then(|f| b.face(f).expect("face").surface.as_ref());
+            (
+                trim.map(|t| format!("{t:?}")),
+                surface.map(|s| format!("{s:?}")),
+            )
         })
         .collect()
 }
@@ -399,7 +435,7 @@ fn kept_trims_are_certified() {
                 }
                 let tol = b.edge(e).expect("edge").tolerance;
                 let bounds = crate::certify::trim_tolerance::trim_bounds_any_surface(&k, b, e);
-                let kept = now.iter().zip(&then).filter(|(n, _)| n.is_some());
+                let kept = now.iter().zip(&then).filter(|(n, _)| n.0.is_some());
                 for ((n, t), (eu, bound)) in kept.zip(bounds) {
                     if n == t {
                         continue;

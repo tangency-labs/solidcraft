@@ -48,8 +48,8 @@ use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::math::CPoint;
 use solidcore::query::curve_surface_gap::{
-    curve_face_gap_bound_within, line_evaluation_slack, plane_uv_lipschitz, trim_image_gap_bound,
-    uv_line_slack_on_surface,
+    clamped_trim_gap_bound, crv_on_surf_trim_gap_bound, curve_face_gap_bound_within,
+    line_evaluation_slack, plane_uv_lipschitz, trim_image_gap_bound, uv_line_slack_on_surface,
 };
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -481,13 +481,27 @@ fn use_bound_on(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId, any_surface: boo
     let ivl = rec.interval;
     let range = [ivl.min(), ivl.max()];
     let floor = FLOOR * rec.tolerance;
-    let mut bound =
-        trim_image_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound");
+    // (with `any_surface`, an edge curve on a surface is enclosed through its own UV curve
+    // and surface: [`crv_on_surf_trim_gap_bound`])
+    let mut bound = if any_surface && matches!(curve.kind(), CurveKind::CrvOnSurf(_)) {
+        crv_on_surf_trim_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound")
+    } else {
+        trim_image_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound")
+    };
     // Past the tolerance (or not enclosed), the same pair is bounded again on an exactly
     // translated copy ([`exact_translated_bound`]): the same geometry, nearer the origin,
     // where the enclosures are not widened by the coordinates; the smaller bound is kept.
     if !bound.is_some_and(|x| x + line_slack <= rec.tolerance) {
         if let Some(x) = exact_translated_bound(k, &surface, curve, trim, range, floor) {
+            bound = Some(bound.map_or(x, |b| b.min(x)));
+        }
+    }
+    // A B-spline trim whose domain ends inside the edge's interval is evaluated clamped there:
+    // bounded on its domain plus the curve's run over the slivers ([`clamped_trim_gap_bound`]).
+    if any_surface && !bound.is_some_and(|x| x + line_slack <= rec.tolerance) {
+        if let Some(x) =
+            clamped_trim_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound")
+        {
             bound = Some(bound.map_or(x, |b| b.min(x)));
         }
     }
