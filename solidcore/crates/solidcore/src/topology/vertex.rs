@@ -1324,8 +1324,9 @@ pub fn refresh_tolerance(b: &mut Brep, v: VertexId, nested_refreshes: bool) -> R
 pub(crate) enum UnboundedEnd {
     /// The end adds nothing to the reach.
     Skip,
-    /// The end adds the distance from the vertex to the evaluated end point, as computed:
-    /// the same figure the vertex use's edge gap (`CalcVertexEdgeGap`) holds.
+    /// The end adds the distance from the vertex to the evaluated end point, rounded up by
+    /// 4 ulps: the figure the vertex use's edge gap (`CalcVertexEdgeGap`) holds, without
+    /// an evaluation error term (the curve has none), so it is not certified.
     Computed,
 }
 
@@ -1334,8 +1335,9 @@ pub(crate) enum UnboundedEnd {
 /// plus the evaluation's error, bounded per coordinate from the curve's own data
 /// ([`crate::curve::curve::Curve::point_error_bound`]: its control points, not the size of
 /// the point it returns) times `√3`, each step rounded up by 4 ulps. An end with no such
-/// bound is taken as `unbounded` says; an end not evaluated, or a non-finite reach, adds
-/// nothing. `0` for a vertex with no edge end.
+/// bound is taken as `unbounded` says; an end whose evaluation fails, or a non-finite
+/// reach, adds nothing (as `CalcVertexEdgeGap` measures no gap there), so the bound
+/// covers the ends that can be evaluated. `0` for a vertex with no edge end.
 ///
 /// # Errors
 ///
@@ -1367,7 +1369,7 @@ pub(crate) fn edge_end_reach(
             };
             let far = match (curve.point_error_bound(t), unbounded) {
                 (Some(error), _) => up(up(at.distance(p)) + up(error * up(3.0_f64.sqrt()))),
-                (None, UnboundedEnd::Computed) => at.distance(p),
+                (None, UnboundedEnd::Computed) => up(at.distance(p)),
                 (None, UnboundedEnd::Skip) => continue,
             };
             if far.is_finite() {

@@ -79,9 +79,11 @@
 //!   vertex by the merged points' neighbourhood, [`PointClassification::merge_into_brep`]
 //!   grows its tolerance to twice the farthest end of its edges at it (the evaluated end's
 //!   distance plus its certified evaluation error where the curve bounds it, the computed
-//!   distance otherwise), so `AssertValid`'s edge-end test (half the vertex tolerance)
-//!   holds for the vertex as returned. Upstream leaves a split's new vertex smaller than
-//!   that until a later UV-trim build covers it, if one runs. The opaque-handle
+//!   distance otherwise) when every end lies inside that neighbourhood, so `AssertValid`'s
+//!   edge-end test (half the vertex tolerance) holds for the vertex as returned. Upstream
+//!   leaves a split's new vertex smaller than that until a later UV-trim build covers it,
+//!   if one runs. Ends outside the neighbourhood (an `sss_point` move off the edges,
+//!   #21511) are left as upstream leaves them. The opaque-handle
 //!   [`PointClassification::merge_into_object`] reaches no edges and is unchanged.
 //! - **Mutable topology.** [`BrepMerge`] supplies an arena, resolved target,
 //!   handle mapping and notification environment for [`PointClassification::merge_into_brep`],
@@ -1766,13 +1768,19 @@ impl<O: ClassObject> PointClassification<O> {
         vertex::set_exact(b, vertex_id, merged.exact)?;
         set_point(b, env, merged.position)?;
         vertex::set_tolerance(b, vertex_id, merged.zone_tol_3d, true, true)?;
-        // Not upstream (#21340): the vertex also covers the ends of its edges. The merged
-        // neighbourhood bounds only the two merged points, while `AssertValid` takes an
-        // edge end within half the vertex tolerance: so the tolerance grows to twice the
-        // farthest end's bound ([`vertex::edge_end_reach`]; doubling is exact).
+        // Not upstream (#21340): the merged neighbourhood is a ball of radius
+        // `zone_tol_3d` around the merged position, which holds the edge ends at the old
+        // point (a split's ends lie at the split point, the centre of the merged vertex
+        // ball). `AssertValid` takes an edge end within half the vertex tolerance, so a
+        // vertex whose ends all lie inside that ball is raised to twice the farthest
+        // end's bound ([`vertex::edge_end_reach`]; doubling is exact): the same
+        // neighbourhood, stated as AssertValid measures it. Ends outside the ball (the
+        // `sss_point` move can carry a vertex off its edges) are not the merge's
+        // neighbourhood and stay as upstream leaves them (#21511).
+        let tol = vertex::tolerance(b, vertex_id)?;
         let reach = vertex::edge_end_reach(k, b, vertex_id, vertex::UnboundedEnd::Computed)?;
         let cover = 2.0 * reach;
-        if cover.is_finite() {
+        if reach <= tol && cover.is_finite() {
             vertex::set_tolerance(b, vertex_id, cover, true, true)?;
         }
         Ok(outputs)
