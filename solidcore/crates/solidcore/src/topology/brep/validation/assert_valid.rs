@@ -1010,21 +1010,23 @@ mod tests {
         assert_eq!(printed(&skipped), printed(&full));
     }
 
-    /// A check writes nothing to a body it has checked before (#21105): the gaps it stores
+    /// A check leaves a body it has checked before as it was (#21105): the gaps it stores
     /// are stored already, the tolerance pass takes `bValidateOnly` as its argument instead
-    /// of setting and restoring it on the body, and no curve is taken to be repaired.
+    /// of setting and restoring it on the body, and no curve is repaired. Compared by
+    /// value, not by write stamps: the vertex/face gap refresh clears the caches of the
+    /// vertex's other uses on the face and stores only its own (`CalcVertexFaceGap`), so a
+    /// later read of a sibling computes its gap again and stores the same value.
     #[test]
-    fn a_repeated_check_writes_nothing_to_the_body() {
+    fn a_repeated_check_leaves_the_body_as_it_was() {
         for memoize in [true, false] {
             let (mut k, mut b) = checked_box(memoize);
             check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-            let before = b.write_stamps();
+            let before = format!("{b:?}");
             let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
             assert!(check.is_valid(), "{:?}", check.lines());
-            assert_eq!(
-                b.write_stamps(),
-                before,
-                "a repeated check wrote to the body (memoize {memoize})"
+            assert!(
+                format!("{b:?}") == before,
+                "a repeated check changed the body (memoize {memoize})"
             );
         }
     }
@@ -1098,7 +1100,7 @@ mod tests {
     }
 
     /// Replaces the curve of the box's first edge by a cubic B-spline along the same line
-    /// whose second control point lies 0.01 behind its start: `ValidatePointers` takes the
+    /// whose second control point lies 0.001 of the edge behind its start: `ValidatePointers` takes the
     /// polygon for a reversal and straightens it, a write to the body.
     fn bend_first_edge(k: &Kernel, b: &mut Brep) -> crate::topology::EdgeId {
         use crate::nurbs::b_spline_curve::p1::{
@@ -1148,16 +1150,19 @@ mod tests {
     }
 
     /// A reversed curve end is reported, not repaired (#21105 step 2): the check leaves the
-    /// edge curve as it is, says so in one warning (test 147, which does not fail the check),
-    /// says the same with and without the memoized pass, and the explicit fix path
-    /// (`ValidateGeometry(bFixTolerances = TRUE)`) still straightens the end.
+    /// edge curve as it is and says so in one warning (test 147, which does not fail the
+    /// check), the same with and without the memoized pass. The bent curve doubles back
+    /// along its line, so its speed vanishes inside it: the check now sees that too
+    /// (`SmBSplineCurve` test 12), where upstream straightened the end first and then
+    /// checked the straightened curve. The explicit fix path
+    /// (`ValidateGeometry(bFixTolerances = TRUE)`) still straightens the end, and the
+    /// body it leaves checks valid with no warning.
     #[test]
     fn a_reversed_end_is_reported_not_repaired() {
         let (mut k, mut b) = checked_box(true);
         let e = bend_first_edge(&k, &mut b);
         let bent = second_control_point(&b, e);
         let (reported, _) = check_counting(&mut k, &mut b);
-        assert!(reported.is_valid(), "{:?}", reported.lines());
         assert_eq!(
             second_control_point(&b, e),
             bent,
@@ -1165,6 +1170,16 @@ mod tests {
         );
         let warnings: Vec<_> = reported.warnings().map(|r| r.test_index).collect();
         assert_eq!(warnings, [147], "{reported:?}");
+        let failures: Vec<_> = reported
+            .failures()
+            .map(|r| (r.reporting_type, r.test_index))
+            .collect();
+        assert_eq!(
+            failures,
+            [(crate::geom::assert_array::labels::B_SPLINE_CURVE_TYPE, 12)],
+            "{:?}",
+            reported.lines()
+        );
 
         let (mut k, mut full_b) = checked_box(false);
         let e = bend_first_edge(&k, &mut full_b);
@@ -1182,6 +1197,9 @@ mod tests {
             bent,
             "the fix path left the end reversed"
         );
+        let (fixed, _) = check_counting(&mut k, &mut b);
+        assert!(fixed.is_valid(), "{:?}", fixed.lines());
+        assert_eq!(fixed.warnings().count(), 0, "{:?}", fixed.lines());
     }
 
     /// A face without UV trims is checked on a copy standing for the body, which the first
