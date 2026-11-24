@@ -110,8 +110,8 @@
 //! - A failing `eRet` of `GlueCoincidentBrepVertices` is returned as the error (the
 //!   curves deleted before it are not reported).
 //! - When `CreateProtoEdge` fails at `NER(pBrep1Topo)`, upstream returns the already
-//!   allocated `rpNewPE` through the out-parameter; the port returns `None` there (the
-//!   failing paths are not reachable from the callers ported so far).
+//!   allocated `rpNewPE` through the out-parameter; the port returns its error there,
+//!   which `FindOrCreateProtoEdge` turns into no edge, or passes on for a needed edge.
 //! - **Needed edges** (not upstream, #18927): `FindOrCreateProtoEdge` drops the statuses of
 //!   its end proto vertices and of `CreateProtoEdge`, leaving the interval without its edge.
 //!   [`ProtoTopologyManager::find_or_create_needed_proto_edge`], used where the result needs
@@ -781,7 +781,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 classification2,
                 ci2,
             );
-            let created = if needed { Some(made?) } else { ignore_soft(made)? };
+            let created = if needed {
+                Some(made?)
+            } else {
+                ignore_soft(made)?
+            };
             if let Some(pe) = created {
                 was_created = true;
                 let mut ids = Vec::with_capacity(overlapping.len());
@@ -3484,9 +3488,10 @@ mod tests {
         use crate::nurbs::b_spline_curve::BSplineCurve;
         let k = Kernel::default();
         let mut pool = Pool::new();
-        let mut uv =
-            Curve::from(BSplineCurve::create_line_segment(3, Vec3::X, Vec3::Y).unwrap());
-        assert!(uv.reparam_bspline_to(&Extent1d::from_min_max(5.0, 6.0)).unwrap());
+        let mut uv = Curve::from(BSplineCurve::create_line_segment(3, Vec3::X, Vec3::Y).unwrap());
+        assert!(uv
+            .reparam_bspline_to(&Extent1d::from_min_max(5.0, 6.0))
+            .unwrap());
         pool.curves.push(uv);
         let b = H(100, ClassObjectKind::Other);
         let e = Brep::new();
@@ -3528,12 +3533,76 @@ mod tests {
                 assert!(
                     matches!(
                         e.nurbs_failure(),
-                        Some(NurbsFailure::BSpline(BSplineFailure::ParameterOutside { .. }))
+                        Some(NurbsFailure::BSpline(
+                            BSplineFailure::ParameterOutside { .. }
+                        ))
                     ),
                     "{e}"
                 );
             } else {
                 assert_eq!(r.unwrap(), (None, false));
+            }
+        }
+    }
+
+    /// An interval whose start proto vertex fails (neither classification of the start
+    /// has parameters, so no position can be found) while its end makes one: the helper
+    /// makes no edge, `(None, false)`; a needed edge passes the start's failure on. With
+    /// its middle on a vertex the interval makes no edge for a geometric reason whatever
+    /// its ends did, and gives `(None, false)` either way (#18927).
+    #[test]
+    fn a_needed_edge_passes_on_a_failed_end_unless_it_would_make_no_edge() {
+        let k = Kernel::default();
+        let mut pool = Pool::new();
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        let curve = H(0, ClassObjectKind::Curve);
+        let ivl = pool.curves[0].natural_interval();
+        let at = |class: PointClassType, o: H, set: bool| {
+            let mut pc = PointClassification::new(1e-5);
+            pc.set_class_object(class, Some(o));
+            if !set {
+                pc.unset_parameters();
+            }
+            pc
+        };
+        let cc = CurveClassification::with_curve_interval(&k, curve, ivl, 1e-5);
+        let interval = |v: usize, class: PointClassType, mid: H| CurveInterval {
+            interval: ivl,
+            start: at(PointClassType::Vertex, vtx(v), false),
+            mid: at(class, mid, true),
+            end: at(PointClassType::Vertex, vtx(v), true),
+        };
+        for (mid_on_vertex, needed) in [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let mut m =
+                ProtoTopologyManager::new(&k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap();
+            let (class, mid): (_, fn(usize) -> H) = if mid_on_vertex {
+                (PointClassType::Vertex, vtx)
+            } else {
+                (PointClassType::Edge, edg)
+            };
+            let (mut ci1, mut ci2) = (interval(4, class, mid(0)), interval(5, class, mid(1)));
+            let r = if needed {
+                m.find_or_create_needed_proto_edge(
+                    &k, &mut pool, 1e-6, &cc, &mut ci1, &cc, &mut ci2,
+                )
+            } else {
+                m.find_or_create_proto_edge(&k, &mut pool, 1e-6, &cc, &mut ci1, &cc, &mut ci2)
+            };
+            let case = format!("mid on vertex {mid_on_vertex}, needed {needed}");
+            // the end's proto vertex is made, the start's is not
+            assert_eq!(m.proto_vertices().len(), 1, "{case}");
+            assert!(m.proto_edges().is_empty(), "{case}");
+            if needed && !mid_on_vertex {
+                let e = r.unwrap_err();
+                assert_eq!(
+                    e.topology_failure(),
+                    Some(&TopologyFailure::ClassificationParametersUnset),
+                    "{case}: {e}"
+                );
+            } else {
+                assert_eq!(r.unwrap(), (None, false), "{case}");
             }
         }
     }

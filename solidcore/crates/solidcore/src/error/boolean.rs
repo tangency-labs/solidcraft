@@ -274,6 +274,10 @@ pub enum BooleanFailure {
     /// An operand of the planar Boolean has no faces, so the Boolean made no result (class
     /// `invalid_input`).
     OperandWithoutFaces,
+    /// Not upstream (#18927): a step of making the proto edge of an interval of a face
+    /// pair's intersection failed, so the intersection lacks that edge and no result built
+    /// from it bounds the operands. The failed step's error is the cause. Class `failed`.
+    IntervalEdgeNotMade,
     /// Replacing a group of overlapping intersection curves failed after the group's
     /// curves were taken out of the intersection: what is left records neither the group
     /// nor its replacement, so no result built from it bounds the operands' overlap. The
@@ -397,6 +401,7 @@ impl BooleanFailure {
             | Self::FaceListLimit { .. }
             | Self::EdgeListLimit { .. }
             | Self::CoincidentFacesNotSettled { .. }
+            | Self::IntervalEdgeNotMade
             | Self::OverlapGroupNotReplaced => None,
         }
     }
@@ -426,6 +431,7 @@ impl BooleanFailure {
             | Self::NoRadialEdgeUse
             | Self::NoSurfacesToMerge
             | Self::NotRelatedPair
+            | Self::IntervalEdgeNotMade
             | Self::OverlapGroupNotReplaced
             | Self::RelateConflict { .. }
             | Self::SelfLoopLeavesReach { .. }
@@ -472,6 +478,7 @@ impl BooleanFailure {
             | Self::NoCommonSubinterval
             | Self::NoRadialEdgeUse
             | Self::NotRelatedPair
+            | Self::IntervalEdgeNotMade
             | Self::OverlapGroupNotReplaced
             | Self::RelateConflict { .. }
             | Self::SelfLoopLeavesReach { .. }
@@ -609,6 +616,9 @@ impl core::fmt::Display for BooleanFailure {
             Self::NotRelatedPair => f.write_str("the two entities are not related to each other"),
             Self::OperandWithoutFaces => f.write_str(
                 "an operand of the planar Boolean has no faces, so it made no result B-rep",
+            ),
+            Self::IntervalEdgeNotMade => f.write_str(
+                "making the edge of an interval of a face pair's intersection failed",
             ),
             Self::OverlapGroupNotReplaced => f.write_str(
                 "replacing a group of overlapping intersection curves failed after the group was taken out of the intersection",
@@ -819,6 +829,7 @@ mod tests {
             (F::EdgeRelationNotRepaired, SM_ERR, K::Failed),
             (F::NoCommonSubinterval, SM_ERR, K::Failed),
             (F::NotRelatedPair, SM_ERR, K::Failed),
+            (F::IntervalEdgeNotMade, SM_ERR, K::Failed),
             (F::OverlapGroupNotReplaced, SM_ERR, K::Failed),
             (
                 F::SelfLoopSplitReachesVertex { needed: Some(0.5) },
