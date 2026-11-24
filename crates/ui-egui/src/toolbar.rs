@@ -380,12 +380,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::links::run(ui.ctx(), id);
                     }
                     app_bar::BarAction::HidePill { id } => {
-                        // A pill the organization's policy shows stays: say why instead.
-                        if crate::links::by_id(id).is_some_and(|link| app.policy.locks(link.pref)) {
-                            app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
-                        } else {
-                            crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
-                        }
+                        // `run` refuses a pill the organization's policy shows, and says why.
+                        crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
                     app_bar::BarAction::App { id } => run_overflow_control(app, id),
@@ -5859,6 +5855,75 @@ mod app_bar_tests {
         assert!(h.app.dialog.is_none() && h.app.tool.is_none());
         assert!(!h.app.preferences.show_donate_button && !h.app.preferences.show_discord_button && !h.app.preferences.ai_toolbar_button);
         assert_eq!((h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), before);
+    }
+
+    #[test]
+    fn a_pill_the_policy_shows_stays_on_the_bar_through_every_hide() {
+        let _language = solidcraft_ui_text::scope("en");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.call("ui.resize", json!({"width":1920,"height":720}));
+        h.app.preferences.show_discord_button = true;
+        h.app.policy = crate::policy::Policy::from_json(r#"{"ShowDonateButton": 1}"#);
+        crate::policy::enforce(&mut h.app);
+        h.app.toolbar_custom.reset_app_bar();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some(), "the policy shows the pill");
+        let refused = "Set by your organization";
+        let hide_row = |app: &crate::SolveApp, id: &str| {
+            crate::app_bar_custom::items(app, Some(id))
+                .into_iter()
+                .find(|row| row.params == Some(json!({"item":id,"action":"hide"})))
+                .unwrap()
+                .enabled
+        };
+        assert!(!hide_row(&h.app, "donate"), "the right-click Hide row is off");
+        assert!(hide_row(&h.app, "discord"));
+        // The pill's ×, the edit menu's Hide (also Delete and dragging it off) and a preset that
+        // leaves it out: each keeps the pill and says why.
+        h.step(&json!({"click":{"handle":"titlebar:kofi:hide"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some());
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains(refused)), "{:?}", h.app.status);
+        h.app.status = None;
+        crate::app_bar_custom::run(&mut h.app, &json!({"item":"donate","action":"hide"}));
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains(refused)), "{:?}", h.app.status);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "the saved layout is unchanged");
+        crate::app_bar_custom::preset(&mut h.app, ui_kit::app_bar_items::Preset::Minimal);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some(), "a preset that hides it does not");
+        assert!(crate::scenario::rect_of("titlebar:discord").is_none(), "the preset still hides the unlocked pill");
+        // In customize mode, Delete on the focused pill and dragging it off the bar keep it too.
+        h.app.toolbar_custom.reset_app_bar();
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        let at = crate::scenario::handle_at("appbar:edit:donate").unwrap();
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(3);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "Delete keeps it");
+        let at = crate::scenario::rect_of("appbar:edit:donate").unwrap().center();
+        let press =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![press(at, true)]);
+        let away = pos2(at.x, 650.0);
+        h.frame_with(vec![egui::Event::PointerMoved(away)]);
+        h.frame_with(vec![press(away, false)]);
+        h.frames(30);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "dragging it off keeps it");
+        assert!(crate::scenario::rect_of("appbar:edit:donate").is_some(), "it is back on the bar");
+        h.step(&json!({"click":{"handle":"appbar:done"}})).unwrap();
+        h.frames(3);
+        // A pill the policy does not lock hides as before.
+        h.app.toolbar_custom.reset_app_bar();
+        h.frames(3);
+        h.app.status = None;
+        h.step(&json!({"click":{"handle":"titlebar:discord:hide"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("titlebar:discord").is_none());
+        assert!(h.app.status.as_ref().is_none_or(|s| !s.0.contains(refused)), "{:?}", h.app.status);
+        assert!(h.app.preferences.show_discord_button, "bar hiding edits the placement only");
     }
 
     #[test]
