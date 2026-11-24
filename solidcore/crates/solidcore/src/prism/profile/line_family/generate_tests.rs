@@ -680,12 +680,12 @@ fn a_dot_enclosure_overlapping_a_boundary_refuses_the_entire_result() {
     let ambiguous = family([0.0, 0.0], 0.33333333333333337, 1.0, &[0.0, -4.0]);
     let r = region(1.0, 2.5, 2.0, 3.5);
     assert_marks(
-        &clip(&[first.clone()], &r).unwrap(),
+        &clip(std::slice::from_ref(&first), &r).unwrap(),
         &[[1.0, 3.0, 2.0, 3.0]],
         &[],
         0.0,
     );
-    assert!(clip(&[ambiguous.clone()], &r).is_err());
+    assert!(clip(std::slice::from_ref(&ambiguous), &r).is_err());
     assert!(clip(&[first, ambiguous], &r).is_err());
 }
 

@@ -1499,7 +1499,7 @@ fn line_family_record_admission_bounds_conversion_before_geometry() {
     use solidcore_ops::profile::clip_line_family;
     use solidcore_record::profile::line_family::{Invalid, LineFamily};
     let families = [LineFamily {
-        angle: std::f64::consts::FRAC_PI_4,
+        angle: FRAC_PI_4,
         origin: v(0.0, 0.0),
         delta_x: 0.0,
         delta_y: 1.0,
