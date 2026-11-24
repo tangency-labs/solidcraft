@@ -77,11 +77,12 @@ CommandSpec::new("view.browser", "Browser Tree", crate::checked!("view.browser",
     .contract(&BROWSER_TREE_CONTRACT).output(output_schema_for::<BrowserTreeResult>)
     .params("visible?: bool (omitted: toggle) → visible?; show or hide the Browser tree panel, the design's tree of components, bodies and sketches (window setting)"),
 CommandSpec::new("view.fit", "Fit", crate::checked!("view.fit", fit))
-    .icon("fit").key("F6").noundo().doc_only().any_part()
+    // F6 also fits: the window handles it itself (`keymap::RESERVED`), so End is the key that can change.
+    .icon("fit").key("End").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
     .params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
 CommandSpec::new("view.home", "Home View", crate::checked!("view.home", home))
-    .icon("home").noundo().doc_only().any_part()
+    .icon("home").key("Home").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
     .params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
@@ -92,6 +93,18 @@ CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zo
     .icon("zoom").noundo().doc_only().any_part()
     .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
     .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
+CommandSpec::new("view.pan_mode", "Pan Mode", crate::checked!("view.pan_mode", pan_mode))
+    .icon("pan").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; moving the pointer over the view pans it, no button held, until turned off, another mode or Esc"),
+CommandSpec::new("view.orbit_mode", "Orbit Mode", crate::checked!("view.orbit_mode", orbit_mode))
+    .icon("orbit").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; moving the pointer over the view orbits it, no button held, until turned off, another mode or Esc"),
+CommandSpec::new("view.zoom_mode", "Zoom Mode", crate::checked!("view.zoom_mode", zoom_mode))
+    .icon("zoom").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; moving the pointer up over the view zooms in and down zooms out, no button held, until turned off, another mode or Esc"),
 CommandSpec::new("view.spin", "Continuous Orbit", crate::checked!("view.spin", spin))
     .icon("spin").noundo().doc_only()
     .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
@@ -386,6 +399,18 @@ fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
 
 fn zoom_tool(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.tool.zoom", "on")
+}
+
+fn pan_mode(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.pan_mode", "on")
+}
+
+fn orbit_mode(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.orbit_mode", "on")
+}
+
+fn zoom_mode(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.zoom_mode", "on")
 }
 
 fn spin(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -764,9 +789,16 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for (id, key) in
-            [("view.tool.zoom", "on"), ("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")]
-        {
+        for (id, key) in [
+            ("view.tool.zoom", "on"),
+            ("view.pan_mode", "on"),
+            ("view.orbit_mode", "on"),
+            ("view.zoom_mode", "on"),
+            ("view.spin", "on"),
+            ("view.grid", "on"),
+            ("view.ground_shadow", "on"),
+            ("view.navigation_bar", "visible"),
+        ] {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
             for on in [false, true] {
@@ -781,6 +813,9 @@ mod tests {
             "view.home",
             "view.tool",
             "view.tool.zoom",
+            "view.pan_mode",
+            "view.orbit_mode",
+            "view.zoom_mode",
             "view.spin",
             "view.visual_style",
             "view.grid",

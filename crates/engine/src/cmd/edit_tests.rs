@@ -166,6 +166,67 @@ fn roll_to_takes_a_number_or_end_and_refuses_anything_else() {
     }
 }
 
+/// The History bar's Back and Forward controls are click-only, so they carry no key. The same
+/// steps are commands, which is what the shortcut editor binds: one feature at a time, staying at
+/// either end of the history, and taking no parameters.
+#[test]
+fn history_steps_are_commands_moving_the_marker_one_feature() {
+    let mut s = Session::default();
+    for name in ["A", "B", "C"] {
+        run(&mut s, "solid.box", json!({"name": name, "length": 10, "width": 10, "height": 10}));
+    }
+    // The end of the history is "no marker", not a position.
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert_eq!(s.doc.features.len(), 3);
+    assert!(s.doc.marker.is_none(), "a new design sits at the end of its history");
+
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 2);
+    assert_eq!(s.doc.marker, Some(2));
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 1);
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 2);
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 3);
+    assert!(s.doc.marker.is_none(), "stepping past the last feature is the end again");
+
+    // Either end stays put instead of wrapping around.
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 3);
+    assert!(s.doc.marker.is_none());
+    for _ in 0..5 {
+        run(&mut s, "timeline.step_back", json!({}));
+    }
+    assert_eq!(s.doc.marker, Some(0), "back stops at the first feature");
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 0);
+    assert_eq!(s.doc.marker, Some(0));
+
+    // Both ends are reachable by key too. A keybinding cannot pass `position`, so `roll_to`'s
+    // start needs a command of its own.
+    run(&mut s, "timeline.roll_to_end", json!({}));
+    assert!(s.doc.marker.is_none(), "roll_to_end builds the whole history");
+    assert_eq!(run(&mut s, "timeline.roll_to_start", json!({}))["marker"], 0);
+    assert_eq!(s.doc.marker, Some(0), "roll_to_start rolls every feature back");
+    assert_eq!(run(&mut s, "timeline.roll_to_start", json!({}))["marker"], 0, "at the start it stays");
+    assert_eq!(run(&mut s, "timeline.roll_to_end", json!({}))["marker"], 3);
+    assert_eq!(run(&mut s, "timeline.roll_to_end", json!({}))["marker"], 3, "at the end it stays");
+
+    // A step clears the selection, as the marker commands do.
+    let id = s.doc.features[0].id;
+    assert_eq!(run(&mut s, "select.set", json!({"items": [{"type": "feature", "id": id}]}))["selected"], 1);
+    run(&mut s, "timeline.step_forward", json!({}));
+    assert!(s.selection.is_empty(), "a step clears the selection");
+
+    // They are registry commands, which is what makes them bindable and searchable.
+    for id in ["timeline.step_back", "timeline.step_forward", "timeline.roll_to_start", "timeline.roll_to_end"] {
+        let spec = crate::find_command(id).unwrap_or_else(|| panic!("{id} is a command"));
+        assert!(spec.undoable, "{id} is an undoable marker move, as roll_to is");
+    }
+
+    // No parameters: a position is refused, not silently ignored.
+    let mut strict = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    run(&mut strict, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let e = strict.execute("timeline.step_back", &json!({"position": 1})).unwrap_err().to_string();
+    assert!(e.contains("timeline.step_back"), "named as asked: {e}");
+    assert!(strict.doc.marker.is_none(), "the refused call changed nothing");
+}
+
 /// #7077: Repeat Last Command is a command (its key can change, command search finds it), but
 /// only the app has a tool to start, so a script's call is refused and changes nothing.
 #[test]
@@ -1682,6 +1743,92 @@ fn a_reorder_keeps_the_model_it_was_checked_on() {
     let mut fresh = solidcraft_doc::Model::new();
     fresh.evaluate(&s.doc);
     assert_eq!(fresh.state().bodies.len(), bodies(&s));
+}
+
+/// #18107: Invert Selection swaps faces for the other faces of their body, edges for the other
+/// edges of theirs, and bodies for the other shown bodies. A body selected with some of its faces
+/// inverts inside it; items of other kinds stay; nothing to invert is refused. No undo step.
+#[test]
+fn select_invert_swaps_each_kind_within_its_body_and_keeps_history() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    let history = (s.undo.len(), s.redo.len());
+    let faces = |s: &Session, body: &str| -> Vec<usize> {
+        s.selection
+            .iter()
+            .filter_map(|x| match x {
+                Sel::Face { body: b, index, .. } if b == body => Some(*index),
+                _ => None,
+            })
+            .collect()
+    };
+    // Two faces of A: the other four.
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"A","index":0},{"type":"face","body":"A","index":3}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [1, 2, 4, 5]);
+    assert_eq!(s.selection.len(), 4, "only faces of A");
+    // Inverting again gives the first two back.
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [0, 3]);
+    // One edge of B: the other eleven.
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"B","index":5}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection.len(), 11);
+    assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { body, index, .. } if body == "B" && *index != 5)));
+    // A body: the other shown bodies; a hidden one is left out.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection, [Sel::Body { name: "B".into() }, Sel::Body { name: "C".into() }]);
+    s.visibility.hidden_bodies.push("C".into());
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection, [Sel::Body { name: "B".into() }]);
+    // A body with a face of it selected: the other faces of that body, not the other bodies.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"},{"type":"face","body":"A","index":2},{"type":"feature","id":1}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [0, 1, 3, 4, 5]);
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Body { .. })), "the body is where the faces invert");
+    assert!(s.selection.contains(&Sel::Feature { id: 1 }), "a feature stays selected");
+    // Another body beside it: A is still not taken back as a whole body.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"},{"type":"face","body":"A","index":0},{"type":"body","name":"B"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [1, 2, 3, 4, 5]);
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Body { .. })), "neither A nor B (C is hidden)");
+    // Nothing of those kinds: refused, the selection unchanged.
+    run(&mut s, "select.set", json!({"items":[{"type":"feature","id":1}]}));
+    let before = s.selection.clone();
+    assert!(s.execute("select.invert", &json!({})).is_err());
+    assert_eq!(s.selection, before);
+    run(&mut s, "select.clear", json!({}));
+    assert!(s.execute("select.invert", &json!({})).is_err());
+    assert!(s.execute("select.invert", &json!({"kind":"face"})).is_err(), "no parameters");
+    assert_eq!((s.undo.len(), s.redo.len()), history, "not an undo step");
+}
+
+/// Invert Selection leaves out bodies a hidden folder hides, and its 10,000 limit counts the
+/// items it keeps; a refusal leaves the selection as it was.
+#[test]
+fn select_invert_skips_folder_hidden_bodies_and_counts_kept_items_in_its_limit() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+    assert!(!s.body_visible("B"));
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert!(s.selection.is_empty(), "B is hidden by its folder: {:?}", s.selection);
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": true}));
+
+    // 9,999 kept features and one face of A: five faces more would be 10,004 items.
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"A","index":0}]}));
+    s.selection.extend((1..10_000).map(|id| Sel::Feature { id }));
+    let before = s.selection.clone();
+    let err = s.execute("select.invert", &json!({})).unwrap_err().to_string();
+    assert!(err.contains("too many items"), "{err}");
+    assert_eq!(s.selection, before, "the selection stays as it was");
 }
 
 #[test]

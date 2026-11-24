@@ -97,6 +97,7 @@ use crate::blend::fillet_geom::p1::{
     FilletGeomId, FilletSolverId, FilletVertex, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType};
+use crate::blend::fillet_solver::p5::edge_bounds_material_linked;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::{BlendFailure, CornerInput, CornerPatchMiss, CornerShape, FilletSetUp};
 use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
@@ -328,7 +329,7 @@ pub struct FilletCorner {
     /// The fork's Ball's own members (`m_pBallSurface` and its loop; smlib#79 step 4c,
     /// WR-697): set by its topology on a blend corner that is a Ball.
     pub ball: Option<crate::blend::blend_corner::ball::BallCorner>,
-    /// The blend corner's chamfer event (WR-716, #2345, `fixes.fillet_chamfer_corner`): its
+    /// The blend corner's chamfer event (WR-716, #2345): its
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
@@ -362,6 +363,10 @@ pub struct FilletCorner {
     /// two fillet edges, on the end face and on the wall, meeting at the seam, and the cap is
     /// two faces, one on each, split along the seam's line ([`FilletCorner::wide_cap`]).
     pub(crate) seam_cap: Option<SeamCap>,
+    /// Not upstream (#17605): the face of the target an Nx1 End ends on, set by its topology
+    /// (`finish_nx1_end`). The executive's extended surfaces are shared by all its corners, so
+    /// a face having one does not make it this corner's end face.
+    pub(crate) end_face: Option<FaceId>,
 }
 
 /// Not upstream (#10876): an Nx1 End whose rib and cap span the end face and the wall across
@@ -725,6 +730,7 @@ impl FilletCorner {
             turned_back_arcs: [None, None],
             roll_over: false,
             seam_cap: None,
+            end_face: None,
         }
     }
 
@@ -848,7 +854,9 @@ impl FilletCorner {
     /// mixed-convexity corner whose two filleted edges leave the vertex along one
     /// tangent, so their rails cross before the corner. [`SolidError::Unsupported`] with
     /// the reason [`MIXED_CORNER_OF_FOUR_EDGES`] for a convex and a concave blend at a
-    /// vertex of four edges that are not the blend corner's Mixed one (#10876).
+    /// vertex of four edges that are not the blend corner's Mixed one (#10876). Those of
+    /// the Mixed classification ([`crate::blend::blend_corner::mixed::classify_mixed`]),
+    /// which says "not mixed" as a value (#19829).
     pub fn create(
         k: &Kernel,
         b: &mut Brep,
@@ -1229,13 +1237,29 @@ impl FilletCorner {
                             // The fork's (WR-697, 6fd0411; smlib#82): a convex and a
                             // concave blend continuing each other across a tangent
                             // seam are the blend corner's Mixed
-                            // (SmBlendCorner::ClassifyMixed); of three edges a failed
-                            // classification builds no corner. Four edges (not the
-                            // fork's, #2953): the seam's line run on past the vertex as
-                            // an edge; any other vertex of four goes on below.
+                            // (SmBlendCorner::ClassifyMixed). "Not mixed" is its
+                            // `false`; its errors are failures and pass on (#19829).
+                            // Four edges (not the fork's, #2953): the seam's line run
+                            // on past the vertex as an edge; any other vertex of four
+                            // goes on below.
+                            // A blended sheet edge bounds no material, so this corner is
+                            // neither the Mixed one nor the 3x2 one below: no corner
+                            // (MSG: Corner Case Not Implemented), as before #19829, when
+                            // the classification's convexity test failed on it.
+                            // A loop use without a shell or region is refused, as the
+                            // convexity test refused it.
+                            if opposite {
+                                let bounds = [
+                                    edge_bounds_material_linked(b, edge_of(b, eu0)?)?,
+                                    edge_bounds_material_linked(b, edge_of(b, eu1_)?)?,
+                                ];
+                                if !bounds[0] || !bounds[1] {
+                                    return Ok(None);
+                                }
+                            }
                             let mixed = if opposite || total_eus == 4 {
                                 let lookup = |eu: EdgeuseId| solver_of(eu).ok();
-                                match crate::blend::blend_corner::mixed::classify_mixed(
+                                crate::blend::blend_corner::mixed::classify_mixed(
                                     k,
                                     b,
                                     vertex,
@@ -1243,13 +1267,9 @@ impl FilletCorner {
                                     &all_eus,
                                     &lookup,
                                     tan_tol_deg,
-                                ) {
-                                    Ok(found) => Some(found),
-                                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                                    Err(_) => None,
-                                }
+                                )?
                             } else {
-                                Some(false)
+                                false
                             };
                             // Not upstream (#10876): of four edges, a convex and a concave
                             // blend that are not the Mixed corner have no corner. The
@@ -1257,7 +1277,7 @@ impl FilletCorner {
                             // face a convex blend lies in the material and a concave one
                             // outside it, so the two meet only on that face, at any size,
                             // and there is no crossing to mitre them on.
-                            if mixed != Some(true)
+                            if !mixed
                                 && total_eus == 4
                                 && eu2::is_convex_radial_sector(k, b, eu0, 4, false, 0.0)?
                                     != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?
@@ -1283,7 +1303,7 @@ impl FilletCorner {
                                     reason: MIXED_CORNER_OF_FOUR_EDGES,
                                 });
                             }
-                            if mixed == Some(true) {
+                            if mixed {
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(crate::blend::blend_corner::BlendCorner {
                                     event: BlendCornerEvent::Mixed,
@@ -1293,9 +1313,6 @@ impl FilletCorner {
                                 return Ok(Some(c));
                             }
                             if opposite {
-                                if mixed.is_none() {
-                                    return Ok(None); // MSG: Corner Case Not Implemented
-                                }
                                 // Not upstream (WR-710, #2256):
                                 // where the two edges leave the vertex along one tangent,
                                 // their common face closes to a cusp there and the rails

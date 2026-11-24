@@ -2056,7 +2056,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
 
     let picked = outside.to_string_lossy().into_owned();
     let answer = picked.clone();
-    h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+    h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(Some(answer.clone())))));
     h.frames(2);
     assert_eq!(h.widgets(&browse).len(), 1, "only the directory field has Browse");
     let y = |label: &str| h.widgets(label)[0][1];
@@ -2158,10 +2158,159 @@ mod native {
         root
     }
 
+    #[test]
+    fn panel_row_click_runs_on_the_command_worker_and_refreshes_its_data() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let folder = h.dir.join("sample");
+        std::fs::create_dir_all(&folder).unwrap();
+        let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
+            "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read","input_schema":{
+                "type":"object","properties":{"panel":{"type":"string"},"event":{"type":"string"},"path":{"type":"string"},"row":{"type":["string","null"]},"value":{"type":["object","string","null"]}}
+            }}],"limits":{"fuel":1000000,"memory_mib":2,"deadline_ms":5000},
+            "ui":{"ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+                "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+            }}}]}}],"workspaces":[]}
+        }});
+        let (package, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+        let source = include_str!("../../craft-plugin-wasm/src/ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "inspect.measure")
+            .replace("__COMMAND_LEN__", "15")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2");
+        std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+        std::fs::write(folder.join("plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.clone());
+        let inspected = h.app.run("plugin.inspect", json!({"path":folder.to_string_lossy()})).unwrap();
+        let (initial, _) = h.call_queued("engine.execute", json!({"command":"sample.make","params":{"approval":inspected["approval"],"params":{}}}));
+        assert_eq!(initial["ok"], true, "{initial}");
+        h.frames(3);
+        assert_eq!(h.app.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("ready".into())));
+        let at = crate::scenario::rect_of("plugin-panel:sample:jobs:row:op1").expect("a real shared-host table row").center();
+        for pressed in [true, false] {
+            h.frame_with(crate::test_support::pointer(at, pressed));
+        }
+        settle(&mut h);
+        h.frames(2);
+        assert_eq!(
+            h.app.session.plugin_panels()[0].data.get("/jobs/0/state"),
+            Some(&solidcraft_engine::plugin::ui::UiValue::Text("posted".into())),
+            "clicks must reach the worker and adopt a later set-data"
+        );
+        assert!(h.app.session.doc.features.is_empty(), "read actions never edit the design");
+        // Keep the synthetic replacement below until the queued action has been inspected.
+        h.app.plugin_menu.loaded = true;
+        let pinned = h.app.session.plugin_panels()[0].clone();
+        crate::panel_runtime::queue_selection(
+            &h.app,
+            "sample".into(),
+            pinned.approval.clone(),
+            "make".into(),
+            solidcraft_engine::plugin::ui::UiEvent {
+                panel: "jobs".into(),
+                event: solidcraft_engine::plugin::ui::EventKind::Select,
+                path: "/jobs".into(),
+                row: Some("op1".into()),
+                value: None,
+            },
+        );
+        h.app.session.plugin_state.panels.get_mut("sample").unwrap().approval = "0".repeat(64);
+        h.frames(1);
+        assert!(h.app.plugin_menu.panel_runs.is_empty(), "a stale click never starts a worker under a replacement package's hash");
+        assert_eq!(h.app.session.plugin_panels()[0].data, pinned.data, "a discarded action leaves panel data alone");
+        h.app.session.plugin_state.panels.get_mut("sample").unwrap().approval = pinned.approval;
+
+        let id = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .find(|section| section.instance.0.starts_with("plugin."))
+            .unwrap()
+            .instance
+            .clone();
+        h.app
+            .dispatch_panel_layout(solidcraft_engine::panels::LayoutAction::Apply {
+                expected_revision: None,
+                mutations: vec![solidcraft_engine::panels::Mutation::Close { instance: id.clone() }],
+            })
+            .unwrap();
+        h.frames(1);
+        assert!(h.app.session.plugin_panels()[0].visible, "a manual close is workspace placement, not guest state");
+        h.app.session.plugin_state.panels.get_mut("sample").unwrap().visibility_revision.insert("jobs".into(), 1);
+        h.frames(2);
+        assert!(
+            h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|section| section.instance == id),
+            "a later show-panel(true) reopens the panel"
+        );
+        use solidcraft_engine::panels::{Destination, LayoutAction, Mutation, Point, SectionId, SectionLocation, Size};
+        let location = SectionLocation::Floating { origin: Point { x: 420.0, y: 180.0 } };
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply {
+                expected_revision: None,
+                mutations: vec![Mutation::Move {
+                    instance: id.clone(),
+                    destination: Destination::NewSection {
+                        section: SectionId::new("plugin-floating").unwrap(),
+                        index: 0,
+                        location: location.clone(),
+                        size: Size { width: 400.0, height: 240.0 },
+                    },
+                }],
+            })
+            .unwrap();
+        h.frames(2);
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"solidcraft.review"})).unwrap();
+        h.frames(2);
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"solidcraft.classic"})).unwrap();
+        h.frames(2);
+        assert_eq!(
+            h.app.panel_runtime().unwrap().layout().layout().containing(&id).unwrap().location,
+            location,
+            "placement is remembered per workspace"
+        );
+        {
+            let package = h.app.session.plugin_state.panels.get_mut("sample").unwrap();
+            package.visible.insert("jobs".into(), false);
+            package.visibility_revision.insert("jobs".into(), 2);
+        }
+        h.frames(2);
+        assert!(!h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|section| section.instance == id));
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"solidcraft.review"})).unwrap();
+        h.frames(2);
+        assert!(
+            h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|section| section.instance == id),
+            "a consumed hide request does not replay in another workspace"
+        );
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"solidcraft.classic"})).unwrap();
+        h.frames(2);
+        let saved = crate::panel_runtime::preferences_value(&h.app).unwrap();
+        let mut restarted = crate::scenario::Harness::new();
+        restarted.app.home.open = false;
+        restarted.app.disable_panel_runtime().unwrap();
+        restarted.app.session.plugin_state.plugins_dir = Some(h.dir.clone());
+        crate::panel_runtime::load_preferences(&mut restarted.app, &json!({"panel_layout":saved}));
+        restarted.frames(3);
+        let restored = restarted.app.panel_runtime().unwrap().layout().layout().instance(&id).unwrap();
+        assert!(!restored.requested_open, "an inert default declaration honours a restored closed instance");
+        assert_eq!(restored.memory.location, location, "inert plugin registration precedes saved layout restoration");
+        restarted.app.session.plugin_state.panels.get_mut("sample").unwrap().visibility_revision.insert("jobs".into(), 1);
+        restarted.frames(2);
+        assert_eq!(
+            restarted.app.panel_runtime().unwrap().layout().layout().containing(&id).unwrap().location,
+            location,
+            "a new explicit show request reopens a restored closed instance"
+        );
+    }
+
     fn settle(h: &mut crate::scenario::Harness) {
         for _ in 0..500 {
             h.frames(1);
-            if h.app.plugin_menu.dialog().is_none_or(|d| d.running.is_none()) {
+            if h.app.plugin_menu.dialog().is_none_or(|d| d.running.is_none()) && h.app.plugin_menu.panel_runs.is_empty() {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));

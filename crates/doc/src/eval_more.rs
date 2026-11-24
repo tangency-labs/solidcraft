@@ -1373,9 +1373,11 @@ pub(super) fn sheet_eval(
             // the later one's is cut.
             let order = doc.feature_index(f.id).unwrap_or(usize::MAX);
             let mut made = Vec::with_capacity(picks.len());
+            let mut square = Vec::with_capacity(picks.len());
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
                 // One bend for each run: a split edge's butt where its runs meet.
-                let joints = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                square.push(sides);
                 if let Some((relief, size)) = own {
                     for &joint in &joints {
                         sk.corner_reliefs.push((joint, relief, size, order));
@@ -1386,6 +1388,11 @@ pub(super) fn sheet_eval(
             let mut open = Vec::new();
             for (k, joints) in made.iter().enumerate() {
                 open.extend(sk.close_flange_corners(joints).map_err(named(k))?);
+            }
+            // A side laid on square no other bend met carries on the edge beside it again, now
+            // that every corner of the feature is closed (#19833).
+            for (k, sides) in square.iter().enumerate() {
+                sk.slant_open_sides(sides).map_err(named(k))?;
             }
             // The corners on the outside of a bend that stay open (#20720): each pair of bends is
             // met once, so each corner once.
@@ -2007,15 +2014,16 @@ fn stops_inside(sk: &crate::SurfaceSheet, reach: &[Option<Aabb3>], plane: &Plane
 /// panel, inside its thickness, a bore of it (see [`crate::sheet::SheetBore`]). Each drill must
 /// meet one panel so and nothing else of the sheet. The sheets' bodies drilled; none, and nothing
 /// changed, for any other hole, which the generic path takes.
-pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Traced, Option<PrimitivePrism>)]) -> Result<Vec<String>> {
+pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[super::HoleTool]) -> Result<Vec<String>> {
     if tools.is_empty() || tools.len() > 10_000 {
         return Ok(Vec::new());
     }
     let mut drills = Vec::with_capacity(tools.len());
-    for (_, prism) in tools {
+    for tool in tools {
         // A drill meets a panel by what the tool holds whole, and reaches all its cylinder may.
-        let Some(PrimitivePrism::Cylinder { base, axis, radius, height, reach }) = *prism else { return Ok(Vec::new()) };
-        drills.push((base, axis, radius, height, drill_box(base, axis, radius, reach)));
+        let Some(PrimitivePrism::Cylinder { base, axis, radius, height, reach, part }) = tool.prism else { return Ok(Vec::new()) };
+        let role = tool.point_role.as_ref().map(|point| format!("{point}:{part}"));
+        drills.push((base, axis, radius, height, drill_box(base, axis, radius, reach), role));
     }
     let mut plans: Vec<(usize, crate::SurfaceSheet)> = Vec::new();
     for (i, sk) in st.surface_sheets.iter().enumerate() {
@@ -2033,7 +2041,7 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
         let t = sk.thickness;
         let tol = 1e-7;
         let mut out = sk.clone();
-        for &&(base, axis, radius, height, reach) in &reaching {
+        for &(base, axis, radius, height, reach, ref role) in reaching {
             let mut found: Option<(usize, bool, Vec3, Vec3, (f64, f64), (f64, f64))> = None;
             for (p, frame, own) in &panels {
                 let inv = frame.inverse();
@@ -2119,10 +2127,19 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                 if !crate::sheet_surface::holds_clear(&panel.region, &circle) {
                     return Ok(Vec::new());
                 }
+                if let Some(role) = role {
+                    out.holes.push(crate::sheet_surface_convert::HoleRecord {
+                        panel: panel.name.clone(),
+                        feature: f.id,
+                        segs: circle.outer.segs.iter().map(|seg| (*seg, String::new(), Some(*seg))).collect(),
+                        drill_role: Some(format!("{role}:side:0")),
+                    });
+                }
                 panel.region.holes.push(circle.outer.ccw().reversed());
             } else {
                 // Through the panel's material only, a hair past it where it runs out of it.
-                out.bores.push(crate::sheet::SheetBore { panel: p, base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1 });
+                let source = role.as_ref().map(|role| crate::sheet::BoreSource { feature: f.id, role: role.clone() });
+                out.bores.push(crate::sheet::SheetBore { panel: p, base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1, source });
             }
         }
         plans.push((i, out));
@@ -2327,7 +2344,7 @@ pub(super) enum PrimitivePrism {
     /// A cylinder: base centre, unit axis, radius and signed height, which the tool holds whole.
     /// The tool lies within the cylinder of the same base `reach` long: longer than `height` where
     /// material above the hole's entry face was left out of the tool (see `hole_run_on`).
-    Cylinder { base: Vec3, axis: Vec3, radius: f64, height: f64, reach: f64 },
+    Cylinder { base: Vec3, axis: Vec3, radius: f64, height: f64, reach: f64, part: &'static str },
 }
 
 /// The most outline segments of a sketch's text a cut tells letters by, and the most letters it

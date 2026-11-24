@@ -22,6 +22,9 @@ macro_rules! design_preferences {
             default_projection: Projection = Projection::Third, PAGE_DESIGN;
             /// Units of new designs.
             default_units: String = "mm".into(), PAGE_DESIGN;
+            /// The folder Save and Save As open in for a design that has never been saved (#5522). Empty:
+            /// the folder last used, as before. The desktop app reads it; the web app has no folders.
+            designs_folder: String = String::new(), PAGE_DESIGN;
             /// A double-click on a component, in the browser or on its face in the view, opens a linked
             /// one's design with the assembly around it (`edit_in_place`) and activates any other. Off:
             /// a double-click in the browser activates every component and one in the view does nothing,
@@ -41,8 +44,12 @@ macro_rules! design_preferences {
             drawing_sheets_visibility: String = "multiple".into(), PAGE_DESIGN;
             /// The file name File › Export and Save As Mesh offer: `{design}` and `{body}` stand for the
             /// design's and the exported body's names (`export_name`). Empty: each export offers the name
-            /// it did before (the design's, or the first body's for a mesh).
+            /// it needs: the design name for the whole design, the body name for a subset. The body-first
+            /// default can be kept by specifying the body template explicitly.
             export_name: String = String::new(), PAGE_DESIGN;
+            /// The folder export dialogs (File › Export, Save As Mesh, drawings and other saved files)
+            /// open in, until another folder is chosen in one (#5522). Empty: the folder last used.
+            exports_folder: String = String::new(), PAGE_DESIGN;
             /// GLB export writes each component occurrence as a named node holding its part's bodies, so a
             /// viewer can move each part on its own (#5296). Off: every body under the root in world
             /// coordinates, named as the model names it, as SolidCraft 0.40 wrote it.
@@ -62,6 +69,7 @@ macro_rules! design_preferences {
             /// #13262). Off: the grabbed point goes to the pointer and the part may spin about it, as
             /// before.
             joint_drag_trackball: bool = true, PAGE_DESIGN => check_id("prefs.joint_drag_trackball");
+            joint_moving_first: bool = false, PAGE_DESIGN => check_id_help("settings.joint_moving_first", "settings.joint_moving_first_help");
             /// Decimals shown for lengths and angles.
             length_decimals: u8 = 2, PAGE_DESIGN;
             /// A saved design's tab and its Browser top row are named after its file, so a Save As or a
@@ -81,6 +89,12 @@ macro_rules! design_preferences {
             /// The template new drawings of a part start from: a part's built-in, by name (ISO A3 when not set,
             /// or set to one this version doesn't have for a part).
             part_drawing_template: String = template::default_for(false).into(), PAGE_DESIGN;
+            /// Components pasted from another design (tab) go to the origin of the component they are
+            /// pasted into, the first one's origin on it and the others kept where they are from it,
+            /// each one's contents where they are from its own origin; a whole design copied and pasted
+            /// as a linked component goes there too (#17621). Off: copied components go where they were
+            /// in the world in their design, and a copied design under the pointer, as before.
+            paste_components_at_origin: bool = false, PAGE_DESIGN => check_id_help("prefs.paste_components_at_origin", "prefs.paste_components_at_origin_help");
             /// Reapply a file's stand-up answer when its original bytes have not changed.
             remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
             /// Reopen an unchanged CAD import from the existing saved-design model cache.
