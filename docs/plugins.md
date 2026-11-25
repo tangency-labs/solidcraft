@@ -133,15 +133,18 @@ notifications.
 
 Handlers run on the command worker, away from the window thread, with their own
 budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
-limited by their requested budgets. They may refresh caches or panel data.
+limited by their requested budgets. They may refresh caches.
 Editing, file writes and starting jobs are refused with existing typed permission
 errors. A failure is shown in Preferences › Plugins and never fails the action
 that triggered the notification. Each invocation uses a fresh guest instance.
 Handler results use the existing 1 MiB JSON reply limit; retained panel data is
 limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 
-A handler of a plugin that declares `ui@0.1` may refresh that plugin's panel data with
-`ui.set-data` (see Docked panels below).
+A handler cannot refresh its plugin's docked panel yet. It runs on a scratch copy of the
+session, so a `ui.set-data` call it makes does not reach the open panel; only the handler's JSON
+reply is kept (up to the limits above), and no panel reads it. Until the panel contract lands
+(#19516, phase 3 of RFC 0015), give the panel a Refresh button whose entry reads the design and
+calls `ui.set-data`, as the entries a panel runs do (see Docked panels below).
 
 ## Classifying points and reading surface normals
 
@@ -239,6 +242,30 @@ The installer limits the archive to 256 entries, each file to 16 MiB (an importe
 64 MiB. The manifest has a separate 16 KiB cap. Before publication, the host parses the manifest and
 refuses unknown or newer capabilities. It unpacks into a hidden `.install-…` folder beside the installed
 plugins, then renames it to `plugins/<id>/`. The entries resolve immediately, with no restart.
+
+## Updates
+
+A plugin can name the GitHub repository it is released from, and SolidCraft 0.49 and later offer its
+new versions on its card. Older versions refuse a manifest with this field.
+
+```json
+{"id": "gears", "name": "Gears", "version": "1.0.0", "updates": {"github": "maker/gears"}}
+```
+
+- At every start, and once a day while SolidCraft stays open, one background request per such
+  plugin (at most 20) asks GitHub for that repository's latest release. Nothing else is sent, and a
+  failed request (offline, rate limited) says nothing. The app's **Check at start and once a day**
+  update setting, or the organization's policy over it, turns these checks off too.
+- The release is offered when it is a stable release, its tag is a version (`v1.1.0` or `1.1.0`)
+  newer than the installed `version`, and it has an asset named `<id>.zip` or `<id>-<version>.zip`
+  under that repository's releases, for which GitHub lists a sha256 digest. Both versions must be
+  `major.minor.patch` versions.
+- **Update to 1.1.0** then shows beside the card's on/off control, also on a turned-off plugin. It downloads
+  the `.zip` into the hidden `plugins/.updates/` folder and checks it against the sha256 digest GitHub
+  lists for the asset. The same confirmation as Install follows, titled Update plugin: the package
+  must be the same id and the offered version, every install check applies, and the installed
+  version's folders are kept as for any update (above). **Update** replaces the plugin, with no restart;
+  **Cancel** or any failure leaves the installed version. The downloaded `.zip` is then deleted.
 
 ## Removing
 
@@ -795,6 +822,10 @@ exporters; `evaluate@0.2` lets an importer check its result, `storage@0.1` keeps
 (below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own versioned
 interface. While a version is 0.x, a minor version may break the one before it.
 
+`themes@0.1` lets a plugin add colour themes to Preferences > Appearance > Theme from
+`solidcraft-theme/1` files it ships; it needs no runtime. A plugin that does not list it is not
+affected. See [plugin themes](plugin-themes.md).
+
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
 `invalid-input`, which means the input is broken; SolidCraft then says "Sample does not support
@@ -803,6 +834,17 @@ bracket.smp: ..." instead of an "invalid" file. Plugins built against 0.1 (`comm
 component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
+
+`shaders@0.1` lets a plugin draw the 3D view's background with a WGSL shader the host checks,
+wraps and limits; it needs no runtime. See [plugin shaders](plugin-shaders.md) and
+[RFC 0015, amendment 1](rfcs/0015-plugin-ui-workspaces.md#amendment-1-shaders).
+
+`shaders@0.2` adds tints, which colour the ribbon's icons, its button blocks and the panels each
+frame, settings sliders for shaders, a `state` grid a background keeps between frames, and background textures the person chooses under the
+plugin's card (`choose`). See [plugin shaders](plugin-shaders.md#tints) and
+[pictures the person chooses](plugin-shaders.md#pictures-the-person-chooses).
+It also adds panel shaders, which draw every see-through panel's background from what is behind
+it. See [plugin panels](plugin-panels.md).
 
 ## Docked panels
 

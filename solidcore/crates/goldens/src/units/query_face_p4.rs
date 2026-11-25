@@ -656,7 +656,7 @@ pub(super) fn own_brep(
     init_gaps: bool,
 ) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
     use super::topology_face_p2::{own_output, CONVENTIONS};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let built = match brep {
         BrepIn::File { .. } | BrepIn::Face { .. } => {
             return Ok(super::topology_face_p2::own_brep(

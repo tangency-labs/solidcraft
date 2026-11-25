@@ -37,6 +37,8 @@ mod issue_1061_moved_boss_top_extends_cylinder;
 mod issue_1130_shelled_dome_rim;
 #[path = "../issue_1253_shell_under_rounded_top.rs"]
 mod issue_1253_shell_under_rounded_top;
+#[path = "../issue_13685_tube_folds.rs"]
+mod issue_13685_tube_folds;
 #[path = "../issue_1441_offset_surface_export.rs"]
 mod issue_1441_offset_surface_export;
 #[path = "../issue_1442_local_operation_offset_status.rs"]

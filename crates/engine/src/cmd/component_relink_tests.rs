@@ -94,7 +94,9 @@ fn deleting_a_hole_point_keeps_surviving_linked_joints() {
 fn legacy_hole_names_keep_their_numbering_until_a_point_is_lost() {
     let plate = three_hole_plate();
     let mut old: Value = serde_json::from_str(&plate.doc.to_json()).unwrap();
-    old["format_pending"].as_array_mut().unwrap().retain(|name| name != "hole-point-face-roles");
+    // The design as the release before v67 (`hole-point-face-roles.rs`) saved it.
+    old["format"] = json!(solidcraft_doc::format::format_string(66));
+    old.as_object_mut().unwrap().remove("format_pending");
     let mut legacy = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
     let legacy_names = |s: &mut Session| {
         let result = run(s, "model.faces", json!({"body": "Body1"}));
@@ -517,6 +519,267 @@ fn linked_bodies_with_one_conflicting_material_share_its_copy() {
     assert_eq!(s.doc.user_materials.len(), 2, "{assigned:?}");
     assert!(assigned.iter().all(|m| *m == assigned[0] && m != "Custom alloy"), "{assigned:?}");
     assert_eq!(s.doc.material_density("Custom alloy"), Some(9.0));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21651: an assembly already bloated up to `MAX_USER_MATERIALS` with pre-#21182 `(linked N)`
+/// duplicates consolidates them when inserting another link, remapping body assignments and
+/// link snapshots so future source edits still propagate.
+#[test]
+fn legacy_duplicate_linked_materials_consolidate_on_insert_and_keep_tracking_updates() {
+    let dir = folder("properties-legacy-consolidate");
+    let file_a = dir.join("part_a.solidcraft");
+    let file_b = dir.join("part_b.solidcraft");
+    let mut part_a = properties_part(&file_a, "Custom alloy", Some(4.2), [12, 34, 56]);
+    properties_part(&file_b, "Another alloy", Some(3.1), [90, 80, 70]);
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let c1 = run(&mut s, "component.insert_design", json!({"path": file_a}))["component"].as_u64().unwrap();
+    let c2 = run(&mut s, "component.insert_design", json!({"path": file_a}))["component"].as_u64().unwrap();
+
+    // Simulate pre-#21182 bloat: duplicate `(linked 2..=999)` copies right up to MAX_USER_MATERIALS,
+    // with `c2`'s body pinned to `Custom alloy (linked 2)`.
+    let canonical = s.doc.user_materials.iter().find(|m| m.name == "Custom alloy (linked 1)").unwrap().clone();
+    let body2 = s.doc.links[&c2].feature;
+    let body2_name = s.model.state().bodies.iter().find(|b| b.feature == body2).unwrap().name.clone();
+    for i in 2..solidcraft_doc::MAX_USER_MATERIALS {
+        let mut dup = canonical.clone();
+        dup.name = format!("Custom alloy (linked {i})");
+        s.doc_mut().user_materials.push(dup);
+    }
+    assert_eq!(s.doc.user_materials.len(), solidcraft_doc::MAX_USER_MATERIALS);
+    let dup2 = s.doc.user_material("Custom alloy (linked 2)").unwrap().clone();
+    let dup2_fp = solidcraft_doc::LinkedBodyProperties::fingerprint(&dup2).unwrap();
+    s.doc_mut().materials.insert(body2_name.clone(), "Custom alloy (linked 2)".into());
+    let snap2 = &mut s.doc_mut().links.get_mut(&c2).unwrap().inherited[0];
+    snap2.material = "Custom alloy (linked 2)".into();
+    snap2.material_fingerprint = Some(dup2_fp);
+
+    // Inserting a new link with a brand-new custom material succeeds instead of hitting the 1000 cap.
+    let c3 = run(&mut s, "component.insert_design", json!({"path": file_b}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.user_materials.len(), 3, "duplicates consolidated: {:?}", s.doc.user_materials.iter().map(|m| &m.name).collect::<Vec<_>>());
+    assert_eq!(s.doc.materials.get(&body2_name).map(String::as_str), Some("Custom alloy (linked 1)"));
+    assert_link_properties(&mut s, c1, "Custom alloy (linked 1)", 4.2, [12, 34, 56]);
+    assert_link_properties(&mut s, c2, "Custom alloy (linked 1)", 4.2, [12, 34, 56]);
+    assert_link_properties(&mut s, c3, "Another alloy", 3.1, [90, 80, 70]);
+
+    // Because `c2`'s inherited fingerprint was remapped cleanly, a later source density edit still propagates.
+    part_a.doc_mut().user_materials[0].density = 5.5;
+    run(&mut part_a, "file.save", json!({}));
+    run(&mut s, "component.update_links", json!({}));
+    let p1 = run(&mut s, "component.properties", json!({"component": c1}));
+    let p2 = run(&mut s, "component.properties", json!({"component": c2}));
+    assert!((p1["total"]["mass_g"].as_f64().unwrap() - 5.5).abs() < 1e-6, "{p1}");
+    assert!((p2["total"]["mass_g"].as_f64().unwrap() - 5.5).abs() < 1e-6, "{p2}");
+    // Old 4.2 `(linked 1)` copy was pruned once no body used it, leaving base + updated copy + Another alloy.
+    assert_eq!(s.doc.user_materials.len(), 3, "{:?}", s.doc.user_materials.iter().map(|m| &m.name).collect::<Vec<_>>());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21651: `component.update_links` merges pinned `(linked N)` duplicates and remaps configuration
+/// material cells pointing to the removed duplicate; a second update is unchanged.
+#[test]
+fn update_links_consolidates_pinned_duplicates_and_remaps_configuration_cells() {
+    let dir = folder("properties-update-consolidate");
+    let file = dir.join("source.solidcraft");
+    properties_part(&file, "Custom alloy", Some(4.2), [12, 34, 56]);
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let _c1 = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    let c2 = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    let body2_feat = s.doc.links[&c2].feature;
+    let body2_name = s.model.state().bodies.iter().find(|b| b.feature == body2_feat).unwrap().name.clone();
+
+    let mut dup2 = s.doc.user_material("Custom alloy (linked 1)").unwrap().clone();
+    dup2.name = "Custom alloy (linked 2)".into();
+    let dup2_fp = solidcraft_doc::LinkedBodyProperties::fingerprint(&dup2).unwrap();
+    s.doc_mut().user_materials.push(dup2);
+    s.doc_mut().materials.insert(body2_name.clone(), "Custom alloy (linked 2)".into());
+    s.doc_mut().links.get_mut(&c2).unwrap().inherited[0].material = "Custom alloy (linked 2)".into();
+    s.doc_mut().links.get_mut(&c2).unwrap().inherited[0].material_fingerprint = Some(dup2_fp);
+    s.doc_mut().configs.columns.push(solidcraft_doc::config::Column::Material(body2_name.clone()));
+    s.doc_mut().add_configuration_row("Alt".into(), vec!["Custom alloy (linked 2)".into()]).unwrap();
+
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(s.doc.user_materials.len(), 2, "{:?}", s.doc.user_materials.iter().map(|m| &m.name).collect::<Vec<_>>());
+    assert_eq!(s.doc.materials.get(&body2_name).map(String::as_str), Some("Custom alloy (linked 1)"));
+    assert_eq!(s.doc.configs.rows[0].cells[0], "Custom alloy (linked 1)");
+    assert_eq!(run(&mut s, "component.update_links", json!({}))["unchanged"].as_array().unwrap().len(), 2);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21651: deleting a linked component or switching its source material prunes unreferenced
+/// auto-generated `(linked N)` materials while leaving user-created materials untouched, and Undo
+/// restores both the component and its linked material.
+#[test]
+fn orphaned_linked_materials_are_pruned_on_update_and_component_delete() {
+    let dir = folder("properties-orphan-prune");
+    let file = dir.join("source.solidcraft");
+    let mut part = properties_part(&file, "Custom alloy", Some(4.2), [12, 34, 56]);
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.user_materials.len(), 2);
+    assert!(s.doc.user_material("Custom alloy (linked 1)").is_some());
+
+    // Deleting the linked component prunes its orphaned `(linked 1)` copy while keeping user material.
+    run(&mut s, "component.delete", json!({"component": c}));
+    assert_eq!(s.doc.user_materials.len(), 1);
+    assert_eq!(s.doc.user_materials[0].name, "Custom alloy");
+
+    // Undo restores both the component and its `(linked 1)` material.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.user_materials.len(), 2);
+    assert!(s.doc.user_material("Custom alloy (linked 1)").is_some());
+
+    // Switching the linked part to a built-in material also prunes the orphaned `(linked 1)` copy.
+    run(&mut part, "material.assign", json!({"bodies": ["Cube"], "material": "Steel"}));
+    run(&mut part, "file.save", json!({}));
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(s.doc.user_materials.len(), 1);
+    assert_eq!(s.doc.user_materials[0].name, "Custom alloy");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// PR #21663 review: user-created materials whose names contain `(linked N)` — whether unreferenced
+/// or assigned to a non-linked body — must never be pruned or consolidated by link inheritance or
+/// component deletion.
+#[test]
+fn user_created_material_with_linked_suffix_is_never_pruned_or_consolidated() {
+    let dir = folder("properties-user-linked-suffix");
+    let file = dir.join("source.solidcraft");
+    properties_part(&file, "Source alloy", Some(4.2), [12, 34, 56]);
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "LocalBox"}));
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Workshop alloy".into(),
+        density: 4.2,
+        appearance: None,
+        physical_card: None,
+    });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Workshop alloy (linked 1)".into(),
+        density: 4.2,
+        appearance: None,
+        physical_card: None,
+    });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Unused authored (linked 1)".into(),
+        density: 2.5,
+        appearance: None,
+        physical_card: None,
+    });
+    run(&mut s, "material.assign", json!({"bodies": ["LocalBox"], "material": "Workshop alloy (linked 1)"}));
+
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    assert!(s.doc.user_material("Workshop alloy (linked 1)").is_some());
+    assert!(s.doc.user_material("Unused authored (linked 1)").is_some());
+    assert_eq!(s.doc.materials.get("LocalBox").map(String::as_str), Some("Workshop alloy (linked 1)"));
+
+    run(&mut s, "component.update_links", json!({}));
+    assert!(s.doc.user_material("Workshop alloy (linked 1)").is_some());
+    assert!(s.doc.user_material("Unused authored (linked 1)").is_some());
+    assert_eq!(s.doc.materials.get("LocalBox").map(String::as_str), Some("Workshop alloy (linked 1)"));
+
+    run(&mut s, "component.delete", json!({"component": c}));
+    assert!(s.doc.user_material("Workshop alloy (linked 1)").is_some());
+    assert!(s.doc.user_material("Unused authored (linked 1)").is_some());
+    assert_eq!(s.doc.materials.get("LocalBox").map(String::as_str), Some("Workshop alloy (linked 1)"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// PR #21663 review: a linked material whose name exceeds 64 characters and gets truncated to
+/// `P (linked 1)` must never be consolidated into an unrelated material `PA` that merely shares
+/// the 64-character prefix `P`.
+#[test]
+fn truncated_64_char_prefix_does_not_consolidate_unrelated_long_material_names() {
+    let dir = folder("properties-truncated-prefix");
+    let file = dir.join("source.solidcraft");
+    let prefix = "A".repeat(64);
+    let name_pa = format!("{prefix}A");
+    let name_pb = format!("{prefix}B");
+    properties_part(&file, &name_pb, Some(4.2), [12, 34, 56]);
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial { name: name_pa.clone(), density: 4.2, appearance: None, physical_card: None });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial { name: name_pb.clone(), density: 9.0, appearance: None, physical_card: None });
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    let p = run(&mut s, "component.properties", json!({"component": c}));
+    let assigned = p["bodies"][0]["material"].as_str().unwrap().to_string();
+    assert_eq!(assigned, format!("{prefix} (linked 1)"));
+    assert!(s.doc.user_material(&assigned).is_some());
+
+    // Editing unrelated `PA` must not affect the linked body.
+    s.doc_mut().user_materials.iter_mut().find(|m| m.name == name_pa).unwrap().density = 7.7;
+    run(&mut s, "component.update_links", json!({}));
+    let p2 = run(&mut s, "component.properties", json!({"component": c}));
+    assert_eq!(p2["bodies"][0]["material"].as_str(), Some(assigned.as_str()));
+    assert!((p2["total"]["mass_g"].as_f64().unwrap() - 4.2).abs() < 1e-6, "{p2}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// PR #21663 review: deleting a sub-component whose body belongs to a surviving parent Import
+/// feature removes that deleted body's material assignment and prunes its orphaned `(linked N)`
+/// material while keeping the surviving sibling body's material assignment intact.
+#[test]
+fn deleting_subcomponent_of_surviving_import_clears_its_material_and_prunes_linked_copy() {
+    let dir = folder("properties-surviving-import-delete");
+    let file = dir.join("two_bodies.solidcraft");
+    let mut part = Session::default();
+    run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "First"}));
+    run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Second"}));
+    part.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 4.2,
+        appearance: None,
+        physical_card: None,
+    });
+    run(&mut part, "material.assign", json!({"bodies": ["First"], "material": "Custom alloy"}));
+    run(&mut part, "material.assign", json!({"bodies": ["Second"], "material": "Steel"}));
+    run(&mut part, "file.save_as", json!({"path": file}));
+
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let parent = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    assert!(s.doc.user_material("Custom alloy (linked 1)").is_some());
+
+    // Place `First` under a child component inside `parent` so deleting that child keeps the
+    // parent Import feature alive and adds `First`'s slot to `Import.skip`.
+    let child = s.doc_mut().add_component(Some("RemovedChild"), parent).unwrap();
+    s.doc_mut().body_components.insert("First".into(), child);
+    s.refresh();
+    assert_eq!(s.doc.materials.get("First").map(String::as_str), Some("Custom alloy (linked 1)"));
+    assert_eq!(s.doc.materials.get("Second").map(String::as_str), Some("Steel"));
+
+    run(&mut s, "component.delete", json!({"component": child}));
+    assert!(!s.doc.materials.contains_key("First"), "deleted imported body material must be cleared");
+    assert_eq!(s.doc.materials.get("Second").map(String::as_str), Some("Steel"), "surviving body keeps its material");
+    assert!(s.doc.user_material("Custom alloy (linked 1)").is_none(), "orphaned linked material must be pruned");
+    assert!(s.doc.user_material("Custom alloy").is_some(), "base user material stays");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -1153,6 +1416,46 @@ fn relink_keeps_joint_definitions_and_reports_solver_diagnostics() {
 
 /// #12227: relinking one placement of several leaves the others on the old source. The placement
 /// shows a component linked to the new design, made once and reused for the next placement.
+#[test]
+fn relink_of_one_placement_names_the_patterns_and_mirrors_it_breaks() {
+    let dir = folder("placement-copies");
+    let (original, taller) = (dir.join("original.solidcraft"), dir.join("taller.solidcraft"));
+    for (path, height, name) in [(&original, 10, "Block"), (&taller, 20, "Tall")] {
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [0,0,0], "body_name": name}));
+        run(&mut part, "file.save", json!({"path": path}));
+    }
+    // Two placements of one design; a body pattern and a mirror copy the body at the first.
+    let relink = |which: usize| -> Vec<String> {
+        let mut s = Session::default();
+        let first = run(&mut s, "component.insert_design", json!({"path": original, "reuse": true}));
+        let second = run(&mut s, "component.insert_design", json!({"path": original, "reuse": true, "matrix": [1,0,0,100, 0,1,0,0, 0,0,1,0]}));
+        run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [1,0,0], "count1": 2, "spacing1": 20}));
+        run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "YZ"}));
+        let occurrence = [&first, &second][which]["occurrence"].clone();
+        let reply = run(&mut s, "component.relink", json!({"component": first["component"], "occurrence": occurrence, "path": taller}));
+        reply["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|w| w.contains("worked before this relink"))
+            .map(str::to_string)
+            .collect()
+    };
+
+    // The placement nothing copies: the pattern and the mirror keep working, and no warning.
+    assert_eq!(relink(1), Vec::<String>::new());
+    // The placement both copy: each one that now fails is named, with its error.
+    let warned = relink(0);
+    assert_eq!(warned.len(), 2, "{warned:?}");
+    for name in ["RectangularPattern1", "Mirror1"] {
+        let w = warned.iter().find(|w| w.starts_with(&format!("`{name}`"))).unwrap_or_else(|| panic!("{name}: {warned:?}"));
+        assert!(w.contains("fails now: the placement `Block` was copied from no longer shows it"), "{w}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn relink_of_one_placement_leaves_the_others_on_the_old_source() {
     let dir = folder("placement");
