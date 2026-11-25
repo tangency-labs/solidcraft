@@ -8287,15 +8287,16 @@ fn spot_touch_sides(b: &ModelBody, p: Vec3, n: Vec3) -> (bool, bool) {
                 // Outward normals point along -n: material lies in +n (up).
                 (false, true) => (false, true),
                 // Grazing wall (neither) or sharp ridge/groove (both): probe strictly outside
-                // the boundary tolerance band.
+                // the boundary tolerance band without scaling up with body size (which could
+                // overshoot a thin wall on a large part).
                 (false, false) => {
-                    let step = (b.body.size() * 1e-5).max(tol * 16.0).max(2e-4);
+                    let step = (tol * 16.0).max(2e-4);
                     let along_wall =
                         |d: Vec3| matches!(b.body.classify_point(p + d * step), Ok(kernel::PointClass::Inside | kernel::PointClass::OnBoundary));
                     (along_wall(-n), along_wall(n))
                 }
                 (true, true) => {
-                    let step = (b.body.size() * 1e-5).max(tol * 16.0).max(2e-4);
+                    let step = (tol * 16.0).max(2e-4);
                     let inside = |d: Vec3| matches!(b.body.classify_point(p + d * step), Ok(kernel::PointClass::Inside));
                     (inside(-n), inside(n))
                 }
@@ -12205,7 +12206,10 @@ fn cut_left_bodies_unchanged(before: &[Body], st: &ModelState) -> bool {
     };
     st.bodies.iter().zip(before).all(|(b, old)| {
         old.same(&b.body)
-            || (!b.body.is_mesh() && !old.is_mesh() && !has_a_new_surface(old, &b.body) && (no_face_from_tools(b) || same_volume(old, &b.body)))
+            || (!b.body.is_mesh()
+                && !old.is_mesh()
+                && !has_a_new_surface(old, &b.body)
+                && ((b.body.face_count() >= old.face_count() && no_face_from_tools(b)) || same_volume(old, &b.body)))
     })
 }
 
