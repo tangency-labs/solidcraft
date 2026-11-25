@@ -1131,18 +1131,9 @@ impl Surface {
         singular_dir: SurfParamType,
         tol: f64,
     ) -> Result<DegenParam> {
-        let search = || {
-            Ok(self
-                .degen_param_search(k, uv, dir, dir_from_pole, singular_dir, tol, false)?
-                .0)
-        };
-        // (test-only seam of the WR-57 substitution replay, feature `wr57-replay`)
-        #[cfg(feature = "wr57-replay")]
-        let search = || {
-            let input = super::replay::degen_input(uv, dir, dir_from_pole, singular_dir, tol);
-            super::replay::wrap(k, self, super::replay::Seam::Degen, &input, false, search)
-        };
-        search()
+        Ok(self
+            .degen_param_search(k, uv, dir, dir_from_pole, singular_dir, tol, false)?
+            .0)
     }
 
     /// [`Surface::find_degen_param_for_direction`], and with `with_roots` also the
