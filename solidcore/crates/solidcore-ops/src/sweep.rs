@@ -650,6 +650,142 @@ pub fn join_arcs(run_of: &[Curve], join: Join, tol: f64) -> Result<Curve> {
     })?
 }
 
+/// `profile` with each run of consecutive arcs on one circle made one arc ([`join_arcs`]), so
+/// that the run's wall is one face as a single arc's is: a circle drawn in pieces (split where
+/// another curve ends on it) sweeps the one cylinder it lies on, not a face per piece meeting
+/// the next along a line that is no edge of the shape.
+///
+/// The profile's loops are its runs of curves end to end ([`curves_meet`] to `tol`), each
+/// closed where its last curve meets its first. Two consecutive arcs of a loop join where they
+/// meet end to end and lie on one circle ([`arcs_on_one_circle`]), both proved to `tol`; a
+/// verdict the kernel leaves undecided joins nothing. A run that is its whole loop is the full
+/// circle, its seam at angle 0 of the pieces' frame when they share one, else at the middle of
+/// the longest piece ([`Join`]); any other run is the open arc through its pieces. A run the
+/// kernel's join refuses stays as its pieces. Every other curve is as given, in order.
+///
+/// # Errors
+/// [`Error::Argument`] for a curve list refused; the kernel's error.
+pub fn join_circle_runs(profile: &[Curve], tol: f64) -> Result<Vec<Curve>> {
+    run("join_circle_runs", |k| {
+        let made = parsed!(parse(k, profile));
+        let n = made.curves.len();
+        let meets = |i: usize, j: usize| -> solidcore::Result<bool> {
+            Ok(match (made.curves.get(i), made.curves.get(j)) {
+                (Some(a), Some(b)) => arc::curves_meet(k, a, b, tol)? == Verdict::Yes,
+                _ => false,
+            })
+        };
+        let circle = |i: usize, j: usize| -> solidcore::Result<Option<arc::OnOneCircle>> {
+            match (
+                made.pieces.get(i).and_then(PathPiece::arc),
+                made.pieces.get(j).and_then(PathPiece::arc),
+            ) {
+                (Some(a), Some(b)) => arc::arcs_on_one_circle(a, b, tol).map(Some),
+                _ => Ok(None),
+            }
+        };
+        let joins = |i: usize, j: usize| -> solidcore::Result<bool> {
+            Ok(meets(i, j)? && circle(i, j)?.is_some_and(|c| c.circle == Verdict::Yes))
+        };
+        // The one arc of the pieces `run` (indices of `profile`), as `join` says; `None` where
+        // the kernel's join refuses it.
+        let joined = |run: &[usize], join: Join| -> solidcore::Result<Option<Curve>> {
+            let pieces: Vec<PathPiece> = run
+                .iter()
+                .filter_map(|&i| made.pieces.get(i).cloned())
+                .collect();
+            Ok(match arc::join_arcs(k, &pieces, join, tol) {
+                Ok((d, _)) => Some(Curve::Arc {
+                    center: [d.centre.x, d.centre.y, d.centre.z],
+                    axis: [d.axis.x, d.axis.y, d.axis.z],
+                    reference: [d.reference.x, d.reference.y, d.reference.z],
+                    radius: d.radius,
+                    start: d.start,
+                    end: d.end,
+                }),
+                Err(SolidError::InvalidInput { .. }) => None,
+                Err(e) => return Err(e),
+            })
+        };
+        let given = |run: &[usize]| -> Vec<Curve> {
+            run.iter()
+                .filter_map(|&i| profile.get(i).cloned())
+                .collect()
+        };
+        let mut out = Vec::with_capacity(n);
+        let mut first = 0;
+        while first < n {
+            // the loop from `first`: its curves end to end until one ends at its start
+            let mut last = first;
+            while last + 1 < n && !meets(last, first)? && meets(last, last + 1)? {
+                last += 1;
+            }
+            let len = last - first + 1;
+            let closed = meets(last, first)?;
+            let at = |j: usize| first + j % len;
+            // whether two of the loop's arcs go on on one circle
+            let mut any = false;
+            let mut j = 0;
+            while !any && (j + 1 < len || (closed && len > 1 && j < len)) {
+                any = joins(at(j), at(j + 1))?;
+                j += 1;
+            }
+            if !any {
+                out.extend(given(&(first..=last).collect::<Vec<_>>()));
+                first = last + 1;
+                continue;
+            }
+            // a run starts where its curve does not go on from the one before it round the loop
+            let mut begin = 0;
+            if closed {
+                while begin < len && joins(at(begin + len - 1), at(begin))? {
+                    begin += 1;
+                }
+            }
+            if begin == len {
+                // the whole loop: the full circle, its seam where the pieces' shared frame
+                // starts, else at the middle of the longest
+                let run: Vec<usize> = (first..=last).collect();
+                let mut one_frame = true;
+                for &i in &run {
+                    one_frame =
+                        one_frame && circle(first, i)?.is_some_and(|c| c.frame == Verdict::Yes);
+                }
+                let join = if one_frame {
+                    Join::ClosedAtFrameStart
+                } else {
+                    Join::ClosedAtMiddleOfLongest
+                };
+                match joined(&run, join)? {
+                    Some(c) => out.push(c),
+                    None => out.extend(given(&run)),
+                }
+            } else {
+                let mut kk = 0;
+                while kk < len {
+                    // the arcs from here round the loop that go on on its circle
+                    let mut m = 1;
+                    while kk + m < len && joins(at(begin + kk + m - 1), at(begin + kk + m))? {
+                        m += 1;
+                    }
+                    let run: Vec<usize> = (0..m).map(|x| at(begin + kk + x)).collect();
+                    if m == 1 {
+                        out.extend(given(&run));
+                    } else {
+                        match joined(&run, Join::Open)? {
+                            Some(c) => out.push(c),
+                            None => out.extend(given(&run)),
+                        }
+                    }
+                    kk += m;
+                }
+            }
+            first = last + 1;
+        }
+        Ok(Ok(out))
+    })?
+}
+
 fn arc_definition(c: &Curve) -> Option<ArcDefinition> {
     match c {
         Curve::Arc {
