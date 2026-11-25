@@ -464,7 +464,7 @@ fn finish_editing_stays_reachable_with_plugins_at_every_window_width() {
 
     let mut f = assembly("ribbon-plugins");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     h.app.home.open = false;
     h.app.plugin_menu.loaded = true;
     let mut gears = listed("gears", vec![entry("spur", "edit", json!([]))]);
