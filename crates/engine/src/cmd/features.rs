@@ -1386,8 +1386,9 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
     let (sketch, face_profile, face_body) = if let Some(grouped) = grouped {
         grouped
     } else {
-        match p.get("face").and_then(vec3) {
-            Some(fp) => {
+        match p.get("face") {
+            Some(value) => {
+                let fp = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z]"))?;
                 let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }
@@ -2234,7 +2235,7 @@ struct RowHit {
 }
 
 /// How many bodies a refusal names before "and N more".
-const NAMED_BODIES: usize = 8;
+pub(crate) const NAMED_BODIES: usize = 8;
 
 /// A body's size, its edges' polylines and which of them are seams.
 type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>, Option<solidcraft_geom::Mesh>);
@@ -2245,7 +2246,7 @@ fn polyline_dist(points: &[Vec3], q: Vec3) -> f64 {
 }
 
 /// How far from an edge of a body this big a pick still means it.
-fn edge_reach(size: f64) -> f64 {
+pub(crate) fn edge_reach(size: f64) -> f64 {
     size * 0.05 + 1e-3
 }
 
@@ -2554,7 +2555,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
 }
 
 /// "A", "A and B", "A, B and C", and past `most` names "A, B and 3 more".
-fn and_list(names: &[String], most: usize) -> String {
+pub(crate) fn and_list(names: &[String], most: usize) -> String {
     let mut shown: Vec<String> = names.iter().take(most).cloned().collect();
     if names.len() > most {
         shown.push(format!("{} more", names.len() - most));
@@ -2568,7 +2569,7 @@ fn and_list(names: &[String], most: usize) -> String {
 
 /// The distance from `q` to edge `index` of `body` on its exact curve, and the point there:
 /// samples, then a golden-section search between the best one's neighbours.
-fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
+pub(crate) fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
     const SAMPLES: usize = 32;
     const STEPS: usize = 40;
     let e = body.record().edges.get(index)?;
@@ -3223,6 +3224,18 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// the sources' order.
 fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
     let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
+    copy_keeps_appearance_for(s, id, sources, None, cmd)
+}
+
+/// Copy each source body's body-level appearance and physical material onto its copies created by
+/// feature `id`. Bodies in `preserve` keep any explicit assignment they already have (#21245).
+pub(super) fn copy_keeps_appearance_for(
+    s: &mut Session,
+    id: u64,
+    sources: &[String],
+    preserve: Option<&std::collections::HashSet<String>>,
+    cmd: &str,
+) -> Result<()> {
     let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
     let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
     let Some(each) = each else {
@@ -3230,11 +3243,21 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
     };
     for (source, copies) in sources.iter().zip(copies.chunks(each)) {
         for copy in copies {
+            if preserve.is_some_and(|existing| existing.contains(copy)) {
+                continue;
+            }
             if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+            } else {
+                s.doc_mut().appearances.bodies.remove(copy);
             }
             if let Some(material) = s.doc.materials.get(source).cloned() {
                 s.doc_mut().materials.insert(copy.clone(), material);
+            } else {
+                s.doc_mut().materials.remove(copy);
+            }
+            if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
+                s.doc_mut().collision_shapes.insert(copy.clone(), shape);
             }
         }
     }
@@ -4377,7 +4400,7 @@ pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware:
             if single && (ids.len() != 1 || flip) {
                 return Err(bad(cmd, "a `single` hole takes one sketch point and no `flip`"));
             }
-            Some((solidcraft_doc::SketchPoints { sketch: SketchId(sketch), ids, flip, single }, first, -n))
+            Some((solidcraft_doc::SketchPoints { sketch: SketchId(sketch), ids, flip, single, legacy_face_roles: false }, first, -n))
         }
         _ => None,
     };

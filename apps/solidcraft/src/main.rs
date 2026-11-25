@@ -1,6 +1,6 @@
 //! SolidCraft desktop app.
 //!
-//! Usage: `solidcraft [--control <port>] [--sample] [--crash-log] [--safe-mode] [design.sc | part.step]`
+//! Usage: `solidcraft [--control <port>] [--sample] [--crash-log] [--safe-mode] [--read-only] [design.sc | part.step]`
 //!
 //! `--safe-mode` (or `SOLIDCRAFT_SAFE_MODE=1`) starts with default settings, no recovery offer and
 //! the software renderer; see `startup` and docs/book/src/guide/troubleshooting.md.
@@ -40,6 +40,8 @@ mod native_crash_macos;
 mod native_frame;
 #[cfg(any(target_os = "macos", test))]
 mod native_menu;
+#[cfg(target_os = "macos")]
+mod native_titlebar_macos;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
@@ -300,8 +302,12 @@ impl eframe::App for App {
         }
         // Files other launches handed over (single_instance.rs).
         if !self.solve.file_picker_busy() {
-            for f in single_instance::take() {
-                self.solve.open_chosen_file(&f);
+            for (f, read_only) in single_instance::take() {
+                if read_only {
+                    self.solve.open_chosen_file_read_only(&f);
+                } else {
+                    self.solve.open_chosen_file(&f);
+                }
             }
         }
         #[cfg(target_os = "macos")]
@@ -1627,12 +1633,16 @@ fn main() -> eframe::Result {
     let mut max_file_size = None;
     // `--new-instance`: open this launch as its own app even when SolidCraft already runs.
     let mut new_instance = false;
+    // `--read-only`: the files named open read-only (Save asks for a new file), here or in the
+    // window they are handed to.
+    let mut read_only = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
             "--new-instance" => new_instance = true,
+            "--read-only" => read_only = true,
             "--theme-file" => theme_file = args.next(),
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
@@ -1657,7 +1667,7 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--read-only] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }
@@ -1675,7 +1685,10 @@ fn main() -> eframe::Result {
         && let Some(endpoint) = settings.as_deref().and_then(single_instance::Endpoint::in_settings)
     {
         let absolute: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
-        if single_instance::forward(&endpoint, &absolute) {
+        // A window from before `--read-only` refuses read-only files, and this launch opens them itself.
+        let handed =
+            if read_only { single_instance::forward_read_only(&endpoint, &absolute) } else { single_instance::forward(&endpoint, &absolute) };
+        if handed {
             return Ok(());
         }
     }
@@ -1946,12 +1959,20 @@ fn main() -> eframe::Result {
                 if !native_frame::set_class_icon(cc) {
                     solidcraft_engine::note!("SolidCraft window: no class icon; the taskbar may show a generic one");
                 }
+                // Every window that draws SolidCraft's title bar hands it to Windows: the main
+                // window here, a pop-out when it first draws its bar (#13996).
+                native_frame::register(&cc.egui_ctx);
                 // The OS hit test offers the resize border, at the window's DPI, from the first
                 // message (#1381).
                 app.native_resize_border = custom_titlebar && native_frame::install(cc);
                 if custom_titlebar && !app.native_resize_border {
                     solidcraft_engine::note!("SolidCraft window: no native resize border; egui edge zones instead");
                 }
+            }
+            // macOS: AppKit must not move the window from a press on a tab or a bar button.
+            #[cfg(target_os = "macos")]
+            if !native_titlebar_macos::install(cc) {
+                eprintln!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.cpu_meshing = safe_mode || safe;
@@ -2050,6 +2071,10 @@ fn main() -> eframe::Result {
             if !new_instance && !sample && control_port.is_none() {
                 single_instance::start(instance_dir.as_deref(), &cc.egui_ctx);
             }
+            // `--read-only` covers the files named on the command line: the first this many of `files`.
+            // Finder's come after them, and the designs reopened from the last session only when none was
+            // named, so neither opens read-only.
+            let read_only_count = if read_only { files.len() } else { 0 };
             // A launch from Finder: its files arrived before the window.
             #[cfg(target_os = "macos")]
             let files = {
@@ -2120,8 +2145,12 @@ fn main() -> eframe::Result {
                     // Lock files next to open designs: a design open on another computer says so (#5467),
                     // the files given at launch included.
                     solidcraft_ui_egui::open_elsewhere::start(app);
-                    for f in &files {
-                        app.open_chosen_file(f);
+                    for (i, f) in files.iter().enumerate() {
+                        if i < read_only_count {
+                            app.open_chosen_file_read_only(f);
+                        } else {
+                            app.open_chosen_file(f);
+                        }
                     }
                     // No file and no sample: the empty design takes Units of new designs (#1205).
                     // An opened file and the sample part keep the units they were saved or built with.
@@ -2312,6 +2341,15 @@ fn startup_step(step: &'static str, detail: &str) {
     solidcraft_engine::crash::startup_step(step);
 }
 
+/// The window's swapchain: vsync, two frames in flight (wgpu's default, as every release up to
+/// v0.40.0-rc.3 had). With one frame in flight (`SurfaceConfig::LOW_LATENCY`, #13993) the
+/// swapchain has two buffers on D3D12, Vulkan and Metal, so a frame can't start until the one
+/// before it is on screen: the CPU's and the GPU's work then have to fit in one refresh together,
+/// and a frame that takes a little longer than 16.7 ms halves the rate to 30 frames a second
+/// (#14831, #21322; macOS native fullscreen, where the display holds a drawable until the next
+/// vblank). Two in flight let the CPU build the next frame while the GPU draws this one.
+const WINDOW_SURFACE: eframe::egui_wgpu::SurfaceConfig = eframe::egui_wgpu::SurfaceConfig::HIGH_THROUGHPUT;
+
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
 /// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
 /// in use is started); `preference` is `graphics.json`'s `backend`. `skipped`: the APIs that
@@ -2323,10 +2361,7 @@ fn wgpu_options(
     skipped: startup::SkippedBackends,
     guard: Option<&startup::BackendGuard>,
 ) -> eframe::egui_wgpu::WgpuConfiguration {
-    // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
-    // `WgpuConfiguration::default()` is HIGH_THROUGHPUT (two frames queued), which added a frame
-    // of input-to-display latency to every pan, orbit and drag.
-    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(WINDOW_SURFACE);
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         let env_set = std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| !v.trim().is_empty());
         // A retry applies only to this launch. WGPU_BACKEND always has priority.
@@ -2370,11 +2405,11 @@ fn wgpu_options(
 /// choice, as v0.1.0 had, with no API order, no retries, no adapter preference and no float depth.
 /// After a failure, the API the failed launch used is left out (`failed`, [`startup::safe_backends`]),
 /// and so is every API that crashed while starting (`crashed`), the software renderer's included.
-/// Kept: one frame in flight (eframe's own default), the D3D12 shader compiler that never loads a
+/// Kept: two frames in flight ([`WINDOW_SURFACE`]), the D3D12 shader compiler that never loads a
 /// `dxcompiler.dll` from PATH (#6756), and the Intel Mac validation fix (#3080); with `cpu`, the
 /// software adapter.
 fn safe_wgpu_options(cpu: bool, failed: Option<&str>, crashed: eframe::wgpu::Backends) -> eframe::egui_wgpu::WgpuConfiguration {
-    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(WINDOW_SURFACE);
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
         let indirect = std::env::var(startup::INDIRECT_VALIDATION_ENV).ok();
@@ -3163,6 +3198,20 @@ mod msaa_tests {
                 assert!(!guarded.instance_descriptor.backends.is_empty());
             }
         }
+    }
+
+    /// The window keeps two frames in flight with vsync, in safe graphics mode too: with one, the
+    /// swapchain has two buffers and a frame just over one refresh halves the rate (#21322).
+    #[test]
+    fn the_window_keeps_two_frames_in_flight() {
+        for options in [
+            super::safe_wgpu_options(false, None, eframe::wgpu::Backends::empty()),
+            super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty()),
+        ] {
+            assert_eq!(options.surface.desired_maximum_frame_latency, Some(2));
+            assert_eq!(options.surface.present_mode, eframe::wgpu::PresentMode::AutoVsync);
+        }
+        assert_eq!(super::WINDOW_SURFACE.desired_maximum_frame_latency, Some(2));
     }
 
     /// Safe mode uses default UI settings but edits the real graphics.json for the next start.

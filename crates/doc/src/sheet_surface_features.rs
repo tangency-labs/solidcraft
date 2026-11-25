@@ -1880,13 +1880,15 @@ impl SurfaceSheet {
         let moved_cuts = beyond(self.sheet.cuts.iter().map(|c| starts(c.panel == i, &c.region.outer)).collect(), None)?;
         let recesses = beyond(self.recesses.iter().map(|r| starts(r.panel == i, &r.region.outer)).collect(), Some("a pocket"))?;
         let loose = beyond(self.loose.iter().map(|l| starts(l.panel == i, &l.region.outer)).collect(), Some("a loose piece of the sheet"))?;
-        Ok(Ok(FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose }))
+        let t = self.sheet.thickness;
+        let beads = beyond(self.beads.iter().map(|b| b.footprint_loop(t).and_then(|l| starts(b.panel == i, &l))).collect(), Some("a bead"))?;
+        Ok(Ok(FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose, beads }))
     }
 
     /// Makes the fold `plan` of panel `i` (see [`SurfaceSheet::add_fold`]). Returns the fold's
     /// first joint.
     fn apply_fold(&mut self, i: usize, plan: FoldPlan) -> usize {
-        let FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose } = plan;
+        let FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose, beads } = plan;
         for (k, on_a, p) in anchors {
             if let Some(joint) = self.sheet.joints.get_mut(k) {
                 if on_a {
@@ -1904,6 +1906,11 @@ impl SurfaceSheet {
         for (k, p) in moved_cuts {
             if let Some(c) = self.sheet.cuts.get_mut(k) {
                 c.panel = p;
+            }
+        }
+        for (k, p) in beads {
+            if let Some(b) = self.beads.get_mut(k) {
+                b.panel = p;
             }
         }
         for (k, p) in recesses {
@@ -2067,6 +2074,9 @@ impl SurfaceSheet {
         }
         for l in &mut self.loose {
             l.region = r(&l.region);
+        }
+        for b in &mut self.beads {
+            (b.a, b.b) = (f(b.a), f(b.b));
         }
         // The flat lies in the sheet's flat frame, which `copied` turns with `place`: it turns
         // over with the frame.
@@ -2966,11 +2976,12 @@ struct FoldPlan {
     /// The rips the zone parts: the joint, its stretch that stays (in its place) and its stretch
     /// that folds (a joint of its own).
     rips: Vec<(usize, Joint, Joint)>,
-    /// The sheet's cuts, recesses and loose pieces that go with a piece that folds: each one's
-    /// index, and the piece's panel.
+    /// The sheet's cuts, recesses, loose pieces and beads that go with a piece that folds: each
+    /// one's index, and the piece's panel.
     moved_cuts: Vec<(usize, usize)>,
     recesses: Vec<(usize, usize)>,
     loose: Vec<(usize, usize)>,
+    beads: Vec<(usize, usize)>,
 }
 
 /// A piece of a panel that a fold folds: its panel to be, its material, its bend, where its

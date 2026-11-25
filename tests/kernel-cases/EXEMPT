@@ -24,7 +24,9 @@ assembly.bom.item.set             the bill of materials: its tests in crates/eng
 assembly.bom.renumber             the bill of materials: its tests in crates/engine/src/cmd/bom_tests.rs
 assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
 assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
+body.collision                    URDF collision shape: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 body.print_faces                  reports which bodies have a print face; crates/engine/src/cmd/print_face.rs tests
+body.remove_history               timeline bookkeeping: the body's B-rep kept as a base feature (crates/engine/src/cmd/edit_tests.rs)
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
@@ -56,6 +58,7 @@ component.list                    a listing
 component.metadata                component metadata
 component.metadata.set            component metadata
 component.paste_from_design       pastes the app's clipboard from another window, which no command fills (engine tests place it)
+component.physical_override       URDF mass and inertia: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 component.properties              component properties
 component.relink                  component links
 component.rename                  a component name
@@ -77,6 +80,7 @@ diagnostics.profile               timing: where a command's time goes
 diagnostics.report_issue          problem reports: tested in issue_report.rs
 diagnostics.report_issue_status   problem reports: tested in issue_report.rs
 diagnostics.validation            a setting: when the body check runs
+doc.info                          the open design's file: crates/engine/src/schema/inspect_tests.rs, plugin/tests.rs
 doc.open                          opening and recovering documents
 doc.recover                       opening and recovering documents
 doc.recovery_discard              opening and recovering documents
@@ -178,6 +182,7 @@ explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
 file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.export_sdf                  writes a robot model folder from the meshes: tested in crates/io/src/sdf.rs and crates/engine/src/tests.rs
+file.export_urdf_options          the URDF export with its options dialog first: tested in crates/engine/src/cmd/urdf_tests.rs
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
@@ -185,6 +190,7 @@ file.import_cache_clear           clears a cache of imported files
 file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
 file.move                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.open_in_easyprint            hands the file to another program
+file.revert_saved                 reads the open design again from its file: tested in crates/engine/src/cmd/file.rs tests
 file.save                         saving the design
 file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
@@ -200,6 +206,7 @@ frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
 frame.remove_member               removes a tube from a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
 frame.rotate_member               turns a member about its own axis; tested in crates/engine/src/cmd/frame_tests.rs
+frame.trim                        frame member ends; tested in crates/engine/src/cmd/frame_tests.rs
 inspect.accessibility             display analysis: shading
 inspect.analysis                  display analysis: which one is on
 inspect.classify_points           exact read query: crates/engine/src/schema/inspect_tests.rs classification, normals, trim, tolerance and hostile inputs
@@ -207,9 +214,12 @@ inspect.colored_components        display: component colours
 inspect.compare_picture           display analysis: a picture compared with the outline
 inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
+inspect.hole_stacks               read-only query: tested in crates/engine/src/cmd/hole_stacks_tests.rs
 inspect.parameter_variants        inspect: independent rebuilds and regressions in crates/engine/src/cmd/parameter_sweep_tests.rs
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
+joint.dynamics                    URDF joint dynamics: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
+joint.origin_frame                URDF frame flag on a joint origin: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
 layout.delete                     application panel layout; no geometry (engine/UI/MCP tests)
 layout.get                        application panel layout; no geometry (engine/UI/MCP tests)
@@ -377,6 +387,7 @@ settings.profile.import           settings profiles: preferences saved, applied 
 settings.profile.list             settings profiles: preferences saved, applied and shared
 settings.profile.rename           settings profiles: preferences saved, applied and shared
 settings.profile.save             settings profiles: preferences saved, applied and shared
+sheet.bead                        formed beads pressed into a panel: crates/engine/src/cmd/sheet_surface_bead_tests.rs and solidcore/crates/solidcore/src/develop/bead_tests.rs
 sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
 sheet.hardware                    a hole in a sheet's flat, no kernel operation of its own: crates/engine/src/cmd/sheet_surface_cut_tests.rs and crates/ui-egui/src/dialogs_sheet_tests.rs
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
@@ -475,6 +486,7 @@ sketch.spline.insert_point        2D sketch only (the sketch solver and engine t
 sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.reset_handles       2D sketch only (crates/engine/src/cmd/sketch_create.rs: blend_tests::reset_tangent_handles_gives_back_the_spline_through_its_fit_points); no kernel operation
 sketch.spline.reverse             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline3d.control_point     a 3D sketch curve: its tests in crates/engine/src/cmd/sketch_3d_frame_tests.rs
 sketch.toggle_diameter            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.toggle_driven              2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.transform                  2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -522,6 +534,10 @@ timeline.inspect                  a listing of the timeline
 timeline.play                     plays the history back in the view: no new geometry
 timeline.rename                   a feature name
 timeline.rename_group             a group name
+timeline.roll_to_end              a marker move; tested in crates/engine/src/cmd/edit_tests.rs
+timeline.roll_to_start            a marker move; tested in crates/engine/src/cmd/edit_tests.rs
+timeline.step_back                a marker move; tested in crates/engine/src/cmd/edit_tests.rs
+timeline.step_forward             a marker move; tested in crates/engine/src/cmd/edit_tests.rs
 ui.appBarCustomize                the view: opens the app bar tray (validation only when called programmatically); tested in crates/engine/src/cmd/edit_tests.rs
 ui.appBarReset                    the view: restores the app bar's default layout; tested in crates/engine/src/cmd/edit_tests.rs
 ui.assistant                      the view: camera, layout, display

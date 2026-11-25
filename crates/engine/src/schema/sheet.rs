@@ -611,6 +611,60 @@ pub struct TabParams {
     pub common: FeatureCommon,
 }
 
+/// Press formed beads (stiffening ribs) into a sheet along straight sketch lines on a face of one
+/// of its planar panels: each keeps the sheet's thickness, is in the folded solid, and is listed
+/// in the flat pattern and drawn in its DXF (the flat blank stays flat).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BeadParams {
+    /// The sketch holding the centrelines, by id or name: on a face of a planar panel of the
+    /// sheet. Default: the active sketch, else the last one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// The centrelines: straight sketch lines (curve ids), 1 to 200; each makes one bead from
+    /// end to end (its ends are where the end ramps meet the face).
+    pub curves: StringList,
+    /// The cross-section: trapezoid (the only one so far). Default: trapezoid.
+    #[serde(default)]
+    pub shape: Option<String>,
+    /// From the face the bead stands out of to its crown on that side, more than 0.
+    pub depth: LengthExpr,
+    /// Across, between the flanks' virtual sharps on the face it stands out of, more than 0.
+    pub width: LengthExpr,
+    /// The flanks' angle to the face, between 0 and 90 deg. Give it or `crown_width`, not both.
+    /// Default: 45 deg.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Across the crown, between the flanks' virtual sharps there: sets the angle instead.
+    #[serde(default)]
+    pub crown_width: Option<LengthExpr>,
+    /// The inner radius of the bends at the base. Default: the rule's bend radius.
+    #[serde(default)]
+    pub base_radius: Option<LengthExpr>,
+    /// The inner radius of the bends at the crown. Default: the rule's bend radius.
+    #[serde(default)]
+    pub crown_radius: Option<LengthExpr>,
+    /// Along the centreline, how long each end's ramp is between its virtual sharps. Default: 3 ×
+    /// the depth.
+    #[serde(default)]
+    pub end_length: Option<LengthExpr>,
+    /// How near the bead may come to edges, cut-outs, bends and other beads before the feature
+    /// warns. Default: 3 × the thickness.
+    #[serde(default)]
+    pub margin: Option<LengthExpr>,
+    /// The bead stands out of the other face of the sheet. Default: false (out of the face the
+    /// sketch is on).
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The sheet metal body. Default: the one sheet with a planar panel the first centreline
+    /// lies on.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
 /// Add hems: the sheet folded back on itself along edges. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -1539,6 +1593,41 @@ pub struct FlatBore {
     pub length: f64,
 }
 
+/// Which side a formed bead stands out of: up out of the sheet's surface, the side the flat is
+/// drawn from, or down out of the other.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlatBeadDirection {
+    Up,
+    Down,
+}
+
+/// A formed bead (`sheet.bead`): pressed after cutting, not in the outline (the blank is flat).
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatBead {
+    /// The `sheet.bead` feature's id, and the sketch curve its centreline is.
+    pub feature: u64,
+    pub curve: String,
+    pub direction: FlatBeadDirection,
+    /// Its centreline's ends, where the end ramps meet the face, and its footprint's four corners.
+    pub start: FlatPoint,
+    pub end: FlatPoint,
+    pub footprint: [FlatPoint; 4],
+    /// Its depth and width on the side it stands out of, in mm, and its flanks' angle to the
+    /// face, in degrees.
+    pub depth: f64,
+    pub width: f64,
+    pub angle_deg: f64,
+    /// Its crown's width and length between the virtual sharps, in mm.
+    pub crown_width: f64,
+    pub crown_length: f64,
+    /// The inner radii of its bends at the base and at the crown, and each end ramp's length, in
+    /// mm.
+    pub base_radius: f64,
+    pub crown_radius: f64,
+    pub end_length: f64,
+}
+
 /// What `sheet.flat_pattern` returns: the sheet's flat pattern in flat coordinates (mm, in the
 /// sheet's flat: the plane its surface is laid out in, where the feature that made the sheet put
 /// it, its sketch's plane or the converted face's). The `json` form of `sheet.export_bend_table`
@@ -1575,6 +1664,9 @@ pub struct FlatPatternResult {
     /// Left out when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bores: Vec<FlatBore>,
+    /// Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beads: Vec<FlatBead>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

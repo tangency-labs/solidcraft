@@ -21,7 +21,7 @@ use crate::{DocError, Document, Result};
 #[path = "sheet_face_names.rs"]
 mod face_names;
 pub use crate::sheet_surface_convert::bend_edge_names;
-pub(crate) use face_names::{FaceNamer, FaceRole, carried, ranked};
+pub(crate) use face_names::{FaceNamer, FaceRole, carried, carried_from, ranked};
 
 /// The most work one sheet's flat may take (see [`FlatWork`]).
 const MAX_FLAT_WORK: usize = 500_000_000;
@@ -459,13 +459,22 @@ pub const MAX_PATH_LINES: usize = 64;
 
 /// A straight round bore of panel `panel`, in that panel's chart (see `SurfaceSheet::bores`): a
 /// cylinder from `base` along the unit `axis` for `height`, cut only from that panel's material.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetBore {
     pub panel: usize,
     pub base: Vec3,
     pub axis: Vec3,
     pub radius: f64,
     pub height: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source: Option<BoreSource>,
+}
+
+/// What drilled a bore and its role (e.g. `point:p2:bore`), when drilled at a sketch point.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct BoreSource {
+    pub feature: u64,
+    pub role: String,
 }
 
 /// A perforation field from a `sheet.perforate` feature (#732).
