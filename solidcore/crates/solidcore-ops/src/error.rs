@@ -285,6 +285,17 @@ pub enum Error {
     },
     /// The application cancelled the call.
     Cancelled,
+    /// The call spent the fuel it was given ([`crate::fuel`]): a deterministic budget of
+    /// work units, never of time. It gave no result; run again with more fuel
+    /// ([`crate::fuel::Fuel::Limit`], or [`crate::fuel::Fuel::Unlimited`]) to try harder.
+    OutOfFuel {
+        /// The ops call that ran out (its session call name).
+        op: &'static str,
+        /// The work units it spent.
+        spent: u64,
+        /// The work units it was given.
+        limit: u64,
+    },
     /// A body built from a record whose blend face's net its definition does not certify (the
     /// kernel's `DefinitionNotCertified`): the face, by its index in the body's face order, and
     /// the bound ε its definition states.
@@ -328,8 +339,9 @@ pub enum Error {
         /// The index of the edge it runs on into.
         continues_into: usize,
     },
-    /// A round too small to change the part (the kernel's `BlendRefusal::RoundTooSmall`): it
-    /// lies within the edge's tolerance of the edge.
+    /// A round too small to change the part or to build (the kernel's
+    /// `BlendRefusal::RoundTooSmall`): it lies within the edge's tolerance of the edge, or is
+    /// narrower across its faces than eight times the body's tolerance.
     RoundTooSmall {
         /// The edge's index.
         edge: usize,
@@ -536,6 +548,7 @@ impl Error {
             Error::Invariant { .. } => "Invariant",
             Error::ContactUndecided { .. } => "ContactUndecided",
             Error::Cancelled => "Cancelled",
+            Error::OutOfFuel { .. } => "OutOfFuel",
             Error::DefinitionNotCertified { .. } => "DefinitionNotCertified",
             Error::Reentered => "Reentered",
             Error::NotOneFoot { .. } => "NotOneFoot",
@@ -892,6 +905,10 @@ pub enum FitKind {
     Scale,
     /// A chord round's width.
     Chord,
+    /// A bead's leg: from its joint to its toe ([`crate::bead`]).
+    Leg,
+    /// A bead's sagitta: how far the middle of its arc stands off the chord ([`crate::bead`]).
+    Sagitta,
 }
 
 impl RoomReason {
@@ -955,6 +972,8 @@ impl FitKind {
             FitKind::Distance => "distance",
             FitKind::Scale => "scale",
             FitKind::Chord => "chord width",
+            FitKind::Leg => "leg",
+            FitKind::Sagitta => "sagitta",
         }
     }
 }
@@ -1106,6 +1125,10 @@ impl std::fmt::Display for Error {
                 "contact with body {other} is undecided: the boundary distance is in [{lower}, {upper}]"
             ),
             Error::Cancelled => write!(f, "cancelled"),
+            Error::OutOfFuel { op, spent, limit } => write!(
+                f,
+                "{op}: gave up: spent {spent} of the {limit} work units it was given"
+            ),
             Error::Reentered => write!(
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"
@@ -1209,6 +1232,15 @@ fn typed(e: SolidError) -> Error {
         SolidError::Unsupported { reason, .. } => Error::Unsupported(reason),
         SolidError::Unported { upstream, .. } => Error::Unported(upstream),
         SolidError::Cancelled { .. } => Error::Cancelled,
+        SolidError::OutOfFuel {
+            operation,
+            spent,
+            limit,
+        } => Error::OutOfFuel {
+            op: operation,
+            spent,
+            limit,
+        },
         e @ SolidError::PortInvariant { operation, reason } => Error::Invariant {
             class: e.kind(),
             defect: true,
