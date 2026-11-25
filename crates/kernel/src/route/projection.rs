@@ -28,21 +28,43 @@ pub fn project_points(source: &Plane, target: &Plane, points: &[Vec2]) -> Vec<Ve
 
 /// A control spline of `source` (its `degree`, and its knots and weights where `metadata`
 /// has them) projected into `target`; `collapse` when the planes are seen edge on.
-pub fn project_control(source: &Plane, target: &Plane, points: &[Vec2], degree: usize, metadata: Option<(&[f64], &[f64])>, collapse: bool, max_coord: f64) -> Result<Vec<Projection>, ProjectionRefused> {
+pub fn project_control(
+    source: &Plane,
+    target: &Plane,
+    points: &[Vec2],
+    degree: usize,
+    metadata: Option<(&[f64], &[f64])>,
+    collapse: bool,
+    max_coord: f64,
+) -> Result<Vec<Projection>, ProjectionRefused> {
     match which(OpKind::Projection) {
-        Which::Solidcore => Solidcore.project_control(source, target, points, degree, metadata, &[f64])>, collapse, max_coord),
+        Which::Solidcore => Solidcore.project_control(source, target, points, degree, metadata, collapse, max_coord),
     }
 }
 
 /// Cubic Bézier pieces of `source` projected into `target`.
-pub fn project_beziers(source: &Plane, target: &Plane, pieces: &[[Vec2; 4]], collapse: bool, max_coord: f64) -> Result<Vec<Projection>, ProjectionRefused> {
+pub fn project_beziers(
+    source: &Plane,
+    target: &Plane,
+    pieces: &[[Vec2; 4]],
+    collapse: bool,
+    max_coord: f64,
+) -> Result<Vec<Projection>, ProjectionRefused> {
     match which(OpKind::Projection) {
         Which::Solidcore => Solidcore.project_beziers(source, target, pieces, collapse, max_coord),
     }
 }
 
 /// A fit spline through `points` of `source` projected into `target`, at most `limit` points.
-pub fn project_fit(source: &Plane, target: &Plane, points: &[Vec2], periodic: bool, limit: usize, collapse: bool, max_coord: f64) -> Result<Vec<Projection>, ProjectionRefused> {
+pub fn project_fit(
+    source: &Plane,
+    target: &Plane,
+    points: &[Vec2],
+    periodic: bool,
+    limit: usize,
+    collapse: bool,
+    max_coord: f64,
+) -> Result<Vec<Projection>, ProjectionRefused> {
     match which(OpKind::Projection) {
         Which::Solidcore => Solidcore.project_fit(source, target, points, periodic, limit, collapse, max_coord),
     }
@@ -65,7 +87,15 @@ pub fn classify_pieces(target: &Plane, pieces: &[PlanarPiece], limit: usize, max
 
 /// The part `interval` of `curve` (ends `ends`, `forward` or reversed) read exactly in `plane`
 /// to `tol`, spending at most `work` steps; `None` where it isn't read exactly.
-pub fn project_curve(curve: &Curve, interval: [f64; 2], forward: bool, ends: [Vec3; 2], plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<PlanarPiece>> {
+pub fn project_curve(
+    curve: &Curve,
+    interval: [f64; 2],
+    forward: bool,
+    ends: [Vec3; 2],
+    plane: &Plane,
+    tol: f64,
+    work: &mut usize,
+) -> Option<Vec<PlanarPiece>> {
     match which(OpKind::Projection) {
         Which::Solidcore => Solidcore.project_curve(curve, interval, forward, ends, plane, tol, work),
     }
@@ -73,7 +103,15 @@ pub fn project_curve(curve: &Curve, interval: [f64; 2], forward: bool, ends: [Ve
 
 /// The part `interval` of `curve` lying in `plane` as sketch geometry; `None` where it isn't
 /// read exactly.
-pub fn projected_part(curve: &Curve, interval: [f64; 2], ends: [Vec3; 2], plane: &Plane, tol: f64, limit: usize, max_coord: f64) -> Result<Option<Vec<Projection>>, ProjectionRefused> {
+pub fn projected_part(
+    curve: &Curve,
+    interval: [f64; 2],
+    ends: [Vec3; 2],
+    plane: &Plane,
+    tol: f64,
+    limit: usize,
+    max_coord: f64,
+) -> Result<Option<Vec<Projection>>, ProjectionRefused> {
     match which(OpKind::Projection) {
         Which::Solidcore => Solidcore.projected_part(curve, interval, ends, plane, tol, limit, max_coord),
     }
@@ -81,7 +119,14 @@ pub fn projected_part(curve: &Curve, interval: [f64; 2], ends: [Vec3; 2], plane:
 
 /// Edge `index` of `body` projected into `plane` as sketch geometry; `None` where it isn't
 /// projected exactly.
-pub fn projected_edge(body: &Brep, plane: &Plane, index: usize, tol: f64, limit: usize, max_coord: f64) -> Result<Option<Vec<Projection>>, ProjectionRefused> {
+pub fn projected_edge(
+    body: &Brep,
+    plane: &Plane,
+    index: usize,
+    tol: f64,
+    limit: usize,
+    max_coord: f64,
+) -> Result<Option<Vec<Projection>>, ProjectionRefused> {
     match which(OpKind::Projection) {
         Which::Solidcore => Solidcore.projected_edge(body, plane, index, tol, limit, max_coord),
     }
