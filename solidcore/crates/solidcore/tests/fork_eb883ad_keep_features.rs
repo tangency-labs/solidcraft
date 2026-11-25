@@ -737,14 +737,13 @@ fn crease_pieces_are_classified_on_one_snapshot_per_copy() {
 }
 
 /// One fillet r 1 on two chains that share no face (#22144): the block's top front edge, clear
-/// of a boss r 2 at (20, 15) on the top, and the bottom rim of a blind hole r 1.5 under that
-/// boss. The boss's walls continued down from the top pass through the
-/// hole's round (it spans r 1.5 to 2.5 about the hole's axis), which rolls on no face the boss
-/// stands on: the boss is in neither band, and the one fillet is the two fillets one after the
-/// other.
-fn boss_over_a_rounded_hole(k: &mut Kernel) -> Brep {
+/// of a boss of base r 2 at (20, 15) on the top, and the bottom rim of a blind hole r 1.5 under
+/// that boss. The boss's walls continued down from its footprint pass through the hole's round
+/// (it spans r 1.5 to 2.5 about the hole's axis), which rolls on no face the boss stands on:
+/// the boss is in neither band, and the one fillet is the two fillets one after the other.
+fn boss_over_a_rounded_hole(k: &mut Kernel, boss: fn(&mut Kernel) -> Result<Brep>) -> Brep {
     let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
-    let boss = create_cylinder(k, Point3::new(20.0, 15.0, 20.0), 2.0, 5.0).unwrap();
+    let boss = boss(k).unwrap();
     let block = boolean_union(k, block, boss).unwrap();
     let hole = create_cylinder(k, Point3::new(20.0, 15.0, -1.0), 1.5, 7.0).unwrap();
     boolean_difference(k, block, hole).unwrap()
@@ -770,12 +769,16 @@ fn sound_counts(k: &mut Kernel, b: &mut Brep) -> ((usize, usize, usize), Vec<&'s
     (counts, kinds, volume_of(k, b))
 }
 
-#[test]
-fn a_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
+/// [`boss_over_a_rounded_hole`] with `boss`, of volume `boss_volume`: one fillet on both chains
+/// against the two fillets one after the other.
+fn assert_two_chains_as_one_after_the_other(
+    boss: fn(&mut Kernel) -> Result<Brep>,
+    boss_volume: f64,
+) {
     let (front, rim) = (Point3::new(20.0, 0.0, 20.0), Point3::new(20.0, 16.5, 0.0));
     // the two rounds one after the other
     let mut k = Kernel::default();
-    let mut apart = boss_over_a_rounded_hole(&mut k);
+    let mut apart = boss_over_a_rounded_hole(&mut k, boss);
     let e = pick(&k, &apart, front);
     fillet_edges(&mut k, &mut apart, &[e], 1.0, 1, 1, 1.0).unwrap();
     let e = pick(&k, &apart, rim);
@@ -788,14 +791,14 @@ fn a_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
     let (a, r) = (1.5, 1.0);
     let centroid = a + r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
     let closed =
-        24000.0 + 20.0 * PI - 13.5 * PI - 40.0 * spandrel(r) - 2.0 * PI * centroid * spandrel(r);
+        24000.0 + boss_volume - 13.5 * PI - 40.0 * spandrel(r) - 2.0 * PI * centroid * spandrel(r);
     assert!(
         (want - closed).abs() <= 1e-9 * closed,
         "one after the other {want:.12}, closed form {closed:.12}"
     );
     // the two rounds in one fillet
     let mut k = Kernel::default();
-    let mut b = boss_over_a_rounded_hole(&mut k);
+    let mut b = boss_over_a_rounded_hole(&mut k, boss);
     let edges = [pick(&k, &b, front), pick(&k, &b, rim)];
     fillet_edges(&mut k, &mut b, &edges, r, 1, 1, 1.0)
         .expect("two chains clear of each other and of the boss");
@@ -806,4 +809,23 @@ fn a_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
     assert_eq!(counts, want_counts);
     assert_eq!(kinds, want_kinds);
     assert!((v - want).abs() <= 1e-9 * want, "volume {v}, want {want}");
+}
+
+#[test]
+fn a_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
+    assert_two_chains_as_one_after_the_other(
+        |k| create_cylinder(k, Point3::new(20.0, 15.0, 20.0), 2.0, 5.0),
+        20.0 * PI,
+    );
+}
+
+/// The same with a boss leaning 45 degrees, past the angular tolerance (a frustum r 2 to 1, 1
+/// tall, as `lean_45`): its footprint is swept down all the same, to find whether a band takes
+/// the ground under it, and is refused where one does; the hole's round is not one.
+#[test]
+fn a_leaning_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
+    assert_two_chains_as_one_after_the_other(
+        |k| create_cone(k, Point3::new(20.0, 15.0, 20.0), 2.0, 1.0, 1.0),
+        frustum(2.0, 1.0, 1.0),
+    );
 }
