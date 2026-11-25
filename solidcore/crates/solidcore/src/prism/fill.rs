@@ -93,7 +93,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Vec2};
 use crate::prism::arc_conversion::{bulge_arc, Vertex};
 use crate::prism::profile::{
-    check_regions, loop_crosses, near_miss, on_arc, on_seg, smallest_arc_sweep, Loop2,
+    check_regions, gamma, loop_crosses, near_miss, on_arc, on_seg, smallest_arc_sweep, Loop2,
     ProfileRefusal, Region2, Seg2, MAX_ARC_RADIUS, MAX_SEGMENTS,
 };
 
@@ -529,7 +529,29 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
         outer: Loop2 { segs }.reversed(),
         holes: Vec::new(),
     };
-    if let Err(refusal) = check_regions(std::iter::once(&region), eps.max(1e-12), zone) {
+    // the loop's joins: within the section's allowance, or within the rounding of an arc's ends
+    // where that is larger (a nearly straight arc of a large radius): an end read from its
+    // centre, radius and angle lies within gamma(4) (|c| + r) + gamma(1) r |angle| of the exact
+    // one in each coordinate, and an arc built through two points has its angles rounded too;
+    // gamma(8) of the reach below covers both of a join's ends
+    let reach = region
+        .outer
+        .segs
+        .iter()
+        .filter_map(|s| match *s {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => Some(
+                center.x.abs().max(center.y.abs()) + radius * (1.0 + start.abs() + sweep.abs()),
+            ),
+            _ => None,
+        })
+        .fold(0.0_f64, f64::max);
+    let closure = eps.max(1e-12).max(gamma(8) * reach);
+    if let Err(refusal) = check_regions(std::iter::once(&region), closure, zone) {
         return Err(SolidError::invalid_input(
             OP,
             match refusal {
