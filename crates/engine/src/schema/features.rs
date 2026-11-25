@@ -94,7 +94,8 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub exact_regions: Option<bool>,
     /// A point on a planar body face to extrude instead of a sketch profile.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
     pub face: Option<Point3>,
     /// Several coplanar faces of one body to extrude together, by a point on each. Not with
     /// `face`, `sketch` or `profiles`.
@@ -570,6 +571,10 @@ pub struct SurfaceSweepParams {
     pub path_edges: Option<PathEdgePoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub shape: SweepShape,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -626,6 +631,24 @@ pub struct BoundingSolidParams {
     pub common: FeatureCommon,
 }
 
+/// What a Scale grows its bodies about: the bodies' centre, or a reference.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ScaleAboutParam {
+    /// The bodies' centre.
+    Centre(ScaleCentre),
+    /// A vertex, face, edge, sketch or construction point.
+    Pick(GeoRefParam),
+}
+
+/// The bodies' centre, in either spelling.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScaleCentre {
+    Centre,
+    Center,
+}
+
 /// Scale bodies about a point.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -639,9 +662,15 @@ pub struct ScaleParams {
     /// the scale; a `factor` given too has no effect but must still evaluate.
     #[serde(default)]
     pub factors: Option<ScaleFactors>,
-    /// The point that stays where it is, in mm. Default: the origin.
+    /// A fixed point that stays where it is, in mm. Default: the origin. Not with `about`.
     #[serde(default)]
     pub origin: Option<Point3>,
+    /// What stays where it is, found again each time the design updates: `"centre"` (the centre
+    /// of the bodies' box as the features before the Scale leave them) or a reference (a vertex,
+    /// a sketch or construction point, a circular edge's centre, a flat face's middle or a round
+    /// face's end), which follows the model. Not with `origin`.
+    #[serde(default)]
+    pub about: Option<ScaleAboutParam>,
     // Not `FeatureCommon`: a scale makes no body, so `body_name` and `body_names` would do nothing.
     // `participants` stays because `timeline.redefine` passes a feature's own back.
     /// The feature's name in the timeline.
@@ -1036,7 +1065,7 @@ fn alignment_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<sol
     serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be left, center or right"))))
 }
 
-/// A pattern's flip under `key`, as `cmd::reversed_param` reads it, with its message. `null` is
+/// A reversal flag under `key`, as `cmd::reversed_param` reads it, with its message. `null` is
 /// refused, as the reader refuses it.
 fn reversed_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
     serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be true or false"))))
@@ -1051,7 +1080,7 @@ fn pattern_alignment2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcra
     alignment_at(d, "alignment2")
 }
 
-fn pattern_reversed<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+pub(super) fn reversed_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     reversed_at(d, "reversed")
 }
 
@@ -1086,7 +1115,7 @@ pub struct PatternCircularParams {
     #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
     pub alignment: Option<solidcraft_sketch::PatternAlignment>,
     /// Flip the pattern's direction; for an even count centred, selects the extra side.
-    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -1280,7 +1309,7 @@ pub struct PatternRectangularParams {
     #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
     pub alignment2: Option<solidcraft_sketch::PatternAlignment>,
     /// Flip the first direction; for an even count centred, selects the extra side.
-    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
     /// Flip the second direction.

@@ -78,6 +78,12 @@ or a law r(t).
   at each pair of support feet. The local tangent planes give the radius from their wedge and
   the requested distance. As the normals approach those of an adjacent planar strip, both
   constructions give the same radius and the same end chord.
+  A second chamfer kind, setbacks held at every station (each foot a straight line of its size
+  from the edge, in the plane square to it), is defined but not built: its record
+  (`ChamferKindRecord::Setbacks`, its radius `RadiusRecord::Edge`, the edge as its leader) is
+  refused when read. Its station, and the definitions it is built under (where stations
+  cross, which root is the foot, ends and corners), are in
+  `blend::fillet_section::setback_station`.
 
 Every geometric quantity downstream (rails, sections, events, corner boundaries) is built from the
 same exact spine points. The foot blend of §2.5 (weld beads) has no spine: its quantities come from
@@ -390,7 +396,7 @@ face in common and a bead wholly behind the other's wall are refused, naming the
 | a leg below the smallest size the body builds (eight times its tolerance), on any joint of the call: checked first, as the planar bead's frame checks it | `SizeBelowResolution`, naming the edge and the leg | `InvalidInput` | none |
 | a toe on its face's surface but off the face (classified on the face, at least 32 stations; a foot past a periodic support's seam moved into its domain first) | `NoRoomReason::LegPastFace` | `FilletTooLarge` | the largest leg on that side whose toes stay on the face, halved down (until the bracket is 1e-7 (1 + its upper end) wide), less the face's tolerance (a toe that far past the face's edge still classifies on it), as the exact bead's; 0 where it is below the smallest leg the body builds |
 | no point of the face at the leg on its side (the face turns away or ends within the leg) | `NoRoomReason::NoToeAtLeg` | `FilletTooLarge` | the largest leg on that side that finds its toes over the whole weld, halved down the same way; 0 below the smallest leg the body builds |
-| the arc would cut into a face at a station | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the least of the stations' bounds, (c/2) tan(min βᵢ/2) concave, a hair below it: over the whole weld and over every joint of the call, naming the joint whose fit it is; the legs and toes of every joint are checked before it, so a retry at it is not refused for a leg or a toe off its face. Sampled: the joints not yet built are read at their check stations only, so a retry can be refused again, with a smaller fit |
+| the arc would cut into a face somewhere along a span | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the float below a proved lower end of the bound's least over every parameter, (c/2) tan(min βᵢ/2) concave and (c/2) tan((π − max βᵢ)/2) convex (`FootBlend::bound_over`: Taylor models over the pieces the feet are proved on, within 10⁻⁴ of the least): over the whole weld and over every joint of the call, naming the joint whose fit it is. The build reads the same lower end over the same pieces, so a retry at it is not refused for its sagitta; the legs and toes of every joint are checked before it. It is named only once the feet are proved over the weld's spans: where they are not, the refusal is the proof's (`NotCertified`, or a station's own) |
 | Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
 | the feet between two stations not proved after the halvings | `NotCertified` (`NoToeAtLeg` with its leg fit where the equations are near singular at an end: the toes on the leg's circle meet there) | `NotWithinTolerance` | none (the fit where `NoToeAtLeg`) |
 | the net does not hold the tolerance after its refinements | `SkinPastStationCap` | `NotWithinTolerance` | none |
