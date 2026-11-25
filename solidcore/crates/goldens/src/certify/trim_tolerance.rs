@@ -125,7 +125,9 @@ const OPEN: &str = include_str!("trim_tolerance_open.tsv");
 /// needed for the trim (its `B` is within the old tolerance): the margin is upstream's, wider
 /// than the B-rep check needs (a gap within the tolerance), and moves every dropped trim
 /// kernel-wide (#20912). Each is certified as a raise whose every trim's `B` is within the new
-/// tolerance (none need be past the old). The edge's vertices follow it
+/// tolerance (none need be past the old), and derived: the drop, made again on a copy of the
+/// body with the edge put back to its old tolerance, gives the new one bit for bit
+/// ([`drop_margin_raise`]). The edge's vertices follow it
 /// (`edge::set_tolerance`).
 const DROP_MARGIN: &[(&str, &str, usize, usize)] = &[
     ("topology.brep_p10", "gen0026", 0, 20),
@@ -934,6 +936,65 @@ fn edge_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> (Vec<Option<f64>>, us
     (out, trimless)
 }
 
+/// Derives a [`DROP_MARGIN`] raise of edge `e` of `b` from `old` to `new` on a copy of `b`:
+/// for a use of the edge that holds a trim, the copy with that trim taken off and the edge put
+/// back to `old`, where `get_or_create_uv_trim_curve` on the use (the drop the classification
+/// makes) reports the drop distance `d` and leaves the edge at `new`, bit for bit, with
+/// `old < new`; and with the trim's `B` on `b` ([`use_bound`]), `new` is one of
+/// `trim_raise_distance`'s raises, doubled: `2 d` with `B <= new` (upstream's), or `2 B` with
+/// `B < d` (the proved distance, below upstream's). Either way `B <= new` and `new <= 2 d`.
+/// Returns `(d, B)` of the first use that gives `new`.
+fn drop_margin_raise(b: &Brep, e: EdgeId, old: f64, new: f64) -> Result<(f64, f64), String> {
+    let uses: Vec<EdgeuseId> = b
+        .edge(e)
+        .expect("edge")
+        .edgeuses
+        .iter()
+        .copied()
+        .filter(|&eu| b.edgeuse(eu).expect("edge use").uv_trim_curve.is_some())
+        .collect();
+    let mut tried = Vec::new();
+    for eu in uses {
+        let mut m = b.clone_standing_for_self().map_err(|x| format!("{x:?}"))?;
+        m.edgeuse_mut(eu)
+            .map_err(|x| format!("{x:?}"))?
+            .uv_trim_curve = None;
+        edge::set_tolerance(&mut m, e, old, false, false).map_err(|x| format!("{x:?}"))?;
+        let k = Kernel::default();
+        let fetch = solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+            &k, &mut m, eu, true, false, true,
+        )
+        .map_err(|x| format!("{x:?}"))?;
+        if let Err(x) = fetch.status {
+            tried.push(format!("use {}: the drop: {x:?}", eu.index()));
+            continue;
+        }
+        let d = fetch.dist_to_surf;
+        let now = m.edge(e).map_err(|x| format!("{x:?}"))?.tolerance;
+        if now.to_bits() != new.to_bits() {
+            tried.push(format!(
+                "use {}: the drop leaves {now:e} (d {d:e})",
+                eu.index()
+            ));
+            continue;
+        }
+        let bm = match use_bound(&k, b, e, eu) {
+            UseBound::Bound(x) => x,
+            x => return Err(format!("use {}: the trim: {x:?}", eu.index())),
+        };
+        // (written so a NaN fails; doubling is exact)
+        let upstream = new.to_bits() == (2.0 * d).to_bits() && bm <= new;
+        let proved = new.to_bits() == (2.0 * bm).to_bits() && bm < d;
+        if !(d > 0.0 && new > old && (upstream || proved)) {
+            return Err(format!(
+                "{old:e} -> {new:e} is neither 2 d (d {d:e}) covering B {bm:e} nor 2 B below 2 d"
+            ));
+        }
+        return Ok((d, bm));
+    }
+    Err(format!("no use gives {new:e}: {tried:?}"))
+}
+
 /// Whether the point of `v` is within `n` of the end of every edge curve of `v` that ends
 /// there, the evaluation's error bound and the distance's rounding counted against it.
 fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
@@ -1271,8 +1332,11 @@ fn certify(unit: &str) -> Tally {
                         // a raise by `SetUVTrimCurve`'s margin: every trim within the new
                         // tolerance, or the edge in OPEN as `UNCOVERED`, every bound past the
                         // new tolerance past the old as well (the old tolerance did not cover
-                        // it either: #20906)
-                        if bad.is_empty() {
+                        // it either: #20906); and the raise is the drop's, derived on a copy
+                        // ([`drop_margin_raise`])
+                        if let Err(why) = drop_margin_raise(b, e, old, new) {
+                            failures.push(format!("{at}: drop margin not derived: {why}"));
+                        } else if bad.is_empty() {
                             assert!(
                                 !open.contains_key(&key),
                                 "{at}: certified, remove it from OPEN"
