@@ -45,10 +45,10 @@
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
-use solidcore_ops::measure::FaceHit;
-use solidcore_ops::sweep::{self, Curve};
-use solidcore_ops::{Body, Order, affine, curve, make_sphere};
 use solidcore_record::brep::Curve as RecordCurve;
+use solidcraft_kernel::services::measure::FaceHit;
+use solidcraft_kernel::services::sweep::{self, Curve};
+use solidcraft_kernel::services::{ExactBody as Body, Order, affine, curve, make_sphere};
 
 /// Why a spot is refused.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -94,7 +94,7 @@ pub enum SpotRefusal {
     EdgeNotMeasured { sheet: usize, face: usize },
     /// An ops call failed.
     #[error(transparent)]
-    Ops(#[from] solidcore_ops::Error),
+    Ops(#[from] solidcraft_kernel::services::Error),
 }
 
 type Result<T> = std::result::Result<T, SpotRefusal>;
@@ -607,7 +607,7 @@ pub fn spot_site(sheets: &[(&Body, &Order)], picked: usize, face: usize, point: 
     if !positive(diameter) {
         return bad("a spot diameter that is not finite and positive");
     }
-    let copies = sheets.iter().map(|(b, o)| b.copy_with_order(o)).collect::<solidcore_ops::Result<Vec<_>>>()?;
+    let copies = sheets.iter().map(|(b, o)| b.copy_with_order(o)).collect::<solidcraft_kernel::services::Result<Vec<_>>>()?;
     let Some((body, order)) = copies.get(picked) else {
         return bad("a picked sheet not in the list");
     };
