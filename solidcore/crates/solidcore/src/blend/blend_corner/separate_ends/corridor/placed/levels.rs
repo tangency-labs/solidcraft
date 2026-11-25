@@ -13,9 +13,8 @@ const OP: &str = "blend::blend_corner::separate_ends::placed_levels";
 struct Support {
     face: FaceId,
     axis: usize,
-    coordinate: Ivl,
-    range: Ivl,
-    zone: f64,
+    level: f64,
+    allowed: Ivl,
     parent: usize,
 }
 
@@ -46,20 +45,22 @@ fn representative(faces: &[Support], mut current: usize) -> Option<usize> {
 
 /// A shared fan can carry multiple faces with the same dominant axis.
 /// Join only supports whose complete chart domains agree with a shared level.
-fn link(faces: &mut [Support], frame: &Frame, first: usize, second: usize) -> Option<bool> {
+fn link(faces: &mut [Support], first: usize, second: usize) -> Option<bool> {
     let a = representative(faces, first)?;
     let b = representative(faces, second)?;
     if a == b {
         return Some(true);
     }
-    let (first, second) = (faces.get(a)?, faces.get(b)?);
-    let gap = frame.plane_gap(first.axis, first.range, second.coordinate.mid())?;
-    let reverse = frame.plane_gap(second.axis, second.range, first.coordinate.mid())?;
-    let zone = first.zone.min(second.zone);
-    if !(zone.is_finite() && gap.max(reverse) <= zone) {
+    let (root, joined) = (a.min(b), a.max(b));
+    let first = faces.get(root)?.allowed;
+    let second = faces.get(joined)?.allowed;
+    let lo = first.lo.max(second.lo);
+    let hi = first.hi.min(second.hi);
+    if lo > hi {
         return Some(false);
     }
-    faces.get_mut(a.max(b))?.parent = a.min(b);
+    faces.get_mut(root)?.allowed = Ivl::new(lo, hi);
+    faces.get_mut(joined)?.parent = root;
     Some(true)
 }
 
@@ -77,18 +78,18 @@ impl Levels {
                 continue;
             };
             let zone = face2::tolerance(b, face)?.min(b.tolerance());
-            if !frame
-                .plane_gap(axis, range, coordinate.mid())
-                .is_some_and(|gap| zone.is_finite() && gap <= zone)
-            {
+            let Some(allowed) = frame.level_window(axis, range, zone) else {
+                continue;
+            };
+            let level = coordinate.mid();
+            if !(allowed.lo <= level && level <= allowed.hi) {
                 continue;
             }
             supports.push(Support {
                 face,
                 axis,
-                coordinate,
-                range,
-                zone,
+                level,
+                allowed,
                 parent: 0,
             });
         }
@@ -121,7 +122,7 @@ impl Levels {
                     return Ok(None);
                 };
                 if let Some(first) = *slot {
-                    match link(&mut supports, frame, first, index) {
+                    match link(&mut supports, first, index) {
                         Some(true) => {}
                         // This fan cannot supply a unique placed point.
                         Some(false) => continue 'vertices,
@@ -143,22 +144,21 @@ impl Levels {
         reserve(&mut face_roots, supports.len())?;
         for (i, support) in supports.iter().enumerate() {
             k.check_cancelled(OP)?;
-            // Parents precede their children, so the cached parent coordinate
-            // already belongs to the lowest-ID face of the whole class.
+            // Parents precede their children, so each non-root gets the
+            // level selected from the entire class's admissible interval.
             let coordinate = if support.parent == i {
-                support.coordinate.mid()
+                let allowed = support.allowed;
+                if allowed.lo <= support.level && support.level <= allowed.hi {
+                    support.level
+                } else {
+                    allowed.lo.midpoint(allowed.hi)
+                }
             } else {
                 let Some(&coordinate) = faces.get(support.parent) else {
                     return Ok(None);
                 };
                 coordinate
             };
-            let Some(gap) = frame.plane_gap(support.axis, support.range, coordinate) else {
-                return Ok(None);
-            };
-            if !(support.zone.is_finite() && gap <= support.zone) {
-                return Ok(None);
-            }
             faces.push(coordinate);
             let root = if support.parent == i {
                 i
@@ -207,5 +207,34 @@ impl Levels {
             .binary_search_by_key(&vertex, |(vertex, _)| *vertex)
             .ok()?;
         self.vertices.get(index).map(|&(_, point)| point)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Vec3;
+
+    #[test]
+    fn support_joins_keep_a_level_admissible_for_the_whole_class() {
+        let frame = Frame {
+            axes: [Vec3::X, Vec3::Y, Vec3::Z].map(|axis| super::super::Axis::new(axis).unwrap()),
+        };
+        let mut faces = [(0, 0.0), (1, 0.75), (2, 1.5), (3, 3.0)].map(|(i, level)| Support {
+            face: FaceId::from_index(i),
+            axis: 0,
+            level,
+            allowed: frame.level_window(0, Ivl::from(level), 1.0).unwrap(),
+            parent: usize::try_from(i).unwrap(),
+        });
+        assert_eq!(link(&mut faces, 1, 2), Some(true));
+        assert_eq!(link(&mut faces, 0, 1), Some(true));
+        let allowed = faces[0].allowed;
+        assert!(allowed.lo > 0.0 && allowed.lo < 0.75 && 0.75 < allowed.hi);
+        assert!(allowed.hi <= 1.0);
+        assert_eq!(link(&mut faces, 1, 3), Some(false));
+        assert_eq!(faces[0].allowed, allowed);
+        assert_eq!(representative(&faces, 2), Some(0));
+        assert_eq!(representative(&faces, 3), Some(3));
     }
 }

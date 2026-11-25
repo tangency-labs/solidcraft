@@ -86,6 +86,15 @@ impl Axis {
         trim::dot(point, direction.map(Ivl::from)).div_ulp(self.length_squared)
     }
 
+    /// Signed difference from a chart anchor to a placed level, in numerator units.
+    fn level_offset(self, anchor: Point3, level: f64) -> Option<Ivl> {
+        let origin = expansion::dot(self.direction, anchor)?;
+        let normal = expansion::dot(self.direction, self.direction)?;
+        let placed = expansion::scale(&normal, level)?;
+        let span = expansion_span(&expansion::sub(&origin, &placed))?;
+        Some(Ivl::new(span.lo, span.hi))
+    }
+
     /// The signed line projection relative to the level, in numerator units.
     /// Apply parameter uncertainty to the projected slope. An exactly zero
     /// slope removes all dependence on movement along the line.
@@ -278,11 +287,17 @@ impl Frame {
             })
     }
 
-    /// Enclose the physical distance between two parallel levels of an axis.
-    pub(super) fn plane_gap(&self, axis: usize, exact: Ivl, level: f64) -> Option<f64> {
+    /// An inner interval of placed levels within the physical zone of the
+    /// whole enclosure. Lower limits round up and upper limits round down.
+    pub(super) fn level_window(&self, axis: usize, range: Ivl, zone: f64) -> Option<Ivl> {
+        if !zone.is_finite() || zone < 0.0 {
+            return None;
+        }
         let length = self.axes.get(axis)?.length_squared.sqrt();
-        let gap = exact.sub_ulp(Ivl::from(level)).mul_ulp(length);
-        gap.is_finite().then_some(gap.mag())
+        let radius = Ivl::from(zone).div_ulp(length).lo;
+        let lo = Ivl::from(range.hi).sub_ulp(Ivl::from(radius)).hi;
+        let hi = Ivl::from(range.lo).add_ulp(Ivl::from(radius)).lo;
+        (lo.is_finite() && hi.is_finite() && lo <= hi).then_some(Ivl::new(lo, hi))
     }
 
     /// A width enclosing the requested physical sweep on each of the 3 axes.
@@ -372,6 +387,11 @@ impl Placed {
         )
     }
 
+    /// Enclose a trimmed segment directly in the arm's coordinate frame.
+    pub(super) fn project_trim(&self, trim: Segment) -> Segment {
+        trim.map(|point| self.frame.axes.map(|axis| axis.coordinate_bounds(point)))
+    }
+
     /// Keep the entire lifted segment except where a shared intrinsic UV
     /// boundary certifies contact with an open side of this rectangle.
     pub(super) fn support_trim(
@@ -403,12 +423,11 @@ impl Placed {
             return Ok(None);
         };
         let interval = edge::interval(b, e)?;
-        let project = |point| self.frame.axes.map(|axis| axis.coordinate_bounds(point));
-        let mut projected = raw.map(project);
+        let mut projected = self.project_trim(raw);
         // The opposite opening wall is foreign to this arm. Keep both
         // representations until a shared cap certifies their contact.
         if let Some(spatial) = spatial {
-            for (lifted, spatial) in projected.iter_mut().zip(spatial.map(project)) {
+            for (lifted, spatial) in projected.iter_mut().zip(self.project_trim(spatial)) {
                 for (lifted, spatial) in lifted.iter_mut().zip(spatial) {
                     *lifted = lifted.hull(spatial);
                 }
@@ -439,26 +458,36 @@ impl Placed {
                 let Some(basis) = Axis::new(cap.z_axis()) else {
                     continue;
                 };
-                let Some((spatial, rounding)) = basis.edge_residual(line, parameter, cap.origin())
-                else {
-                    continue;
+                let reaches = |basis: Axis, offset: Ivl| {
+                    let (spatial, rounding) = basis.edge_residual(line, parameter, cap.origin())?;
+                    let lifted = trim::projected_uv_ends(
+                        plane,
+                        uv.as_ref()?,
+                        basis.direction,
+                        cap.origin(),
+                    )?;
+                    let &(lifted, uv_rounding) = lifted.get(end)?;
+                    Some(reaches_cap(
+                        (spatial.add_ulp(offset), rounding),
+                        (lifted.add_ulp(offset), uv_rounding),
+                    ))
                 };
-                let Some(lifted) = uv.as_ref().and_then(|uv| {
-                    trim::projected_uv_ends(plane, uv, basis.direction, cap.origin())
-                }) else {
-                    continue;
-                };
-                let Some(&(lifted, uv_rounding)) = lifted.get(end) else {
-                    return Ok(None);
-                };
-                if !reaches_cap((spatial, rounding), (lifted, uv_rounding)) {
+                if reaches(basis, Ivl::from(0.0)) != Some(true) {
                     continue;
                 }
-                // The opposite opening wall is already identified by the
-                // corner fan. An enclosed common axial or side endpoint
-                // only establishes contact at that face of the arm.
+                // An opening endpoint must also reach the arm's placed
+                // level. A tilted physical cap can meet the endpoint
+                // without reaching that level at the same position.
                 if opening && axis != arm.above {
-                    *value = Ivl::from(level);
+                    if let Some(&placed) = self.frame.axes.get(axis) {
+                        if placed
+                            .level_offset(cap.origin(), level)
+                            .and_then(|offset| reaches(placed, offset))
+                            == Some(true)
+                        {
+                            *value = Ivl::from(level);
+                        }
+                    }
                     continue;
                 }
                 let same_support = |peer| self.levels.same_support(peer, other);
@@ -560,6 +589,17 @@ mod tests {
     use crate::geom::extent1d::Extent1d;
     use crate::geom::extent2d::Extent2d;
     use crate::math::Vec2;
+
+    #[test]
+    fn contact_with_a_tilted_cap_does_not_put_the_endpoint_at_the_placed_level() {
+        let axis = Axis::new(Vec3::X).unwrap();
+        let rise = 1e-8;
+        let contact = Point3::new(rise, 0.0, 1.0);
+        let zero = Ivl::from(0.0);
+        assert!(reaches_cap((zero, zero), (zero, zero)));
+        let offset = axis.level_offset(contact, 0.0).unwrap();
+        assert!(!reaches_cap((offset, zero), (offset, zero)));
+    }
 
     #[test]
     fn an_opening_wall_needs_its_actual_trim_to_stop_at_the_start() {

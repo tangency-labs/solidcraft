@@ -206,6 +206,22 @@ impl Arm {
         bounds_extent(self.spans.map(|span| Ivl::new(span.lo, span.hi)))
     }
 
+    /// A foreign trim endpoint enclosed strictly inside the arm is a
+    /// contact witness. A box overlap alone cannot establish one.
+    fn has_foreign_contact(self, path: &Polygon) -> bool {
+        path.loops
+            .iter()
+            .flatten()
+            .filter_map(|segment| segment.lifted)
+            .flatten()
+            .any(|point| {
+                self.spans
+                    .into_iter()
+                    .zip(point)
+                    .all(|(span, value)| span.lo < value.lo && value.hi < span.hi)
+            })
+    }
+
     fn contacts(self, bounds: [Span; 3]) -> Option<bool> {
         let along = *self.spans.get(self.along)?;
         let across = *self.spans.get(self.across)?;
@@ -544,8 +560,7 @@ fn segment(
                 };
                 Some(actual)
             }
-            // The general placed foreign check already budgets both zones.
-            TrimUse::OtherFace { opening: None } => None,
+            TrimUse::OtherFace { opening: None } => Some(placed.project_trim(lifted)),
         };
         (point_bounds(a), point_bounds(z), lifted)
     } else {
@@ -1528,12 +1543,9 @@ pub(super) fn check_corridor(
             }
             continue;
         };
-        let Some(bounds) = polygon_bounds(
-            path.loops
-                .into_iter()
-                .flatten()
-                .map(|segment| segment.nominal),
-        ) else {
+        let Some(bounds) =
+            polygon_bounds(path.loops.iter().flatten().map(|segment| segment.nominal))
+        else {
             clear = false;
             continue;
         };
@@ -1551,7 +1563,7 @@ pub(super) fn check_corridor(
                 arm.contacts(bounds)
             };
             match contact {
-                Some(true) => return Ok(Clearance::Obstructed),
+                Some(true) if arm.has_foreign_contact(&path) => return Ok(Clearance::Obstructed),
                 Some(false) => {
                     if placed.is_none()
                         && path
@@ -1561,7 +1573,7 @@ pub(super) fn check_corridor(
                         clear = false;
                     }
                 }
-                None => {
+                Some(true) | None => {
                     clear = false;
                 }
             }
@@ -1629,6 +1641,41 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn a_foreign_box_overlap_is_not_a_contact_witness() {
+        let arm = Arm::new(
+            Point3::ZERO,
+            Point3::X,
+            Point3::Y,
+            Point3::Z,
+            1.0,
+            [FaceId::from_index(0); 5],
+        )
+        .unwrap();
+        let triangle = |x, y| {
+            let [a, b, c] = [
+                Point3::new(0.5, 2.0, 0.5),
+                Point3::new(2.0, 0.5, 0.5),
+                Point3::new(x, y, 0.5),
+            ]
+            .map(point_bounds);
+            let segments = [[a, b], [b, c], [c, a]].map(|nominal| BoundarySegment {
+                nominal,
+                lifted: Some(nominal),
+            });
+            Polygon {
+                loops: vec![segments.into_iter().collect()],
+                lifted: None,
+            }
+        };
+        let outside = triangle(2.0, 2.0);
+        let bounds =
+            polygon_bounds(outside.loops.iter().flatten().map(|edge| edge.nominal)).unwrap();
+        assert_eq!(arm.contacts(bounds), Some(true));
+        assert!(!arm.has_foreign_contact(&outside));
+        assert!(arm.has_foreign_contact(&triangle(0.5, 0.5)));
+    }
+
     #[test]
     fn an_oblique_carrier_that_misses_the_cap_cannot_hide_a_lifted_trim_entering_it() {
         let arm = Arm::new(

@@ -434,8 +434,21 @@ fn post_foot_blends_refuse_a_floor_trim_shifted_into_the_sweep() {
     let original = post_foot(true);
     original.transform(&map).unwrap();
     let record = original.to_record().unwrap().0;
-    for (count, join_neighbors) in [(1, false), (2, false), (2, true)] {
+    for (count, join_neighbors, target_last) in [
+        (1, false, false),
+        (2, false, false),
+        (2, true, false),
+        (2, true, true),
+    ] {
         let mut shifted = record.clone();
+        let rotated_by = if join_neighbors {
+            let (loop_edges, index) = floor_loop(&mut shifted);
+            let start = (index + usize::from(target_last)) % loop_edges.len();
+            loop_edges.rotate_left(start);
+            start
+        } else {
+            0
+        };
         let (loop_edges, index) = floor_loop(&mut shifted);
         let moved = if join_neighbors {
             10.0 + 1e-8
@@ -450,7 +463,10 @@ fn post_foot_blends_refuse_a_floor_trim_shifted_into_the_sweep() {
         let expected = trim.to_vec();
         if join_neighbors {
             assert!(loop_edges[index].forward);
-            let neighbors = [(index - 1, true, 0.0), (index + 1, false, 10.0)];
+            let count = loop_edges.len();
+            let previous = index.checked_sub(1).unwrap_or(count - 1);
+            let next = (index + 1) % count;
+            let neighbors = [(previous, true, 0.0), (next, false, 10.0)];
             for (neighbor, before, u) in neighbors {
                 let occurrence = &mut loop_edges[neighbor];
                 let slot = usize::from(occurrence.forward == before);
@@ -459,6 +475,9 @@ fn post_foot_blends_refuse_a_floor_trim_shifted_into_the_sweep() {
                 assert!((endpoint[1] - 10.0).abs() < 1e-13);
                 endpoint[1] = moved;
             }
+            // Records are stored in canonical order. Only the test's edit
+            // accesses the circular neighbors from an arbitrary start.
+            loop_edges.rotate_right(rotated_by);
         }
         assert_eq!(shifted.edges, record.edges);
         for kind in [Blend::Chamfer, Blend::Round] {
