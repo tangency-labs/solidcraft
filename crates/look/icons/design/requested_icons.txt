@@ -35,6 +35,7 @@ c_collinear	false
 c_concentric	false
 c_equal	false
 c_fix	false
+c_horizontal	false
 c_hv	false
 c_midpoint	false
 c_parallel	false
@@ -43,6 +44,7 @@ c_polygon	false
 c_smooth	false
 c_symmetry	false
 c_tangent	false
+c_vertical	false
 cam	false
 camera	false
 canvas	false
@@ -100,6 +102,7 @@ delete_face	false
 dimension	false
 discord	false
 display	false
+dome	false
 dots	false
 draft	false
 draft_analysis	false
@@ -200,6 +203,7 @@ intersect	false
 intersection_curve	false
 iso_analysis	false
 iso_curve	false
+isolate	false
 joint	false
 joint_origin	false
 kofi	false
@@ -397,8 +401,10 @@ timeline_stop	false
 torus	false
 trace	false
 trim	false
+turn_around	false
 undo	false
 unfold	false
+unisolate	false
 update	false
 warning	false
 web	false

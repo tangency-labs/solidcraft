@@ -53,8 +53,6 @@ pub mod curve;
 pub mod develop;
 pub mod eval;
 pub mod geom;
-#[allow(missing_docs)]
-pub mod hatch;
 pub mod heal;
 pub mod hlr;
 pub mod intersect;
