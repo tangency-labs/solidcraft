@@ -1231,7 +1231,12 @@ impl FilletSession<'_> {
             // with the sheet's boundary)
             let sectioned = session.executive.open_ends.iter().any(|end| end.section);
             if open_setback || sectioned || session.executive.cliff_overflow {
+                // the trim sews in place under the session's identities, as the merge
+                // inserts: its owners are rebound to the target's naming as the merge's
+                // are (#18913: a round past its faces failed `SmBrep` test #61)
+                let recorded = session.objects.target.geometry_owner_keys().clone();
                 let result = session.trim_at_creases(k);
+                let result = result.and(session.normalize_target_owners(&recorded));
                 session.objects.target.set_editing_enabled(editing);
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
@@ -1264,21 +1269,27 @@ impl FilletSession<'_> {
         // afterwards (`Brep::owner_identity`)
         let recorded = self.objects.target.geometry_owner_keys().clone();
         let result = self.merge_fillet_in_place(k);
-        // (not upstream: owners are pointers there) the insertion names the geometry
-        // it binds to the target's edges and faces by the session's kernel identity
-        // of the entity; rebind it to the same entity's identity in the target's
-        // naming, as the piecewise merge does, so the curve owner test of
-        // `SmEdge::ValidateGeometry` (`SmBrep` test #61) finds its edge
-        // (tangency-labs/solidcore#423). Also after an error.
+        // Also after an error.
+        result.and(self.normalize_target_owners(&recorded))
+    }
+
+    /// (not upstream: owners are pointers there) the insertion and the trim at creases
+    /// name the geometry they bind to the target's edges and faces by the session's
+    /// kernel identity of the entity; rebind it to the same entity's identity in the
+    /// target's naming (for a caller-named target, the key `recorded` before the edit),
+    /// as the piecewise merge does, so the curve owner test of `SmEdge::ValidateGeometry`
+    /// (`SmBrep` test #61) finds its edge (tangency-labs/solidcore#423).
+    fn normalize_target_owners(
+        &mut self,
+        recorded: &std::collections::BTreeMap<EntityRef, crate::geom::object::ObjectRef>,
+    ) -> Result<()> {
         let naming = self.objects.target.naming();
         let serial = self.objects.target_serial;
         let session_owner = |e| p3::topology_ref(serial, e);
-        let restored =
-            super::piecewise::normalize_session_owners(self.objects.target, session_owner, |e| {
-                super::piecewise::naming_owner(naming, recorded.get(&e).copied(), e)
-                    .unwrap_or_else(|| session_owner(e))
-            });
-        result.and(restored)
+        super::piecewise::normalize_session_owners(self.objects.target, session_owner, |e| {
+            super::piecewise::naming_owner(naming, recorded.get(&e).copied(), e)
+                .unwrap_or_else(|| session_owner(e))
+        })
     }
 
     /// The in-place (non-piecewise) body of [`Self::merge_fillet`].
