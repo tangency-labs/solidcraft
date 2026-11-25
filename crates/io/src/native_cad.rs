@@ -354,7 +354,9 @@ impl<'a> StepHeaderScanner<'a> {
 /// `{UNKNOWN IMPLEMENTATION LEVEL}`), return the bare schema name. Otherwise return `None` so the
 /// original bytes remain untouched.
 fn strip_invalid_schema_oid(raw: &[u8]) -> Option<String> {
-    if !raw.contains(&b'{') {
+    // Bail out on STEP Part 21 escape sequences (`\X\`, `\S\`, `\\`, etc.) so we never rewrite
+    // escaped string contents.
+    if !raw.contains(&b'{') || raw.contains(&b'\\') {
         return None;
     }
     // Part 21 ignores ASCII control bytes (such as line breaks) inside string literals.
@@ -1198,6 +1200,7 @@ mod convert {
         if !matches!(ext.as_str(), "step" | "stp") {
             return Err(format!("{name}: not a STEP file (.step or .stp)"));
         }
+        crate::limits::check(crate::limits::Kind::Step, bytes.len() as u64).map_err(|e| format!("{name}: {e}"))?;
         let prepared = super::normalize_step_file_schema(bytes);
         records_of(name, &ext, &prepared, &["step"])
     }
