@@ -16,11 +16,12 @@
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::{Result, SolidError};
+use crate::geom::interval_vector::{cross as cross_ivl, dot as dot_ivl, norm as norm_ivl};
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, PI};
 use crate::nurbs::math::UNIT;
-use crate::query::tangent_edge::{cross_ivl, dot_ivl, face_use_normal, norm_ivl};
+use crate::query::tangent_edge::face_use_normal;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, Brep, EdgeId, VertexId};

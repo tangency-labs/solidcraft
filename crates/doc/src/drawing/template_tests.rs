@@ -42,6 +42,8 @@ fn every_built_in_is_a_template_on_its_paper() {
         let (size, kind) = name.strip_prefix("iso-").unwrap().split_once('-').unwrap();
         let want = if kind == "assembly" { ASSEMBLY_NOTE } else { PART_NOTE };
         assert_eq!((note(&d), assembly(name)), (Some(want), Some(kind == "assembly")), "{name}");
+        let want = if kind == "assembly" { ASSEMBLY_TYPE } else { PART_TYPE };
+        assert_eq!(d.sheets[0].title_block_overrides.get("document_type").map(String::as_str), Some(want), "{name}: its document type");
         let SheetSize::Standard(paper) = sheet.sheet.size else { panic!("{name}: a standard size") };
         assert_eq!(serde_json::to_value(paper).unwrap(), serde_json::json!(size), "{name}");
         let upright = if size == "a4" { Orientation::Portrait } else { Orientation::Landscape };
@@ -129,8 +131,31 @@ fn a_template_applied_gives_each_sheet_its_format() {
     let (applied, changed) = apply(&d, &renamed, &mut IdSource::seeded(1)).unwrap();
     assert_eq!(changed[0], Restyled { sheet: ids[0], paper: false, border: false, title_block: true, lost: vec!["finish".into()] });
     let kept: Vec<&str> = applied.sheets[0].title_block_overrides.keys().map(String::as_str).collect();
-    assert_eq!(kept, ["general_tolerances", "material"], "the template's note is typed text too, and its cell is still there");
+    assert_eq!(kept, ["document_type", "general_tolerances", "material"], "the template's note is typed text too, and its cell is still there");
     assert!(apply(&d, &plate(), &mut IdSource::seeded(1)).unwrap_err().to_string().starts_with("a template draws no design"));
+}
+
+/// A drawing saved before the ISO 7200 cells (#20121) keeps the title block it was saved with, cell for
+/// cell, and its border keeps printing no labels: reading and saving it again changes neither.
+#[test]
+fn a_drawing_saved_before_the_iso_7200_cells_keeps_its_block_and_prints_no_labels() {
+    let mut old = made("iso-a3-part");
+    let sheet = Arc::make_mut(&mut old.sheets[0]);
+    let mut block = sheet.title_block.clone().unwrap();
+    block.cells.retain(|cell| cell.rect_mm[1] < 49.0);
+    block.size_mm.y = 49.0;
+    sheet.title_block = Some(block.clone());
+    sheet.title_block_overrides.remove("document_type");
+    let mut value: serde_json::Value = serde_json::from_str(&old.to_json().unwrap()).unwrap();
+    // The border as an older release saved it: no `zone_labels`.
+    let border = value["sheets"][0]["border"].as_object_mut().unwrap();
+    assert_eq!(border.remove("zone_labels"), Some(serde_json::json!(true)));
+    let read = Drawing::from_json(&value.to_string()).unwrap();
+    assert_eq!(read.sheets[0].title_block, Some(block), "the block it was saved with, twelve cells");
+    assert_eq!(read.sheets[0].title_block.as_ref().map(|b| b.cells.len()), Some(12));
+    assert_eq!(read.sheets[0].border.map(|b| b.zone_labels), Some(false));
+    assert_ne!(read.sheets[0].title_block, Some(title_block::default_block()));
+    assert_eq!(Drawing::from_json(&read.to_json().unwrap()).unwrap().sheets[0].title_block, read.sheets[0].title_block);
 }
 
 /// A drawing saved as a template keeps its sheets and leaves its model behind, and reads back as
@@ -207,4 +232,33 @@ fn a_drawing_from_a_template_has_ids_of_its_own() {
     // A drawing with a model makes none.
     let refusal = instantiate(&plate(), "Copy", &taken, &mut IdSource::seeded(9)).unwrap_err().to_string();
     assert!(refusal.starts_with("a template draws no design"), "{refusal}");
+}
+
+/// Saving a reusable sheet format must not leave annotations referring to the views it removes.
+#[test]
+fn a_template_drops_centre_annotations_with_their_views() {
+    use crate::drawing::centre_line::CentreLine;
+    use crate::drawing::centre_mark::CentreMark;
+    use crate::drawing::dimension::{ModelEdge, ModelPoint};
+
+    let mut d = plate();
+    let view = d.views[0].id;
+    let mut ids = IdSource::seeded(9419);
+    let edge = ModelEdge { body: "Part".into(), origin_feature: 1, name: "rim".into(), path: Vec::new() };
+    let mark = d.allocate_id(&mut ids).unwrap();
+    d.add_centre_marks([Arc::new(CentreMark { id: mark, view, edge, overshoot_mm: 2.0 })]);
+    let point = |name: &str| ModelPoint { body: "Part".into(), origin_feature: 1, edges: vec![name.into()], centre: true, path: Vec::new() };
+    let line = d.allocate_id(&mut ids).unwrap();
+    d.add_centre_lines([Arc::new(CentreLine { id: line, view, a: point("a"), b: point("b"), overshoot_mm: 2.0 })]);
+    d.validate().unwrap();
+    let refusal = check(&d).unwrap_err().to_string();
+    assert!(refusal.contains("centre marks") && refusal.contains("centre lines"), "{refusal}");
+    let template = from_drawing(&d).unwrap();
+    let reopened = read(&template.to_json().unwrap()).unwrap();
+    let created = instantiate(&reopened, "New part", &BTreeSet::new(), &mut IdSource::seeded(9421)).unwrap();
+    for drawing in [&template, &reopened, &created] {
+        assert!(drawing.views.is_empty() && drawing.centre_marks.is_empty() && drawing.centre_lines.is_empty());
+        check(drawing).unwrap();
+    }
+    assert_eq!((d.centre_marks.len(), d.centre_lines.len()), (1, 1), "the source drawing is unchanged");
 }
