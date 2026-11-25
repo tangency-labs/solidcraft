@@ -115,7 +115,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
         "canvas.insert" => &[("plane", HerePlane), ("at", Here)],
-        "sketch.project" | "sketch.intersect" | "sketch.include_3d" => &[("refs", Here), ("ref", Here)],
+        "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.repair_link" => &[("refs", Here), ("ref", Here)],
         "sketch.project_to_surface" | "sketch.isoparametric_curve" => &[("face", Here)],
         "sketch.intersection_curve" => &[("a", Here), ("b", Here)],
         "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],

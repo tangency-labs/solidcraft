@@ -38,7 +38,9 @@ mod delete_face;
 mod distance;
 mod dome;
 mod draft_corners;
+pub mod drawing_centre_mark;
 mod emboss;
+mod face_flux;
 #[cfg(test)]
 mod face_source_tests;
 pub mod failure;
@@ -52,6 +54,7 @@ pub mod fuzz;
 mod heal;
 mod helix;
 pub mod history;
+pub mod hlr;
 mod iges_in;
 mod iges_out;
 mod intersection;
@@ -98,6 +101,7 @@ mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
 mod native;
+pub mod network;
 mod numbered;
 mod offset;
 mod offset_backend;
@@ -116,6 +120,7 @@ pub use par::map_with_local_pools;
 mod display_plan_tests;
 #[cfg(test)]
 mod pinch_tests;
+mod placement;
 #[cfg(test)]
 mod planar_faces_tests;
 mod plane_fit;
@@ -128,6 +133,8 @@ mod prism_measure;
 pub mod profile;
 pub mod provenance;
 mod record;
+#[cfg(test)]
+mod record_eval_tests;
 mod repair;
 mod route;
 #[cfg(test)]
@@ -220,6 +227,7 @@ pub use body::CapSignature;
 pub use body::DISPLAY_ANGLE;
 pub use body::DisplayShare;
 pub use body::EdgeInfo;
+pub use body::EdgeLines;
 pub use body::FaceInfo;
 pub use body::FacePaint;
 pub use body::FaceSource;
@@ -651,6 +659,7 @@ impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
 impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcore_ops::pcurve::Error {}
+impl Cause for solidcraft_geom::brep::eval::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {
         (**self).panic()

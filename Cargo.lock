@@ -2464,6 +2464,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fontdb"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2660c5e9157bf76d2db1294e4a9feba604ef610819a3b591088d0d8392a3290f"
+dependencies = [
+ "log",
+ "memmap2",
+ "slotmap",
+ "tinyvec",
+]
+
+[[package]]
 name = "foreign-types"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6317,8 +6329,6 @@ version = "0.49.0"
 dependencies = [
  "serde",
  "serde_json",
- "solidcore",
- "solidcore-ops",
  "solidcore-record",
  "solidcore-tess",
  "thiserror 2.0.21",
@@ -6377,7 +6387,6 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-cadir",
  "solidcore-record",
  "solidcraft-color",
  "solidcraft-doc",
@@ -6405,6 +6414,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-step",
@@ -6580,6 +6590,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "flate2",
+ "fontdb",
  "getrandom 0.2.17",
  "image",
  "log",
