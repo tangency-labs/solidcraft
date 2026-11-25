@@ -53,6 +53,7 @@
 //! | [`Vec3::unitized_derivative3`]               | `UnitizedDerivative3`                            |
 //! | [`Vec3::angle_between`]                      | `AngleBetween`                                   |
 //! | [`Vec3::ccw_angle_between`]                  | `CCWAngleBetween`                                |
+//! | [`Vec3::signed_unit_angle`]                  | not upstream: oriented angle of unit directions   |
 //! | [`Vec3::square_turn`]                        | (none)                                           |
 //! | [`Vec3::is_colinear_with`]                   | `IsColinearWith`                                 |
 //! | [`sqrt`], [`cbrt`], [`acos`], [`asin`]       | `sm_sqrt`, `sm_cbrt`, `sm_acos`, `sm_asin` (`smos_Sqrt`, `smos_CubeRoot`, `smos_ArcCosine`, `smos_ArcSine`) |
@@ -877,6 +878,34 @@ impl Vec3 {
         }
     }
 
+    /// Signed angle in radians about the unit normal `self`, from unit `start` to unit `end`.
+    /// The directions must be perpendicular to the normal, within `1e-9` for rounding.
+    /// They are not renormalised. A half turn with a triple product below `1e-12` in
+    /// magnitude always chooses positive `PI`, including a negative rounded zero.
+    ///
+    /// # Errors
+    /// [`SolidError::InvalidInput`] for non-finite, non-unit or non-perpendicular directions.
+    pub fn signed_unit_angle(self, start: Self, end: Self) -> Result<f64> {
+        if ![self, start, end]
+            .iter()
+            .all(|v| (v.length_squared() - 1.0).abs() <= 1e-9)
+            || self.dot(start).abs() > 1e-9
+            || self.dot(end).abs() > 1e-9
+        {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            });
+        }
+        let sin = self.dot(start.cross(end));
+        let cos = start.dot(end).clamp(-1.0, 1.0);
+        Ok(if cos < 0.0 && sin.abs() < 1e-12 {
+            PI
+        } else {
+            sin.atan2(cos)
+        })
+    }
+
     /// Counter-clockwise angle in radians, in `[-PI, PI]`, from `start` to `end`
     /// after projecting both into the plane normal to `self` (`CCWAngleBetween`).
     /// Returns `0` when either vector is parallel to `self`.
@@ -1064,6 +1093,54 @@ impl DivAssign<f64> for Vec3 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn signed_unit_angles_keep_orientation_and_choose_positive_half_turns() {
+        for (normal, start, quarter) in [
+            (Vec3::Z, Vec3::X, Vec3::Y),
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            (Vec3::Y, Vec3::Z, Vec3::X),
+            (Vec3::new(0.0, 0.6, 0.8), Vec3::X, Vec3::new(0.0, 0.8, -0.6)),
+        ] {
+            assert_eq!(normal.signed_unit_angle(start, start).unwrap(), 0.0);
+            assert!((normal.signed_unit_angle(start, quarter).unwrap() - PI / 2.0).abs() < 1e-15);
+            assert!((normal.signed_unit_angle(quarter, start).unwrap() + PI / 2.0).abs() < 1e-15);
+            assert_eq!(normal.signed_unit_angle(start, -start).unwrap(), PI);
+        }
+        for tiny in [-5e-13, -0.0, 0.0, 5e-13] {
+            assert_eq!(
+                Vec3::Z
+                    .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
+                    .unwrap(),
+                PI
+            );
+        }
+        for tiny in [-2e-12_f64, 2e-12] {
+            assert_eq!(
+                Vec3::Z
+                    .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
+                    .unwrap(),
+                tiny.atan2(-1.0)
+            );
+        }
+    }
+
+    #[test]
+    fn signed_unit_angles_refuse_invalid_frames_without_normalising_them() {
+        for invalid in [
+            Vec3::ZERO,
+            Vec3::X * 2.0,
+            Vec3::new(f64::NAN, 0.0, 0.0),
+            Vec3::new(0.0, f64::INFINITY, 0.0),
+            Vec3::new(1e300, 1e300, 0.0),
+        ] {
+            assert!(invalid.signed_unit_angle(Vec3::X, Vec3::Y).is_err());
+            assert!(Vec3::Z.signed_unit_angle(invalid, Vec3::Y).is_err());
+            assert!(Vec3::Z.signed_unit_angle(Vec3::X, invalid).is_err());
+        }
+        assert!(Vec3::Z.signed_unit_angle(Vec3::Z, Vec3::X).is_err());
+        assert!(Vec3::Z.signed_unit_angle(Vec3::X, Vec3::Z).is_err());
+    }
+
     #[test]
     fn distance_along_is_signed_and_ignores_the_sideways_offset() {
         let (o, d) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
