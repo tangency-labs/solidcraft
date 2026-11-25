@@ -1183,7 +1183,9 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             let previous = app.viewport.button_nav.filter(|held| held.button == b);
             let kept = previous.filter(|held| held.focused && app.preferences.nav_drag_keeps_mode);
             let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |held| held.mode);
-            if previous.is_some_and(|held| held.mode != mode) {
+            // Only a drag that began unfocused re-resolves its mode; a focused drag (with the
+            // preference off too) keeps its orbit state exactly as before.
+            if previous.is_some_and(|held| !held.focused && held.mode != mode) {
                 app.viewport.orbit_pivot = None;
                 app.viewport.orbit_pivot_at = None;
                 app.viewport.orbit_mark = None;
