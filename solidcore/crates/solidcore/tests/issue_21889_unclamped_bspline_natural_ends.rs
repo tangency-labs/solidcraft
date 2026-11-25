@@ -16,7 +16,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as Nurbs;
 use solidcore::nurbs::math::{CPoint, NOW};
-use solidcore::{Kernel, Point3, Vec3};
+use solidcore::{Kernel, Point3};
 
 fn cp(x: f64, y: f64) -> CPoint {
     CPoint {
@@ -86,8 +86,8 @@ fn unclamped_cubic_curve_evaluates_at_natural_ends_and_matches_derivatives() {
     let d_start = c.evaluate(&k, 0.3, 1, false, false).unwrap();
     let d_end = c.evaluate(&k, 0.7, 1, false, false).unwrap();
 
-    assert!((Vec3::from(p_start) - d_start[0]).length() < 1e-12);
-    assert!((Vec3::from(p_end) - d_end[0]).length() < 1e-12);
+    assert!((p_start - d_start[0]).length() < 1e-12);
+    assert!((p_end - d_end[0]).length() < 1e-12);
 }
 
 #[test]
