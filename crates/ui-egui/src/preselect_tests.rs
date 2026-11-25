@@ -3161,7 +3161,10 @@ fn extend_dialog_goes_up_to_a_picked_face_or_plane() {
     let (lo, hi) = x_span(&h);
     assert!(lo.abs() < 1e-6 && (hi - 24.0).abs() < 1e-6, "the sheet runs from 0 to 24: {lo} to {hi}");
 
-    // The edge at x = 24 up to the whole box: its near face, at x = 30. Editing shows the body.
+    // Without the YZ extension, the edge at x = 24 up to the whole box: its near face, at x = 30
+    // (no sheet trimmed by an extension is extended up to anything yet). Editing shows the body.
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(4);
     open(&mut h, Vec3::new(24.0, 5.0, 0.0));
     choose(&mut h, "To Object");
     {
@@ -3174,7 +3177,7 @@ fn extend_dialog_goes_up_to_a_picked_face_or_plane() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
     assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Body(b)) if b.as_ref() == "Block"));
     let (lo, hi) = x_span(&h);
-    assert!(lo.abs() < 1e-6 && (hi - 30.0).abs() < 1e-6, "the sheet runs from 0 to 30: {lo} to {hi}");
+    assert!((lo - 5.0).abs() < 1e-6 && (hi - 30.0).abs() < 1e-6, "the sheet runs from 5 to 30: {lo} to {hi}");
     let name = h.app.session.doc.features.last().unwrap().name.clone();
     h.step(&json!({"call":"ui.editFeature","params":{"feature": name}})).unwrap();
     h.frames(4);
