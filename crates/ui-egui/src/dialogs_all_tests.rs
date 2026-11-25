@@ -675,7 +675,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
         "Offset" if command == "frame.end_cap" => Role::CheckBox,
         "Through all" if command == "solid.cell_grid" => Role::CheckBox,
-        "Clip" | "Keep-out clip" | "Dot grid" if command == "solid.cell_grid" => Role::ComboBox,
+        "Mode" | "Clip" | "Keep-out clip" | "Dot grid" if command == "solid.cell_grid" => Role::ComboBox,
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
         _ => Role::TextInput,
