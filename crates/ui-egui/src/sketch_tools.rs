@@ -1259,8 +1259,8 @@ pub fn glyph_at(pos: Pos2) -> Option<String> {
 
 /// The glyph within `reach` of `pos` whose centre is nearest (its id and centre). Large glyphs'
 /// hit regions overlap, so the first one in reach could be a neighbour of the one under the
-/// pointer (#10794); hover and click both pick with this rule.
-fn nearest_glyph<'a>(glyphs: impl IntoIterator<Item = (&'a str, Pos2)>, pos: Pos2, reach: f32) -> Option<(&'a str, Pos2)> {
+/// pointer (#10794); hover and click both pick with this rule, and so do the plane handles.
+pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
     glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
 }
 

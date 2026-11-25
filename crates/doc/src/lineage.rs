@@ -1038,6 +1038,8 @@ impl crate::ModelBody {
         remade.transferred = self.transferred;
         remade.source_name = self.source_name.clone();
         remade.source_transform = self.source_transform;
+        // A surface stays a surface through a change to its shape (#21969).
+        remade.sheet = self.sheet;
         remade
     }
 

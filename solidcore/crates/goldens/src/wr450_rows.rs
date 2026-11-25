@@ -55,6 +55,10 @@
 //! [`MAIN_COMMIT`] (the recorder does not write it), `UNITS`, the total and
 //! [`WITHIN_RULE`] by hand from its output.
 //!
+//! WR-732's retirement (#18934) moves `topology.brep_cutting`'s `gen0049` (within the
+//! comparator) and `gen0050` (edge 8 and its vertices raised) apart from main's lines with
+//! main's choices put back, so their entries are deleted.
+//!
 //! Retiring WR-495's flag (tangency-labs/solidcraft#21301) moved seven of these rows again
 //! (`topology.brep_local_operation`'s fc0000, fc0008, fc0025, gen0011, gen0030, gen0041 and
 //! gen0070; the first three were [`UNGATED_LINES`] rows too): they are deleted here by the
@@ -349,7 +353,7 @@ replay_tests! {
     api_files: "topology.api_files", 18;
     api_projection: "topology.api_projection", 1;
     assert_valid: "topology.assert_valid", 3;
-    brep_cutting: "topology.brep_cutting", 6;
+    brep_cutting: "topology.brep_cutting", 4;
     brep_local_operation: "topology.brep_local_operation", 29;
     brep_mirror: "topology.brep_mirror", 51;
     brep_p1: "topology.brep_p1", 4;
@@ -555,7 +559,7 @@ fn data_covers_the_moved_rows() {
     }
     let want: BTreeMap<&str, usize> = UNITS.iter().copied().collect();
     assert_eq!(per_unit, want);
-    assert_eq!(DATA.len(), 395);
+    assert_eq!(DATA.len(), 393);
     // each (unit, case) once
     let keys: std::collections::BTreeSet<(&str, &str)> = DATA.iter().map(|r| (r.0, r.1)).collect();
     assert_eq!(keys.len(), DATA.len(), "a (unit, case) listed twice");
