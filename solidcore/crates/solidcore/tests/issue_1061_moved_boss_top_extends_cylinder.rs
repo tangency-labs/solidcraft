@@ -5,9 +5,9 @@
 //! shortfall is the moved top's rim, the plane z = 22 meeting the cylinder, which
 //! `MateEdges` marches as a B-spline 7.5e-7 off the circle (its trim on the wall a
 //! degree 3 curve of 358 control points), so the top's disc loses a sliver: 9.7e-9 of the
-//! volume. With `offset_analytic_mate_edges` (WR-495, the fork's tangency-labs/smlib@fddc366
-//! and @98ab1b0) the rim is the exact circle and the volume is exact. Extending the wall's
-//! cylinder as itself (WR-532, now the only extension) changes neither.
+//! volume. With the exact analytic mate (WR-495, the fork's tangency-labs/smlib@fddc366
+//! and @98ab1b0, now the only path) the rim is the exact circle and the volume is exact.
+//! Extending the wall's cylinder as itself (WR-532, now the only extension) changes neither.
 //!
 //! The part: a 60 x 40 x 10 plate with an r10 boss on it at (30, 20), its top at z = 20,
 //! moved to z = 22 by its own plane offset by 2 (`CreateOffsetSurface`, as the capi moves a
@@ -74,9 +74,8 @@ fn rim_off_circle(k: &Kernel, b: &Brep) -> f64 {
 
 /// The moved part's volume relative to its closed form, `(got - want) / want`, and its
 /// rim's distance from the circle.
-fn moved_top(exact_mates: bool) -> (f64, f64) {
+fn moved_top() -> (f64, f64) {
     let mut k = Kernel::default();
-    k.fixes.offset_analytic_mate_edges = exact_mates;
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(30.0, 20.0, 5.0), 10.0, 15.0).unwrap();
     let mut part = boolean_union(&mut k, plate, boss).unwrap();
@@ -103,25 +102,14 @@ fn moved_top(exact_mates: bool) -> (f64, f64) {
     let want = 60.0 * 40.0 * 10.0 + PI * 100.0 * 12.0;
     let got = volume(&k, &mut part);
     let off = rim_off_circle(&k, &part);
-    eprintln!("exact mates {exact_mates}: volume {got}, closed form {want}, rim off {off:e}");
+    eprintln!("volume {got}, closed form {want}, rim off {off:e}");
     ((got - want) / want, off)
 }
 
 #[test]
 fn issue_1061_moved_boss_top_is_exact_with_exact_mate_edges() {
-    let (rel, off) = moved_top(true);
+    let (rel, off) = moved_top();
     // measured 1.2e-14 and 3.6e-15
     assert!(rel.abs() < 1e-12, "{rel}");
     assert!(off < 1e-12, "{off}");
-}
-
-/// Without the opt-in the rim is marched off the circle (measured 7.5e-7), as upstream
-/// marches it. The part used to come out 9.7e-9 short: the integrator leaked through the
-/// marched rim's gap. With tolerant edges' gaps closed (#16735) its volume is the closed
-/// form (measured -2.7e-14).
-#[test]
-fn issue_1061_without_the_opt_in_the_rim_is_marched() {
-    let (rel, off) = moved_top(false);
-    assert!(rel.abs() < 1e-12, "{rel}");
-    assert!(off > 1e-8, "{off}");
 }

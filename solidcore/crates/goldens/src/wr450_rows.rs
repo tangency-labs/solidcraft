@@ -54,6 +54,11 @@
 //! --lib -- wr450_rows::record --ignored` rewrites `DATA` and `main.jsonl`; then set
 //! [`MAIN_COMMIT`] (the recorder does not write it), `UNITS`, the total and
 //! [`WITHIN_RULE`] by hand from its output.
+//!
+//! Retiring WR-495's flag (tangency-labs/solidcraft#21301) moved seven of these rows again
+//! (`topology.brep_local_operation`'s fc0000, fc0008, fc0025, gen0011, gen0030, gen0041 and
+//! gen0070; the first three were [`UNGATED_LINES`] rows too): they are deleted here by the
+//! first rule, and `wr495_rows` holds each to main's facts.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -66,7 +71,7 @@ use solidcore::surface::surface::replay::{Call, Seam};
 
 use crate::golden::encode;
 use crate::golden::{default_dir, diff, read};
-use crate::wr57_replay::{cases, run, unit, with_hook};
+use crate::replay_seam::{cases, run, unit, with_hook};
 use crate::UnitDiff;
 
 mod data;
@@ -159,7 +164,6 @@ fn with_mains_choices(u: &dyn UnitDiff, case: &crate::Case) -> (Value, Flips) {
                 // gate also moves within the comparator is listed by its class flips only;
                 // the rows the gate alone moved are `UNGATED_LINES`)
                 Seam::CarryGate => return Ok(vec![0]),
-                _ => return c.own,
             };
             if c.own.as_ref().ok() != Some(&main) {
                 let mut f = f.lock().unwrap();
@@ -259,7 +263,6 @@ pub(crate) fn with_mains_choices_counting_gate<R>(
             }
             Seam::AnalyticCopy => Ok(vec![0]),
             Seam::SplitTrims => Ok(c.input.to_vec()),
-            _ => c.own,
         },
         f,
     );
@@ -347,7 +350,7 @@ replay_tests! {
     api_projection: "topology.api_projection", 1;
     assert_valid: "topology.assert_valid", 3;
     brep_cutting: "topology.brep_cutting", 6;
-    brep_local_operation: "topology.brep_local_operation", 36;
+    brep_local_operation: "topology.brep_local_operation", 29;
     brep_mirror: "topology.brep_mirror", 51;
     brep_p1: "topology.brep_p1", 4;
     brep_p10: "topology.brep_p10", 30;
@@ -454,7 +457,7 @@ fn carry_gate_rows_move_only_through_the_gate() {
         rows += 1;
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows, 6, "the rows the carry gate moved");
+    assert_eq!(rows, 3, "the rows the carry gate moved");
 }
 
 /// Each [`BELOW_COMPARATOR`] row: not in [`DATA`]; as run, it agrees with its committed
@@ -552,7 +555,7 @@ fn data_covers_the_moved_rows() {
     }
     let want: BTreeMap<&str, usize> = UNITS.iter().copied().collect();
     assert_eq!(per_unit, want);
-    assert_eq!(DATA.len(), 402);
+    assert_eq!(DATA.len(), 395);
     // each (unit, case) once
     let keys: std::collections::BTreeSet<(&str, &str)> = DATA.iter().map(|r| (r.0, r.1)).collect();
     assert_eq!(keys.len(), DATA.len(), "a (unit, case) listed twice");

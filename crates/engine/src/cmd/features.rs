@@ -1933,19 +1933,24 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, &p, kind)
 }
 
-/// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis, a
-/// world axis (also as saved: {type: world, axis: X|Y|Z}), a construction axis by name
+/// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis (also
+/// as saved: {type: sketch_axis, axis: x|y}), a world axis (also as saved: {type: world, axis:
+/// X|Y|Z}), a construction axis by name
 /// (followed when it is edited), a component origin axis (saved as its datum, so it follows the
 /// placement), {origin, dir} (each origin coordinate a number or an expression over
 /// the parameters, which the axis follows), {sketch, curve} (a line of another sketch, followed in
 /// that sketch, #6548; also as saved: {type: sketch_line, …}), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
 /// changes. A line of the sketch wins over a construction axis of the same name.
-pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
+pub(crate) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
     if let Some((geo, ..)) = super::construct::model_axis_param(s, p.get("axis"), cmd)? {
         return Ok(AxisRef::Model { geo });
     }
     if let Some(o) = p.get("axis").filter(|v| v.is_object()) {
+        if str_(o, "type") == Some("sketch_axis") {
+            let axis = str_(o, "axis").filter(|a| matches!(*a, "x" | "y")).ok_or_else(|| bad(cmd, "sketch axis requires `axis` to be x or y"))?;
+            return Ok(AxisRef::SketchAxis { axis: axis.into() });
+        }
         if str_(o, "type") == Some("world") {
             let axis =
                 str_(o, "axis").filter(|a| matches!(*a, "X" | "Y" | "Z")).ok_or_else(|| bad(cmd, "world axis requires `axis` to be X, Y or Z"))?;
@@ -2810,13 +2815,18 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`setbacks` are built for a constant-radius fillet (`type: constant`, `fit: exact`) only"));
         }
     }
-    // How two rounds turn at a sharp side edge.
+    // How two rounds turn at a sharp side edge: a new fillet sweeps each turn where the swept turn
+    // builds and mitres the rest (`auto`), except one at per-edge radii, which is mitred.
     let turn = match str_(p, "turn").map(str::to_ascii_lowercase).as_deref() {
+        None if edge_radii.is_empty() => solidcraft_doc::FilletTurn::Auto,
+        Some("auto") => solidcraft_doc::FilletTurn::Auto,
         None | Some("mitre") => solidcraft_doc::FilletTurn::Mitre,
         Some("swept") => solidcraft_doc::FilletTurn::Swept,
-        Some(o) => return Err(bad(cmd, format!("unknown turn `{o}` (mitre or swept)"))),
+        Some(o) => return Err(bad(cmd, format!("unknown turn `{o}` (auto, mitre or swept)"))),
     };
-    if !turn.is_mitre() && (!style.is_constant() || fit == solidcraft_doc::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty()) {
+    if turn == solidcraft_doc::FilletTurn::Swept
+        && (!style.is_constant() || fit == solidcraft_doc::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty())
+    {
         return Err(bad(cmd, solidcraft_doc::SWEPT_TAKES));
     }
     let tangent_chain = bool_(p, "tangent_chain").unwrap_or(true);
@@ -5497,7 +5507,16 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     };
     check_expr(s, &factor, Kind::Unitless, cmd, "factor")?;
     let origin = p.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
-    add_feature(s, p, FeatureKind::Scale { bodies: bodies.into_iter().map(BodyName).collect(), origin: Position(origin), factor, factors })
+    // What it scales about, found again each time the design updates: `"centre"` (the bodies'
+    // centre) or a reference (a vertex, face, edge or sketch point), which follows the model. A
+    // fixed `origin` stays where it is.
+    let about = match p.get("about") {
+        None | Some(Value::Null) => None,
+        Some(_) if p.get("origin").is_some_and(|o| !o.is_null()) => return Err(bad(cmd, "give `origin` or `about`, not both")),
+        Some(Value::String(c)) if c == "centre" || c == "center" => Some(solidcraft_doc::ScaleAbout::Centre),
+        Some(v) => Some(solidcraft_doc::ScaleAbout::Pick { at: super::construct::geo(s, Some(v), cmd, "about")? }),
+    };
+    add_feature(s, p, FeatureKind::Scale { bodies: bodies.into_iter().map(BodyName).collect(), origin: Position(origin), about, factor, factors })
 }
 
 fn delete_face(s: &mut Session, p: &Value) -> Result<Value> {
@@ -5675,13 +5694,15 @@ mod corner_tests {
         assert!(err.contains("not supported yet") && err.contains("(40.000, 20.000, 20.000)") && err.contains("all convex or all concave"), "{err}");
     }
 
-    /// `solid.fillet turn?: mitre|swept` on the four base edges of a 10 x 10 x 5 boss on a
+    /// `solid.fillet turn?: auto|mitre|swept` on the four base edges of a 10 x 10 x 5 boss on a
     /// 40 x 30 x 10 plate, r 1: at each upright boss edge the two rounds turn round it. Each base
     /// edge gains the spandrel A = (1 - π/4) r² along its 10, and the corners the rounds' part
     /// beyond both walls, whose section's first moment about the upright edge is
-    /// M = (5/6 - π/4) r³: mitred (the default), 8 M; swept, that section revolved a quarter turn at
-    /// each corner, 2π M, the corner's face the horn torus of radii r, r about the upright edge,
-    /// centred r above the plate. The turn is saved; an unknown turn and a swept chord round are
+    /// M = (5/6 - π/4) r³: mitred, 8 M; swept, that section revolved a quarter turn at each corner,
+    /// 2π M, the corner's face the horn torus of radii r, r about the upright edge, centred r above
+    /// the plate. The default, auto, sweeps every turn the swept turn builds: these four concave
+    /// rounds turn round convex upright edges, so it is the swept body. The turn is saved (a
+    /// mitred one writes none); an unknown turn and a swept chord round are
     /// refused as parameters, and swept rounds along a pocket's floor (its upright edges concave)
     /// with the kernel's reason.
     #[test]
@@ -5706,8 +5727,8 @@ mod corner_tests {
             assert!(body.validity().is_empty(), "{:?}", body.validity());
             (s, solidcraft_kernel::measure(&body).unwrap(), body)
         };
-        let (mitred, mitre, _) = turned(None);
-        let (_, named, _) = turned(Some("mitre"));
+        let (defaulted, auto, _) = turned(None);
+        let (mitred, mitre, _) = turned(Some("mitre"));
         let (swept_session, swept, body) = turned(Some("swept"));
         eprintln!("mitre: {} faces, {:.9}; swept: {} faces, {:.9}", mitre.faces, mitre.volume, swept.faces, swept.volume);
         let r: f64 = 1.0;
@@ -5715,8 +5736,8 @@ mod corner_tests {
         let near = |v: f64, want: f64| (v - want).abs() < 1e-9 * want;
         assert!(near(mitre.volume, 12500.0 + 40.0 * a + 8.0 * m), "{}", mitre.volume);
         assert!(near(swept.volume, 12500.0 + 40.0 * a + 2.0 * PI * m), "{}", swept.volume);
-        assert_eq!(named.volume.to_bits(), mitre.volume.to_bits(), "mitre is the default");
-        assert_eq!((mitre.faces, swept.faces), (15, 19));
+        assert_eq!(auto.volume.to_bits(), swept.volume.to_bits(), "the default sweeps every turn here");
+        assert_eq!((mitre.faces, swept.faces, auto.faces), (15, 19, 19));
         // The four corner faces (the record's torus is a ring torus, so a horn torus is its exact
         // rational form): every point on the horn torus about its upright edge.
         let mut corners = 0;
@@ -5739,10 +5760,11 @@ mod corner_tests {
         }
         assert_eq!(corners, 4);
         assert!(!mitred.doc.to_json().contains("\"turn\""));
+        assert!(defaulted.doc.to_json().contains("\"turn\": \"auto\""));
         assert!(swept_session.doc.to_json().contains("\"turn\": \"swept\""));
         let mut s = boss();
         let e = s.execute("solid.fillet", &json!({"edges": BASE, "radius": 1, "turn": "round"})).unwrap_err().to_string();
-        assert!(e.contains("unknown turn `round` (mitre or swept)"), "{e}");
+        assert!(e.contains("unknown turn `round` (auto, mitre or swept)"), "{e}");
         let e = s.execute("solid.fillet", &json!({"edges": BASE, "radius": 1, "turn": "swept", "type": "chord"})).unwrap_err().to_string();
         assert!(e.contains(solidcraft_doc::SWEPT_TAKES), "{e}");
         // A pocket 5 deep in the plate, its floor's edges rounded: the rounds meet at its concave
@@ -5754,6 +5776,34 @@ mod corner_tests {
         let e = s.execute("solid.fillet", &json!({"edges": rim, "radius": 1, "turn": "swept"})).unwrap_err().to_string();
         eprintln!("swept along a pocket's rim: {e}");
         assert!(e.contains("swept corner at (") && e.contains("round that edge at a radius of at least 1 first"), "{e}");
+    }
+
+    /// The default turn never refuses a fillet the mitre builds. Along a pocket's floor the
+    /// rounds meet at its concave upright edges, where no ball turns (`turn: swept` is refused
+    /// there): the default mitres them, the mitre's closed form 11000 + 60 A - 8 M (A and M as in
+    /// [`rounds_turning_round_a_boss_edge_are_mitred_or_swept`], the floor's rounds adding
+    /// material). A fillet at per-edge radii, which builds only mitred, is mitred by default and
+    /// writes no `turn`.
+    #[test]
+    fn the_default_turn_mitres_where_no_ball_turns_and_at_per_edge_radii() {
+        use std::f64::consts::PI;
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "P"}));
+        run(&mut s, "solid.box", &json!({"corner": [10, 10, 5], "length": 20, "width": 10, "height": 6, "operation": "cut"}));
+        let rim = json!([[20, 10, 5], [30, 15, 5], [20, 20, 5], [10, 15, 5]]);
+        let reply = run(&mut s, "solid.fillet", &json!({"edges": rim, "radius": 1}));
+        assert_eq!(reply["warning"], json!(null), "{reply}");
+        let body = s.world_state().unwrap().body("P").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        let (a, m) = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+        let v = solidcraft_kernel::measure(&body).unwrap().volume;
+        let want = 11000.0 + 60.0 * a - 8.0 * m;
+        assert!((v - want).abs() < 1e-9 * want, "{v} against {want}");
+        assert!(s.doc.to_json().contains("\"turn\": \"auto\""));
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"}));
+        run(&mut s, "solid.fillet", &json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, 3], "tangent_chain": false}));
+        assert!(!s.doc.to_json().contains("\"turn\""));
     }
 
     /// `solid.fillet edge_radii: [r, ...]`: each picked edge at its own radius in one blend. On a
