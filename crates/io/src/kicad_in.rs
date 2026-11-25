@@ -3745,6 +3745,16 @@ fn token_cap(len: usize) -> usize {
     MIN_TOKEN_CAP.max(len / 2)
 }
 
+/// Push one token, refusing the board first when the vector already holds `cap` tokens, so it never
+/// grows (and reallocates) past the cap.
+fn push_token<'a>(tokens: &mut Vec<Token<'a>>, cap: usize, token: Token<'a>) -> Result<()> {
+    if tokens.len() >= cap {
+        return Err(IoError::Invalid(format!("KiCad PCB has more than {cap} s-expression tokens")));
+    }
+    tokens.push(token);
+    Ok(())
+}
+
 fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
     let cap = token_cap(source.len());
     let mut tokens = Vec::new();
@@ -3753,16 +3763,16 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
         let byte = source.as_bytes().get(index).copied().unwrap_or_default();
         match byte {
             b'(' => {
-                tokens.push(Token::Open);
+                push_token(&mut tokens, cap, Token::Open)?;
                 index += 1;
             }
             b')' => {
-                tokens.push(Token::Close);
+                push_token(&mut tokens, cap, Token::Close)?;
                 index += 1;
             }
             b'"' => {
                 let (value, next) = quoted(source, index + 1)?;
-                tokens.push(Token::String(value));
+                push_token(&mut tokens, cap, Token::String(value))?;
                 index = next;
             }
             b';' => {
@@ -3779,11 +3789,8 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
                     index += 1;
                 }
                 let word = source.get(start..index).ok_or_else(|| IoError::Invalid("invalid UTF-8 boundary in KiCad PCB".into()))?;
-                tokens.push(Token::Atom(word));
+                push_token(&mut tokens, cap, Token::Atom(word))?;
             }
-        }
-        if tokens.len() > cap {
-            return Err(IoError::Invalid(format!("KiCad PCB has more than {cap} s-expression tokens")));
         }
     }
     Ok(tokens)
