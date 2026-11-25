@@ -839,6 +839,24 @@ impl Line {
 
     /// Exact coordinates of a line point when the parameter conversion is exact.
     pub(crate) fn point_expansions_at_parameter(&self, t: f64) -> Option<[Vec<f64>; 3]> {
+        let step = self.exact_step_parameter_at(t)?;
+        let parameter = expansion::product(step, self.scale)?;
+        let [x, y, z] = [
+            (self.point.x, self.vector.x),
+            (self.point.y, self.vector.y),
+            (self.point.z, self.vector.z),
+        ]
+        .map(|(origin, direction)| {
+            Some(expansion::add(
+                &expansion::scale(&parameter, direction)?,
+                &[origin],
+            ))
+        });
+        Some([x?, y?, z?])
+    }
+
+    /// The STEP parameter when conversion from the line's NURB domain is exact.
+    pub(crate) fn exact_step_parameter_at(&self, t: f64) -> Option<f64> {
         if !t.is_finite() {
             return None;
         }
@@ -872,19 +890,7 @@ impl Line {
             t
         };
 
-        let parameter = expansion::product(step, self.scale)?;
-        let [x, y, z] = [
-            (self.point.x, self.vector.x),
-            (self.point.y, self.vector.y),
-            (self.point.z, self.vector.z),
-        ]
-        .map(|(origin, direction)| {
-            Some(expansion::add(
-                &expansion::scale(&parameter, direction)?,
-                &[origin],
-            ))
-        });
-        Some([x?, y?, z?])
+        Some(step)
     }
 
     /// Not upstream: the STEP parameter of NURB parameter `t` as
@@ -904,7 +910,7 @@ impl Line {
     /// `η = 2^-1075` (sums and differences are exact there). The quotient's `η` is then
     /// multiplied by `A`, the product's is not, so `(1 + |A|) · 2^-1074` covers both with
     /// room for the bound's own rounding. The other branches copy or negate `t`, exactly.
-    fn step_param_enclosure(&self, t: f64) -> Option<(f64, f64)> {
+    pub(crate) fn step_param_enclosure(&self, t: f64) -> Option<(f64, f64)> {
         let s = self.convert_t_from_nurbs_to_step(t);
         let err = if self.is_bounded() && !is_zero(self.natural_interval().length()) {
             let subnormal = (1.0 + self.anal_domain.length().abs()) * f64::from_bits(1);

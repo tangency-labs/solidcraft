@@ -1,6 +1,6 @@
 //! Enclose the exact endpoints of straight edges on non-cardinal support planes.
 
-use super::{coords, expansion_span, lift_component, measured_span, resolved_vertex};
+use super::{cardinal, coords, expansion_span, lift_component, measured_span, resolved_vertex};
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
@@ -10,7 +10,7 @@ use crate::geom::expansion;
 use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
-use crate::nurbs::math::{CPoint, NOW};
+use crate::nurbs::math::{gamma, CPoint, NOW};
 use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
@@ -18,6 +18,7 @@ use crate::topology::face::p2 as face2;
 use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 pub(super) type PointBounds = [Ivl; 3];
+pub(super) type UvEnds = [[Vec<f64>; 2]; 2];
 
 pub(super) fn point_bounds(point: Point3) -> PointBounds {
     coords(point).map(Ivl::from)
@@ -280,10 +281,7 @@ pub(super) fn line_endpoints(line: &Line, interval: &Extent1d) -> Option<[PointB
 }
 
 /// Enclose each spatial coordinate independently at the selected endpoint.
-pub(super) fn line_end_with_error(
-    line: &Line,
-    parameter: f64,
-) -> Option<(PointBounds, PointBounds)> {
+fn line_end_bounds(line: &Line, parameter: f64) -> Option<PointBounds> {
     let errors = line.point_coordinate_errors(parameter)?;
     let point = line.evaluate_point(parameter);
     if !coords(point).into_iter().all(f64::is_finite) {
@@ -312,7 +310,7 @@ pub(super) fn line_end_with_error(
             *value = Ivl::from(origin);
         }
     }
-    Some((bounds, errors.map(|error| Ivl::new(-error, error))))
+    Some(bounds)
 }
 
 /// The lifted ends of an affine stored trim over the actual edge interval.
@@ -335,7 +333,7 @@ pub(super) fn lifted_trim(
         }
         CurveKind::Line(line) if line.dim() == 2 => {
             let [a, z] = [interval.min(), interval.max()]
-                .map(|t| line_end_with_error(line, t).map(|([u, v, _], _)| [u, v]));
+                .map(|t| line_end_bounds(line, t).map(|[u, v, _]| [u, v]));
             a.zip(z).map(|(a, z)| [a, z])
         }
         _ => None,
@@ -343,7 +341,7 @@ pub(super) fn lifted_trim(
     Ok(uv.map(|uv| uv_bounds(plane, uv)))
 }
 
-fn uv_terms(b: &Brep, eu: EdgeuseId) -> Result<Option<[[Vec<f64>; 2]; 2]>> {
+pub(super) fn uv_terms(b: &Brep, eu: EdgeuseId) -> Result<Option<UvEnds>> {
     let Some(e) = eu1::edge(b, eu)? else {
         return Ok(None);
     };
@@ -354,7 +352,7 @@ fn uv_terms(b: &Brep, eu: EdgeuseId) -> Result<Option<[[Vec<f64>; 2]; 2]>> {
     terms_for_curve(curve, interval)
 }
 
-fn terms_for_curve(curve: &Curve, interval: Extent1d) -> Result<Option<[[Vec<f64>; 2]; 2]>> {
+fn terms_for_curve(curve: &Curve, interval: Extent1d) -> Result<Option<UvEnds>> {
     Ok(match curve.kind() {
         CurveKind::BSpline(spline)
             if spline.dim() == 2
@@ -376,6 +374,111 @@ fn terms_for_curve(curve: &Curve, interval: Extent1d) -> Result<Option<[[Vec<f64
         }
         _ => None,
     })
+}
+
+/// Project the affine lift before enclosing either endpoint. UV motion parallel
+/// to the boundary then cancels exactly, even along a long trim.
+pub(super) fn projected_uv_ends(
+    plane: &Plane,
+    ends: &UvEnds,
+    normal: Point3,
+    level: &[f64],
+) -> Option<[(Ivl, Ivl); 2]> {
+    let chart = plane.position();
+    let origin = expansion::dot(normal, chart.origin())?;
+    let slopes = [
+        expansion::scale(&expansion::dot(normal, chart.x_axis())?, plane.uv_scale().x)?,
+        expansion::scale(&expansion::dot(normal, chart.y_axis())?, plane.uv_scale().y)?,
+    ];
+    let [first, last] = ends;
+    let domain = plane.step_uv_domain();
+    let limits = [
+        (domain.min().x, domain.max().x),
+        (domain.min().y, domain.max().y),
+    ];
+    let unbounded = plane.is_out_of_bounds_enabled();
+    if !unbounded
+        && first
+            .iter()
+            .zip(last)
+            .all(|(a, z)| !expansion::is_zero(&expansion::sub(a, z)))
+        && first
+            .iter()
+            .zip(last)
+            .zip(&slopes)
+            .zip(limits)
+            .any(|(((a, z), slope), (min, max))| {
+                !expansion::is_zero(slope) && !shared_clamp_branch(a, z, min, max)
+            })
+    {
+        // A clamp can bend a trim with two varying coordinates between its
+        // endpoints. Keep the full raw enclosure where that projection bends.
+        return None;
+    }
+    let cardinal_axis = cardinal([0.0; 3], coords(normal)).is_some();
+    let magnitude = |terms: &[f64]| {
+        let span = expansion_span(terms)?;
+        Some(Ivl::from(span.lo.abs().max(span.hi.abs())))
+    };
+    let origin_size = abs_dot(normal, chart.origin())?.add_ulp(magnitude(level)?);
+    let origin = expansion::sub(&origin, level);
+    let project = |uv: &[Vec<f64>; 2]| {
+        let (value, size) = uv.iter().zip(&slopes).zip(limits).try_fold(
+            (origin.clone(), origin_size),
+            |(sum, size), ((terms, slope), (min, max))| {
+                if !terms.iter().all(|t| t.is_finite()) {
+                    return None;
+                }
+                let clamped = if unbounded {
+                    terms.as_slice()
+                } else if expansion::sign(&expansion::sub(terms, &[min])) < 0 {
+                    std::slice::from_ref(&min)
+                } else if expansion::sign(&expansion::sub(terms, &[max])) > 0 {
+                    std::slice::from_ref(&max)
+                } else {
+                    terms.as_slice()
+                };
+                let contribution = clamped.iter().try_fold(Vec::new(), |sum, &t| {
+                    Some(expansion::add(&sum, &expansion::scale(slope, t)?))
+                })?;
+                Some((
+                    expansion::add(&sum, &contribution),
+                    size.add_ulp(magnitude(&contribution)?),
+                ))
+            },
+        )?;
+        // Two coordinate products and three sums in the affine projection
+        // relative to the cap. Its tangent coefficients are already combined.
+        let roundoff = if cardinal_axis {
+            Ivl::from(0.0)
+        } else {
+            let bound = size.mul_ulp(Ivl::from(gamma(5))).hi;
+            Ivl::new(-bound, bound)
+        };
+        let span = expansion_span(&value)?;
+        Some((Ivl::new(span.lo, span.hi), roundoff))
+    };
+    Some([project(first)?, project(last)?])
+}
+
+fn shared_clamp_branch(a: &[f64], z: &[f64], min: f64, max: f64) -> bool {
+    if min == max {
+        return true;
+    }
+    let lower = [a, z].map(|point| expansion::sign(&expansion::sub(point, &[min])));
+    let upper = [a, z].map(|point| expansion::sign(&expansion::sub(point, &[max])));
+    lower.into_iter().all(|sign| sign <= 0)
+        || upper.into_iter().all(|sign| sign >= 0)
+        || (lower.into_iter().all(|sign| sign >= 0) && upper.into_iter().all(|sign| sign <= 0))
+}
+
+pub(super) fn abs_dot(a: Point3, b: Point3) -> Option<Ivl> {
+    let abs = |p| {
+        let [x, y, z] = coords(p).map(f64::abs);
+        Point3::new(x, y, z)
+    };
+    let sum = expansion_span(&expansion::dot(abs(a), abs(b))?)?;
+    Some(Ivl::new(sum.lo, sum.hi))
 }
 
 /// Compare the affine restriction of a stored trim to the kernel's

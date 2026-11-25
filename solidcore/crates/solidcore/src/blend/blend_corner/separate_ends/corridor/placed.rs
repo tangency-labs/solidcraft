@@ -11,6 +11,7 @@ use crate::geom::expansion;
 use crate::geom::extent3d::Extent3d;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
+use crate::nurbs::math::gamma;
 use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::face::p2 as face2;
@@ -68,18 +69,97 @@ impl Axis {
         coordinate.is_finite().then_some(coordinate)
     }
     fn coordinate_bounds(self, point: PointBounds) -> Ivl {
-        trim::dot(point, coords(self.direction).map(Ivl::from)).div_ulp(self.length_squared)
+        let direction = coords(self.direction);
+        if self.length_squared == Ivl::from(1.0) {
+            if let Some((axis, positive)) = cardinal([0.0; 3], direction) {
+                if let Some(&value) = point.get(axis) {
+                    return if positive {
+                        value
+                    } else {
+                        Ivl::new(-value.hi, -value.lo)
+                    };
+                }
+            }
+        }
+        trim::dot(point, direction.map(Ivl::from)).div_ulp(self.length_squared)
     }
 
-    fn contact_roundoff(self, error: PointBounds) -> Ivl {
-        // A cardinal projection can use the actual Cartesian enclosures.
-        // A placed axis needs the rounding from this endpoint in its own chart.
+    #[cfg(test)]
+    fn support_level(self, level: f64) -> Option<Vec<f64>> {
+        expansion::scale(&expansion::dot(self.direction, self.direction)?, level)
+    }
+
+    /// The signed line projection relative to the level, in numerator units.
+    /// Apply parameter uncertainty to the projected slope. An exactly zero
+    /// slope removes all dependence on movement along the line.
+    fn edge_residual(self, line: &Line, t: f64, level: &[f64]) -> Option<(Ivl, Ivl)> {
+        let origin = line.line_point();
+        let base = expansion::sub(&expansion::dot(origin, self.direction)?, level);
+        let slope = expansion::scale(
+            &expansion::dot(self.direction, line.line_vector())?,
+            line.line_scale(),
+        )?;
+        let (step, step_error) = if expansion::is_zero(&slope) {
+            (0.0, 0.0)
+        } else {
+            line.exact_step_parameter_at(t)
+                .map(|step| (step, 0.0))
+                .or_else(|| line.step_param_enclosure(t))?
+        };
+        let residual = expansion_span(&expansion::add(&base, &expansion::scale(&slope, step)?))?;
+        let slope = expansion_span(&slope)?;
+        let speed = Ivl::new(slope.lo, slope.hi);
+        let parameter_error = speed.mul_ulp(Ivl::new(-step_error, step_error));
+        let bounds = Ivl::new(residual.lo, residual.hi).add_ulp(parameter_error);
         if cardinal([0.0; 3], coords(self.direction)).is_some() {
+            return Some((bounds, cardinal_point_roundoff(level)?));
+        }
+        // Bounds for the rounded Cartesian line evaluation before projection.
+        // The products in the origin dot contribute individually. An exactly
+        // tangential line has no travel term. The independently evaluated UV
+        // trim always uses its own affine projection and arithmetic bound.
+        let origin_size = trim::abs_dot(origin, self.direction)?;
+        let travel = if speed == Ivl::from(0.0) {
             Ivl::from(0.0)
         } else {
-            self.coordinate_bounds(error)
-        }
+            trim::abs_dot(line.line_vector(), self.direction)?
+                .mul_ulp(Ivl::from(line.line_scale().abs()))
+                .mul_ulp(Ivl::from(step.abs()).add_ulp(Ivl::from(step_error)))
+        };
+        let level = expansion_span(level)?;
+        let level_magnitude = Ivl::new(level.lo, level.hi).mag();
+        let roundoff = origin_size
+            .add_ulp(Ivl::from(level_magnitude))
+            .add_ulp(travel)
+            .mul_ulp(Ivl::from(gamma(3)));
+        roundoff
+            .is_finite()
+            .then_some((bounds, Ivl::new(-roundoff.hi, roundoff.hi)))
     }
+}
+
+/// A cardinal projection of the spatial line may round to the stored cap
+/// coordinate. Its rounding cell excludes the next representable value on
+/// either side. Trims use the exact cardinal projection independently.
+fn cardinal_point_roundoff(level: &[f64]) -> Option<Ivl> {
+    let at = expansion::to_f64(level);
+    if !at.is_finite() || !expansion::is_zero(&expansion::sub(level, &[at])) {
+        return None;
+    }
+    let half_gap = |gap: f64| {
+        let half = gap * 0.5;
+        if !half.is_finite() || half == 0.0 {
+            0.0
+        } else if at.to_bits() & 1 == 0 {
+            half
+        } else {
+            half.next_down()
+        }
+    };
+    Some(Ivl::new(
+        -half_gap(at.next_up() - at),
+        half_gap(at - at.next_down()),
+    ))
 }
 
 fn reaches_level(range: Ivl, roundoff: Ivl, level: f64) -> bool {
@@ -314,18 +394,16 @@ impl Placed {
             return Ok(None);
         };
         let interval = edge::interval(b, e)?;
-        let [Some(first), Some(last)] = [interval.min(), interval.max()]
-            .map(|parameter| trim::line_end_with_error(line, parameter))
-        else {
-            return Ok(None);
-        };
         let project = |point| self.frame.axes.map(|axis| axis.coordinate_bounds(point));
         let mut projected = raw.map(project);
+        let uv = trim::uv_terms(b, eu)?;
         let mut regenerated = None;
-        for ((bounds, (vertex, nominal)), (spatial, error)) in
-            projected.iter_mut().zip(endpoints).zip([first, last])
+        for (end, ((bounds, (vertex, nominal)), parameter)) in projected
+            .iter_mut()
+            .zip(endpoints)
+            .zip([interval.min(), interval.max()])
+            .enumerate()
         {
-            let spatial = project(spatial);
             for (other, axis, level) in boundaries {
                 let Some(level) = level else {
                     continue;
@@ -333,17 +411,35 @@ impl Placed {
                 if other == face || coords(nominal).get(axis) != Some(&level) {
                     continue;
                 }
-                let (Some(value), Some(spatial), Some(basis)) = (
-                    bounds.get_mut(axis),
-                    spatial.get(axis),
-                    self.frame.axes.get(axis),
-                ) else {
+                let Some(value) = bounds.get_mut(axis) else {
+                    return Ok(None);
+                };
+                let Some(cap) = read_plane(b, other)? else {
+                    continue;
+                };
+                let cap = cap.position();
+                let Some(basis) = Axis::new(cap.z_axis()) else {
+                    continue;
+                };
+                let Some(reference) = expansion::dot(basis.direction, cap.origin()) else {
+                    continue;
+                };
+                let Some((spatial, rounding)) = basis.edge_residual(line, parameter, &reference)
+                else {
+                    continue;
+                };
+                let Some(lifted) = uv
+                    .as_ref()
+                    .and_then(|uv| trim::projected_uv_ends(plane, uv, basis.direction, &reference))
+                else {
+                    continue;
+                };
+                let Some(&(lifted, uv_rounding)) = lifted.get(end) else {
                     return Ok(None);
                 };
                 // Both representations must reach the level at this endpoint.
-                let rounding = basis.contact_roundoff(error);
-                if !reaches_level(*value, rounding, level)
-                    || !reaches_level(*spatial, rounding, level)
+                if !reaches_level(lifted, uv_rounding, 0.0)
+                    || !reaches_level(spatial, rounding, 0.0)
                 {
                     continue;
                 }
@@ -441,6 +537,8 @@ mod tests {
     use super::*;
     use crate::curve::line::BoundedLineOptions;
     use crate::geom::extent1d::Extent1d;
+    use crate::geom::extent2d::Extent2d;
+    use crate::math::Vec2;
 
     #[test]
     fn a_long_edge_does_not_hide_an_offset_across_a_cardinal_cap() {
@@ -452,18 +550,106 @@ mod tests {
             &BoundedLineOptions::default(),
         );
         let axis = Axis::new(Vec3::new(1.0, 0.0, 0.0)).expect("finite cap normal");
+        let reference = axis.support_level(1.0).expect("finite support level");
         let offset = 2.0_f64.powi(-35);
         assert!(line.point_error(length).expect("finite end error") > offset);
         for t in [0.0, length] {
-            let (spatial, error) =
-                trim::line_end_with_error(&line, t).expect("finite line endpoint");
-            let rounding = axis.contact_roundoff(error);
-            assert!(reaches_level(
-                axis.coordinate_bounds(spatial),
-                rounding,
-                1.0
-            ));
-            assert!(!reaches_level(Ivl::from(1.0 + offset), rounding, 1.0));
+            let (spatial, error) = axis
+                .edge_residual(&line, t, &reference)
+                .expect("finite line endpoint");
+            assert!(reaches_level(spatial, error, 0.0));
+            assert!(!reaches_level(Ivl::from(offset), error, 0.0));
+        }
+    }
+
+    #[test]
+    fn a_long_rotated_edge_cannot_hide_a_shift_across_its_cap() {
+        let length = 2.0_f64.powi(20);
+        let offset = 2.0_f64.powi(-35);
+        let normal = Vec3::new(0.6, 0.8, 0.0);
+        let tangent = Vec3::new(-0.8, 0.6, 0.0);
+        let line = Line::bounded(
+            normal,
+            tangent,
+            &Extent1d::from_min_max(length, length + 1.0),
+            &BoundedLineOptions::default(),
+        );
+        let plane = Plane::new(
+            normal,
+            normal,
+            tangent,
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(-1.0, 0.0, 1.0, length + 2.0),
+        );
+        let axis = Axis::new(normal).expect("finite cap normal");
+        let reference = axis.support_level(1.0).expect("finite support level");
+        for (shift, contact) in [(-offset, false), (0.0, true), (offset, false)] {
+            let parameters = [length, length + 1.0];
+            let ends = parameters.map(|v| [vec![shift], vec![v]]);
+            let lifted = trim::projected_uv_ends(&plane, &ends, normal, &reference)
+                .expect("affine trim within the chart");
+            for (t, (lifted, uv_rounding)) in parameters.into_iter().zip(lifted) {
+                let (spatial, rounding) = axis
+                    .edge_residual(&line, t, &reference)
+                    .expect("finite line endpoint");
+                assert!(reaches_level(spatial, rounding, 0.0));
+                assert_eq!(
+                    reaches_level(lifted, uv_rounding, 0.0),
+                    contact,
+                    "shift={shift}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_clamped_trim_must_not_hide_a_bend_between_its_ends() {
+        let plane = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        );
+        let epsilon = 0.125;
+        let normal = Vec3::new(1.0, 1.0, 0.0);
+        let bent = [
+            [vec![-epsilon], vec![epsilon]],
+            [vec![epsilon], vec![-epsilon]],
+        ];
+        assert!(trim::projected_uv_ends(&plane, &bent, normal, &[epsilon]).is_none());
+
+        let straight = [
+            [vec![-epsilon], vec![epsilon]],
+            [vec![epsilon], vec![epsilon]],
+        ];
+        let [(first, first_error), (last, last_error)] =
+            trim::projected_uv_ends(&plane, &straight, normal, &[epsilon])
+                .expect("a fixed UV coordinate only shortens the straight segment");
+        assert!(reaches_level(first, first_error, 0.0));
+        assert!(!reaches_level(last, last_error, 0.0));
+    }
+
+    #[test]
+    fn either_cardinal_axis_sign_preserves_the_next_value_across_a_cap() {
+        let at = 1.0_f64;
+        for direction in [1.0, -1.0] {
+            let axis = Axis::new(Vec3::new(direction, 0.0, 0.0)).expect("finite cap normal");
+            let level = direction * at;
+            let no_rounding = Ivl::from(0.0);
+            let stored = cardinal_point_roundoff(&[level]).expect("finite stored coordinate");
+            for (x, contact) in [(at.next_down(), false), (at, true), (at.next_up(), false)] {
+                let point = [Ivl::from(x), Ivl::from(2.0), Ivl::from(3.0)];
+                assert_eq!(
+                    reaches_level(axis.coordinate_bounds(point), no_rounding, level),
+                    contact,
+                    "direction={direction}, x={x:?}"
+                );
+                let residual = Ivl::from(direction * x - level);
+                assert_eq!(reaches_level(residual, stored, 0.0), contact);
+            }
+            let inside_rounding_cell = direction * (at.next_up() - at) * 0.25;
+            assert!(reaches_level(Ivl::from(inside_rounding_cell), stored, 0.0));
         }
     }
 }
