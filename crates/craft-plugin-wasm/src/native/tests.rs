@@ -2533,6 +2533,40 @@ fn file_aware_hooks_read_optional_user_settings_without_publishing_or_writing() 
 }
 
 #[test]
+fn parallel_dialog_tests_do_not_share_prefix_read_slots() {
+    let reads = prefix_reads();
+    let mut releases = Vec::new();
+    let mut replies = Vec::new();
+    for _ in 0..MAX_PREFIX_READS {
+        let (release, blocked) = mpsc::channel();
+        let reply = start_prefix_read(prefix_reads(), move || {
+            blocked.recv().unwrap();
+            Ok(())
+        })
+        .unwrap();
+        releases.push(release);
+        replies.push(reply);
+    }
+    // Repeated calls on this thread still share the limit.
+    assert_eq!(reads.load(Ordering::Acquire), MAX_PREFIX_READS);
+    let refused = start_prefix_read(prefix_reads(), || Ok(()));
+    assert!(matches!(refused, Err(HostError::LimitExceeded { .. })));
+
+    // Another test can read while every permit on this thread is occupied.
+    let other = std::thread::spawn(|| {
+        start_prefix_read(prefix_reads(), || Ok(7_u8))
+            .and_then(|reply| wait_prefix(&reply, Instant::now() + Duration::from_secs(5)))
+    })
+    .join();
+    for (release, reply) in releases.into_iter().zip(replies) {
+        release.send(()).unwrap();
+        reply.recv().unwrap().unwrap();
+    }
+    assert_eq!(reads.load(Ordering::Acquire), 0);
+    assert_eq!(other.unwrap().unwrap(), 7);
+}
+
+#[test]
 fn a_blocked_prefix_read_expires_and_late_reads_keep_the_global_slots_until_finished() {
     let reads = Arc::new(AtomicUsize::new(0));
     let mut releases = Vec::new();
