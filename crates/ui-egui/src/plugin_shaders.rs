@@ -12,19 +12,23 @@ use crate::SolveApp;
 /// The status line's message when a background can't be drawn.
 const UNREADABLE: &str = "prefs.background_shader_failed";
 
-struct Loaded {
-    wgsl: String,
-    animated: bool,
+pub(crate) struct Loaded {
+    pub(crate) wgsl: String,
+    pub(crate) animated: bool,
+    pub(crate) kind: solidcraft_engine::plugin::shader::ShaderKind,
+    /// Its manifest entry, for its settings.
+    pub(crate) shader: solidcraft_engine::plugin::shader::Shader,
     /// Each texture's mip levels, largest first: size and straight RGBA.
-    textures: Vec<Vec<([u32; 2], Vec<u8>)>>,
+    pub(crate) textures: Vec<Vec<([u32; 2], Vec<u8>)>>,
 }
 
-type Pending = Arc<Mutex<Option<Result<Loaded, String>>>>;
+pub(crate) type Pending = Arc<Mutex<Option<Result<Loaded, String>>>>;
 
 /// A background ready to draw, and its target the size of the view.
 struct Active {
     key: String,
     animated: bool,
+    shader: solidcraft_engine::plugin::shader::Shader,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniforms: wgpu::Buffer,
@@ -59,7 +63,7 @@ impl State {
 }
 
 /// The folder of the turned-on plugin that offers background `key`, if one is installed.
-fn folder_of(app: &SolveApp, key: &str) -> Option<String> {
+pub(crate) fn folder_of(app: &SolveApp, key: &str) -> Option<String> {
     let (plugin, shader) = key.split_once('/')?;
     if !crate::plugins::enabled(app, plugin) {
         return None;
@@ -72,7 +76,7 @@ fn folder_of(app: &SolveApp, key: &str) -> Option<String> {
 }
 
 /// A plugin folder's manifest alone: a background needs no component.
-fn manifest(folder: &str) -> Result<solidcraft_engine::plugin::Manifest, String> {
+pub(crate) fn manifest(folder: &str) -> Result<solidcraft_engine::plugin::Manifest, String> {
     let dir = std::path::Path::new(folder);
     let name = dir.file_name().and_then(|n| n.to_str()).ok_or("a plugin folder needs a name")?;
     let path = dir.join("plugin.json");
@@ -85,7 +89,7 @@ fn manifest(folder: &str) -> Result<solidcraft_engine::plugin::Manifest, String>
 }
 
 /// Reads and checks the chosen background off the window thread.
-fn load(folder: String, key: String, limit: u32) -> Result<Loaded, String> {
+pub(crate) fn load(folder: String, key: String, limit: u32) -> Result<Loaded, String> {
     let manifest = manifest(&folder)?;
     let shader_id = key.split_once('/').map(|(_, s)| s).unwrap_or_default();
     let shader = manifest.shaders.iter().find(|s| s.id == shader_id).ok_or_else(|| format!("{key} is not in the plugin any more"))?;
@@ -110,7 +114,7 @@ fn load(folder: String, key: String, limit: u32) -> Result<Loaded, String> {
                 .and_then(|bytes| mips(&bytes, side).map_err(|e| format!("{}: {e}", t.file)))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Loaded { wgsl: compiled.wgsl, animated: shader.animated, textures })
+    Ok(Loaded { wgsl: compiled.wgsl, animated: shader.animated, kind: shader.kind, shader: shader.clone(), textures })
 }
 
 /// A picture's mip levels, at most `limit` on a side, down to 1×1.
@@ -205,7 +209,8 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
     } else {
         0.0
     };
-    let uniforms = host_uniforms(size, time, ppp, &app.cam, tokens);
+    let settings = settings(&app.preferences.shader_settings, &active.key, &active.shader);
+    let uniforms = host_uniforms(size, time, ppp, &app.cam, tokens, settings);
     let Some(id) = draw(&rs, active, size, &uniforms) else { return };
     painter.image(id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
 }
@@ -265,13 +270,29 @@ fn retire(state: &mut State) {
 }
 
 /// Linear-light RGBA of a theme colour, alpha 1.
-fn linear(c: egui::Color32) -> [f32; 4] {
+pub(crate) fn linear(c: egui::Color32) -> [f32; 4] {
     let l = egui::Rgba::from(c);
     [l.r(), l.g(), l.b(), 1.0]
 }
 
 /// `ScHost` as the shader reads it (`solidcraft_engine::plugin::shader::PRELUDE`).
-fn host_uniforms(size: [u32; 2], time: f32, scale: f32, cam: &solidcraft_viewport::Camera, t: &solidcraft_theme::Tokens) -> Vec<u8> {
+/// The values of `key`'s settings (`sc.settings`) from the preference, keyed `plugin/shader/setting`.
+pub(crate) fn settings(
+    stored: &std::collections::BTreeMap<String, f32>,
+    key: &str,
+    shader: &solidcraft_engine::plugin::shader::Shader,
+) -> [f32; solidcraft_engine::plugin::shader::MAX_SETTINGS] {
+    shader.setting_values(|id| stored.get(&format!("{key}/{id}")).copied())
+}
+
+pub(crate) fn host_uniforms(
+    size: [u32; 2],
+    time: f32,
+    scale: f32,
+    cam: &solidcraft_viewport::Camera,
+    t: &solidcraft_theme::Tokens,
+    settings: [f32; solidcraft_engine::plugin::shader::MAX_SETTINGS],
+) -> Vec<u8> {
     const HALF_HEIGHT: f64 = 0.5;
     let (right, up, back) = cam.basis();
     let aspect = f64::from(size[0]) / f64::from(size[1].max(1));
@@ -285,6 +306,7 @@ fn host_uniforms(size: [u32; 2], time: f32, scale: f32, cam: &solidcraft_viewpor
         f.extend(linear(c));
     }
     f.extend([if dark { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
+    f.extend(settings);
     debug_assert_eq!(f.len() * 4, solidcraft_engine::plugin::shader::HOST_UNIFORM_BYTES);
     f.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
@@ -296,6 +318,9 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// The pipeline and bindings for `loaded`, made under error scopes: a module this graphics card
 /// refuses is an error here, never a crash.
 fn build(rs: &egui_wgpu::RenderState, key: &str, loaded: Loaded) -> Result<Active, String> {
+    if loaded.kind != solidcraft_engine::plugin::shader::ShaderKind::Background {
+        return Err("not a background".into());
+    }
     let device = &rs.device;
     let scopes = [wgpu::ErrorFilter::Validation, wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal].map(|f| device.push_error_scope(f));
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -374,7 +399,7 @@ fn build(rs: &egui_wgpu::RenderState, key: &str, loaded: Loaded) -> Result<Activ
         })
     };
     let (clamp, repeat) = (sampler(wgpu::AddressMode::ClampToEdge), sampler(wgpu::AddressMode::Repeat));
-    let views: Vec<wgpu::TextureView> = loaded.textures.iter().map(|levels| upload(rs, levels)).collect();
+    let views: Vec<wgpu::TextureView> = loaded.textures.iter().map(|levels| upload(&rs.device, &rs.queue, levels)).collect();
     let mut bindings = vec![
         wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&clamp) },
@@ -397,12 +422,12 @@ fn build(rs: &egui_wgpu::RenderState, key: &str, loaded: Loaded) -> Result<Activ
     if let Some(error) = error {
         return Err(error);
     }
-    Ok(Active { key: key.to_string(), animated: loaded.animated, pipeline, bind_group, uniforms, target: None })
+    Ok(Active { key: key.to_string(), animated: loaded.animated, shader: loaded.shader, pipeline, bind_group, uniforms, target: None })
 }
 
-fn upload(rs: &egui_wgpu::RenderState, levels: &[([u32; 2], Vec<u8>)]) -> wgpu::TextureView {
+pub(crate) fn upload(device: &wgpu::Device, queue: &wgpu::Queue, levels: &[([u32; 2], Vec<u8>)]) -> wgpu::TextureView {
     let [w, h] = levels.first().map_or([1, 1], |(size, _)| *size);
-    let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("sc_plugin_background_picture"),
         size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         mip_level_count: levels.len().max(1) as u32,
@@ -413,7 +438,7 @@ fn upload(rs: &egui_wgpu::RenderState, levels: &[([u32; 2], Vec<u8>)]) -> wgpu::
         view_formats: &[],
     });
     for (level, ([lw, lh], rgba)) in levels.iter().enumerate() {
-        rs.queue.write_texture(
+        queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: level as u32, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             rgba,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * lw), rows_per_image: Some(*lh) },
@@ -491,7 +516,7 @@ mod tests {
     #[test]
     fn the_host_uniforms_are_the_size_the_prelude_declares() {
         let tokens = solidcraft_theme::Tokens::get();
-        let bytes = super::host_uniforms([800, 400], 1.5, 2.0, &solidcraft_viewport::Camera::default(), &tokens);
+        let bytes = super::host_uniforms([800, 400], 1.5, 2.0, &solidcraft_viewport::Camera::default(), &tokens, [0.0; 4]);
         assert_eq!(bytes.len(), solidcraft_engine::plugin::shader::HOST_UNIFORM_BYTES);
         let first: Vec<f32> = bytes.chunks(4).take(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
         assert_eq!(first, vec![800.0, 400.0, 1.5, 2.0]);
@@ -500,7 +525,7 @@ mod tests {
     #[test]
     fn the_background_turns_with_the_camera_but_not_with_zoom_or_pan() {
         let tokens = solidcraft_theme::Tokens::get();
-        let at = |cam: &solidcraft_viewport::Camera| super::host_uniforms([800, 400], 0.0, 1.0, cam, &tokens);
+        let at = |cam: &solidcraft_viewport::Camera| super::host_uniforms([800, 400], 0.0, 1.0, cam, &tokens, [0.0; 4]);
         let cam = solidcraft_viewport::Camera::default();
         let mut turned = cam;
         turned.orbit(200.0, 0.0);

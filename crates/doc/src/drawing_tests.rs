@@ -1416,8 +1416,9 @@ fn a_view_sketch_goes_with_its_view_and_with_its_views_sheet() {
     assert!(why.contains("owner"), "{why}");
 }
 
-/// A drawing saved before view sketches (its `format_pending` lacks `view-sketches`) opens with each
-/// sheet sketch's `sheet` as its owner, keeps its id and geometry, and saves the same bytes again.
+/// A drawing saved before view sketches (format 5, which they came with, its `format_pending`
+/// lacking `view-sketches`) opens with each sheet sketch's `sheet` as its owner, keeps its id and
+/// geometry, and saves the same bytes again.
 #[test]
 fn an_older_drawings_sheet_sketches_open_with_their_sheet_as_owner() {
     let current = file(&read(&view_sketch_file()).unwrap());
