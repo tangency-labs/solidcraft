@@ -3083,8 +3083,8 @@ pub enum SideAlong {
 ///
 /// [`SolidError::InvalidInput`] for an `along` that is not finite or has no length, a `max_part`
 /// not finite in `(-1, 1)`, or a face use whose normal or binormal is not proved non-zero
-/// anywhere along the edge; [`SolidError::Unsupported`] for a procedural blend's face (its net
-/// only approximates it), an edge whose curve has no NURBS form, and as [`tangent_all_along`]
+/// anywhere along the edge; [`SolidError::Unsupported`] for a procedural blend's or sweep's face
+/// (its net only approximates it), an edge whose curve has no NURBS form, and as [`tangent_all_along`]
 /// for the face and its pcurve; [`SolidError::Cancelled`] when the kernel's cancel token is
 /// cancelled; those of the evaluations.
 pub fn side_along(
@@ -3106,9 +3106,18 @@ pub fn side_along(
     }
     let e = eu1::edge(b, eu)?.ok_or_else(|| invalid("an edge use without edge"))?;
     let mut u = Use::new(k, b, eu)?;
-    if u.definition.is_some() {
+    // a procedural surface's net only approximates it (the definitions contract; the kinds
+    // `exact_nurbs_surface` turns down): the side is read on the net alone, so such a face is
+    // refused, not decided on the net
+    let procedural = {
+        let f = eu1::face(b, eu)?.ok_or_else(|| invalid("an edge use without face"))?;
+        b.face(f)?.surface.as_ref().is_some_and(|s| {
+            s.procedural_sweep().is_some() || matches!(s.kind(), SurfaceKind::ProceduralBlend(_))
+        })
+    };
+    if procedural || u.definition.is_some() {
         return Err(unsupported(
-            "the side of a procedural blend's edge (its net only approximates it)",
+            "the side of an edge on a procedural blend or sweep (its net only approximates it)",
         ));
     }
     let cn =
@@ -3189,6 +3198,10 @@ pub fn side_along(
         }
         count += 1;
         let at = 0.5 * (a + z);
+        // the budget counts every piece, the knots' own too
+        if count > MAX_SIDE_PIECES {
+            return Ok(SideAlong::Undecided { at });
+        }
         let piece = Ivl::new(a, z);
         // on one cell, `sigma F . (H x d)` is a polynomial of degree `degree` in `t`: bounded from
         // its values at the piece's Chebyshev points (module docs, `poly_range`), which are
