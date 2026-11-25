@@ -2169,6 +2169,14 @@ mod tests {
         s.execute("file.export", &json!({"path": h.dir.join("part2.step")})).unwrap();
         h.step(&json!({"choose_file": "part1.solidcraft"})).unwrap();
         h.step(&json!({"start": "component.insert_design"})).unwrap();
+        // The picked design waits in Insert Design's options panel; OK inserts it.
+        for _ in 0..600 {
+            if h.app.dialog.is_some() {
+                break;
+            }
+            h.frames(1);
+        }
+        h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
         // The file pick and the insert finish on later frames; wait for them like the STEP case below
         // instead of assuming three frames is enough on a loaded machine.
         for _ in 0..600 {

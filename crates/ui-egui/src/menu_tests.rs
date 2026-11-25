@@ -2902,7 +2902,8 @@ mod browser_rows {
 /// #8570: Insert Design lists the designs open in other tabs. One click inserts a saved one; one
 /// with unsaved changes inserts its saved file and says so; one never saved is greyed out, as there
 /// is no file to link. Browse… opens the file picker. Alone, or with the preference off, the
-/// button goes straight to the picker, as before.
+/// button goes straight to the picker, as before. A picked design opens Insert Design's options
+/// panel, whose OK inserts it.
 #[test]
 fn insert_design_offers_the_other_open_designs_then_browse() {
     let mut h = crate::scenario::Harness::new();
@@ -2917,12 +2918,20 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     };
     let linked = |app: &SolveApp, file: &str| app.session.doc.links.values().filter(|l| l.path.ends_with(file)).count();
     let menu_open = |app: &SolveApp| app.viewport.context_menu.is_some() && app.menu.target == Target::InsertDesign;
+    // A picked design opens Insert Design's options panel; its OK inserts it.
+    let ok = |h: &mut crate::scenario::Harness| {
+        h.frames(2);
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::InsertDesign(_))), "the options panel");
+        h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK closes the panel: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    };
 
     // Alone: the picker, as before.
     h.step(&json!({"choose_file": "none.solidcraft"})).unwrap();
     h.app.start("component.insert_design");
     assert!(!menu_open(&h.app));
     h.frames(3);
+    ok(&mut h);
     // The picked file is read beside the window (#11593); `run` refuses until that is done (#14390).
     h.settle();
     context_menu::close(&mut h.app);
@@ -2957,11 +2966,16 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
 
     // Each is read beside the window, as a file picked under Browse… is (#11593).
     act(&mut h.app, &Target::InsertDesign, &names[0]);
+    h.frames(2);
+    // The panel's OK, run here so the read is caught before a frame finishes it.
+    let Some(crate::dialogs::Kind::InsertDesign(panel)) = h.app.dialog.take().map(|d| d.kind) else { panic!("the options panel") };
+    crate::dialogs_insert_design::run(&mut h.app, &panel).unwrap();
     assert!(h.app.file_load.busy(), "the design is read off the window thread");
     h.settle();
     assert_eq!(linked(&h.app, "bracket.solidcraft"), 1);
     assert!(h.app.status.as_ref().is_none_or(|(s, _, _)| !s.contains("unsaved")), "{:?}", h.app.status);
     act(&mut h.app, &Target::InsertDesign, &names[1]);
+    ok(&mut h);
     h.settle();
     assert_eq!(linked(&h.app, "plate.solidcraft"), 1);
     assert!(
@@ -2974,6 +2988,7 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.step(&json!({"choose_file": "bracket.solidcraft"})).unwrap();
     act(&mut h.app, &Target::InsertDesign, "Browse…");
     h.frames(3);
+    ok(&mut h);
     h.settle();
     assert_eq!(linked(&h.app, "bracket.solidcraft"), 2);
 
@@ -2984,6 +2999,7 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.app.start("component.insert_design");
     assert!(!menu_open(&h.app));
     h.frames(3);
+    ok(&mut h);
     h.settle();
     assert_eq!(linked(&h.app, "plate.solidcraft"), 2);
 }

@@ -9,11 +9,11 @@ use serde_json::{Value, json};
 use crate::SolveApp;
 
 /// What Insert Design asks of `component.insert_design` for a design that has components of
-/// its own, from the preferences: keep them as components inside the linked one
-/// (`insert_keeps_components`), and bring its joints too (`insert_flexible`), which needs them.
-/// One component is what the command does when it is not told, so nothing is asked for it.
-pub(crate) fn insert_design_options(preferences: &crate::prefs::Prefs) -> Vec<(&'static str, bool)> {
-    match (preferences.insert_keeps_components, preferences.insert_flexible) {
+/// its own, from its options panel (`dialogs_insert_design`): keep them as components inside the
+/// linked one (`keep`), and bring its joints too (`flexible`), which needs them. One component is
+/// what the command does when it is not told, so nothing is asked for it.
+pub(crate) fn insert_design_options(keep: bool, flexible: bool) -> Vec<(&'static str, bool)> {
+    match (keep, flexible) {
         (false, _) => Vec::new(),
         (true, true) => vec![("structure", true), ("flexible", true)],
         (true, false) => vec![("structure", true)],
@@ -512,17 +512,85 @@ mod tests {
         }));
     }
 
-    /// How Insert Design asks for a design that has components, from the two preferences.
+    /// How Insert Design asks for a design that has components, from its panel's two options.
     #[test]
-    fn insert_design_takes_how_a_linked_design_comes_in_from_the_preferences() {
-        let mut prefs = crate::prefs::Prefs::default();
-        assert_eq!(insert_design_options(&prefs), [], "as shipped: one component, which is what the command does untold");
-        prefs.insert_flexible = true;
-        assert_eq!(insert_design_options(&prefs), [], "one component has no joints to bring");
-        prefs.insert_keeps_components = true;
-        assert_eq!(insert_design_options(&prefs), [("structure", true), ("flexible", true)]);
-        prefs.insert_flexible = false;
-        assert_eq!(insert_design_options(&prefs), [("structure", true)], "its components kept, rigid");
+    fn insert_design_takes_how_a_linked_design_comes_in_from_its_options() {
+        assert_eq!(insert_design_options(false, false), [], "both off: one component, which is what the command does untold");
+        assert_eq!(insert_design_options(false, true), [], "one component has no joints to bring");
+        assert_eq!(insert_design_options(true, true), [("structure", true), ("flexible", true)]);
+        assert_eq!(insert_design_options(true, false), [("structure", true)], "its components kept, rigid");
+    }
+
+    /// Insert Design's options panel (#5526): a picked design waits in it, both options off;
+    /// Flexible is greyed until Keep its components is ticked; Cancel inserts nothing; OK inserts
+    /// with what was ticked, as `structure` and `flexible`; with import options not asked for, no
+    /// panel.
+    #[test]
+    fn insert_designs_panel_asks_how_a_picked_design_comes_in() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.clone();
+        let plate = dir.join("plate.solidcraft");
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        part.execute("file.save", &json!({"path": plate})).unwrap();
+        // The unit: the plate twice, the second on a slider from the first.
+        let mut design = Session::default();
+        design.execute("component.insert_design", &json!({"path": plate})).unwrap();
+        design.execute("component.insert_design", &json!({"path": plate, "reuse": true, "translate": [40, 0, 0]})).unwrap();
+        let origin = |occurrence: &str| json!({"occurrence": occurrence, "point": [0, 0, 0], "z": [0, 0, 1]});
+        design
+            .execute("joint.create", &json!({"type": "slider", "name": "Slide", "flip": true, "a": origin("plate:1"), "b": origin("plate:2")}))
+            .unwrap();
+        design.execute("file.save", &json!({"path": dir.join("unit.solidcraft")})).unwrap();
+        let panel = |h: &crate::scenario::Harness| match h.app.dialog.as_ref().map(|d| d.kind.clone()) {
+            Some(crate::dialogs::Kind::InsertDesign(f)) => Some(f),
+            _ => None,
+        };
+        let pick = |h: &mut crate::scenario::Harness| {
+            h.step(&json!({"choose_file": "unit.solidcraft"})).unwrap();
+            h.app.start("component.insert_design");
+            h.frames(3);
+        };
+        let click = |h: &mut crate::scenario::Harness, handle: &str| {
+            h.step(&json!({"click": {"handle": handle}})).unwrap();
+            h.frames(2);
+        };
+        // Picked: the panel waits, both off, and nothing is read yet.
+        pick(&mut h);
+        let f = panel(&h).expect("the options panel");
+        assert!(f.path.ends_with("unit.solidcraft") && !f.keep && !f.flexible, "{f:?}");
+        assert!(!h.app.file_load.busy() && h.app.session.doc.links.is_empty());
+        // Flexible is greyed until the components are kept.
+        click(&mut h, "dialog:insert_design:flexible");
+        assert!(!panel(&h).unwrap().flexible, "greyed while the design comes in as one component");
+        // Cancel inserts nothing.
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.settle();
+        assert!(panel(&h).is_none() && h.app.session.doc.links.is_empty(), "nothing inserted");
+        // Both ticked, OK: a linked subassembly whose occurrence is flexible.
+        pick(&mut h);
+        click(&mut h, "dialog:insert_design:keep");
+        click(&mut h, "dialog:insert_design:flexible");
+        let f = panel(&h).unwrap();
+        assert!(f.keep && f.flexible, "{f:?}");
+        h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(panel(&h).is_none());
+        let tree = h.app.session.doc.links.values().find_map(|link| link.tree.clone()).expect("the link keeps its design's components");
+        assert!(!tree.components.is_empty() && !tree.flexible.is_empty(), "kept and flexible: {tree:?}");
+        assert!(h.app.insert_design_keeps_components, "remembered for a paste");
+        // OK with both off: one linked component, as the command makes it untold.
+        pick(&mut h);
+        h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.links.values().filter(|link| link.tree.is_none()).count(), 1, "one component");
+        assert!(!h.app.insert_design_keeps_components);
+        // Import options not asked for: no panel, straight in as one component, as before.
+        h.app.preferences.ask_import_options = false;
+        pick(&mut h);
+        assert!(panel(&h).is_none(), "no panel");
+        h.settle();
+        assert_eq!(h.app.session.doc.links.values().filter(|link| link.tree.is_none()).count(), 2, "one component");
     }
 
     /// A linked design that has components (#5526): its menu switches it between rigid and

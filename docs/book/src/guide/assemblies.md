@@ -589,9 +589,9 @@ the part's bodies only: its timeline, parameters and sheet-metal data (flat patt
 table) stay in the part's own design.
 
 A linked design that has components of its own can come in as a **linked subassembly**. As
-shipped, **Insert Design** puts all its bodies into the one linked component. Turn on
-Preferences › Design › Linked designs › **Insert Design keeps a linked design's components**
-to link it as a subassembly, or choose **Keep Its Components** in the linked component's menu.
+shipped, **Insert Design** puts all its bodies into the one linked component. Tick **Keep its
+components** in Insert Design's options to link it as a subassembly, or choose **Keep Its
+Components** in the linked component's menu.
 The components of the linked design then become components inside the linked
 component. Each keeps its name and its part properties. A component that the linked design
 places several times is one component here, with one occurrence for each place. The Browser
@@ -697,11 +697,13 @@ When the linked design has no components of its own, **Keep Its Components** say
 status line. Nothing else changes until the design has some: **Update Links** keeps them from
 then on.
 
-Preferences › Design › Linked designs set how **Insert Design** links a design.
-**Insert Design keeps a linked design's components** makes a linked subassembly. It is off as
-shipped: all bodies go into the one linked component, as in earlier versions. **A new
-occurrence of a linked design with joints is flexible** is off as shipped too. It needs the
-first one, and the page greys it until that one is on. In scripts, use `structure` and
+Once a design is picked, **Insert Design** shows its options on the right, and **OK** inserts
+it. **Keep its components** makes a linked subassembly. It starts off: all bodies go into the
+one linked component, as in earlier versions. **Flexible** makes the new occurrence flexible.
+It starts off too, and it needs the first one: the panel greys it until that one is ticked. A
+paste of a copied linked component keeps its components as the last Insert Design did, and
+comes in rigid. With Preferences › General › **Ask for a file's import options** off, a picked
+design goes straight in as one linked component, without the panel. In scripts, use `structure` and
 `flexible` on `component.insert_design` (both
 default to `false`, and `flexible` keeps the components as `structure` does),
 `component.relink` and `component.link_mode`. `component.link_mode` takes

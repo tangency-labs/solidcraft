@@ -2399,7 +2399,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             // file is read beside the window, as a picked one is (#11593).
             let note = (p.get("unsaved").and_then(Value::as_bool) == Some(true))
                 .then(|| solidcraft_ui_text::format("ui.insert_design.saved_file", &[("name", name)]));
-            app.insert_design_async(path, note);
+            crate::dialogs_insert_design::open(app, path, note);
         }
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {

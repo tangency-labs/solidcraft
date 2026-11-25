@@ -64,6 +64,7 @@ pub mod dialogs_frame_plate;
 pub mod dialogs_gusset;
 mod dialogs_hole;
 pub mod dialogs_insert_airfoil;
+pub mod dialogs_insert_design;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;
 pub mod dialogs_motion;
@@ -945,6 +946,9 @@ pub struct SolveApp {
     pub import_options: Option<import_options::Ask>,
     /// Files asked while another waits for its options (several dropped at once), asked in turn.
     pub import_options_waiting: std::collections::VecDeque<import_options::Ask>,
+    /// Keep its components, as last chosen in Insert Design's panel (`dialogs_insert_design`):
+    /// a paste of a copied occurrence brings its design the same way. Off at start; not saved.
+    pub(crate) insert_design_keeps_components: bool,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
     /// The view background a plugin draws (`shaders@0.1`), when one is chosen.
@@ -1284,6 +1288,7 @@ impl SolveApp {
             mesh_units: None,
             import_options: None,
             import_options_waiting: Default::default(),
+            insert_design_keeps_components: false,
             plugin_menu: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             plugin_shaders: Default::default(),
@@ -2414,14 +2419,15 @@ impl SolveApp {
         }
     }
 
-    /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
+    /// Insert Design's file picker: another design becomes a linked component, as its panel
+    /// says (`dialogs_insert_design`); a STEP or mesh
     /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240), and a KiCad
     /// board asks for its import options and opens as a design of its own (`import_options`).
     pub(crate) fn pick_design_to_insert(&mut self) {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
-                app.insert_design_async(&path, None);
+                dialogs_insert_design::open(app, &path, None);
             } else {
                 app.insert_path_async(&path);
             }
@@ -2431,14 +2437,14 @@ impl SolveApp {
     /// Insert the saved design at `path` as a linked component, read beside the window as Insert
     /// STEP is: a large design rebuilds for a while, the window keeps drawing and Cancel changes
     /// nothing (#11593). The user chose the file, so its network server is allowed. `note`: the
-    /// status line once it is in.
-    pub(crate) fn insert_design_async(&mut self, path: &str, note: Option<String>) {
+    /// status line once it is in; `options`: how a linked design that has components comes in
+    /// ([`linked_source::insert_design_options`]).
+    pub(crate) fn insert_design_async(&mut self, path: &str, note: Option<String>, options: &[(&str, bool)]) {
         let mut request = file_load::Request::new(path, file_load::Kind::InsertDesign);
         request.allow_hosts = solidcraft_engine::io::vfs::network_host(path).into_iter().collect();
         request.note = note;
-        // How a linked design that has components comes in: as the preferences say.
-        for (key, on) in linked_source::insert_design_options(&self.preferences) {
-            request.options.insert(key.into(), json!(on));
+        for (key, on) in options {
+            request.options.insert((*key).into(), json!(on));
         }
         // A request that could not be queued has said why in the status line.
         let _ = file_load::begin_request(self, request);

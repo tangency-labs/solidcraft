@@ -583,14 +583,13 @@ pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Op
         }
         // The copied design is one the user opened: its server is the user's choice.
         let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-        // Whether a design with components comes in as a subassembly is the preference's to
-        // say here as for Insert Design: one component is what the command does untold, and a
-        // link to the design that is there already stays as it is. A pasted occurrence is rigid.
-        let mut insert = json!({"path": path, "reuse": true, "translate": translate});
-        if app.preferences.insert_keeps_components {
-            insert["structure"] = json!(true);
+        // Whether a design with components comes in as a subassembly is as last chosen in Insert
+        // Design's panel: one component is what the command does untold, and a link to the
+        // design that is there already stays as it is. A pasted occurrence is rigid.
+        if app.insert_design_keeps_components {
+            params["structure"] = json!(true);
         }
-        let pasted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", insert));
+        let pasted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", params));
         let Ok(out) = pasted else { return false };
         // Move/Copy opens on it, to place it.
         if let Some(id) = out.get("occurrence").and_then(Value::as_u64) {

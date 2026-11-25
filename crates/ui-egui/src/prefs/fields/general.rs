@@ -9,8 +9,8 @@ macro_rules! general_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
             /// Opening, inserting or dropping a file whose format has import options (STEP, IGES,
-            /// FreeCAD, Rhino, glTF) asks them first (`import_options`); off imports at once with the defaults,
-            /// as before.
+            /// FreeCAD, Rhino, glTF) asks them first (`import_options`), and Insert Design shows its options
+            /// for a picked design (`dialogs_insert_design`); off imports at once with the defaults, as before.
             ask_import_options: bool = true, PAGE_GENERAL => check_id("settings.ask_import_options");
             /// Import with cadmpeg: a STEP, IGES, FreeCAD or Rhino file is read from cadmpeg's model
             /// straight into B-rep records: a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder
