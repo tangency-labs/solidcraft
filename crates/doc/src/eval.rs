@@ -7879,18 +7879,27 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             }
             continue;
         };
-        let hit = trusted_edge_name(f, i, p)
-            .and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok())
-            .ok_or_else(|| DocError::reselect(stored.as_str()))?;
-        if let Some(note) = hit.note(stored) {
-            notes.push(note);
-        }
         // The body changed since the pick: the pick may now sit at an end of the edge.
         let moved = f.edge_refs.get(i).is_some_and(|r| {
             let now = mb.mesh().bounds();
             let tight = (mb.body.size() * 2e-3).max(1e-3);
             now.min.dist(r.min) > tight || now.max.dist(r.max) > tight
         });
+        let named = trusted_edge_name(f, i, p);
+        let Some(hit) = named.and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok()) else {
+            // #21997: the saved whole closed edge can now exist as the pieces a whole-turn
+            // revolve join's turned seam split it into. Every piece is blended, as a pick made
+            // today stores one name per piece.
+            let Some(pieces) = named.and_then(|n| crate::name_lookup::recover_split_closed_edge(mb, n, p)) else {
+                return Err(DocError::reselect(stored.as_str()));
+            };
+            out.extend(pieces.iter().map(|hit| if moved { off_the_ends(mb, hit.edge, hit.point) } else { hit.point }));
+            notes.push(format!("the saved edge `{stored}` now exists as {} pieces; every piece is blended", pieces.len()));
+            continue;
+        };
+        if let Some(note) = hit.note(stored) {
+            notes.push(note);
+        }
         out.push(if moved { off_the_ends(mb, hit.edge, hit.point) } else { hit.point });
     }
     if out.is_empty() {
