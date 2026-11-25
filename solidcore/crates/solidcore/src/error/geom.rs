@@ -488,7 +488,10 @@ impl crate::SolidError {
     /// through unchanged, as in `nurbs_routine`.
     pub(crate) fn geom_call(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
-            Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            Self::Unported { .. }
+            | Self::Cancelled { .. }
+            | Self::OutOfFuel { .. }
+            | Self::PreparationRequired { .. } => e,
             _ => Failure::new(operation, GeomFailure::CallFailed { class: e.kind() })
                 .caused_by(e)
                 .into_error(),

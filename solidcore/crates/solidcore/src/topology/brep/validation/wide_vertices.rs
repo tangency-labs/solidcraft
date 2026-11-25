@@ -59,6 +59,7 @@ pub(crate) fn centre_wide_vertices(k: &mut Kernel, b: &mut Brep) -> Result<()> {
             Ok(true) => {}
             Err(
                 e @ (SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }
                 | SolidError::Unported { .. }
                 | SolidError::FaceTrimsUnavailable { .. }),
             ) => {
