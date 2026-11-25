@@ -19,7 +19,9 @@
 //!   this test): those failures are main's own, unchanged by the flags, and pinned so that
 //!   any new one fails here. A row main refused has no body on main, so its body is held
 //!   to its input body's failures instead ([`HELD_TO_INPUT`]): each as often, and an edge
-//!   off a face's surface only on the very curve of an input edge off it.
+//!   off a face's surface only on the very curve of an input edge off it or where its
+//!   distance to every face it is off is proved within its tolerance ([`gap_within_tolerance`],
+//!   the kernel's certified curve-to-surface bound, not samples).
 //!   Each moved `mass_properties` entry is classified
 //!   against a certified enclosure of the body's true value ([`MASS_ROWS`], `harness::Table`:
 //!   CLOSER, EQUAL or FARTHER, pinned in [`EXPECTED`], none FARTHER); a row that was a
@@ -100,10 +102,11 @@ use solidcore::mass::enclosure::enclose_mass_properties;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::query::curve_surface_gap::{curve_face_gap_bound_within, line_evaluation_slack};
 use solidcore::surface::implicit::{curve_lies_on, AnalyticSupport, Implicit};
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::topology::{edge, face, vertex, Brep};
+use solidcore::topology::{edge, face, vertex, Brep, EdgeId, FaceId};
 use solidcore::Kernel;
 
 #[path = "moved_mass_rows/harness.rs"]
@@ -279,6 +282,9 @@ struct Found {
     /// Each edge off a face's surface: its failure's index in `failures` and its curve
     /// (`{:?}`, which writes every coordinate exactly, so equal text is the same curve).
     off_surface: Vec<(usize, String)>,
+    /// Each edge off a face's surface: its failure's index in `failures`, the edge and the
+    /// faces whose surface it is off.
+    off_edges: Vec<(usize, EdgeId, Vec<FaceId>)>,
 }
 
 /// The result-body certificate (see the module docs).
@@ -336,6 +342,13 @@ fn certify(body: &Brep) -> Found {
             if on.iter().all(|o| *o == Some(true)) {
                 found.exact_edges += 1;
             } else if on.iter().all(Option::is_some) {
+                let off: Vec<FaceId> = faces
+                    .iter()
+                    .zip(&on)
+                    .filter(|(_, o)| **o == Some(false))
+                    .map(|(f, _)| *f)
+                    .collect();
+                found.off_edges.push((found.failures.len(), e, off));
                 found
                     .off_surface
                     .push((found.failures.len(), format!("{curve:?}")));
@@ -378,11 +391,57 @@ fn certify_into(tag: &str, body: &Brep, bad: &mut Vec<String>) -> Found {
 
 /// The rows main refused (status 1001, so main has no body of theirs): each failure of
 /// its body is held to its input body's ([`certify_against_input`]).
-const HELD_TO_INPUT: [&str; 3] = [
+const HELD_TO_INPUT: [&str; 5] = [
     "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
     "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
     "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
+    "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
+    "sweep5-sphere_diff_3cylinders-e29-r1.0",
 ];
+
+/// The largest proved bound on the distance from edge `e`'s curve over its interval to the
+/// surface of each face of `faces` ([`curve_face_gap_bound_within`], pieces cut until shown
+/// within the edge's tolerance where they are, floor a thousandth of it), plus a line's
+/// evaluation slack against its NURB ([`line_evaluation_slack`]) and the sum's rounding, where
+/// every one is at most the edge's tolerance: the edge then meets the B-rep's own contract
+/// on those faces. `None` where a bound is not enclosed or past the tolerance.
+fn gap_within_tolerance(body: &Brep, e: EdgeId, faces: &[FaceId]) -> Option<f64> {
+    let k = Kernel::default();
+    let tol = edge::tolerance(body, e).unwrap();
+    let rec = body.edge(e).unwrap();
+    let curve = rec.curve.as_ref()?;
+    let line;
+    let (bs, slack) = match curve.kind() {
+        CurveKind::BSpline(bs) => (bs, 0.0),
+        CurveKind::Ellipse(el) => (el.base(), 0.0),
+        CurveKind::Line(l) => {
+            line = l.base_with_nurb().unwrap();
+            (&*line, line_evaluation_slack(l, false)?)
+        }
+        _ => return None,
+    };
+    let ivl = rec.interval;
+    let enough = tol / (1.0 + 4.0 * f64::EPSILON) - slack;
+    let mut worst = 0.0f64;
+    for &f in faces {
+        let g = curve_face_gap_bound_within(
+            &k,
+            body,
+            f,
+            bs,
+            [ivl.min(), ivl.max()],
+            1e-3 * tol,
+            [enough, f64::INFINITY],
+        )
+        .unwrap()?;
+        let g = (g + slack) * (1.0 + 4.0 * f64::EPSILON);
+        if !(g <= tol) {
+            return None;
+        }
+        worst = worst.max(g);
+    }
+    Some(worst)
+}
 
 /// A failure as [`MAIN_FAILURES`] writes it: its edge ids `EdgeId(_)` (a rebuilt body
 /// numbers its edges afresh).
@@ -435,7 +494,10 @@ fn certify_against_main(tag: &str, case: &str, body: &Brep, bad: &mut Vec<String
 /// input body's: a failure passes only as one the input body read from `case`'s file has,
 /// each as often, and an edge off a face's surface only where the input has an edge off a
 /// face's surface on the same curve (exactly: the same `{:?}` text), so the failure is that
-/// unchanged input edge's, not one the fillet made.
+/// unchanged input edge's, not one the fillet made. An edge off a face's surface that is
+/// not the input's passes only where its distance to each face it is off is proved within
+/// the edge's tolerance ([`gap_within_tolerance`]): off the exact implicit, but within the
+/// gap the body records for it.
 fn certify_against_input(tag: &str, case: &goldens::Case, body: &Brep, bad: &mut Vec<String>) {
     let path = source_file(&case.inputs).unwrap_or_else(|| panic!("{tag}: no file source"));
     let input = goldens::read_source_file(&mut Kernel::default(), &path).unwrap();
@@ -460,6 +522,15 @@ fn certify_against_input(tag: &str, case: &goldens::Case, body: &Brep, bad: &mut
         .collect();
     for (i, f) in found.failures.iter().enumerate() {
         let key = without_ids(f);
+        if let Some((_, e, off)) = found.off_edges.iter().find(|(j, _, _)| *j == i) {
+            if let Some(g) = gap_within_tolerance(body, *e, off) {
+                eprintln!(
+                    "I18913 {tag}: within its tolerance ({:e}, proved gap {g:e}): {f}",
+                    edge::tolerance(body, *e).unwrap()
+                );
+                continue;
+            }
+        }
         let tied = match found.off_surface.iter().find(|(j, _)| *j == i) {
             Some((_, curve)) => input_curves
                 .iter()
