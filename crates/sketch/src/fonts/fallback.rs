@@ -252,6 +252,10 @@ pub const LAO: Candidates = &[
             "C:\\Windows\\Fonts\\NotoSansLao-VariableFont_wdth,wght.ttf",
         ],
     ),
+    ("Noto Sans Lao UI", &["C:\\Windows\\Fonts\\NotoSansLaoUI-Regular.ttf"]),
+    ("Lao UI", &["C:\\Windows\\Fonts\\LaoUI.ttf"]),
+    ("Leelawadee UI", &["C:\\Windows\\Fonts\\LeelawUI.ttf"]),
+    ("Leelawadee", &["C:\\Windows\\Fonts\\leelawad.ttf"]),    
     // macOS
     ("Noto Sans Lao", &["/Library/Fonts/NotoSansLao-Regular.ttf"]),
     ("Lao Sangam MN", &["/System/Library/Fonts/Supplemental/Lao Sangam MN.ttf", "/System/Library/Fonts/Lao Sangam MN.ttf"]),
