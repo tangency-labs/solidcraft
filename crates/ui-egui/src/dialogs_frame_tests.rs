@@ -128,6 +128,36 @@ fn a_picked_section_and_the_placement() {
     assert!(m.all && m.mirror && m.name == "Rail" && m.angle == "15 deg" && ANCHORS[m.anchor].0 == "bottom", "{m:?}");
 }
 
+/// The Up Axis row: a part drawn with Y up picks Y, the command gets `up: "Y"`, and Edit Feature
+/// shows the member's own axis and keeps it; Z, the default, is left out of the command.
+#[test]
+fn the_up_axis_row_sets_and_keeps_the_members_up_axis() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    assert_eq!(UP_AXES[member(&mut d).up].0, "Z");
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("up").is_none(), "{}", c[0].1);
+    member(&mut d).up = UP_AXES.iter().position(|a| a.0 == "Y").unwrap();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["up"], json!("Y"), "{}", c[0].1);
+    run_all(&mut app, c);
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(UP_AXES[member(&mut e).up].0, "Y");
+    member(&mut e).angle = "90 deg".into();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["up"], json!("Y"), "{}", c[0].1);
+    run_all(&mut app, c);
+    let FeatureKind::FrameMember { up, angle, .. } = &app.session.doc.feature(f).unwrap().kind else { panic!() };
+    assert_eq!((up, angle.as_deref()), (&frame::UpAxis::Y, Some("90 deg")));
+    // Back to Z: the axis is dropped, not kept from the feature.
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    member(&mut e).up = 0;
+    let c = apply_commands(&app, &e).unwrap();
+    assert!(c[0].1["params"].get("up").is_none(), "{}", c[0].1);
+}
+
 /// A member whose section is a whole profile sketch keeps it when edited: the dialog shows the
 /// sketch rather than picking every region of it, which would fill the tube's hole.
 #[test]
@@ -198,6 +228,55 @@ fn an_edit_keeps_each_groups_located_point() {
     let groups = frame::member_groups(&app.session.doc.feature(f).unwrap().kind);
     assert_eq!(groups.iter().map(|g| g.locate).collect::<Vec<_>>(), [Some([10.0, 5.0]), None]);
     assert_eq!(groups[1].body_name.as_deref(), Some("Post"));
+}
+
+/// Edit Feature shows a located member's Offset A and B, worked out once from its `locate` and
+/// its anchor; OK keeps the located point as it was.
+#[test]
+fn an_edit_shows_the_offsets_of_a_located_member() {
+    let mut app = frame_app();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, -70]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "50 mm".to_string()], "the tube's bottom is 50 mm from its line");
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["locate"], json!([0.0, -70.0]), "{}", c[0].1);
+}
+
+/// A parameter a profile dimension names, changed while the dialog is open, moves the anchors: the
+/// offsets stay as they were and `locate` is worked out again from them, as OK would.
+#[test]
+fn a_parameter_change_while_open_works_locate_out_again() {
+    let mut app = frame_app();
+    app.run("parameters.add", json!({"name": "H", "expression": "40 mm"})).unwrap();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": "H", "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, -70]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "50 mm".to_string()]);
+    app.run("parameters.change", json!({"name": "H", "expression": "60 mm"})).unwrap();
+    let (inputs, extra, mut m) = (e.inputs.clone(), e.extra.clone(), member(&mut e).clone());
+    super::sync_offset(&app, &mut m, &inputs, &extra);
+    // The bottom is 30 mm below the centre now; 50 mm from the line is 80 mm.
+    assert_eq!(m.locate, Some([0.0, -80.0]));
+    assert_eq!(m.offset, ["0 mm".to_string(), "50 mm".to_string()], "the offsets are kept");
+}
+
+/// A `locate` the engine takes can be farther from the anchor than any one coordinate may be: an
+/// unchanged edit keeps it, and only a `locate` past the largest profile is refused.
+#[test]
+fn an_edit_keeps_a_located_point_far_from_its_anchor() {
+    let mut app = frame_app();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, 10000]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "-10020 mm".to_string()]);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["locate"], json!([0.0, 10000.0]), "{}", c[0].1);
+    member(&mut e).offset[1] = "-20000 mm".into();
+    assert!(apply_commands(&app, &e).is_err());
 }
 
 /// Without lines there is nothing to place; lines and the section in one sketch are refused.

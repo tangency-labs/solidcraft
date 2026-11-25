@@ -1257,6 +1257,10 @@ impl OffsetExecutive {
                 }
             }
 
+            // (not upstream) a face of two edges whose offset is empty is taken out, its
+            // neighbours' offsets mated across it (the offset eliminates it)
+            self.eliminate_empty_lenses(kernel, original, mark_type, &marked, notifications)?;
+
             // (not upstream, the executor's own split flags are the only path since
             // #2981: fork tangency-labs/smlib 5d428ae, 7ff0a94, 2e1bb8c): close the
             // loop gaps the offset leaves (a local operation's step walls' ends, a solid

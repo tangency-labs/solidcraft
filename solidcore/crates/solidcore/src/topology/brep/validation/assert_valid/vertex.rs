@@ -27,9 +27,17 @@ pub(super) fn vertex(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, v: VertexId)
         rtn &= base::owning(b, cx, this)?;
     }
 
+    // not upstream: the geometric tests of a vertex whose neighbourhood passed them on a
+    // body before are skipped ([`crate::geom::check_memo`]); the structural ones run
+    let geo = !crate::geom::check_memo::vertex_clean(k, v);
+
     // 1: Vertex location must meet its faces within its local tolerance;
     // the check runs at every level, its report is level 2
-    let (located, max_gap) = seams::assert_test_vertex1(k, b, v)?;
+    let (located, max_gap) = if geo {
+        seams::assert_test_vertex1(k, b, v)?
+    } else {
+        (true, 0.0)
+    };
     if !located {
         // Local uncertainty with SmTol::GetXSectTol3d(GetBrep()) as the floor.
         let xsect_tol = seams::vertex1_tolerance(k, b, v)?;
@@ -48,7 +56,7 @@ pub(super) fn vertex(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, v: VertexId)
 
     // Check all connected Vertexuses
     for vu in b.vertex(v)?.vertexuses.clone() {
-        rtn &= vertexuse(k, b, cx, vu)?;
+        rtn &= vertexuse(k, b, cx, vu, geo)?;
     }
 
     // all done
@@ -56,7 +64,13 @@ pub(super) fn vertex(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, v: VertexId)
 }
 
 /// `SmVertexuse::AssertValid(SM_NO_WALK)`.
-fn vertexuse(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, vu: VertexuseId) -> Result<bool> {
+fn vertexuse(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    vu: VertexuseId,
+    geo: bool,
+) -> Result<bool> {
     const C: i64 = class::VERTEXUSE;
     let this = EntityRef::Vertexuse(vu);
     let mut rtn = true;
@@ -81,7 +95,7 @@ fn vertexuse(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, vu: VertexuseId) -> 
     }
 
     // 5: Vertexuse->Sector contains a FaceSrf->Seam not marked by SeamEdge
-    let missing_seam = tvu::is_sector_missing_seam(k, b, vu, true)?.missing;
+    let missing_seam = geo && tvu::is_sector_missing_seam(k, b, vu, true)?.missing;
     rtn &= cx
         .rep
         .this_bool(b, C, this, 5, !cx.rep.need(0) || !missing_seam)?;

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="450" viewBox="0 0 900 450">
+  <title>regularity-bound</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="900" height="450" fill="#ffffff"/>
+    <rect id="overlap" x="60" y="210.9" width="320" height="50.5" fill="#dce9f5"/>
+    <line x1="60" y1="390" x2="400" y2="390" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <line x1="60" y1="390" x2="60" y2="70" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <line x1="60" y1="261.4" x2="380" y2="261.4" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line x1="60" y1="210.9" x2="380" y2="210.9" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="q0" x1="60" y1="261.4" x2="380" y2="132.9" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="Xq1" x1="60" y1="321.4" x2="380" y2="210.9" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 386 137.9)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">q0</tspan></text>
+    <text transform="matrix(1 0 0 1 386 215.9)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">X q1</tspan></text>
+    <text transform="matrix(1 0 0 1 70 203.9)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">max X q1</tspan></text>
+    <text transform="matrix(1 0 0 1 70 276.4)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">min q0</tspan></text>
+    <text transform="matrix(1 0 0 1 300 408)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">s across a patch</tspan></text>
+    <text transform="matrix(1 0 0 1 60 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Ranges: two bounds apart</tspan></text>
+    <text transform="matrix(1 0 0 1 60 425)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">min q0 lies below max X q1: not certified,</tspan></text>
+    <text transform="matrix(1 0 0 1 60 441)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">though Q = q0 - X q1 &gt; 0 at every point</tspan></text>
+    <line x1="500" y1="390" x2="870" y2="390" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <line x1="500" y1="390" x2="500" y2="70" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <polyline id="sqrt" points="500,390 508.5,346 517,327.8 525.5,313.8 534,302.1 542.5,291.7 551,282.3 559.5,273.7 568,265.6 576.5,258.1 585,250.9 593.5,244.2 602,237.7 610.5,231.5 619,225.5 627.5,219.7 636,214.1 644.5,208.7 653,203.4 661.5,198.3 670,193.3 678.5,188.5 687,183.8 695.5,179.1 704,174.6 712.5,170.1 721,165.8 729.5,161.5 738,157.3 746.5,153.2 755,149.2 763.5,145.2 772,141.3 780.5,137.4 789,133.6 797.5,129.9 806,126.2 814.5,122.5 823,118.9 831.5,115.4 840,111.9" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="tangent" x1="500" y1="296.2" x2="840" y2="90" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="654.5" y1="390" x2="654.5" y2="202.5" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <circle id="c" cx="654.5" cy="202.5" r="4" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 648.5 408)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">c²</tspan></text>
+    <text transform="matrix(1 0 0 1 664 214.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">c</tspan></text>
+    <text transform="matrix(1 0 0 1 760 175)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">X = √x2</tspan></text>
+    <text transform="matrix(1 0 0 1 520 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">(x2 + c²) / (2c)</tspan></text>
+    <line x1="560" y1="116" x2="600" y2="235.6" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 855 408)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">x2</tspan></text>
+    <text transform="matrix(1 0 0 1 500 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Tangent: one bound</tspan></text>
+    <text transform="matrix(1 0 0 1 500 425)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">X ≤ (x2 + c²) / (2c) for every c &gt; 0, off X by (X - c)² / (2c),</tspan></text>
+    <text transform="matrix(1 0 0 1 500 441)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">so Q ≥ q0 - q1 (x2 + c²) / (2c) where q1 ≥ 0: one polynomial</tspan></text>
+  </g>
+</svg>
