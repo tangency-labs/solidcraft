@@ -92,6 +92,8 @@ fn every_kind_plans() {
                     Step::RingTaper { height, scale, rim, outline, .. } => assert!(*height > 0.0 && *scale > 0.0 && *rim > outline.max_radius()),
                     Step::Revolve { profile, .. } => assert!(profile.len() >= 3),
                     Step::Coil { section, pitch, .. } => assert!(section.len() >= 3 && *pitch > 0.0),
+                    // One hand of V bevel teeth, trimmed to its half of the face.
+                    Step::Group { steps, .. } => assert!(steps.first().map(Step::op) == Some(crate::plan::Op::New), "{k:?}"),
                     // A differential's case has its pin holes and windows in frames of their own.
                     Step::Placed { .. } if k == Kind::Differential => {}
                     // A bevel planetary set's carrier has a pin placed along every planet's axis.

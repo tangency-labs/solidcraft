@@ -485,6 +485,7 @@ pub(crate) fn shift_z(step: Step, dz: f64) -> Step {
             frame.origin[2] += dz;
             Step::Placed { frame, step }
         }
+        Step::Group { steps, op } => Step::Group { steps: steps.into_iter().map(|st| shift_z(st, dz)).collect(), op },
     }
 }
 

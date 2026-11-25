@@ -549,6 +549,107 @@ fn a_tooth_chamfer_goes_on_every_gear_of_the_set() {
     let _ = tip;
 }
 
+/// V (herringbone) teeth take the chamfer at both ends of each half: the two outer ends and, where
+/// the halves meet at mid-face, a V notch round the tip that chamfers both inner ends (four
+/// chamfered edges a gear). Refused when a half has no room for two.
+#[test]
+fn a_tooth_chamfer_on_v_teeth_chamfers_both_ends_of_each_half() {
+    use crate::mesh3d::Solid;
+    use crate::plan::chamfer::{ChamferFaces, ToothChamfer, tooth_chamfer};
+    let mut items = vec![
+        item("A", ItemKind::Herringbone, vec![circ([0.0; 3], Z, 20.0)]),
+        item("B", ItemKind::Herringbone, vec![circ([50.0, 0.0, 0.0], Z, 30.0)]),
+    ];
+    for it in &mut items {
+        it.gears = vec![crate::items::GearSettings { helix: Some(20.0), v: true, ..Default::default() }];
+    }
+    let links = vec![mesh(g(0, 0), g(1, 0))];
+    let plain = plan_items(&items, &links, &[], None, &Spec::default()).unwrap_or_else(|e| panic!("{e}"));
+    assert!(plain.error.is_none(), "{:?}", plain.error);
+    let module = plain.gears[0].module;
+    let shape = *plain.plan.shapes.iter().find(|s| s.pitch_diameter < 45.0).expect("A's shape");
+    let (tip, face) = (shape.tip_diameter / 2.0, shape.face);
+    let c = 0.4 * module;
+    let mut both = plain.clone();
+    tooth_chamfer(&items, &mut both, ToothChamfer { size: c, faces: ChamferFaces::Both }).unwrap_or_else(|e| panic!("{e}"));
+    let count = |sp: &SystemPlan| sp.plan.bodies.iter().map(|b| b.steps.len()).sum::<usize>();
+    assert_eq!(count(&both), count(&plain) + 6, "two ends and the middle of two gears");
+    let body = plain.member_of.iter().find(|(r, _)| *r == g(0, 0)).and_then(|(_, m)| plain.plan.members[*m].body).unwrap();
+    let ring = |sp: &SystemPlan, z: f64| {
+        let s = Solid::new(&sp.plan.bodies[body], 0.002);
+        (0..720)
+            .map(|k| f64::from(k) * std::f64::consts::TAU / 720.0)
+            .filter(|a| s.contains([(tip - 0.25 * c) * a.cos(), (tip - 0.25 * c) * a.sin(), z]))
+            .count()
+    };
+    // Each half's inner end, either side of the middle: teeth before, none after.
+    for z in [0.25 * c, -0.25 * c] {
+        assert!(ring(&plain, z) > 0, "the teeth reach the middle at {z}");
+        assert_eq!(ring(&both, z), 0, "chamfered at the middle, {z}");
+    }
+    // And each outer end; between them the teeth are whole.
+    assert_eq!(ring(&both, face / 2.0 - 0.25 * c), 0);
+    assert_eq!(ring(&both, -face / 2.0 + 0.25 * c), 0);
+    assert_eq!(ring(&both, face / 4.0), ring(&plain, face / 4.0), "the middle of each half untouched");
+    // A half too narrow for two chamfers (where the addendum would take that size): named.
+    let addendum = tip - shape.pitch_diameter / 2.0;
+    if face / 4.0 < addendum {
+        let mut sp = plain.clone();
+        let e = tooth_chamfer(&items, &mut sp, ToothChamfer { size: face / 4.0, faces: ChamferFaces::Both }).unwrap_err();
+        assert!(e.contains("V teeth") && e.contains("both ends"), "{e}");
+    }
+}
+
+/// A bevel pair takes the tooth chamfer round its tips where they end, at the large and the small
+/// end of each gear (two cuts a gear), and on V teeth either side of the relief groove too (four):
+/// each a little material off the tips, none of the body.
+#[test]
+fn a_tooth_chamfer_goes_round_a_bevel_pairs_tips() {
+    use crate::items::{BlockSettings, ModuleBlock};
+    use crate::mesh3d::{Solid, overlap};
+    use crate::plan::chamfer::{ChamferFaces, ToothChamfer, tooth_chamfer};
+    // Apex at (0, 0, 20): gear 1 r 15 about z, gear 2 r 20 about x, cone distance 25 both.
+    let items = vec![item("C", ItemKind::Bevel, vec![circ([0.0; 3], Z, 15.0), circ([15.0, 0.0, 20.0], X, 20.0)])];
+    for v in [false, true] {
+        let blocks = if v {
+            vec![ModuleBlock {
+                id: "M".into(),
+                module: None,
+                members: vec![0],
+                settings: BlockSettings { helix: Some(20.0), herringbone: true, ..Default::default() },
+            }]
+        } else {
+            Vec::new()
+        };
+        let e = crate::blocks::expand_blocks(&items, &[], &blocks);
+        let plain = plan_items(&e.items, &e.links, &blocks, None, &Spec::default()).unwrap_or_else(|e| panic!("{e}"));
+        assert!(plain.error.is_none(), "{:?}", plain.error);
+        let module = plain.gears[0].module;
+        let mut sp = plain.clone();
+        tooth_chamfer(&e.items, &mut sp, ToothChamfer { size: 0.3 * module, faces: ChamferFaces::Both }).unwrap_or_else(|e| panic!("{e}"));
+        assert!(!sp.notes.iter().any(|n| n.contains("not applied")), "{:?}", sp.notes);
+        let count = |x: &SystemPlan| x.plan.bodies.iter().map(|b| b.steps.len()).sum::<usize>();
+        assert_eq!(count(&sp), count(&plain) + if v { 8 } else { 4 }, "V {v}");
+        for (a, b) in plain.plan.bodies.iter().zip(&sp.plan.bodies) {
+            let vol = |x: &crate::plan::Body| {
+                let s = Solid::new(x, 0.03);
+                overlap(&s, &s, 0.06)
+            };
+            let (before, after) = (vol(a), vol(b));
+            assert!(after < before && after > 0.97 * before, "V {v} {}: {before:.1} -> {after:.1} mm³", a.name);
+        }
+        // Sized for the large end, it shrinks with the teeth towards the apex: 0.7 modules would
+        // not fit the small end's addendum at full size, but goes on.
+        let mut near = plain.clone();
+        tooth_chamfer(&e.items, &mut near, ToothChamfer { size: 0.7 * module, faces: ChamferFaces::Both }).unwrap_or_else(|e| panic!("V {v}: {e}"));
+        assert_eq!(count(&near), count(&sp), "V {v}");
+        // Too big for the teeth at the large end: named.
+        let mut big = plain.clone();
+        let err = tooth_chamfer(&e.items, &mut big, ToothChamfer { size: 2.0 * module, faces: ChamferFaces::Both }).unwrap_err();
+        assert!(err.starts_with("Tooth chamfer") && err.contains("too big for Gear C"), "{err}");
+    }
+}
+
 /// A worm pair keeps its teeth plain, with a note naming it; a compound's layers are chamfered
 /// except where the smaller layer meets the bigger one.
 #[test]

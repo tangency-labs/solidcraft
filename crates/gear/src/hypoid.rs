@@ -1545,9 +1545,6 @@ fn work_out_design(s: &Spec, d: Design) -> Result<Set, String> {
                 }
                 gear.push(teeth_outline(&r, &lo, &hi, s.teeth2));
             }
-            if cfg!(test) && std::env::var("HYPOID_TRACE").is_ok() {
-                eprintln!("gear loft of {n} ({side} a side): restarts {:?}", restarts(&gear, s.teeth2 as usize));
-            }
             if !slips(&gear, s.teeth2 as usize) {
                 gear_n = Some(n);
                 break 'sides;
@@ -1577,10 +1574,6 @@ fn work_out_design(s: &Spec, d: Design) -> Result<Set, String> {
     for n in LOFT_COUNTS.into_iter().filter(|n| *n <= most) {
         let (z, t) = dense(&zeta, &teeth, n);
         let drawn = t.iter().all(|t| sound(&t.r, &t.lo, &t.hi, carve.pitch));
-        if cfg!(test) && std::env::var("HYPOID_TRACE").is_ok() {
-            let outlines: Vec<Outline> = t.iter().map(|t| teeth_outline(&t.r, &t.lo, &t.hi, s.teeth)).collect();
-            eprintln!("pinion loft of {n}: drawn {drawn}, restarts {:?}", restarts(&outlines, s.teeth as usize));
-        }
         if !drawn {
             continue;
         }
@@ -1890,6 +1883,7 @@ fn mirror_step(st: &mut Step) {
             *frame = Frame { origin: m(frame.origin), x: m(frame.x), z: m(frame.z) };
             mirror_step(step);
         }
+        Step::Group { steps, .. } => steps.iter_mut().for_each(mirror_step),
     }
 }
 

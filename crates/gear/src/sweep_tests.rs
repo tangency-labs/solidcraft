@@ -645,6 +645,18 @@ pub(crate) fn check_plan(p: &Plan) -> Result<(), String> {
                         }
                     }
                 }
+                // A solid of its own: its steps checked as a body's (the first new, no group in it).
+                Step::Group { steps, .. } => {
+                    if steps.iter().any(|x| matches!(x, Step::Group { .. })) {
+                        return Err(format!("{at}: a group in a group"));
+                    }
+                    if steps.first().map(Step::op) != Some(Op::New) {
+                        return Err(format!("{at}: a group whose first step isn't new"));
+                    }
+                    let mut one = Plan::default();
+                    one.bodies = vec![crate::plan::Body { name: at.clone(), frame: crate::plan::Frame::at([0.0; 3]), steps: steps.clone() }];
+                    check_plan(&one)?;
+                }
                 Step::Coil { section, pitch, z0, height, .. } => {
                     if !(pitch.is_finite() && *pitch > 0.0 && z0.is_finite() && height.is_finite() && *height > 0.0) {
                         return Err(format!("{at}: coil pitch {pitch} height {height}"));

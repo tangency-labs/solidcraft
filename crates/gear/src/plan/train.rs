@@ -644,6 +644,7 @@ pub(crate) fn build(s: &Spec, t: &Train, p: &mut Plan) {
                 root_diameter: 2.0 * sf.ra,
                 apex: None,
                 toe_pitch_diameter: None,
+                bevel: None,
             });
             if wanted(s, (i + 1).min(255) as u8) {
                 let face = faces[i];
@@ -682,6 +683,7 @@ pub(crate) fn build(s: &Spec, t: &Train, p: &mut Plan) {
                 root_diameter: 2.0 * f.rf,
                 apex: None,
                 toe_pitch_diameter: None,
+                bevel: None,
             });
             if wanted(s, (i + 1).min(255) as u8) {
                 let face = faces[i];

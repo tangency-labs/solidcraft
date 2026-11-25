@@ -1566,14 +1566,16 @@ fn body_points(b: &Body, h: f64, hz: f64) -> Vec<V3> {
             | Step::RingTaper { op, .. }
             | Step::Loft { op, .. }
             | Step::Revolve { op, .. }
-            | Step::Coil { op, .. } => *op,
+            | Step::Coil { op, .. }
+            | Step::Group { op, .. } => *op,
             Step::Placed { step, .. } => match step.as_ref() {
                 Step::Prism { op, .. }
                 | Step::Taper { op, .. }
                 | Step::RingTaper { op, .. }
                 | Step::Loft { op, .. }
                 | Step::Revolve { op, .. }
-                | Step::Coil { op, .. } => *op,
+                | Step::Coil { op, .. }
+                | Step::Group { op, .. } => *op,
                 Step::Placed { .. } => Op::Cut,
             },
         };
@@ -1763,7 +1765,8 @@ fn case_body(s: &Spec, core: &Core, lay: &Layout, drive: Option<&Drive>, p: &mut
                 | Step::RingTaper { op, .. }
                 | Step::Loft { op, .. }
                 | Step::Revolve { op, .. }
-                | Step::Coil { op, .. } => *op,
+                | Step::Coil { op, .. }
+                | Step::Group { op, .. } => *op,
                 Step::Placed { .. } => {
                     return Err("the integral mount can't take this ring gear's details (a step in its own frame): use the separate ring".into());
                 }
@@ -1812,7 +1815,8 @@ fn set_op(st: &mut Step, to: Op) {
         | Step::RingTaper { op, .. }
         | Step::Loft { op, .. }
         | Step::Revolve { op, .. }
-        | Step::Coil { op, .. } => *op = to,
+        | Step::Coil { op, .. }
+        | Step::Group { op, .. } => *op = to,
         Step::Placed { step, .. } => set_op(step, to),
     }
 }

@@ -666,6 +666,10 @@ pub enum Step {
     /// A step in a frame of its own, given in the body's frame ([`Frame::then`]): a radial hole
     /// is a prism along a frame whose z points out from the axis. Not nested.
     Placed { frame: Frame, step: Box<Step> },
+    /// A solid of its own, built from `steps` in order (the first new, none of them a group),
+    /// then combined with the body by `op`: a part that needs a boolean of its own before it
+    /// joins, such as one hand of V bevel teeth trimmed to its half of the face.
+    Group { steps: Vec<Step>, op: Op },
 }
 
 impl Step {
@@ -673,6 +677,7 @@ impl Step {
     pub fn op(&self) -> Op {
         match self {
             Step::Placed { step, .. } => step.op(),
+            Step::Group { op, .. } => *op,
             Step::Prism { op, .. }
             | Step::Taper { op, .. }
             | Step::RingTaper { op, .. }
@@ -685,6 +690,7 @@ impl Step {
     pub fn op_mut(&mut self) -> &mut Op {
         match self {
             Step::Placed { step, .. } => step.op_mut(),
+            Step::Group { op, .. } => op,
             Step::Prism { op, .. }
             | Step::Taper { op, .. }
             | Step::RingTaper { op, .. }
@@ -883,6 +889,27 @@ pub struct MemberShape {
     pub root_diameter: f64,
     pub apex: Option<[f64; 3]>,
     pub toe_pitch_diameter: Option<f64>,
+    /// A bevel gear's cone, as its teeth are built (what a tooth chamfer needs).
+    pub bevel: Option<BevelShape>,
+}
+
+/// A bevel gear's cone as its teeth are built, in its own frame: `center` on z = 0 and the apex
+/// at z = `apex_z` along `axis`. Distances along the pitch cone are from the apex.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct BevelShape {
+    /// The pitch cone's angle from the axis (radians).
+    pub delta: f64,
+    pub apex_z: f64,
+    /// Where the teeth run along the pitch cone: the large end (heel) and the small end (toe).
+    pub heel: f64,
+    pub toe: f64,
+    /// The tips' radius where they end at the heel.
+    pub tip_heel: f64,
+    /// The teeth end on the back and front cones (a cone flatter than [`FLAT_CONE`]); else on
+    /// planes square to the axis through the pitch circles at the heel and the toe.
+    pub cone_ends: bool,
+    /// V teeth: the relief groove's two edges along the pitch cone.
+    pub v_groove: Option<(f64, f64)>,
 }
 
 /// A shaft built with a set ([`Plan::shafts`]).
@@ -2095,6 +2122,40 @@ pub(crate) fn too_tall_for_cone(delta: f64, z: u32, need: u32, angle: &str) -> S
 }
 
 #[allow(clippy::too_many_arguments)]
+/// One half of V (chevron) bevel teeth's room, as a profile to revolve about the member's axis
+/// (its frame: apex at (0, `apex_z`)): inside the sphere of radius `rm` about the apex (the half
+/// towards it), or outside it within `reach` of the apex (the outer half). The sphere is drawn as
+/// a fine polygon; both halves use the same one, so they meet with no gap.
+/// How wide (× module) the relief groove is where V bevel teeth change hand.
+const V_RELIEF: f64 = 0.2;
+
+/// The core under V bevel teeth's relief groove, to revolve about the member's axis: between the
+/// spheres of radius `r0` and `r1` about the apex (0, `apex_z`), between the angles `band`
+/// (radians, from the axis seen from the apex: a band just inside the root cone).
+fn v_groove_core(apex_z: f64, r0: f64, r1: f64, band: (f64, f64)) -> Vec<V2> {
+    const N: usize = 8;
+    let at = |r: f64, t: f64| V2::new(r * t.sin(), apex_z - r * t.cos());
+    let t = |i: usize| band.0 + (band.1 - band.0) * i as f64 / N as f64;
+    let mut out: Vec<V2> = (0..=N).map(|i| at(r0, t(i))).collect();
+    out.extend((0..=N).rev().map(|i| at(r1, t(i))));
+    out
+}
+
+fn v_half_region(apex_z: f64, rm: f64, reach: f64, inner: bool) -> Vec<V2> {
+    const N: usize = 96;
+    let arc = (0..=N).map(|i| {
+        let t = PI * i as f64 / N as f64;
+        V2::new(rm * t.sin(), apex_z - rm * t.cos())
+    });
+    if inner {
+        return arc.collect();
+    }
+    let big = reach.max(2.0 * rm);
+    let mut out = vec![V2::new(0.0, apex_z - big), V2::new(big, apex_z - big), V2::new(big, apex_z + big), V2::new(0.0, apex_z + big)];
+    out.extend(arc.collect::<Vec<_>>().into_iter().rev());
+    out
+}
+
 fn bevel_member(s: &Spec, z: u32, delta: f64, spiral: f64, phase: f64, face: ConeFace, p: &mut Plan, who: &str) -> (ConeTeeth, ToothFlank) {
     let m = s.module;
     let r = m * f64::from(z) / 2.0;
@@ -2151,56 +2212,41 @@ fn bevel_member(s: &Spec, z: u32, delta: f64, spiral: f64, phase: f64, face: Con
     let skew = |rr: f64| if wind == 0.0 { 0.0 } else { wind * (rr.hypot(h) / rm).ln() };
     let (teeth, mut flank) = if s.herringbone && wind != 0.0 && face.toe() < rm && rm < face.heel {
         // V (chevron) teeth: the spiral's hand changes at mid-face (cone distance `rm`). The half
-        // towards the apex runs at the spiral angle, the outer half at the opposite one: two spiral
-        // halves of opposite hand, each its own taper. A flat section through a tooth spans
-        // several cone distances (its tip further from the apex than its root), so each half ends
-        // where the whole of its section is on its own side of `rm`: a narrow groove round the
-        // middle of the face, filled under the roots so the halves are one part.
-        let (ha, hf) = (crown.addendum.max(0.0), crown.dedendum.max(0.0));
-        let reach = |d: f64, off: f64| (d * dc).hypot(d * ds + off / dc);
-        let solve = |off: f64| {
-            let (mut lo, mut hi) = (face.toe(), face.heel);
-            for _ in 0..80 {
-                let mid = 0.5 * (lo + hi);
-                if reach(mid, off) < rm { lo = mid } else { hi = mid }
-            }
-            0.5 * (lo + hi)
-        };
-        let (d_in, d_out) = (solve(ha), solve(-hf));
-        if !(d_in > face.toe() + 0.1 * m && d_out < face.heel - 0.1 * m && d_out > d_in) {
-            p.refuse(format!("{who}: the face is too short for V teeth (each half needs room past the middle of the face): widen the face, or use plain spiral teeth"));
-        }
-        let inner = ConeFace { heel: d_in, width: d_in - face.toe(), mid: rm };
-        let outer = ConeFace { heel: face.heel, width: face.heel - d_out, mid: rm };
+        // towards the apex runs at the spiral angle, the outer half at the opposite one. Each half
+        // is the whole face's spiral teeth of its hand, kept on its side of the sphere of radius
+        // `rm` about the apex (a group of its own: the trim mustn't touch the other half). Both
+        // hands' teeth are the same on that sphere (neither has turned there), so the halves meet
+        // along the line where the hand changes, with no groove, at any cone angle (flat sections
+        // through a wheel near a crown gear's ran across most of its face).
         let mirrored = |rr: f64| -skew(rr);
-        let (a, fl) = lined_up_cone_teeth(&crown, z, mn, &skew, phase, delta, re, inner, wind, m);
-        let (b, _) = lined_up_cone_teeth(&crown, z, mn, &mirrored, phase, delta, re, outer, -wind, m);
-        let mut steps = a.steps;
-        for mut st in b.steps {
-            if !steps.is_empty() {
-                train::set_new_to_join(&mut st);
-            }
-            steps.push(st);
+        let (a, fl) = lined_up_cone_teeth(&crown, z, mn, &skew, phase, delta, re, face, wind, m);
+        let (b, _) = lined_up_cone_teeth(&crown, z, mn, &mirrored, phase, delta, re, face, -wind, m);
+        // A narrow relief groove where the hands meet (as a herringbone's): at the kink the two
+        // hands' contact runs a few thousandths of a millimetre into the mate. The same width
+        // at any cone angle, with the core under the roots across it so the halves are one part.
+        let groove = V_RELIEF * m;
+        let side = |inner: bool| v_half_region(h, if inner { rm - groove / 2.0 } else { rm + groove / 2.0 }, re + h + 10.0 * m, inner);
+        let half = |mut steps: Vec<Step>, inner: bool, op: Op| {
+            steps.push(Step::Revolve { profile: side(inner), op: Op::Intersect });
+            Step::Group { steps, op }
+        };
+        // The root cone's angle from the axis (seen from the apex), a little inside the roots, and
+        // a band 0.4 modules under it: material both halves have (a flat wheel's body is only
+        // half a module thick under its roots).
+        let root = 0.98 * (delta - crown.dedendum.max(0.0).atan2(re));
+        let under = (root - 0.4 * m / rm).max(0.0);
+        let mut steps = vec![half(a.steps, true, Op::New), half(b.steps, false, Op::Join)];
+        if root > under {
+            steps.push(Step::Revolve { profile: v_groove_core(h, rm - groove, rm + groove, (under, root)), op: Op::Join });
         }
-        // The groove's core: under the roots, between the two halves' end planes.
-        let at = |d: f64| re * dc - d * dc;
-        let core = 0.98 * (d_in * ds - hf / dc);
-        if core > 0.0 {
-            let (z0, z1) = (at(d_out), at(d_in));
-            steps.push(Step::Revolve {
-                profile: vec![V2::new(0.0, z0 - 0.05 * m), V2::new(core, z0 - 0.05 * m), V2::new(core, z1 + 0.05 * m), V2::new(0.0, z1 + 0.05 * m)],
-                op: Op::Join,
-            });
-        }
-        p.fact(format!("{who} V teeth groove at mid-face"), d_out - d_in, Unit::Mm);
-        (
-            ConeTeeth {
-                steps,
-                ends: ConeEnds { back: b.ends.back, front: a.ends.front, small_root: a.ends.small_root },
-                tip_radius: b.tip_radius.max(a.tip_radius),
-            },
-            fl,
-        )
+        p.fact(format!("{who} V teeth relief groove at mid-face"), groove, Unit::Mm);
+        let ends = ConeEnds {
+            back: a.ends.back.min(b.ends.back),
+            front: a.ends.front.max(b.ends.front),
+            small_root: a.ends.small_root.min(b.ends.small_root),
+        };
+        let tip_radius = a.tip_radius.max(b.tip_radius);
+        (ConeTeeth { steps, ends, tip_radius }, fl)
     } else {
         lined_up_cone_teeth(&crown, z, mn, &skew, phase, delta, re, face, wind, m)
     };
@@ -2430,9 +2476,22 @@ fn bevel(s: &Spec, p: &mut Plan) {
     let frame2 = Frame { origin: origin2, x: [sigma.cos(), 0.0, sigma.sin()], z: ax2 };
     // The abstract shapes (heel circles, toe pitch circle, apex) and the pitch line the cones
     // share (gear 1's tooth towards +x), for a preview.
+    let built = [(t1.tip_radius, h1), (t2.tip_radius, h2)];
+    let v_teeth = s.herringbone && spiral != 0.0;
     for (k, (f, r, d, face, frame)) in [(f1, r1, d1, f1, Frame::at(s.origin)), (f2, r2, d2, f2, frame2)].into_iter().enumerate() {
         let (ha, hf) = (s.rack.addendum * s.module, s.rack.dedendum * s.module);
         let k_heel = f.heel / re;
+        let (tip_heel, apex_z) = built[k];
+        let groove = V_RELIEF * s.module;
+        let bevel_shape = BevelShape {
+            delta: d,
+            apex_z,
+            heel: f.heel,
+            toe: f.toe(),
+            tip_heel,
+            cone_ends: d > FLAT_CONE,
+            v_groove: (v_teeth && f.toe() < f.mid && f.mid < f.heel).then_some((f.mid - groove / 2.0, f.mid + groove / 2.0)),
+        };
         p.shapes.push(MemberShape {
             member: k,
             center: frame.origin,
@@ -2443,6 +2502,7 @@ fn bevel(s: &Spec, p: &mut Plan) {
             root_diameter: 2.0 * k_heel * (r - hf * d.cos()),
             apex: Some(apex),
             toe_pitch_diameter: Some(2.0 * r * face.toe() / re),
+            bevel: Some(bevel_shape),
         });
     }
     {

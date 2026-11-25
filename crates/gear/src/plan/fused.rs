@@ -214,7 +214,7 @@ fn bounds(s: &Step) -> Option<Bounds> {
             }
             Some(Bounds { z, r: (0.0, far) })
         }
-        Step::Taper { .. } | Step::RingTaper { .. } | Step::Coil { .. } => None,
+        Step::Taper { .. } | Step::RingTaper { .. } | Step::Coil { .. } | Step::Group { .. } => None,
     }
 }
 

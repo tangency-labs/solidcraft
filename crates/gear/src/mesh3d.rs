@@ -396,6 +396,10 @@ enum Part {
         frame: Frame,
         inner: Box<Part>,
     },
+    /// A solid of its own made of parts, each combined with the ones before by its op.
+    Group {
+        parts: Vec<(Part, Op)>,
+    },
 }
 
 /// A step as a part, its op, and the cylinder about the body's axis that holds it (radius,
@@ -467,6 +471,18 @@ fn make_part(st: &Step, h: f64) -> (Part, Op, (f64, f64, f64)) {
             let slack = r * (1.0 - (PI / 32.0).cos()) / (PI / 32.0).cos();
             (Part::Placed { frame: *frame, inner: Box::new(inner) }, op, (rr + slack, zlo - slack, zhi + slack))
         }
+        Step::Group { steps, op } => {
+            let mut parts = Vec::with_capacity(steps.len());
+            let (mut r, mut lo, mut hi) = (0.0f64, f64::MAX, f64::MIN);
+            for st in steps {
+                let (part, o, (pr, plo, phi)) = make_part(st, h);
+                if matches!(o, Op::New | Op::Join) {
+                    (r, lo, hi) = (r.max(pr), lo.min(plo), hi.max(phi));
+                }
+                parts.push((part, o));
+            }
+            (Part::Group { parts }, *op, (r, lo, hi))
+        }
     }
 }
 
@@ -534,6 +550,30 @@ impl Part {
                 let d = sub(p, frame.origin);
                 inner.contains([dot(d, frame.x), dot(d, frame.y()), dot(d, frame.z)])
             }
+            Part::Group { parts } => {
+                let mut inside = false;
+                for (part, op) in parts {
+                    match op {
+                        Op::New | Op::Join => inside = inside || part.contains(p),
+                        Op::Cut => inside = inside && !part.contains(p),
+                        Op::Intersect => inside = inside && part.contains(p),
+                    }
+                }
+                inside
+            }
+        }
+    }
+    /// Whether a point of this part's own surface ([`Part::sheets`]) is kept by the part: a
+    /// group's sheets are its pieces' whole surfaces, of which its own trims keep only some.
+    /// Every other part keeps all of its surface.
+    fn keeps(&self, p: &P3) -> bool {
+        match self {
+            Part::Group { parts } => parts.iter().all(|(part, op)| match op {
+                Op::Intersect => part.contains(*p),
+                Op::Cut => !part.contains(*p),
+                Op::New | Op::Join => true,
+            }),
+            _ => true,
         }
     }
     /// [`Part::sheets`] with the sheets whose every row is one outline turned and scaled (a
@@ -675,6 +715,14 @@ impl Part {
                     out.push(rows.into_iter().map(|row| row.into_iter().map(|q| frame.world(q)).collect()).collect());
                 }
             }
+            // The pieces that add material, whole: [`Part::keeps`] says which points stay.
+            Part::Group { parts } => {
+                for (part, op) in parts {
+                    if matches!(op, Op::New | Op::Join) {
+                        out.extend(part.sheets(h, hz, band));
+                    }
+                }
+            }
         }
         out
     }
@@ -769,10 +817,10 @@ impl Solid {
                 let stride = if adds { 1 } else { (sheet.len() / 96).max(1) };
                 for row in sheet.into_iter().step_by(stride) {
                     if trims.is_empty() {
-                        out.extend(row);
+                        out.extend(row.into_iter().filter(|p| part.keeps(p)));
                         continue;
                     }
-                    out.extend(row.into_iter().filter(|p| kept(p, i) && (adds || made_before(p, i))));
+                    out.extend(row.into_iter().filter(|p| part.keeps(p) && kept(p, i) && (adds || made_before(p, i))));
                 }
             }
         }
@@ -811,7 +859,7 @@ impl Solid {
                     for &k in &order {
                         let q = outline[k].rot(turn) * scale;
                         let p = [q.x, q.y, z];
-                        if trims.is_empty() || (kept(&p, i) && (adds || made_before(&p, i))) {
+                        if part.keeps(&p) && (trims.is_empty() || (kept(&p, i) && (adds || made_before(&p, i)))) {
                             take(p);
                             break;
                         }
@@ -822,7 +870,7 @@ impl Solid {
                 let stride = if adds { 1 } else { (sheet.len() / 96).max(1) };
                 for row in sheet.into_iter().step_by(stride) {
                     if trims.is_empty() {
-                        row.into_iter().for_each(&mut take);
+                        row.into_iter().filter(|p| part.keeps(p)).for_each(&mut take);
                         continue;
                     }
                     // Farthest first (ties in the row's order); each z of the row done at its
@@ -837,7 +885,7 @@ impl Solid {
                         if done.contains(&key) {
                             continue;
                         }
-                        if kept(&p, i) && (adds || made_before(&p, i)) {
+                        if part.keeps(&p) && kept(&p, i) && (adds || made_before(&p, i)) {
                             take(p);
                             if one_z {
                                 break;
