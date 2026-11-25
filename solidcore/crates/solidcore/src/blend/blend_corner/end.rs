@@ -727,7 +727,9 @@ const SIDE_EDGE_BALL_SAMPLES: u32 = 48;
 /// round's radius (`within` or `on_g`), the round's rail misses the side edge completely,
 /// and the largest ball along the edge (less the open margin) is the largest radius whose
 /// rail still reaches it. Returns `Ok(None)` if any probe reaches the round's radius (the
-/// rail does not pass over the edge) or if no positive ball fits.
+/// rail does not pass over the edge) or if no positive ball is found along the edge; when
+/// the margin exhausts the peak (`most <= margin`), returns `Ok(Some(0.0))` so the
+/// rail-miss verdict is preserved as `NoRoom` with no fitting radius.
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` without solver, side edge or curve; those of the evaluations and
@@ -813,8 +815,8 @@ fn max_ball_over_side_edge(
         Some(e) => 1000.0 * edge::tolerance(target, e)?,
         None => target.tolerance(),
     };
-    let fit = most - margin;
-    Ok((fit > 0.0).then_some(fit))
+    let fit = (most - margin).max(0.0);
+    Ok(Some(fit))
 }
 
 /// The fork's `SmBlendCorner::RadiusReachingSideEdgeEnd` (41a39ec, 54a4ee7): whether the
