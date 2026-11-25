@@ -903,9 +903,10 @@ impl Sketch {
             equations,
             counters: _,
             view: _,
+            frame,
         } = self;
         format!(
-            "{points:?}{curves:?}{patterns:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}"
+            "{points:?}{curves:?}{patterns:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}{frame:?}"
         )
     }
 }
