@@ -1437,6 +1437,7 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
         let tolerance = b.edge(edge_id)?.tolerance;
         ignore_status(edge::set_tolerance(b, new_edge, tolerance, true, true))?;
         ignore_status(vertex::set_tolerance(b, new_vertex, tolerance, true, true))?;
+        carry_trim_cover_raise(b, edge_id, new_edge, new_vertex)?;
         insert_brep_entity(b, EntityRef::Edge(new_edge))?;
         insert_brep_entity(b, EntityRef::Vertex(new_vertex))?;
         state.with_env(k, |env| {
@@ -1467,6 +1468,31 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
             vertex: Some(new_vertex),
         })
     })
+}
+
+/// (not upstream) The split `edge`'s cover raise ([`crate::topology::TrimCoverRaises`]) goes to
+/// its new piece and vertex while each holds the raised tolerance, so fits along them match.
+fn carry_trim_cover_raise(
+    b: &mut Brep,
+    edge: EdgeId,
+    new_edge: EdgeId,
+    new_vertex: VertexId,
+) -> Result<()> {
+    let Some(&(before, after)) = b.trim_cover_raises().edges.get(&edge) else {
+        return Ok(());
+    };
+    if b.edge(edge)?.tolerance.to_bits() != after.to_bits() {
+        return Ok(());
+    }
+    let mut record = b.trim_cover_raises().clone();
+    if b.edge(new_edge)?.tolerance.to_bits() == after.to_bits() {
+        record.edges.insert(new_edge, (before, after));
+    }
+    if b.vertex(new_vertex)?.tolerance.to_bits() == after.to_bits() {
+        record.vertices.insert(new_vertex, (before, after));
+    }
+    b.set_trim_cover_raises(record);
+    Ok(())
 }
 
 /// Inputs for `MakeEdgeInFaceWithVU`. Optional geometry is owned, as the native
