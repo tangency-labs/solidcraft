@@ -1709,7 +1709,7 @@ const FOUR_LAYERS: &str = r#"(kicad_pcb (general (thickness 1.6))
 
 /// The lowest and highest Z of a body's mesh.
 fn z_range(mesh: &solidcraft_doc::MeshData) -> (f64, f64) {
-    let zs: Vec<f64> = mesh.positions.as_chunks::<3>().0.iter().map(|p| f64::from(p[2])).collect();
+    let zs: Vec<f64> = mesh.positions.as_chunks::<3>().0.iter().map(|p| p[2]).collect();
     (zs.iter().copied().fold(f64::INFINITY, f64::min), zs.iter().copied().fold(f64::NEG_INFINITY, f64::max))
 }
 
@@ -1740,7 +1740,7 @@ fn inner_copper_sits_inside_the_board_at_its_own_depth() {
     }
     assert!(in1.0 > in2.1, "In1 is above In2: {in1:?} {in2:?}");
     // Each layer holds only its own copper: the In2 body has the track and the pour, B.Cu has one track.
-    let ys = |mesh: &solidcraft_doc::MeshData| -> Vec<f64> { mesh.positions.as_chunks::<3>().0.iter().map(|p| f64::from(p[1])).collect() };
+    let ys = |mesh: &solidcraft_doc::MeshData| -> Vec<f64> { mesh.positions.as_chunks::<3>().0.iter().map(|p| p[1]).collect() };
     assert!(ys(body("Copper B.Cu")).iter().all(|y| (*y + 5.0).abs() < 0.2), "B.Cu holds only its own track");
     assert!(ys(body("Copper In2.Cu")).iter().any(|y| *y < -8.0), "the In2 pour is on In2");
 }
@@ -1805,7 +1805,7 @@ fn inner_pads_cut_inner_traces_and_a_through_pad_has_copper_on_every_layer() {
         let (low, high) = z_range(mesh);
         assert!(low > 0.0 && high < 1.6, "{low} {high}");
     }
-    let xs: Vec<f64> = inner.iter().flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| f64::from(p[0]))).collect();
+    let xs: Vec<f64> = inner.iter().flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| p[0])).collect();
     assert!(xs.iter().any(|x| (*x - 10.0).abs() < 0.6), "the pad's ring is on In1");
 }
 
@@ -1831,7 +1831,7 @@ fn footprint_copper_graphics_and_wildcard_pads_reach_the_inner_layers_or_are_rep
     let xs: Vec<f64> = meshes
         .iter()
         .filter(|mesh| mesh.name.starts_with("Copper In1.Cu"))
-        .flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| f64::from(p[0])))
+        .flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| p[0]))
         .collect();
     // The rectangle spans X = 8 to 12 (its stroke reaches 0.1 mm past that); the pad's ring spans 14.2 to 15.8.
     assert!(
