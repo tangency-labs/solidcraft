@@ -21,8 +21,8 @@
 
 use std::f64::consts::FRAC_PI_2;
 
-use solidcore_ops::{Body, Order, affine, sweep};
 use solidcore_record::{Plane, Vec3};
+use solidcraft_kernel::services::{ExactBody as Body, Order, affine, sweep};
 
 /// Which of the two parts of a joint something is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -61,7 +61,7 @@ pub enum GrooveRefusal {
     GrooveFaceNotStraight { part: JointPart, face: usize },
     /// An ops call failed.
     #[error(transparent)]
-    Ops(#[from] solidcore_ops::Error),
+    Ops(#[from] solidcraft_kernel::services::Error),
 }
 
 type Result<T> = std::result::Result<T, GrooveRefusal>;
@@ -113,7 +113,8 @@ pub fn chain(pick: &GroovePick<'_>, part: JointPart) -> Result<Chain> {
         return Err(GrooveRefusal::TJoint { part });
     }
     // each face's edges, the outer face's last
-    let edges = faces.iter().chain([&pick.outer]).map(|&f| pick.part.rim_edges(pick.order, &[f])).collect::<solidcore_ops::Result<Vec<_>>>()?;
+    let edges =
+        faces.iter().chain([&pick.outer]).map(|&f| pick.part.rim_edges(pick.order, &[f])).collect::<solidcraft_kernel::services::Result<Vec<_>>>()?;
     let outer_edges = edges.last().map_or(&[][..], Vec::as_slice);
     let shared = |a: &[usize], b: &[usize]| a.iter().copied().filter(|e| b.contains(e)).collect::<Vec<usize>>();
     // each picked face's picked neighbours, by position in `faces`

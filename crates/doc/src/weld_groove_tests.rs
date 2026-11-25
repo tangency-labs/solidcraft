@@ -5,9 +5,9 @@
 //! along the joint refused. Ported from the second groove PR's first slice (solidcore
 //! `weld::groove::joint`, never pushed) onto ops reads (#18500).
 
-use solidcore_ops::prism::extrude_planar_regions;
-use solidcore_ops::{Body, Order};
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_kernel::services::prism::extrude_planar_regions;
+use solidcraft_kernel::services::{ExactBody as Body, Order};
 
 use super::*;
 
