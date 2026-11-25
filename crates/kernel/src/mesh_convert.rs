@@ -1174,6 +1174,45 @@ mod tests {
     /// triangulated from the flat's centre) converts to one face per flat: the groups fuse the
     /// subdivisions, and every boundary side pairs with the neighbouring flat's along the rims
     /// both subdivide (#12281's real-world mesh shape).
+
+    /// A flat face fused beside faceted round walls keeps the collinear boundary vertices it
+    /// shares with them. Dropping them was a T-junction, and a real 3MF came out an open shell.
+    #[test]
+    fn a_flat_face_meeting_a_rounded_one_converts_without_t_junctions() {
+        let boxed = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 20.)).unwrap();
+        let filleted = crate::fillet(&boxed, &[Vec3::new(40., 0., 10.)], 8.).unwrap();
+        let mesh = mesh_of(&filleted);
+        let mesh_volume = crate::measure(&mesh).unwrap().volume;
+        let converted = convert_prismatic_mesh(&mesh, 0.05).unwrap();
+        assert!(converted.validity().is_empty(), "{:?}", converted.validity());
+        // The converted solid is the mesh, its fillet faceted, so it measures the mesh's volume.
+        assert!((crate::measure(&converted).unwrap().volume - mesh_volume).abs() < mesh_volume * 1e-6);
+        assert!((mesh_volume - crate::measure(&filleted).unwrap().volume).abs() < 1.0);
+    }
+
+    /// A slicer's STL or 3MF stores coordinates as f32, so a flat face's points no longer sit
+    /// exactly on one plane. They must still fuse into one face instead of being refused
+    /// ("cannot attach a plane to a wire that is not on one plane").
+    #[test]
+    fn a_mesh_rounded_like_f32_converts_without_asking_for_one_plane() {
+        let mesh = mesh_of(&crate::box_solid(Vec3::ZERO, Vec3::new(60., 40., 20.)).unwrap());
+        let inner = mesh.mesh.as_ref().unwrap();
+        let positions: Vec<Vec3> = inner
+            .positions
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let d = 3e-6 * ((i % 5) as f64 - 2.0);
+                Vec3::new(p.x + d, p.y - d * 0.5, p.z + d * 0.25)
+            })
+            .collect();
+        let rounded = crate::mesh_body(&positions, &inner.triangles).unwrap();
+        let converted = convert_prismatic_mesh(&rounded, 0.05).unwrap();
+        assert!(converted.validity().is_empty(), "{:?}", converted.validity());
+        let expected = crate::measure(&rounded).unwrap().volume;
+        assert!((crate::measure(&converted).unwrap().volume - expected).abs() < expected * 1e-6);
+    }
+
     #[test]
     fn a_subdivided_box_converts_to_six_faces() {
         let (w, h, d) = (20., 10., 4.);
