@@ -1974,10 +1974,11 @@ fn notch_loop(outer: &Loop2, drill: &Loop2, center: Vec2) -> Option<Loop2> {
             b.invert_direction_mut();
         }
         let result = a.boolean(&b, BooleanOp::Not);
-        if result.pos_plines.len() == 1 && result.neg_plines.is_empty() {
-            if let Some(notched) = result.pos_plines.first().and_then(|r| pline_to_loop(&r.pline)) {
-                return Some(notched);
-            }
+        if result.pos_plines.len() == 1
+            && result.neg_plines.is_empty()
+            && let Some(notched) = result.pos_plines.first().and_then(|r| pline_to_loop(&r.pline))
+        {
+            return Some(notched);
         }
     }
     None
