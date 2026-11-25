@@ -896,10 +896,7 @@ fn clicking_a_nested_occurrence_in_the_viewport_reveals_its_row_without_opening_
     assert!(!h.app.tree.expanded.contains(&format!("{key_part_a}/bodies")), "target Bodies folder is not expanded");
     h.frames(2);
     assert!(h.app.tree.reveal_occurrence.is_none(), "occurrence reveal acknowledged once presented");
-    assert!(
-        super::drawn_occurrences().iter().any(|(path, _, _, open)| path == &path_a && !*open),
-        "clicked nested placement row is drawn closed"
-    );
+    assert!(super::drawn_occurrences().iter().any(|(path, _, _, open)| path == &path_a && !*open), "clicked nested placement row is drawn closed");
     assert!(
         !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body_a}")),
         "body inside the clicked placement stays hidden"
