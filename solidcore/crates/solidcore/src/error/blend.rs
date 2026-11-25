@@ -2789,6 +2789,11 @@ impl core::fmt::Display for BlendFailure {
                 "{}: a weld bead with an obtuse toe (one leg at most the other's cosine of the angle between the faces) is not built yet",
                 self.class()
             ),
+            Self::WeldNotBuilt(WeldGap::StripNotProved) => write!(
+                f,
+                "{}: a weld bead between two bodies is built only where its strip from the root to the toe is proved on the face; here the proof did not finish",
+                self.class()
+            ),
         }
     }
 }
@@ -3215,6 +3220,10 @@ mod tests {
             ),
             (
                 BlendFailure::WeldNotBuilt(WeldGap::ObtuseToe),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::StripNotProved),
                 ErrorKind::Unsupported,
             ),
             (

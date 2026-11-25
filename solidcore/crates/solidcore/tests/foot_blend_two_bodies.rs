@@ -2,23 +2,26 @@
 //! side from its own face (the side along which the face holds a step from the root) and
 //! refuses faces that do not meet in an inside corner, and `FootBlend::toes_on_bodies`
 //! proves the strip from the root to each toe on its own body's face over the whole joint. A
-//! plate standing on a plate (T joint), a plate lapped on a plate, a rod standing on a plate
-//! and a plate standing on a pocket's floor (a face whose outer use runs against its surface),
-//! each two bodies, 6 mm legs: the flat bead's volume is the closed form, its edges lie in
-//! the joint's corner, and both bodies are the same after, in their file bytes and in memory.
-//! A toe in a notch of the base, and a hole in the base between the stations, are refused
-//! with the leg that fits; two plates butted flush, and a face that leaves the joint away
-//! from the corner, meet in no corner; a joint off one of the faces, or over a hole in it, and
-//! the same face twice are refused.
+//! plate standing on a plate (T joint), a plate lapped on a plate, a rod standing on a plate,
+//! a plate standing on a pocket's floor (a face whose outer use runs against its surface) and
+//! one on a cavity's floor (a face whose outer side is a void inside the body), each two
+//! bodies, 6 mm legs: the flat bead's volume is the closed form, its edges lie in the joint's
+//! corner, and both bodies are the same after, in their file bytes and in memory. Small legs
+//! on the tee are proved too. A toe in a notch of the base, and a hole in the base between
+//! the stations, are refused with the leg that fits; two plates butted flush, and a face that
+//! leaves the joint away from the corner, meet in no corner; a joint off one of the faces, or
+//! over a hole in it, and the same face twice are refused.
 //!
 //! The tolerances: a bead's edges lie within [`WELD_FIT_TOLERANCE`] of the exact toes and
 //! root (its section face is fitted to it); the plates' beads are planes, on which the
 //! volume's Gauss-Kronrod rule is exact, so their volume is held to the accuracy asked
-//! (relative); the rod's bead's section face is within the fit tolerance of the exact cone, so
-//! its volume is within that tolerance times the face's area (Pappus) and the accuracy asked.
-//! A leg's fit is the largest leg that holds, less the halving's bracket `1e-7 (1 + hi)`, and
-//! at most the face's zone tolerance (`1e-5`, a toe within it of the boundary is on the face)
-//! or the strip's margin (the fit tolerance, at the toe) past the distance to the boundary.
+//! (relative); the rod's bead's section face is within the deviation the fit certifies of the
+//! exact cone (`FootBlend::section_bound`; the fit tolerance where none is certified), so its
+//! volume is within that deviation times the face's area (Pappus) and the accuracy asked. A
+//! leg's fit is the largest leg that holds, less the halving's bracket `1e-7 (1 + hi)` and the
+//! face's tolerance (the fit named keeps the toe on the face itself), and at most the face's
+//! zone tolerance (`1e-5`, a toe within it of the boundary is on the face) or the strip's
+//! margin (the fit tolerance, at the toe) past the distance to the boundary.
 
 #![allow(clippy::unwrap_used, clippy::panic)] // test
 
@@ -237,10 +240,21 @@ fn a_rod_standing_on_a_plate_gets_its_bead_round_its_foot() {
     assert!(inside, "the bead left the corner");
     let tau = 2.0 * std::f64::consts::PI;
     let pappus = 18.0 * tau * 17.0;
-    // the section face: the hypotenuse, 6 sqrt 2, swept round its middle's radius 18
+    // the section face: the hypotenuse, 6 sqrt 2, swept round its middle's radius 18; the
+    // face's net within the deviation the fit certifies of the exact cone (else within the fit
+    // tolerance), so the volume within that deviation times the face's area, and the
+    // integration's accuracy asked
     let face = 6.0 * 2.0_f64.sqrt() * tau * 18.0;
-    let bound = WELD_FIT_TOLERANCE * face + 1e-6 * pappus;
-    assert!((v - pappus).abs() <= bound, "{v} against {pappus}, {bound}");
+    let blend = FootBlend::of_faces(&k, &rod, side, &plate, top, &joint).unwrap();
+    let deviation = blend
+        .section_bound(&k, [LEG, LEG], 0.0, WELD_FIT_TOLERANCE)
+        .unwrap()
+        .unwrap_or(WELD_FIT_TOLERANCE);
+    let bound = deviation * face + 1e-6 * pappus;
+    assert!(
+        (v - pappus).abs() <= bound,
+        "{v} against {pappus}, {bound} (deviation {deviation})"
+    );
 }
 
 /// A notch cut through the base behind the web (x from 20 to 30, y from 40 to 60): a leg of
@@ -266,7 +280,7 @@ fn a_toe_in_a_notch_of_the_other_body_s_face_is_refused_with_the_leg_that_fits()
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
     assert!(
-        fit.size >= 15.0 - bracket(15.0) && fit.size <= 15.0 + ZONE + SLACK,
+        fit.size >= 15.0 - bracket(15.0) - ZONE && fit.size <= 15.0 + ZONE + SLACK,
         "{}",
         fit.size
     );
@@ -378,7 +392,7 @@ fn a_hole_under_the_strip_between_the_stations_is_refused_with_the_leg_that_fits
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
     assert!(
-        fit.size >= 1.0 - bracket(1.0) && fit.size <= 1.0 + ZONE + SLACK,
+        fit.size >= 1.0 - bracket(1.0) - ZONE && fit.size <= 1.0 + ZONE + SLACK,
         "{}",
         fit.size
     );
@@ -439,4 +453,50 @@ fn the_same_face_twice_is_refused() {
             && format!("{got:?}").contains("the same face twice"),
         "{got:?}"
     );
+}
+
+/// A web on the floor of a cavity: a block 100 by 100, 50 high, with a closed cavity 60 by 60,
+/// 30 high inside it (its floor at z = 10), a web 10 thick at x = 45 over the cavity's length.
+/// The floor's outer use bounds the cavity, a void that is not the infinite region: it has
+/// an outer side. The bead is 18 by 60.
+#[test]
+fn a_plate_standing_on_a_cavity_floor_gets_its_bead_in_the_corner() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    let mut k = kernel();
+    let block_ = block(&mut k, [0.0; 3], [100.0, 100.0, 50.0]);
+    let cavity = block(&mut k, [20.0, 20.0, 10.0], [60.0, 60.0, 30.0]);
+    let base = boolean_difference(&mut k, block_, cavity).unwrap();
+    let web = block(&mut k, [45.0, 20.0, 10.0], [10.0, 60.0, 20.0]);
+    let side = face_at(&k, &web, [45.0, 50.0, 10.0], [45.0, 20.0, 20.0]);
+    let floor = face_at(&k, &base, [50.0, 20.0, 10.0], [20.0, 50.0, 10.0]);
+    let joint = line([45.0, 20.0, 10.0], [45.0, 80.0, 10.0]);
+    let (v, inside) = bead(
+        &mut k,
+        (&web, side),
+        (&base, floor),
+        &joint,
+        |p| {
+            (39.0 - SLACK..=45.0 + SLACK).contains(&p.x)
+                && (10.0 - SLACK..=16.0 + SLACK).contains(&p.z)
+        },
+        ACCURACY,
+    );
+    assert!(inside, "the bead left the corner");
+    assert!((v - 1080.0).abs() <= ACCURACY * 1080.0, "{v}");
+}
+
+/// Small legs on the tee, down to a tenth of a millimetre (the smallest a body builds is far
+/// below): the strip's proof starts from the edges' and the joint's spans and halves only
+/// where it needs to, so it finishes as the leg shrinks.
+#[test]
+fn small_legs_on_the_tee_are_proved_on_the_faces() {
+    let mut k = kernel();
+    let (web, side, base, top) = tee(&mut k);
+    let joint = line([45.0, 0.0, 10.0], [45.0, 100.0, 10.0]);
+    let blend = FootBlend::of_faces(&k, &web, side, &base, top, &joint).unwrap();
+    for leg in [0.5, 0.2, 0.1] {
+        blend
+            .toes_on_bodies(&k, [&web, &base], [leg, leg], &[])
+            .unwrap_or_else(|e| panic!("leg {leg}: {e}"));
+    }
 }

@@ -426,20 +426,25 @@ impl FootBlend {
                 .surface
                 .clone()
                 .ok_or_else(|| SolidError::invalid_input(OP, "a face with no surface"))?;
-            let fu = crate::topology::face::p2::outer_faceuse(body, *face)?
+            let up = crate::topology::face::p2::outer_faceuse(body, *face)?
                 .ok_or_else(|| SolidError::invalid_input(OP, "a face with no face use"))?;
-            // `outer_faceuse` gives the mate where the upward use is not on the void, without
-            // asking whether the mate is: material on both sides leaves the face no outer side
-            let on_void = match body.faceuse(fu)?.shell {
-                Some(shell) => body.shell(shell)?.region == body.infinite_region(),
-                None => false,
+            // the face's outer use is the one on a void: the infinite region or a cavity
+            // (`outer_faceuse` gives the mate where the upward use is not on the infinite
+            // region, without asking whether the mate is on a void); material on both sides
+            // leaves the face no outer side
+            let fu = if on_a_void(body, up)? {
+                up
+            } else {
+                match body.faceuse(up)?.mate {
+                    Some(mate) if on_a_void(body, mate)? => mate,
+                    _ => {
+                        return Err(SolidError::invalid_input(
+                            OP,
+                            "a face with no outer side (material on both sides)",
+                        ))
+                    }
+                }
             };
-            if !on_void {
-                return Err(SolidError::invalid_input(
-                    OP,
-                    "a face with no outer side (material on both sides)",
-                ));
-            }
             if eu1::faceuse_orientation(body, fu)?
                 != crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Same
             {
@@ -1192,8 +1197,10 @@ impl FootBlend {
     ///
     /// # Errors
     ///
-    /// Those of [`FootBlend::toes_on_faces`], and a station with no toe refused (as the build
-    /// refuses it) rather than skipped; the strip's refusal the same as a toe's (at the
+    /// Those of [`FootBlend::toes_on_faces`], and a station with no toe refused as the build
+    /// refuses it (with the leg that fits) rather than skipped;
+    /// [`crate::error::blend::WeldGap::StripNotProved`] where the strip's proof does not finish
+    /// (at the point where it stopped); the strip's refusal the same as a toe's (at the
     /// point of the face's boundary found in it), each leg tried for the fit checked so too,
     /// the smallest leg a body builds being that of the body the toe is off. Where the faces
     /// are of two bodies the refusal names no face (a face id does not say whose): its point
@@ -1247,7 +1254,7 @@ impl FootBlend {
             let s = match self.try_station(k, t, legs, near.as_ref())? {
                 Ok(s) => s,
                 // two bodies: a station with no toe is refused here, not left to the build
-                Err(miss) if prove => return Err(self.miss_error(miss, None).into_error()),
+                Err(miss) if prove => return Err(self.refusal(k, miss, &ts, legs, 0.0)?),
                 Err(_) => continue,
             };
             for (i, side) in self.sides.iter().enumerate() {
@@ -1270,9 +1277,13 @@ impl FootBlend {
                 else {
                     continue;
                 };
-                if let Some(at) = self.strip_off_face(k, i, target, face, z)? {
-                    off = Some((i, at));
-                    break;
+                match self.strip_off_face(k, i, target, face, z)? {
+                    Strip::Held => {}
+                    Strip::Off(at) => {
+                        off = Some((i, at));
+                        break;
+                    }
+                    Strip::Unproved(at) => return Err(self.strip_not_proved(i, at)),
                 }
             }
         }
@@ -1311,9 +1322,11 @@ impl FootBlend {
                 near = Some(s);
             }
             match targets.get(i) {
-                Some(&target) if prove => {
-                    Ok(self.strip_off_face(k, i, target, face, leg)?.is_none())
-                }
+                Some(&target) if prove => match self.strip_off_face(k, i, target, face, leg)? {
+                    Strip::Held => Ok(true),
+                    Strip::Off(_) => Ok(false),
+                    Strip::Unproved(at) => Err(self.strip_not_proved(i, at)),
+                },
                 _ => Ok(true),
             }
         };
@@ -1341,7 +1354,7 @@ impl FootBlend {
         }
         // a leg below the body's resolution is refused for its size before the toes are read
         // (`weld_bead::bead_body`'s first pass), so a retry at it would not build: no leg fits
-        if !is_radius_supported(lo, target.map_or(0.0, |b| b.tolerance())) {
+        if !is_radius_supported(lo, target.map_or(0.0, Brep::tolerance)) {
             lo = 0.0;
         }
         let edge = self.edge.map(TargetEdge::of_target);
@@ -1372,8 +1385,9 @@ fn strip_margin(z: f64) -> f64 {
 
 /// The most pairs of a boundary edge's piece and a piece of the joint
 /// [`FootBlend::strip_off_face`] looks at for one face before it refuses the strip as not
-/// proved: far past what a face's edges take (a few per edge where it is far from the joint,
-/// some hundreds along a curved edge on the root).
+/// proved (`WeldGap::StripNotProved`, not as off the face): far past what a face's edges
+/// take, halved from their spans (a few per edge far from the joint or square to it at an
+/// end, some hundreds along a curved edge on the root).
 const STRIP_PAIRS: usize = 1 << 18;
 
 /// The least `|v|` over an enclosure `v` (each component's least magnitude), rounded down.
@@ -1382,21 +1396,10 @@ fn ivl_least(v: crate::blend::fillet_section::series::V3<Ivl>) -> f64 {
     (m.iter().map(|c| c * c).sum::<f64>()).sqrt() * (1.0 - 4.0 * f64::EPSILON)
 }
 
-/// The parameter range `[a, b]` of `curve` (`knots` its B-spline form's) cut at the knots
-/// inside it, and each part into pieces no longer than `reach` along the curve (by the
-/// polygon through nine of its points; at most 4096 pieces a part).
-///
-/// # Errors
-///
-/// Those of the evaluations.
-fn pieces_of(
-    k: &Kernel,
-    curve: &Curve,
-    knots: &[f64],
-    a: f64,
-    b: f64,
-    reach: f64,
-) -> Result<Vec<[f64; 2]>> {
+/// The parameter range `[a, b]` cut at the `knots` inside it: the B-spline form's spans,
+/// where the proof starts (it halves from there as it needs, so the pieces do not grow in
+/// number as the leg shrinks).
+fn pieces_of(knots: &[f64], a: f64, b: f64) -> Vec<[f64; 2]> {
     let mut cuts = vec![a];
     for &u in knots {
         if u > a && u < b && cuts.last().is_some_and(|&l| u > l) {
@@ -1404,28 +1407,12 @@ fn pieces_of(
         }
     }
     cuts.push(b);
-    let mut out = Vec::new();
-    for w in cuts.windows(2) {
-        let &[p, q] = w else { continue };
-        if q <= p {
-            continue;
-        }
-        let mut length = 0.0;
-        let mut prev = curve.evaluate_point(k, p)?;
-        for j in 1..=8 {
-            let x = curve.evaluate_point(k, p + (q - p) * f64::from(j) / 8.0)?;
-            length += prev.distance(x);
-            prev = x;
-        }
-        let count = (length / reach).ceil().clamp(1.0, 4096.0) as usize;
-        for j in 0..count {
-            out.push([
-                p + (q - p) * j as f64 / count as f64,
-                p + (q - p) * (j + 1) as f64 / count as f64,
-            ]);
-        }
-    }
-    Ok(out)
+    cuts.windows(2)
+        .filter_map(|w| match *w {
+            [p, q] if q > p => Some([p, q]),
+            _ => None,
+        })
+        .collect()
 }
 
 /// What [`FootBlend::strip_off_face`] found for a pair of an edge's piece and a joint's.
@@ -1438,10 +1425,23 @@ enum StripPair {
     Split,
 }
 
+/// What [`FootBlend::strip_off_face`] proved of a support's strip.
+enum Strip {
+    /// On the face over the whole joint.
+    Held,
+    /// Off the face: the point found (a point of the face's boundary proved in the strip, or
+    /// the strip's anchor off the face).
+    Off(Point3),
+    /// Not proved either way within [`STRIP_PAIRS`] pairs or down to rounding: the point of
+    /// the face's boundary where the proof stopped.
+    Unproved(Point3),
+}
+
 impl FootBlend {
     /// Whether the strip of support `i` at the leg `z`, from the root to the toe over the
-    /// whole joint, lies on `face` of `target`: `None` where it is **proved** to, else a point
-    /// where it is not or the proof stopped (the strip refused).
+    /// whole joint, lies on `face` of `target`: [`Strip::Held`] where it is **proved** to,
+    /// [`Strip::Off`] at a point where it is proved not to, [`Strip::Unproved`] where the proof
+    /// stopped (past [`STRIP_PAIRS`] pairs, or a piece halved down to rounding).
     ///
     /// The band is the points `P` of the station planes `(P − e(t))·e′(t) = 0` with `t` over
     /// the joint, less [`strip_margin`] (`η`, along the joint) from an open joint's ends, and
@@ -1453,7 +1453,7 @@ impl FootBlend {
     ///   joint, classified on it (trims included);
     /// - no edge of the face's boundary (a seam, used twice by the face, is not its boundary;
     ///   an edge with no curve, a pole, neither) has a point in the band: each edge's
-    ///   parameter and the joint's cut into pieces no longer than the leg, each pair cleared
+    ///   parameter and the joint's cut at their knots, each pair cleared
     ///   in intervals ([`crate::blend::fillet_section::certificate::curve_derivs_over_about`],
     ///   rounded outward), else halved. A pair is cleared where every point of the edge's
     ///   piece is farther than the leg from the joint's piece, or in no station plane of it
@@ -1482,7 +1482,7 @@ impl FootBlend {
         target: &Brep,
         face: FaceId,
         z: f64,
-    ) -> Result<Option<Point3>> {
+    ) -> Result<Strip> {
         use crate::blend::fillet_section::certificate::{
             curve_derivs_over, curve_derivs_over_about, NurbsCurve,
         };
@@ -1503,11 +1503,11 @@ impl FootBlend {
             Ok((p, uv, r)) => {
                 let uv = wrapped(&domain, periods, uv);
                 if !face_holds(k, target, face, &side.surface, &domain, periods, uv)? {
-                    return Ok(Some(p));
+                    return Ok(Strip::Off(p));
                 }
                 r
             }
-            Err(_) => return Ok(Some(root)),
+            Err(_) => return Ok(Strip::Off(root)),
         };
         // a plane support's side, `s (n × e′)` as `n` times the side: its strip is the ray
         // along it
@@ -1523,7 +1523,7 @@ impl FootBlend {
         };
         let joint = NurbsCurve::of(&self.leader)?;
         let (joint_knots, _) = self.leader.knots(None)?;
-        let joint_pieces = pieces_of(k, &self.curve, &joint_knots, lo, hi, z)?;
+        let joint_pieces = pieces_of(&joint_knots, lo, hi);
         // an open joint's ends' margins, in its parameter: `η` over the joint's top speed
         let speed = curve_derivs_over(&joint, Ivl::new(lo, hi), 1, None)?
             .get(1)
@@ -1673,7 +1673,7 @@ impl FootBlend {
                 Ok(StripPair::Split)
             };
             let mut work: Vec<([f64; 2], [f64; 2])> = Vec::new();
-            for ep in pieces_of(k, curve, &knots, range.min(), range.max(), z)? {
+            for ep in pieces_of(&knots, range.min(), range.max()) {
                 for &jp in &joint_pieces {
                     work.push((ep, jp));
                 }
@@ -1684,31 +1684,36 @@ impl FootBlend {
                 let [ta, tb] = jp;
                 let here = || curve.evaluate_point(k, 0.5 * (ua + ub));
                 if pairs > STRIP_PAIRS {
-                    return Ok(Some(here()?));
+                    return Ok(Strip::Unproved(here()?));
                 }
                 match pair(ep, jp)? {
                     StripPair::Clear => {}
-                    StripPair::Off => return Ok(Some(here()?)),
+                    StripPair::Off => return Ok(Strip::Off(here()?)),
                     StripPair::Split => {
                         // the longer piece halved; pieces down to rounding are not proved
-                        let edge_length = curve
-                            .evaluate_point(k, ua)?
-                            .distance(curve.evaluate_point(k, ub)?);
-                        let joint_length = self
-                            .curve
-                            .evaluate_point(k, ta)?
-                            .distance(self.curve.evaluate_point(k, tb)?);
+                        // each piece's size by the polygon through its ends and middle (a
+                        // closed piece's chord is nothing)
+                        let size = |c: &Curve, a: f64, b: f64| -> Result<f64> {
+                            let (p, m, q) = (
+                                c.evaluate_point(k, a)?,
+                                c.evaluate_point(k, 0.5 * (a + b))?,
+                                c.evaluate_point(k, b)?,
+                            );
+                            Ok(p.distance(m) + m.distance(q))
+                        };
+                        let edge_length = size(curve, ua, ub)?;
+                        let joint_length = size(&self.curve, ta, tb)?;
                         let tiny = |a: f64, b: f64| b - a <= 1e-12 * (1.0 + a.abs().max(b.abs()));
                         if edge_length >= joint_length {
                             if tiny(ua, ub) {
-                                return Ok(Some(here()?));
+                                return Ok(Strip::Unproved(here()?));
                             }
                             let m = 0.5 * (ua + ub);
                             work.push(([ua, m], jp));
                             work.push(([m, ub], jp));
                         } else {
                             if tiny(ta, tb) {
-                                return Ok(Some(here()?));
+                                return Ok(Strip::Unproved(here()?));
                             }
                             let m = 0.5 * (ta + tb);
                             work.push((ep, [ta, m]));
@@ -1718,7 +1723,30 @@ impl FootBlend {
                 }
             }
         }
-        Ok(None)
+        Ok(Strip::Held)
+    }
+
+    /// The refusal of support `i`'s strip as not proved at `at`
+    /// ([`crate::error::blend::WeldGap::StripNotProved`]): no face named where the faces are of
+    /// two bodies (a face id does not say whose).
+    fn strip_not_proved(&self, i: usize, at: Point3) -> SolidError {
+        let face = self
+            .sides
+            .get(i)
+            .and_then(|side| side.face)
+            .filter(|_| !self.bodies)
+            .map(crate::error::TargetFace::of_target);
+        Failure::new(
+            OP,
+            BlendFailure::WeldNotBuilt(crate::error::blend::WeldGap::StripNotProved),
+        )
+        .or_at(Site {
+            edge: self.edge.map(TargetEdge::of_target),
+            face,
+            at: Some(at),
+            ..Site::default()
+        })
+        .into_error()
     }
 }
 
@@ -1845,6 +1873,26 @@ pub const WELD_FIT_TOLERANCE: f64 = 0.01;
 /// face's zone tolerance (`1e-5`), within which a point next to the face's boundary
 /// classifies as on it either side.
 const SIDE_STEP: f64 = WELD_FIT_TOLERANCE;
+
+/// Whether the face use `fu` of `body` bounds a void: the infinite region, or a region whose
+/// void flag is set (a cavity; `SmRegion::IsVoid`, `UNSURE` counted as set).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+fn on_a_void(body: &Brep, fu: crate::topology::FaceuseId) -> Result<bool> {
+    let Some(shell) = body.faceuse(fu)?.shell else {
+        return Ok(false);
+    };
+    let region = body.shell(shell)?.region;
+    if region == body.infinite_region() {
+        return Ok(true);
+    }
+    match region {
+        Some(r) => Ok(body.region(r)?.is_void() != 0),
+        None => Ok(false),
+    }
+}
 
 /// What [`FootBlend::of_faces`] reads at a parameter of the joint: the root, and for each
 /// support the root's parameters on it, `n_i x e'` and the face's outward normal.

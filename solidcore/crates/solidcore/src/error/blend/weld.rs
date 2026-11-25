@@ -34,4 +34,9 @@ pub enum WeldGap {
     /// bead's surface is read through the chamfer's ball, which such legs fold. The failure's
     /// site names the edge.
     ObtuseToe,
+    /// A bead between two bodies whose strip from the root to a toe was not proved on its
+    /// face within the proof's budget (`crate::blend::foot_blend::FootBlend::toes_on_bodies`):
+    /// neither proved on the face nor proved off it. The failure's site names the point where
+    /// the proof stopped.
+    StripNotProved,
 }
