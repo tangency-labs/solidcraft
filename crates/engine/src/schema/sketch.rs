@@ -206,6 +206,10 @@ fn model_pick_schema(generator: &mut SchemaGenerator) -> Value {
 pub enum Operand {
     Id(String),
     Model(Value),
+    /// A planar model face `{face: [x, y, z], body?}`, which only `sketch.constraint.parallel`
+    /// takes: in a 3D sketch, the plane a drawn 3D line is held parallel to (#10616). Whether the
+    /// point is on a planar face is the handler's to check.
+    Face(Value),
 }
 
 impl JsonSchema for Operand {
@@ -229,6 +233,37 @@ fn operand_of(m: &Fields, key: &str, message: &str) -> Read<Option<Operand>> {
         Some(Value::String(id)) => Ok(Some(Operand::Id(id.clone()))),
         Some(v) if model_pick(v) => Ok(Some(Operand::Model(v.clone()))),
         Some(_) => refuse(message),
+    }
+}
+
+/// An operand of `sketch.constraint.parallel`: an [`Operand`], or a planar model face, the plane
+/// a drawn 3D line is held parallel to in a 3D sketch (#10616).
+pub struct ParallelOperand;
+
+impl JsonSchema for ParallelOperand {
+    fn schema_name() -> Cow<'static, str> {
+        "ParallelOperand".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let model = model_pick_schema(generator);
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "A sketch line by its id, or a model edge {\"edge\": [x, y, z], \"body\"?} or vertex {\"vertex\": [x, y, z], \"body\"?}, projected into the sketch first. In a 3D sketch also a plane: xy, yz or xz, a construction plane's name, or a planar model face {\"face\": [x, y, z], \"body\"?}.",
+            "anyOf": [
+                {"type": "string"},
+                model,
+                {"type": "object", "properties": {"face": point, "body": {"type": "string"}}, "required": ["face"]}
+            ]
+        })
+    }
+}
+
+/// `key` as an operand of `sketch.constraint.parallel`: [`operand_of`]'s forms, or an object with
+/// `face`, which the 3D handler reads (and refuses itself when `face` is no point).
+fn parallel_operand_of(m: &Fields, key: &str, message: &str) -> Read<Option<Operand>> {
+    match m.get(key) {
+        Some(v) if !model_pick(v) && v.get("face").is_some() => Ok(Some(Operand::Face(v.clone()))),
+        _ => operand_of(m, key, message),
     }
 }
 
@@ -539,11 +574,18 @@ pub struct FixResult {
 }
 
 /// A command that takes two operands, `a` and `b`, in one form: the same keys, read with the
-/// handler's message for each.
+/// handler's message for each. `operand` and `read` name the schema and the reader of one operand
+/// when the command takes more than an [`Operand`] (`sketch.constraint.parallel` a model face too).
 macro_rules! two_operands {
     (
         $(#[$meta:meta])* $name:ident,
         a: $a_doc:literal, b: $b_doc:literal, what: $what:literal
+    ) => {
+        two_operands! { $(#[$meta])* $name, a: $a_doc, b: $b_doc, what: $what, operand: "Operand", read: operand_of }
+    };
+    (
+        $(#[$meta:meta])* $name:ident,
+        a: $a_doc:literal, b: $b_doc:literal, what: $what:literal, operand: $operand:literal, read: $read:ident
     ) => {
         $(#[$meta])*
         #[derive(Debug, JsonSchema)]
@@ -551,11 +593,11 @@ macro_rules! two_operands {
         pub struct $name {
             #[doc = $a_doc]
             #[serde(default, skip_serializing_if = "Option::is_none")]
-            #[schemars(with = "Operand")]
+            #[schemars(with = $operand)]
             pub a: Option<Operand>,
             #[doc = $b_doc]
             #[serde(default, skip_serializing_if = "Option::is_none")]
-            #[schemars(with = "Operand")]
+            #[schemars(with = $operand)]
             pub b: Option<Operand>,
             /// `refuse` (in any case) refuses the call when the sketch already determines the new
             /// constraint, instead of keeping it as a redundant one (any other text keeps it).
@@ -572,8 +614,8 @@ macro_rules! two_operands {
                 let m = fields(d)?;
                 let read = || -> Read<Self> {
                     let sketch = sketch_of(&m)?;
-                    let a = operand_of(&m, "a", &format!("`a` must be {}", $what))?;
-                    let b = operand_of(&m, "b", &format!("`b` must be {}", $what))?;
+                    let a = $read(&m, "a", &format!("`a` must be {}", $what))?;
+                    let b = $read(&m, "b", &format!("`b` must be {}", $what))?;
                     Ok(Self { a, b, if_redundant: if_redundant_of(&m)?, sketch })
                 };
                 read().map_err(D::Error::custom)
@@ -592,11 +634,14 @@ two_operands! {
 }
 
 two_operands! {
-    /// Make two lines, or a line and a sketch axis, parallel. Two different lines are needed.
+    /// Make two lines, or a line and a sketch axis, parallel. Two different lines are needed. In
+    /// a 3D sketch, also a drawn 3D line and a plane.
     ParallelParams,
-    a: "A line's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge.",
-    b: "The other line, as `a`.",
-    what: "a curve id, or x / y for a sketch axis"
+    a: "A line's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge. In a 3D sketch also a plane: `xy`, `yz` or `xz`, a construction plane's name, or a planar model face `{face: [x, y, z], body?}`.",
+    b: "The other line or plane, as `a`.",
+    what: "a curve id, or x / y for a sketch axis",
+    operand: "ParallelOperand",
+    read: parallel_operand_of
 }
 
 two_operands! {
