@@ -52,12 +52,9 @@ curve-memo-off = []
 # The profiler (`solidcore::profile`): scopes and counters recorded in `Kernel::profiler`,
 # written as JSON Lines. Off, every scope compiles to nothing. Results never depend on it.
 profile = []
-# The WR-57 substitution replay's seam (`surface::surface::replay`): enabled only by the
-# goldens tests (a dev-dependency feature). With no hook installed it changes nothing.
+# The replay seam (`surface::surface::replay`; named after the retired WR-57 substitution
+# replay, #17856): enabled only by the goldens tests (a dev-dependency feature). With no hook installed it changes nothing.
 wr57-replay = []
-# The WR-469 substitution replay's seam (`topology::brep::p9::replay`): enabled only by the
-# goldens tests (a dev-dependency feature). With no hook installed it changes nothing.
-wr469-replay = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

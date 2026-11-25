@@ -2752,6 +2752,14 @@ pub fn face_intersect_breps_cached(
     // (not upstream) the curves are the faces' own edge curves, known to their tolerance;
     // an intersection curve is known as far as the two surfaces' angle fixes it
     let curves_are_edges = have_curves;
+    let [this_native_support, other_native_support] = if curves_are_edges {
+        [None, None]
+    } else {
+        [
+            crate::surface::implicit::AnalyticSupport::of(surface_of(b, f)?),
+            crate::surface::implicit::AnalyticSupport::of(surface_of(ob, other)?),
+        ]
+    };
     // (not upstream, #18705) whether each face has a seam edge, read once from the kept
     // caches (scanned once for each face while its B-rep is unchanged) and again only
     // after an edit of the B-reps
@@ -2922,6 +2930,20 @@ pub fn face_intersect_breps_cached(
         }
         let face_seams = seams.unwrap_or([None, None]);
         if !curves_are_edges {
+            if let Some(support) = other_native_support {
+                cc1.set_native_foreign_support(
+                    IntersectObject::Topology(EntityRef::Face(f), false),
+                    support,
+                    other_zone_tol,
+                );
+            }
+            if let Some(support) = this_native_support {
+                cc2.set_native_foreign_support(
+                    IntersectObject::Topology(EntityRef::Face(other), other_side),
+                    support,
+                    this_zone_tol,
+                );
+            }
             let reach = intersection_curve_reach(
                 k,
                 [
@@ -2949,6 +2971,13 @@ pub fn face_intersect_breps_cached(
             uv2: &uv_curves2,
             edited: false,
         };
+        // (WR-647) each classification names the other face, whose surface with the
+        // classifying face's neighbours across an edge decides a tangency on that edge
+        cc1.set_tangency_partner(Some(IntersectObject::Topology(
+            EntityRef::Face(other),
+            other_side,
+        )));
+        cc2.set_tangency_partner(Some(IntersectObject::Topology(EntityRef::Face(f), false)));
         qf2::curve_on_classify_mut_with_seams(
             k,
             f,
@@ -2972,6 +3001,8 @@ pub fn face_intersect_breps_cached(
             true,
             face_seams[1],
         )?;
+        cc1.set_tangency_partner(None);
+        cc2.set_tangency_partner(None);
 
         let extract = ExtractOptions {
             uv_curves1: true,

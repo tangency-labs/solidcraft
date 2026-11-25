@@ -246,6 +246,7 @@ mod imp {
         match turn {
             crate::FilletTurn::Mitre => Turn::Mitre,
             crate::FilletTurn::Swept => Turn::Swept,
+            crate::FilletTurn::Auto => Turn::Auto,
         }
     }
 
