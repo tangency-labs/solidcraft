@@ -343,7 +343,8 @@ fn a_castellated_hole_is_a_notch_and_keeps_the_other_drills() {
     let measure = solidcraft_kernel::measure(&body).unwrap();
     let disc = std::f64::consts::PI * 0.25;
     let expected = (200.0 - disc - disc / 2.0) * 1.6;
-    assert!((measure.volume - expected).abs() < expected * 0.002, "{measure:?} against {expected}");
+    // Tighter than the missing half-hole (0.63 mm3), loose enough for the polygon approximation.
+    assert!((measure.volume - expected).abs() < 0.25, "{measure:?} against {expected}");
     let mut load = |_: &str| Err("none".to_string());
     let options = KicadOptions { representation: KicadRepresentation::Brep, ..KicadOptions::default() };
     let imported = read_kicad(source.as_bytes(), "castle.kicad_pcb", &options, &mut load).unwrap();
@@ -376,6 +377,17 @@ fn a_castellated_hole_is_cut_on_every_edge() {
         assert!(imported.board_step.is_some(), "{edge} edge: the board is a solid");
         assert!(imported.feature.warnings.is_empty(), "{edge} edge: {:?}", imported.feature.warnings);
     }
+}
+
+/// A slot that lies wholly inside the outline, 0.1 mm from the edge, is a hole; one that reaches
+/// past the edge is a half-hole.
+#[test]
+fn a_slot_near_the_edge_is_a_notch_only_when_it_crosses_it() {
+    let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 10.0), Vec2::new(0.0, 10.0)]).ccw();
+    let inside = slot_loop(Vec2::new(0.2, 5.0), 0.2, 4.0, 0.0);
+    assert!(!drill_crosses(&outer, &inside), "0.1 mm from the edge is not a notch");
+    let across = slot_loop(Vec2::new(0.05, 5.0), 0.2, 4.0, 0.0);
+    assert!(drill_crosses(&outer, &across), "a slot over the edge is a notch");
 }
 
 #[test]

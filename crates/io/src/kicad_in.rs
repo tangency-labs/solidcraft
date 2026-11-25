@@ -1234,16 +1234,31 @@ fn near2(a: [f64; 2], b: [f64; 2]) -> bool {
 /// Make a mesh body for the board: its largest (or several) closed outlines, with board cutouts
 /// and drilled holes removed. `thickness` is in millimetres.
 pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::MeshObject> {
+    kicad_board_mesh_noted(board, thickness, &mut Vec::new())
+}
+
+/// [`kicad_board_mesh`], also saying in `notes` which drills could not be cut as a notch (kept as
+/// holes) and whether the drilled holes were lost altogether.
+fn kicad_board_mesh_noted(board: &KicadBoard, thickness: f64, notes: &mut Vec<String>) -> Result<crate::MeshObject> {
     if !thickness.is_finite() || thickness <= 0.0 || thickness > 1000.0 {
         return Err(IoError::Invalid("KiCad board thickness must be finite and between 0 and 1000 mm".into()));
     }
     let loops = outline_loops(board)?;
-    let regions = regions_from_loops(loops.clone(), Some(&board.drills));
-    let parts = extrude_regions(&regions, 0.0, thickness).or_else(|_| {
-        // A drill that touches a cutout can defeat the profile: keep the board and lose the holes.
-        let regions = regions_from_loops(loops, None);
-        extrude_regions(&regions, 0.0, thickness)
-    })?;
+    let mut cut_notes = Vec::new();
+    let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut cut_notes);
+    let parts = match extrude_regions(&regions, 0.0, thickness) {
+        Ok(parts) => {
+            notes.append(&mut cut_notes);
+            parts
+        }
+        Err(_) => {
+            // A drill that touches a cutout can defeat the profile: keep the board and lose the holes.
+            if !board.drills.is_empty() {
+                notes.push("the board's drilled holes could not be cut: the board is built without them".into());
+            }
+            extrude_regions(&regions_from_loops(loops, None), 0.0, thickness)?
+        }
+    };
     // One body: the board's areas, at the height it stands at.
     let mut mesh = solidcraft_geom::Mesh::default();
     for part in &parts {
@@ -1333,13 +1348,13 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                 // A profile the kernel cannot build (or a drill touching a cutout) must not lose
                 // the board: it comes in as the mesh it used to be.
                 warnings.push(format!("the board is a mesh: {error}"));
-                let board_mesh = kicad_board_mesh(&board, thickness)?;
+                let board_mesh = kicad_board_mesh_noted(&board, thickness, &mut warnings)?;
                 meshes.push(mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color));
                 plan.bodies.push(None);
             }
         }
     } else {
-        let board_mesh = kicad_board_mesh(&board, thickness)?;
+        let board_mesh = kicad_board_mesh_noted(&board, thickness, &mut warnings)?;
         meshes.push(mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color));
         plan.bodies.push(None);
     }
@@ -1869,6 +1884,11 @@ fn regions_from_loops_noted(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>, no
                 // outline, not a hole inside it.
                 let reach = size[0].max(size[1]) * 0.5 + 1e-6;
                 if distance_to_loop(&region.outer, center).is_some_and(|d| d < reach) {
+                    if !drill_crosses(&region.outer, &hole) {
+                        // Wholly inside the outline, only near it: an ordinary hole.
+                        region.holes.push(hole.reversed());
+                        continue;
+                    }
                     if let Some(notched) = notch_loop(&region.outer, &hole, center) {
                         region.outer = notched;
                         continue;
@@ -1920,12 +1940,19 @@ fn pline_to_loop(pl: &cavalier_contours::polyline::Polyline<f64>) -> Option<Loop
     (points.len() >= 3).then(|| Loop2::polygon(&points).ccw())
 }
 
+/// Whether the drill, in its own pose, reaches past the outline (or onto it): a half-hole rather
+/// than a hole that merely lies near the edge.
+fn drill_crosses(outer: &Loop2, drill: &Loop2) -> bool {
+    drill.polyline(CURVE_TOLERANCE).iter().any(|p| !outer.contains(*p))
+}
+
 /// The outline with `drill` cut out of its edge: one outline when the cut leaves one piece.
 ///
 /// A drill centred on an edge can put polygon vertices exactly on that edge, which the boolean
-/// refuses as touching input. So when a cut fails, the drill polygon is turned a little about its
-/// centre, which moves every vertex off the edge, and tried again: the notch differs by a
-/// fraction of a degree.
+/// refuses as touching input. So when a cut fails, the drill polygon is turned a very small angle
+/// (at most 0.006 rad, about a hundredth of a millimetre at the end of a 4 mm slot) about its
+/// centre, which moves every vertex off the edge, and tried again. Only a drill that crosses the
+/// outline in its specified pose gets here (see [`drill_crosses`]).
 fn notch_loop(outer: &Loop2, drill: &Loop2, center: Vec2) -> Option<Loop2> {
     use cavalier_contours::polyline::{BooleanOp, PlineSource, PlineSourceMut};
     let mut a = loop_to_pline(outer)?;
@@ -1933,7 +1960,7 @@ fn notch_loop(outer: &Loop2, drill: &Loop2, center: Vec2) -> Option<Loop2> {
         a.invert_direction_mut();
     }
     let points = drill.polyline(CURVE_TOLERANCE);
-    for turn in [0.0_f64, 0.0137, -0.0291, 0.0713, -0.1237] {
+    for turn in [0.0_f64, 0.001, -0.0023, 0.0057] {
         let (sin, cos) = turn.sin_cos();
         let mut b = cavalier_contours::polyline::Polyline::<f64>::new_closed();
         for p in &points {
