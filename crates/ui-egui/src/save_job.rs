@@ -26,6 +26,8 @@ pub(crate) struct HostSaving {
     copy: Session,
     original_path: Option<String>,
     original_name: String,
+    /// Preparing Save As can rename the scratch design and advance its own revision.
+    original_revision: u64,
     value: Value,
     reply: Option<Sender<Value>>,
     check: Option<solidcraft_engine::schema::ParamCheck>,
@@ -45,7 +47,7 @@ pub fn protects_host_recovery(app: &SolveApp, session: &Session) -> bool {
     app.host_save_left_dirty.contains(&session.uid)
         || app.host_saves.iter().any(|save| {
             save.copy.uid == session.uid
-                && (save.copy.revision != session.revision || save.copy.visibility != session.visibility || session.forms_prototype.is_some())
+                && (save.original_revision != session.revision || save.copy.visibility != session.visibility || session.forms_prototype.is_some())
         })
 }
 
@@ -127,6 +129,7 @@ pub(crate) fn start_host(
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
     let original_path = app.session.path.clone();
     let original_name = app.session.doc.name.clone();
+    let original_revision = app.session.revision;
     let mut copy = app.session.scratch();
     copy.path.clone_from(&original_path);
     if let Some(level) = check {
@@ -138,7 +141,7 @@ pub(crate) fn start_host(
         return Err("a save to this file is already in progress".into());
     }
     let done = persist(path, bytes);
-    app.host_saves.push(HostSaving { command, done, copy, original_path, original_name, value, reply, check });
+    app.host_saves.push(HostSaving { command, done, copy, original_path, original_name, original_revision, value, reply, check });
     Ok(())
 }
 
