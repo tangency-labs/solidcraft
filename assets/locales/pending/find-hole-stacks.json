@@ -22,5 +22,8 @@
   },
   "ko": {
     "cmd.inspect.hole_stacks": "구멍 스택 찾기"
+  },
+  "fr": {
+    "cmd.inspect.hole_stacks": "Rechercher les empilements de perçages"
   }
 }

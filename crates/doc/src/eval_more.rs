@@ -862,7 +862,8 @@ fn convert_to_sheet(
             let (read, _) = crate::sheet_surface_cuts::engraved(&as_modelled, &built, &mb.body)?;
             let mut sheet = sheet;
             sheet.recesses = read.recesses;
-            let solid = if sheet.recesses.is_empty() { solid } else { sheet.build()? };
+            sheet.countersinks = read.countersinks;
+            let solid = if sheet.recesses.is_empty() && sheet.countersinks.is_empty() { solid } else { sheet.build()? };
             (sheet, solid)
         }
     };
@@ -2034,6 +2035,7 @@ pub(super) fn surface_prism_cut(
                 !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
             };
             if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
+                || out.countersinks.iter().any(|c| c.panel == p && near(&Region2 { outer: c.outer_loop(), holes: Vec::new() }))
                 || out.loose.iter().any(|l| l.panel == p && near(&l.region))
                 || !out.sheet.cuts.is_empty()
             {
@@ -2248,7 +2250,12 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[super:
                 let (s, e) = (o + d * (u0 - p0), o + d * (u1 + p1));
                 Loop2::polygon(&[s - side, e - side, e + side, s + side])
             };
-            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region)) {
+            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region))
+                || out
+                    .countersinks
+                    .iter()
+                    .any(|c| c.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &Region2 { outer: c.outer_loop(), holes: Vec::new() }))
+            {
                 return Ok(Vec::new());
             }
             if !out.sheet.cuts.is_empty() {
