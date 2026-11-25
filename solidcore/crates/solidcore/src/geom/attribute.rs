@@ -110,6 +110,7 @@
 use core::any::Any;
 use std::collections::BTreeMap;
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::object;
 use crate::math::Vec3;
@@ -177,6 +178,33 @@ pub mod ids {
     /// id: the attribute carried to a replacement face is an entity's first of its id, so a
     /// mark sharing an id with one the face already carries would not travel.
     pub const DRAFT_MOVED: u64 = 136;
+    /// Not upstream (tangency-labs/solidcore#3138): how an offset made a face, set by the
+    /// offset executive on every face it relates to what it was made from, where those
+    /// relations are final (`OffsetExecutive::piecewise_merge`), with `Behavior::Copy` so a
+    /// split or merge after that carries it. Its value: [`OFFSET_ROLE_COPY`] (a face use's
+    /// offset copy), [`OFFSET_ROLE_EDGE`] (a face made along an edge: a sheet's wall, a
+    /// round about a convex edge) or [`OFFSET_ROLE_VERTEX`] (a face made at a vertex: a
+    /// ball). Every face of the original and of the offset loses the role an earlier offset
+    /// left on it first, so the role a face carries afterwards is this offset's.
+    pub const OFFSET_ROLE: u64 = 138;
+    /// [`OFFSET_ROLE`]'s value for a face use's offset copy.
+    pub const OFFSET_ROLE_COPY: i64 = 1;
+    /// [`OFFSET_ROLE`]'s value for a face made along an edge.
+    pub const OFFSET_ROLE_EDGE: i64 = 2;
+    /// [`OFFSET_ROLE`]'s value for a face made at a vertex.
+    pub const OFFSET_ROLE_VERTEX: i64 = 3;
+    /// Not upstream (tangency-labs/solidcore#3138): solidcore-ops' own operand tag, an
+    /// application attribute naming the operand faces and edges a result face or edge came
+    /// from, set before one ops call and read and removed after it (`solidcore_ops::history`).
+    /// Its own id below the applications' (`USER_1` and up), so no application's data is read
+    /// as it.
+    pub const OPS_HISTORY: u64 = 140;
+    /// Not upstream (WR-459, #17169): a face of a fillet's target as filleting starts, set by
+    /// the fillet session on each with `Behavior::Copy`, so the pieces a split leaves and the
+    /// face a merge leaves carry it, read by the clean-up after filleting (which leaves the
+    /// target's own faces) and removed when filleting ends. Its own id: the attribute carried
+    /// to a replacement face is an entity's first of its id.
+    pub const FILLET_TARGET_FACE: u64 = 142;
     /// `SM_AI_METRIC_BASE`: first of the ids used by metric attributes (150-199).
     pub const METRIC_BASE: u64 = 150;
     /// `SM_AI_MASS_PROPERTIES`.
@@ -269,9 +297,6 @@ pub mod region_type {
 
 /// `SM_UNDEF_ULONG`: the id a destroyed attribute is left with.
 pub const UNDEF_ULONG: u64 = 123_456_789;
-
-// `SM_ERR`.
-use crate::error::SM_ERR;
 
 /// Largest attribute count or index [`AttributeStore::read_indexed_attributes_from_db`]
 /// accepts (a guard against corrupt input; upstream allocates whatever it reads).
@@ -491,7 +516,7 @@ impl MergeRegionData {
 
     /// `SetRegions`: overwrites entry `index` of all four lists.
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when `index` is not below the number of
+    /// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) when `index` is not below the number of
     /// "this" regions. [`SolidError::InvalidInput`] (upstream writes past the array)
     /// when it is, but one of the other lists is shorter.
     pub fn set_regions(
@@ -504,11 +529,13 @@ impl MergeRegionData {
     ) -> Result<()> {
         const OP: &str = "geom::attribute::MergeRegionData::set_regions";
         if index >= self.this_regions.len() {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::IndexOutOfRange {
+                    index,
+                    len: self.this_regions.len(),
+                },
+            ));
         }
         let (Some(tr), Some(tt), Some(or), Some(ot)) = (
             self.this_regions.get_mut(index),
@@ -1900,7 +1927,7 @@ impl AttributeStore {
     /// ASCII lines are skipped as upstream's `GOTO_NEXT_ATTLINE`: more than 1000
     /// bytes before the newline, or the end of the data (also a `0xFF` byte, which
     /// compares equal to `EOF` as a `signed char`), is `SM_ERR`
-    /// ([`SolidError::Upstream`]).
+    /// ([`GeomFailure`](crate::error::geom::GeomFailure)).
     pub fn read_indexed_attributes_from_db(
         &mut self,
         all_attributes: &mut Vec<Option<AttributeHandle>>,
@@ -2039,24 +2066,41 @@ fn append_new_regions(
 
 /// `GOTO_NEXT_ATTLINE`: consume through the next `'\n'`.
 fn goto_next_attline(s: &mut InputStream) -> Result<()> {
-    let err = || SolidError::Upstream {
-        operation: "geom::attribute::AttributeStore::read_indexed_attributes_from_db",
-        code: SM_ERR,
-        entity: None,
-    };
+    const OP: &str = "geom::attribute::AttributeStore::read_indexed_attributes_from_db";
+    // `count` counts read attempts, as upstream, and drives the limit; `consumed`
+    // counts the bytes the stream returned, which the failure reports.
     let mut count = 0u32;
+    let mut consumed = 0u32;
     loop {
+        let got = s.get();
+        let at_end = got.is_none();
         // `(signed char)rFileIn.get()`: EOF and a 0xFF byte both become -1.
-        let ch: i8 = s.get().map_or(-1, |b| b as i8);
+        let ch: i8 = got.map_or(-1, |b| b as i8);
         if ch == b'\n' as i8 {
             return Ok(());
         }
         count += 1;
-        if count > 1000 {
-            return Err(err());
+        if !at_end {
+            consumed += 1;
         }
+        if count > 1000 {
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::AttributeLineUnterminated {
+                    bytes: consumed,
+                    end_of_input: at_end,
+                },
+            ));
+        }
+        // EOF, or a 0xFF byte the reader takes for one (and has consumed).
         if ch == -1 {
-            return Err(err());
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::AttributeLineUnterminated {
+                    bytes: consumed,
+                    end_of_input: true,
+                },
+            ));
         }
     }
 }
@@ -2371,7 +2415,7 @@ mod tests {
         assert!(d.has_any_solid(1) && !d.has_any_solid(2));
         assert!(matches!(
             d.set_regions(1, O1, 1, O2, 1),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if e.upstream_status() == Some(1001)
         ));
         d.set_regions(0, O3, 1, O1, 0).unwrap();
         assert_eq!(d.this_region(0), Some(O3));
@@ -2417,7 +2461,7 @@ mod tests {
         assert_eq!(all, before_all);
         assert!(matches!(
             s.read_indexed_attributes_from_db(&mut all, &mut db),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if e.upstream_status() == Some(1001)
         ));
     }
 
@@ -2474,7 +2518,7 @@ mod tests {
         assert_eq!(read.indices, vec![3, 1]);
         assert!(matches!(
             read.status,
-            Some(SolidError::Upstream { code: 1001, .. })
+            Some(e) if e.upstream_status() == Some(1001)
         ));
         assert_eq!(s, before_store);
         assert_eq!(all, before_all);
@@ -2520,5 +2564,30 @@ mod tests {
         assert!(s.is_live(shared));
         assert_eq!(s.attributes(O2), vec![shared]);
         assert_eq!(s.users(shared).unwrap(), vec![O1, O2]);
+    }
+
+    #[test]
+    fn goto_next_attline_reports_bytes_consumed() {
+        let fail = |data: Vec<u8>| {
+            goto_next_attline(&mut InputStream::new(data))
+                .unwrap_err()
+                .geom_failure()
+                .copied()
+        };
+        let unterminated = |bytes, end_of_input| {
+            Some(GeomFailure::AttributeLineUnterminated {
+                bytes,
+                end_of_input,
+            })
+        };
+        // EOF at once: no byte consumed.
+        assert_eq!(fail(Vec::new()), unterminated(0, true));
+        // A 0xFF byte reads as EOF upstream; it is counted as consumed.
+        assert_eq!(fail(vec![b'a', 0xFF, b'\n']), unterminated(2, true));
+        // EOF right after the limit's 1000 bytes: the input ended, 1000 bytes in.
+        assert_eq!(fail(vec![b'a'; 1000]), unterminated(1000, true));
+        // A 1001st byte that is not a line end passes the limit.
+        assert_eq!(fail(vec![b'a'; 1001]), unterminated(1001, false));
+        assert!(goto_next_attline(&mut InputStream::new(b"abc\nx".to_vec())).is_ok());
     }
 }

@@ -343,6 +343,10 @@ impl FaceQueries<StaticHandle> for StaticScene {
     fn face_zone_tol_3d(&self, face: StaticHandle) -> SolidResult<f64> {
         self.face_tolerance(face)
     }
+    fn face_has_loopuses(&self, face: StaticHandle) -> SolidResult<bool> {
+        let (b, f) = self.face_entity(face).ok_or_else(static_error)?;
+        solidcore::topology::face::p4::has_loopuses(b, f)
+    }
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -823,7 +827,9 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
             }
             let status = match e {
                 SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-                SolidError::Upstream { code, .. } => f64::from(code),
+                ref e if solidcore::error::upstream_status(e).is_some() => {
+                    f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+                }
                 // a typed refusal (no upstream status): recorded, not a harness failure
                 SolidError::Unsupported { .. } => return Ok(Output::err(e.to_string())),
                 _ => return Err(HarnessError::new(e.to_string())),

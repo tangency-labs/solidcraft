@@ -169,12 +169,13 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             lengths
         }
         D::Shell { thickness } => vec![thickness],
-        D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
+        D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],
         D::Thread { length, .. } | D::Emboss { depth: length, .. } => vec![length],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
+        D::PathPattern { spacing, start, fraction: false, .. } => vec![spacing, start],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
@@ -184,17 +185,17 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         }
         D::Primitive { fields, .. } => fields.iter_mut().filter(|(key, _)| *key != "revolutions").map(|(_, value)| value).collect(),
         D::Surface(k) => match k {
-            Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance } => {
-                vec![distance]
-            }
+            Surf::Extrude { distance, to_offset, .. } => vec![distance, to_offset],
+            Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance } => vec![distance],
             Surf::Thicken { thickness, .. } => vec![thickness],
             Surf::Stitch { tolerance } | Surf::Fair { tolerance, .. } => vec![tolerance],
             _ => vec![],
         },
         D::Sheet(k) => match k {
-            Sm::Flange { height, radius, distance, relief_size, own, .. } => {
+            Sm::Flange { height, radius, distance, relief_size, own, segments, .. } => {
                 let mut values = vec![height, radius, distance, relief_size];
                 values.extend(own.iter_mut().map(|(_, _, height)| height));
+                values.extend(segments.iter_mut().flat_map(|(_, list)| list.iter_mut().map(|row| &mut row.height)));
                 values
             }
             Sm::Hem { length, gap, .. } => vec![length, gap],

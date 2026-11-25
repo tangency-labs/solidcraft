@@ -1,4 +1,6 @@
 //! Sketch and selection preferences with shared figures and the live modifier legend.
+use solidcraft_engine::PickMode;
+
 use super::*;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -18,10 +20,16 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketch.snapping_guides"), |ui| {
         let available = ui.available_width();
         let figure_width = t.space_24 * 5.0;
-        let labels_width = ["prefs.sketch.tracking_guides", "prefs.sketch.tracking_points", "prefs.sketch.recent_snap", "prefs.sketch.align_points"]
-            .into_iter()
-            .map(|id| check_width(ui, app.tr(id), true))
-            .fold(0.0, f32::max);
+        let labels_width = [
+            "prefs.sketch.tracking_guides",
+            "prefs.sketch.tracking_points",
+            "prefs.sketch.recent_snap",
+            "prefs.sketch.align_points",
+            "prefs.sketch.snap_to_visible_grid",
+        ]
+        .into_iter()
+        .map(|id| check_width(ui, app.tr(id), true))
+        .fold(0.0, f32::max);
         let controls_width = if available >= figure_width + t.space_14 + labels_width { available - figure_width - t.space_14 } else { available };
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_14;
@@ -60,6 +68,14 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.sketch.align_points_note"),
                     &mut app.preferences.sketch_align_points,
                 );
+                check(
+                    ui,
+                    "sketch_snap_to_visible_grid",
+                    "prefs.sketch.snap_to_visible_grid",
+                    Some("prefs.sketch_snap_to_visible_grid_note"),
+                    &mut app.preferences.sketch_snap_to_visible_grid,
+                );
+                setting::sketch_square_rectangles(app, ui);
             });
         });
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));
@@ -90,18 +106,23 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.line_hover_tangent_arc",
             "prefs.sketch.center_arc",
             "prefs.sketch_construction_lines",
+            "prefs.construction_line_classic",
             "prefs.sketch_mirror_auto_line",
+            "prefs.region_pick_takes_holes",
             "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
             "ui.first_dimension_scales",
+            "ui.first_dimension_scales_about_origin",
         ];
         let right_labels = [
+            "prefs.sketch.shortcut_again_ends_tool",
             "prefs.sketch.shortcut_cycles_modes",
             "prefs.ribbon_click_ends_tool",
             "ui.project_face_edges_sketch",
             "ui.project_references_construction",
             "prefs.sketch.project_options",
+            "prefs.sketch.cursor_coordinates",
         ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
             .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
@@ -145,7 +166,21 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.center_arc_follows_cursor,
                 );
                 check(ui, "sketch_construction_lines", "prefs.sketch_construction_lines", None, &mut app.preferences.sketch_construction_lines);
+                check(
+                    ui,
+                    "construction_line_classic",
+                    "prefs.construction_line_classic",
+                    Some("prefs.construction_line_classic_note"),
+                    &mut app.preferences.construction_line_classic,
+                );
                 check(ui, "sketch_mirror_auto_line", "prefs.sketch_mirror_auto_line", None, &mut app.preferences.sketch_mirror_auto_line);
+                check(
+                    ui,
+                    "region_pick_takes_holes",
+                    "prefs.region_pick_takes_holes",
+                    Some("prefs.region_pick_takes_holes_note"),
+                    &mut app.preferences.region_pick_takes_holes,
+                );
                 check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
                     ui,
@@ -170,8 +205,24 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("ui.first_dimension_scales_tip"),
                     &mut app.preferences.first_dimension_scales,
                 );
+                ui.add_enabled_ui(app.preferences.first_dimension_scales, |ui| {
+                    check(
+                        ui,
+                        "first_dimension_scales_about_origin",
+                        "ui.first_dimension_scales_about_origin",
+                        Some("ui.first_dimension_scales_about_origin_tip"),
+                        &mut app.preferences.first_dimension_scales_about_origin,
+                    );
+                });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                check(
+                    ui,
+                    "shortcut_again_ends_tool",
+                    "prefs.sketch.shortcut_again_ends_tool",
+                    Some("prefs.sketch.shortcut_again_ends_tool_tip"),
+                    &mut app.preferences.shortcut_again_ends_tool,
+                );
                 check(
                     ui,
                     "shortcut_cycles_modes",
@@ -204,12 +255,50 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.project_options_dialog_note"),
                     &mut app.preferences.project_options_dialog,
                 );
+                check(
+                    ui,
+                    "sketch_move_classic",
+                    "prefs.sketch_move_classic",
+                    Some("prefs.sketch_move_classic_note"),
+                    &mut app.preferences.sketch_move_classic,
+                );
+                check(
+                    ui,
+                    "sketch_cursor_coordinates",
+                    "prefs.sketch.cursor_coordinates",
+                    Some("prefs.sketch.cursor_coordinates_note"),
+                    &mut app.preferences.sketch_cursor_coordinates,
+                );
             });
         });
         if let Some(child) = detached {
             crate::ui_kit::settings_search::commit_search_child(ui, &child, before);
         }
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
+        dimension_appearance(app, ui, t.space_24 * 8.0 + t.space_8);
+        sketch_size(app, ui, t.space_24 * 8.0 + t.space_8);
+    });
+}
+
+/// The most points or curves one sketch holds (#10874): a dense SVG or DXF drawing needs more
+/// than the default.
+fn sketch_size(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+    let label = app.tr("prefs.sketch.max_points").to_string();
+    let unit = app.tr("prefs.sketch.max_points_unit").to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.sketch.max_points_note"), label_width, |ui| {
+        ui.horizontal(|ui| {
+            let t = Tokens::get();
+            ui.spacing_mut().item_spacing.x = t.space_4;
+            let field = ui
+                .scope(|ui| {
+                    ui.spacing_mut().interact_size.x = t.space_24 * 3.0;
+                    ui_kit::number_field(ui, &mut app.preferences.max_sketch_points, DEFAULT_POINTS..=CEILING_POINTS, 100.0, "")
+                })
+                .inner;
+            crate::scenario::publish_rect("prefs:max_sketch_points", field.rect);
+            ui_kit::settings_inline_note(ui, &unit);
+        });
     });
 }
 
@@ -359,6 +448,11 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        // Larger constraint glyphs, readable at any zoom (#10794).
+        let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.constraint_glyph_size"));
+        ui_kit::settings_form(ui, label_width, |ui| {
+            setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr("prefs.constraint_glyph_size_note"));
+        });
     });
 }
 
@@ -374,16 +468,17 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             let cards = ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
                 let width = (t.space_24 * 6.0 + t.space_6).min(ui.max_rect().width());
-                for (bodies, key, label, figure) in [
-                    (false, "faces_edges", "prefs.sketch.faces_edges", ui_kit::paint_select_faces_edges as fn(&egui::Painter, egui::Rect)),
-                    (true, "bodies", "prefs.sketch.whole_bodies", ui_kit::paint_select_bodies),
+                // The selection mode's two plainest choices; the navigation bar's menu has them all (#4255).
+                for (mode, key, label, figure) in [
+                    (PickMode::Faces, "faces_edges", "prefs.sketch.faces_edges", ui_kit::paint_select_faces_edges as fn(&egui::Painter, egui::Rect)),
+                    (PickMode::Bodies, "bodies", "prefs.sketch.whole_bodies", ui_kit::paint_select_bodies),
                 ] {
                     let response = ui_kit::picture_card(
                         ui,
                         &ui_kit::Card {
                             label: app.tr(label),
                             sub: None,
-                            selected: app.ui.pick_bodies == bodies,
+                            selected: app.ui.pick_mode == mode,
                             enabled: true,
                             options: None,
                             check: false,
@@ -393,7 +488,7 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                         width,
                     );
                     crate::scenario::publish_target(&format!("prefs:pick_bodies:{key}"), response.rect);
-                    if bodies {
+                    if mode == PickMode::Bodies {
                         crate::scenario::publish_target("prefs:pick_bodies", response.rect);
                         crate::scenario::publish_target("dialog:Click selects whole bodies", response.rect);
                     }
@@ -404,7 +499,7 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     crate::ui_kit::settings_search::follow(ui, option, response.rect);
                     if response.clicked() {
-                        app.ui.pick_bodies = bodies;
+                        crate::selection_mode::set(app, mode);
                     }
                 }
             });
@@ -432,6 +527,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (&[ctrl, click], toggle),
             ],
         );
+        #[cfg(target_arch = "wasm32")]
+        check(ui, "pencil_mode", "prefs.pencil_mode", Some("prefs.pencil_mode_tip"), &mut app.preferences.pencil_mode);
         check(ui, "prefer_free_sketch_points", "prefs.sketch.prefer_free_points", None, &mut app.preferences.prefer_free_sketch_points);
         check(
             ui,
@@ -439,6 +536,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.select_hidden_edges",
             Some("prefs.select_hidden_edges_help"),
             &mut app.preferences.select_hidden_edges,
+        );
+        check(
+            ui,
+            "select_3d_curve_points",
+            "prefs.sketch.select_3d_curve_points",
+            Some("prefs.sketch.select_3d_curve_points_help"),
+            &mut app.preferences.select_3d_curve_points,
         );
         check(
             ui,
@@ -522,6 +626,7 @@ fn targets(key: &str, response: &egui::Response) {
         "sketch_auto_locate" => "Also place them from the origin (fully constrained)",
         "first_dimension_scales" => "The first dimension scales the drawing",
         "center_arc_follows_cursor" => "Center point arc follows the cursor's direction",
+        "shortcut_again_ends_tool" => "Pressing an active tool's shortcut again closes it",
         "shortcut_cycles_modes" => "Pressing a tool's shortcut again switches its mode",
         "project_options_dialog" => "Project options dialog",
         "sketch_state_icons" => "Sketch icons in the color of their state",
@@ -555,13 +660,81 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     let p = &mut app.preferences;
                     ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
-                        .on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
                 });
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
-                        .on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
                 });
             });
         });
+    });
+}
+
+/// The size and colour of a sketch dimension's lines, arrows and value (#14121). The size is a
+/// factor of the theme's dimension text size; the colour is the theme's or one the user picks.
+/// Selection, hover and conflicts keep their own colours.
+fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    let t = Tokens::get();
+    // The custom colour starts at the theme's dimension colour, so switching to Custom changes
+    // nothing until the user picks a colour, and stays visible in either theme.
+    let theme_colour = {
+        let colour = t.dimension.to_array();
+        [colour[0], colour[1], colour[2]]
+    };
+    let size_label = app.tr("prefs.dimension_text_size").to_string();
+    ui_kit::settings_block_hint(ui, &size_label, app.tr("prefs.dimension_text_size_note"), label_width, |ui| {
+        let response = ui_kit::slider(
+            ui,
+            &mut app.preferences.dimension_text_scale,
+            DIMENSION_TEXT_SCALE,
+            ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+        );
+        crate::scenario::publish_target("prefs:dimension_text_scale", response.rect);
+    });
+    let colour_label = app.tr("prefs.dimension_colour").to_string();
+    ui_kit::settings_block_hint(ui, &colour_label, app.tr("prefs.dimension_colour_note"), label_width, |ui| {
+        let labels = [app.tr("prefs.dimension_colour_theme"), app.tr("prefs.dimension_colour_custom")];
+        let mut selected = usize::from(app.preferences.dimension_colour.is_some());
+        if ui_kit::settings_segments(ui, &colour_label, &mut selected, &labels) {
+            app.preferences.dimension_colour = (selected == 1).then_some(theme_colour);
+        }
+        for (key, caption) in [("theme", labels[0]), ("custom", labels[1])] {
+            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{colour_label}:{caption}")) {
+                crate::scenario::publish_handle(&format!("prefs:dimension_colour:{key}"), at);
+            }
+        }
+        let enabled = app.preferences.dimension_colour.is_some();
+        let mut rgb = app.preferences.dimension_colour.unwrap_or(theme_colour);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                let response = ui_kit::color_field(ui, &mut rgb);
+                crate::scenario::publish_target("prefs:dimension_colour_picker", response.rect);
+                if response.changed() {
+                    app.preferences.dimension_colour = Some(rgb);
+                }
+            });
+            let saved = app.preferences.dimension_colour;
+            let key = ui.make_persistent_id("sketch_dimension_colour_hex");
+            let (last, mut hex) = ui
+                .data(|data| data.get_temp::<(Option<[u8; 3]>, String)>(key))
+                .unwrap_or_else(|| (saved, crate::dialogs_appearance::hex(saved.unwrap_or(theme_colour))));
+            if last != saved {
+                hex = crate::dialogs_appearance::hex(saved.unwrap_or(theme_colour));
+            }
+            ui.add_enabled_ui(saved.is_some(), |ui| {
+                ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+                    let response = ui_kit::cell_editor(ui, key.with("edit"), &mut hex, app.tr("color.hex_hint"), false);
+                    crate::scenario::publish_target("prefs:dimension_colour_hex", response.rect);
+                    if response.changed()
+                        && let Some(colour) = crate::dialogs_appearance::parse_color(&json!(hex))
+                    {
+                        app.preferences.dimension_colour = Some(colour);
+                    }
+                });
+            });
+            ui.data_mut(|data| data.insert_temp(key, (app.preferences.dimension_colour, hex)));
+        });
+        setting::dimension_rim(app, ui);
     });
 }

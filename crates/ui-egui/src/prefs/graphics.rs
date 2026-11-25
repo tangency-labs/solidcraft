@@ -4,7 +4,7 @@ use ui_kit::PreferenceFigure;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    let help_label_width = ["prefs.graphics_page.supersampling", "prefs.graphics_card", "ui.window_system"]
+    let help_label_width = ["prefs.graphics_page.supersampling", "prefs.graphics_card", "prefs.graphics_api", "ui.window_system"]
         .into_iter()
         .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
         .fold(0.0, f32::max)
@@ -156,6 +156,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             let response = setting::dark_parts_shading(app, ui).backing_on_hover_text(app.tr("prefs.dark_parts_shading_help"));
             crate::scenario::publish_target("prefs:dark_parts_shading", response.rect);
+            let response = setting::viewport_material_finish(app, ui).backing_on_hover_text(app.tr("prefs.viewport_material_finish_help"));
+            crate::scenario::publish_target("prefs:viewport_material_finish", response.rect);
         });
         ui_kit::settings_section(ui, "current_view", app.tr("prefs.graphics_page.current_view"), |ui| {
             ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.view_bar"), false);
@@ -200,7 +202,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
             ui.add_enabled_ui(app.ui.ground_shadow, |ui| {
-                let response = setting::ground_shadow_follows_model(app, ui).on_hover_text(app.tr("prefs.ground_shadow_follows_model_help"));
+                let response = setting::ground_shadow_follows_model(app, ui).backing_on_hover_text(app.tr("prefs.ground_shadow_follows_model_help"));
                 crate::scenario::publish_handle("prefs:ground_shadow_follows_model", response.rect.center());
             });
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
@@ -301,11 +303,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ("viewport_section_status", "Section", "prefs.viewport_section_status_help"),
                     ("viewport_status_details", "prefs.graphics_page.live_details", "prefs.viewport_status_details_help"),
                     ("viewport_status_summary", "prefs.graphics_page.fold_items", "prefs.viewport_status_summary_help"),
+                    ("escape_closes_analyses", "prefs.graphics_page.escape_closes", "prefs.escape_closes_analyses_help"),
                 ] {
                     let value = match id {
                         "viewport_analysis_status" => &mut app.preferences.viewport_analysis_status,
                         "viewport_section_status" => &mut app.preferences.viewport_section_status,
                         "viewport_status_details" => &mut app.preferences.viewport_status_details,
+                        "escape_closes_analyses" => &mut app.preferences.escape_closes_analyses,
                         _ => &mut app.preferences.viewport_status_summary,
                     };
                     let response = ui_kit::choice_chip(
@@ -320,6 +324,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         *value = !*value;
                     }
                 }
+            });
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
+                ui_kit::row(ui, app.tr_label("Joint symbols"), |ui| {
+                    let styles = crate::joint_symbols::STYLES;
+                    let mut selected = usize::from(app.preferences.joint_symbols).min(styles.len() - 1);
+                    ui_kit::dropdown(ui, "pref_joint_symbols", &mut selected, &styles);
+                    app.preferences.joint_symbols = selected as u8;
+                });
+            });
+            // Only badges tell moving joints from the rest.
+            ui.add_enabled_ui(app.preferences.joint_symbols != crate::joint_symbols::RING_AND_AXIS, |ui| {
+                let response = setting::highlight_moving_joints(app, ui).on_hover_text(app.tr("prefs.highlight_moving_joints_help"));
+                crate::scenario::publish_handle("prefs:highlight_moving_joints", response.rect.center());
             });
         });
         ui_kit::settings_section(ui, "surfaces_edges", app.tr("prefs.graphics_page.surfaces_edges"), |ui| {
@@ -344,6 +361,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:preview_tint_new_faces", tint_new.rect);
             let cut_tint = setting::cut_preview_tint(app, ui).backing_on_hover_text(app.tr("prefs.cut_preview_tint_help"));
             crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
+            let hidden_edges = setting::show_selected_hidden_edges(app, ui).backing_on_hover_text(app.tr("prefs.show_selected_hidden_edges_help"));
+            crate::scenario::publish_target("prefs:show_selected_hidden_edges", hidden_edges.rect);
             let reference =
                 setting::reference_geometry_through_bodies(app, ui).backing_on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
             crate::scenario::publish_target("dialog:Show reference geometry through bodies", reference.rect);
@@ -364,7 +383,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::text(ui, note, ui_kit::Text::Hint("graphics_fallback"));
                 }
                 if app.services.graphics_path.is_some() {
+                    graphics_api_row(app, ui, help_label_width);
                     graphics_card_row(app, ui, help_label_width);
+                    safe_graphics_row(app, ui);
                 }
                 #[cfg(target_os = "linux")]
                 window_system_row(app, ui, help_label_width);
@@ -495,6 +516,57 @@ fn computer_header(app: &SolveApp, ui: &mut egui::Ui) {
     });
 }
 
+/// The saved API and the API in use are separate: a choice is tried after a normal restart.
+fn graphics_api_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    let t = Tokens::get();
+    let current = graphics_backend_label(&app.preferences.graphics_backend);
+    let mut requested = None;
+    ui_kit::settings_form(ui, label_width, |ui| {
+        ui_kit::settings_row_help(ui, app.tr("prefs.graphics_api"), app.tr("prefs.graphics_api_help"), |ui| {
+            let response = ui_kit::dropdown_menu(ui, "graphics_api", &current, |ui| {
+                for backend in GRAPHICS_BACKENDS {
+                    let response = ui_kit::list_picker(
+                        ui,
+                        &format!("graphics_api:{backend}"),
+                        &graphics_backend_label(backend),
+                        app.preferences.graphics_backend == *backend,
+                    );
+                    if response.clicked() {
+                        requested = Some(*backend);
+                    }
+                }
+            });
+            crate::scenario::publish_target("prefs:graphics_backend", response.rect);
+        });
+    });
+    if let Some(backend) = requested
+        && let Err(error) = set_graphics_backend(app, backend)
+    {
+        app.set_status(error, true);
+    }
+    if let Some(backend) = app.services.graphics_backend {
+        let running = graphics_backend_label(backend);
+        let selected = graphics_backend_label(&app.preferences.graphics_backend);
+        let message = solidcraft_ui_text::format("prefs.graphics_api_running", &[("current", &running), ("selected", &selected)]);
+        ui_kit::text(ui, &message, ui_kit::Text::Hint("graphics_api_running"));
+    }
+    ui_kit::text(ui, app.tr("prefs.graphics_api_restart_note"), ui_kit::Text::Hint("graphics_api_restart_note"));
+    if app.services.graphics_backend_override {
+        ui.label(egui::RichText::new(app.tr("prefs.graphics_api_override")).size(t.font_small).color(t.warning));
+    }
+    if app.services.graphics_restart.is_some() {
+        let response = ui
+            .add_enabled_ui(!app.services.graphics_backend_override, |ui| ui_kit::button(ui, app.tr("update.restart"), ui_kit::Button::Normal))
+            .inner;
+        crate::scenario::publish_target("prefs:graphics_restart", response.rect);
+        if response.clicked()
+            && let Err(error) = request_graphics_restart(app)
+        {
+            app.set_status(error, true);
+        }
+    }
+}
+
 /// The saved adapter picker retains validation, persistence and all fallback notices.
 fn graphics_card_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     let t = Tokens::get();
@@ -558,4 +630,17 @@ fn field_of_view_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         response
     });
+}
+
+/// Start in safe graphics mode, the next launch only (`crate::safe_graphics`): written to
+/// `graphics.json` at once, as the graphics API is.
+fn safe_graphics_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let mut next = app.safe_graphics_next;
+    let response = ui_kit::checkbox(ui, app.tr("prefs.safe_graphics_next"), &mut next).backing_on_hover_text(app.tr("prefs.safe_graphics_next_help"));
+    crate::scenario::publish_target("prefs:safe_graphics_next", response.rect);
+    if next != app.safe_graphics_next
+        && let Err(error) = crate::safe_graphics::set_next_launch(app, next)
+    {
+        app.set_status(error, true);
+    }
 }

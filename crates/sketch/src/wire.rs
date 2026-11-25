@@ -46,6 +46,16 @@ pub struct WireArc {
     pub end: Vec3,
 }
 
+/// A control point spline drawn in 3D space: the clamped uniform B-spline of `degree` over the
+/// wire's `fit` points, which are its control points. The curve touches only the first and the
+/// last of them; the others pull it towards them. Fewer control points than `degree + 1` lower
+/// the degree to one less than their count, as for a control spline on the sketch plane
+/// ([`crate::curves::bspline_beziers`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireControl {
+    pub degree: u8,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Wire {
     pub id: String,
@@ -63,6 +73,10 @@ pub struct Wire {
     /// are its three defining points (start, through, end) and whose `pts` are its samples.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<WireArc>,
+    /// Drawn in a 3D sketch as a control point spline: its `fit` points are its control points
+    /// (the curve passes through the first and the last only) and its `pts` are its samples.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<WireControl>,
     /// A linked curve's exact geometry where its source has one (an included edge or sketch
     /// curve, an intersection curve): record curves end to end along `pts`, in `space`
     /// coordinates. Empty for a curve known only as its points (projected onto a face, iso
@@ -127,6 +141,20 @@ impl Wire {
         }
         self.exact = self.exact.iter().map(|c| c.mapped(&point, &vector)).collect::<Option<_>>().unwrap_or_default();
     }
+
+    /// A drawn control point spline's exact curve ([`control_curve`]); `None` for any other wire.
+    pub fn control_curve(&self) -> Option<WireCurve> {
+        control_curve(&self.fit, self.control?.degree)
+    }
+
+    /// The samples this drawn spline or line has when its points are `fit`: over them for a
+    /// control point spline, through them otherwise.
+    pub(crate) fn samples_of(&self, fit: &[Vec3]) -> Result<Vec<Vec3>> {
+        match self.control {
+            Some(control) => drawn_control(fit, control.degree),
+            None => drawn_polyline(fit),
+        }
+    }
 }
 
 /// Most fit points of a drawn 3D curve.
@@ -137,6 +165,70 @@ pub const MAX_FIT_POINTS: usize = 500;
 /// ([`solidcraft_geom::catmull_rom`] has the curve itself, exactly).
 pub fn fit_polyline(fit: &[Vec3]) -> Vec<Vec3> {
     solidcraft_geom::catmull_rom::samples(fit)
+}
+
+/// Fewest control points of a 3D control point spline: two would make a line.
+pub const MIN_CONTROL_POINTS: usize = 3;
+
+/// Polyline samples per knot span of a 3D control point spline.
+const CONTROL_SPAN_SAMPLES: usize = 24;
+
+/// The degree of the control point spline of `degree` over `n` control points.
+fn control_degree(n: usize, degree: u8) -> usize {
+    usize::from(degree).min(n.saturating_sub(1)).max(1)
+}
+
+/// The knots of the clamped uniform B-spline of degree `k` over `n` control points, on [0, 1]:
+/// each end `k + 1` times, and the `n - k` spans between them of equal length.
+fn control_knots(n: usize, k: usize) -> Vec<f64> {
+    let spans = n.saturating_sub(k).max(1);
+    let mut knots = vec![0.0; k + 1];
+    knots.extend((1..spans).map(|i| i as f64 / spans as f64));
+    knots.extend(std::iter::repeat_n(1.0, k + 1));
+    knots
+}
+
+/// The control point spline of `degree` over `ctrl` as its exact curve, on [0, 1]: the clamped
+/// uniform B-spline ([`WireControl`]). `None` for fewer than two control points or degree 0.
+pub fn control_curve(ctrl: &[Vec3], degree: u8) -> Option<WireCurve> {
+    if ctrl.len() < 2 || degree == 0 {
+        return None;
+    }
+    let knots = control_knots(ctrl.len(), control_degree(ctrl.len(), degree));
+    let points = ctrl.iter().map(|p| [p.x, p.y, p.z]).collect();
+    Some(WireCurve { curve: solidcore_record::brep::Curve::Spline { knots, points }, interval: [0.0, 1.0] })
+}
+
+/// The polyline of the control point spline of `degree` over `ctrl`: each knot span as its
+/// Bézier piece ([`solidcraft_geom::bspline::segment`], the pieces a sweep follows), sampled
+/// evenly, from the first control point to the last. Empty when the spline does not evaluate.
+pub fn control_polyline(ctrl: &[Vec3], degree: u8) -> Vec<Vec3> {
+    control_samples(ctrl, degree).unwrap_or_default()
+}
+
+fn control_samples(ctrl: &[Vec3], degree: u8) -> Option<Vec<Vec3>> {
+    use solidcraft_geom::bspline::{HPoint, bezier_point, segment};
+    let (first, last) = (*ctrl.first()?, *ctrl.last()?);
+    if ctrl.len() < 2 || degree == 0 {
+        return None;
+    }
+    let k = control_degree(ctrl.len(), degree);
+    let knots = control_knots(ctrl.len(), k);
+    let h: Vec<HPoint> = ctrl.iter().map(|p| HPoint::weighted(*p, 1.0)).collect();
+    let mut breaks = knots.clone();
+    breaks.dedup();
+    let mut out = Vec::with_capacity(breaks.len() * CONTROL_SPAN_SAMPLES + 1);
+    out.push(first);
+    for span in breaks.windows(2) {
+        let (a, b) = (*span.first()?, *span.get(1)?);
+        let (_, piece) = segment(k, &knots, &h, a, b).ok()?;
+        for i in 1..=CONTROL_SPAN_SAMPLES {
+            out.push(bezier_point(&piece, i as f64 / CONTROL_SPAN_SAMPLES as f64).project()?);
+        }
+    }
+    // The curve ends on its last control point: the same point, not one rounded beside it.
+    *out.last_mut()? = last;
+    Some(out)
 }
 
 /// Chord-height tolerance (mm) when sampling a drawn 3D arc into `pts`.
@@ -207,6 +299,16 @@ fn arc_ok(arc: &WireArc, fit: &[Vec3]) -> bool {
         && on_circle(arc.end)
 }
 
+/// Is a saved control point spline consistent: a drawn curve that is nothing else, with a
+/// degree and a count of control points the spline can have?
+fn control_ok(control: &WireControl, w: &Wire) -> bool {
+    control_degree_ok(control.degree)
+        && (MIN_CONTROL_POINTS..=MAX_FIT_POINTS).contains(&w.fit.len())
+        && w.link.is_none()
+        && w.arc.is_none()
+        && w.exact.is_empty()
+}
+
 fn clean(w: &[Vec3]) -> Option<Vec<Vec3>> {
     if w.len() > MAX_WIRE_POINTS {
         return None;
@@ -230,7 +332,7 @@ fn clean_wires(wires: &[Vec<Vec3>]) -> Result<Vec<Vec<Vec3>>> {
     wires.iter().map(|w| clean(w).ok_or_else(|| SketchError::Invalid("3D linked curve points out of range or coincident".into()))).collect()
 }
 
-fn drawn_polyline(fit: &[Vec3]) -> Result<Vec<Vec3>> {
+pub(crate) fn drawn_polyline(fit: &[Vec3]) -> Result<Vec<Vec3>> {
     if fit.is_empty() || fit.len() > MAX_FIT_POINTS {
         return Err(SketchError::Invalid(format!("a 3D curve needs 1 to {MAX_FIT_POINTS} points")));
     }
@@ -245,6 +347,31 @@ fn drawn_polyline(fit: &[Vec3]) -> Result<Vec<Vec3>> {
         return Err(SketchError::Invalid("3D spline samples out of range".into()));
     }
     Ok(pts)
+}
+
+/// Whether a 3D control point spline may have this degree.
+fn control_degree_ok(degree: u8) -> bool {
+    (1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&usize::from(degree))
+}
+
+/// The samples of a 3D control point spline of `degree` over `ctrl`, the control points checked
+/// first.
+pub(crate) fn drawn_control(ctrl: &[Vec3], degree: u8) -> Result<Vec<Vec3>> {
+    if !(MIN_CONTROL_POINTS..=MAX_FIT_POINTS).contains(&ctrl.len()) {
+        return Err(SketchError::Invalid(format!("a 3D control point spline needs {MIN_CONTROL_POINTS} to {MAX_FIT_POINTS} control points")));
+    }
+    if !control_degree_ok(degree) {
+        return Err(SketchError::Invalid(format!("a 3D control point spline has degree 1 to {}", solidcore_record::MAX_BEZIER_DEGREE)));
+    }
+    if ctrl.iter().any(|p| !in_range3(*p)) {
+        return Err(SketchError::Invalid("3D point out of range".into()));
+    }
+    if ctrl.windows(2).any(|w| w[0].dist(w[1]) < 1e-9) {
+        return Err(SketchError::Invalid("neighbouring control points of a 3D curve must differ".into()));
+    }
+    control_samples(ctrl, degree)
+        .filter(|pts| pts.iter().all(|p| in_range3(*p)))
+        .ok_or_else(|| SketchError::Invalid("3D spline samples out of range".into()))
 }
 
 impl Sketch {
@@ -281,6 +408,7 @@ impl Sketch {
                 || (w.pts.len() == 1 && w.fit.len() != 1)
                 || w.pts.iter().chain(&w.fit).any(|p| !in_range3(*p))
                 || w.arc.as_ref().is_some_and(|a| !arc_ok(a, &w.fit))
+                || w.control.as_ref().is_some_and(|c| !control_ok(c, w))
             {
                 return Err(SketchError::Invalid("3D curve arrays, ids or point bounds are invalid".into()));
             }
@@ -319,7 +447,20 @@ impl Sketch {
         }
         let id = if geom.is_empty() {
             let id = self.fresh("j")?;
-            self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, auto_face: false, lost: false });
+            self.links.push(Link {
+                sketch_placements: Vec::new(),
+                id: id.clone(),
+                kind,
+                source,
+                face_name: None,
+                edge_name: None,
+                vertex_name: None,
+                curve_edges: Vec::new(),
+                profile_boundary: Vec::new(),
+                auto_face: false,
+                lost: false,
+                name_dropped: false,
+            });
             id
         } else {
             self.add_link(kind, source, geom)?
@@ -349,6 +490,7 @@ impl Sketch {
                 link: Some(id.to_string()),
                 fit: Vec::new(),
                 arc: None,
+                control: None,
                 exact: Vec::new(),
             });
         }
@@ -380,7 +522,7 @@ impl Sketch {
         let pts = drawn_polyline(fit)?;
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh(if fit.len() == 1 { "q" } else { "w" })?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: None, exact: Vec::new() });
+        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: None, control: None, exact: Vec::new() });
         Ok(id)
     }
 
@@ -400,37 +542,72 @@ impl Sketch {
         let pts = arc_polyline(&arc, ARC_TOL);
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh("w")?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: Some(arc), exact: Vec::new() });
+        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: Some(arc), control: None, exact: Vec::new() });
+        Ok(id)
+    }
+
+    /// Add a control point spline drawn in a 3D sketch: `ctrl` is its control points in `space`
+    /// (three or more); the wire keeps them, its degree and its samples ([`WireControl`]).
+    pub fn add_drawn_control_in(&mut self, ctrl: &[Vec3], degree: u8, space: WireSpace) -> Result<String> {
+        let pts = drawn_control(ctrl, degree)?;
+        self.wire_budget(None, 1, pts.len() + ctrl.len())?;
+        let id = self.fresh("w")?;
+        self.wires.push(Wire {
+            id: id.clone(),
+            pts,
+            space,
+            link: None,
+            fit: ctrl.to_vec(),
+            arc: None,
+            control: Some(WireControl { degree }),
+            exact: Vec::new(),
+        });
         Ok(id)
     }
 
     /// Move a fit point of a drawn 3D curve, and every other drawn point at the same place
     /// (curves drawn end to end stay joined). Returns how many points moved.
     pub fn move_drawn_point(&mut self, wire: &str, index: usize, to: Vec3) -> Result<usize> {
-        if !in_range3(to) {
-            return Err(SketchError::Invalid("3D point out of range".into()));
+        self.move_drawn_points(&[(wire.to_string(), index, to)])
+    }
+
+    /// [`Sketch::move_drawn_point`] for several points at once: every place is read before any
+    /// point moves, and a place picked more than once moves once, to its first target.
+    pub fn move_drawn_points(&mut self, moves: &[(String, usize, Vec3)]) -> Result<usize> {
+        let mut targets: Vec<(WireSpace, Vec3, Vec3)> = Vec::new();
+        for (wire, index, to) in moves {
+            if !in_range3(*to) {
+                return Err(SketchError::Invalid("3D point out of range".into()));
+            }
+            let w = self.wire_index(wire).ok_or_else(|| SketchError::Unknown(wire.clone()))?;
+            let space = self
+                .wires
+                .get(w)
+                .filter(|w| w.link.is_none())
+                .map(|w| w.space)
+                .ok_or_else(|| SketchError::Invalid("linked 3D geometry cannot be moved".into()))?;
+            let from =
+                self.wires.get(w).and_then(|w| w.fit.get(*index)).copied().ok_or_else(|| SketchError::Unknown(format!("{wire} point {index}")))?;
+            if !targets.iter().any(|(sp, f, _)| *sp == space && f.dist(from) < 1e-9) {
+                targets.push((space, from, *to));
+            }
         }
-        let w = self.wire_index(wire).ok_or_else(|| SketchError::Unknown(wire.into()))?;
-        let space = self
-            .wires
-            .get(w)
-            .filter(|w| w.link.is_none())
-            .map(|w| w.space)
-            .ok_or_else(|| SketchError::Invalid("linked 3D geometry cannot be moved".into()))?;
-        let from = self.wires.get(w).and_then(|w| w.fit.get(index)).copied().ok_or_else(|| SketchError::Unknown(format!("{wire} point {index}")))?;
         let mut n = 0;
         let mut changes = Vec::new();
-        for (index, w) in self.wires.iter().enumerate().filter(|(_, w)| !w.fit.is_empty() && w.link.is_none() && w.space == space) {
+        for (index, w) in self.wires.iter().enumerate().filter(|(_, w)| !w.fit.is_empty() && w.link.is_none()) {
             let mut fit = w.fit.clone();
             let mut changed = false;
-            for p in fit.iter_mut().filter(|p| p.dist(from) < 1e-9) {
-                *p = to;
-                changed = true;
-                n += 1;
+            for p in fit.iter_mut() {
+                if let Some((_, _, to)) = targets.iter().find(|(sp, f, _)| *sp == w.space && p.dist(*f) < 1e-9) {
+                    *p = *to;
+                    changed = true;
+                    n += 1;
+                }
             }
             if changed {
                 // An exact arc keeps its analytic form: re-derive it from its three defining
-                // points; a spline keeps its fit-point polyline. Both before any change lands.
+                // points; a spline keeps its polyline, through its fit points or over its
+                // control points. All before any change lands.
                 let (arc, pts) = match w.arc {
                     Some(_) => {
                         let [start, through, end] = fit.as_slice() else {
@@ -440,7 +617,7 @@ impl Sketch {
                             .ok_or_else(|| SketchError::Invalid("a 3D arc's points must differ and not be collinear".into()))?;
                         (Some(arc), arc_polyline(&arc, ARC_TOL))
                     }
-                    None => (None, drawn_polyline(&fit)?),
+                    None => (None, w.samples_of(&fit)?),
                 };
                 changes.push((index, fit, arc, pts));
             }
@@ -458,12 +635,15 @@ impl Sketch {
     /// Remove wires by id.
     pub fn remove_wires(&mut self, ids: &[String]) {
         self.wires.retain(|w| !ids.contains(&w.id));
+        self.prune_wire_constraints();
         self.prune_links();
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use solidcore_record::Vec2;
+
     use super::*;
 
     #[test]
@@ -602,6 +782,136 @@ mod tests {
         let arc = w.arc.unwrap();
         assert!(w.pts.iter().all(|p| (arc.center.dist(*p) - arc.radius).abs() < 1e-6));
         sk.validate_wires().unwrap();
+    }
+
+    /// Five control points off any one plane, for the control point spline tests.
+    fn five() -> [Vec3; 5] {
+        [Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 5.0), Vec3::new(30.0, 25.0, -10.0), Vec3::new(50.0, 0.0, 15.0), Vec3::new(60.0, -20.0, 40.0)]
+    }
+
+    #[test]
+    fn a_control_spline_touches_only_its_end_control_points() {
+        // Four control points of a cubic are one Bézier: its middle is (P0 + 3 P1 + 3 P2 + P3) / 8.
+        let c = five();
+        let pts = control_polyline(&c[..4], 3);
+        assert_eq!(pts.len(), CONTROL_SPAN_SAMPLES + 1);
+        assert_eq!((pts.first(), pts.last()), (c.first(), c.get(3)));
+        let mid = (c[0] + c[1] * 3.0 + c[2] * 3.0 + c[3]) * 0.125;
+        assert!(pts[CONTROL_SPAN_SAMPLES / 2].dist(mid) < 1e-12, "{:?} is not {mid:?}", pts[CONTROL_SPAN_SAMPLES / 2]);
+        // The inner control points pull the curve; it does not pass through them.
+        assert!(pts.iter().all(|p| p.dist(c[1]) > 1.0 && p.dist(c[2]) > 1.0));
+        // Three control points of a cubic are a quadratic Bézier: its middle is (P0 + 2 P1 + P2) / 4.
+        let quadratic = control_polyline(&c[..3], 3);
+        assert_eq!(quadratic.len(), CONTROL_SPAN_SAMPLES + 1);
+        assert!(quadratic[CONTROL_SPAN_SAMPLES / 2].dist((c[0] + c[1] * 2.0 + c[2]) * 0.25) < 1e-12);
+    }
+
+    #[test]
+    fn a_control_spline_of_two_spans_joins_them_where_the_knot_says() {
+        // Five control points of a cubic: knots 0 0 0 0 ½ 1 1 1 1. Inserting ½ twice more (or
+        // the blossom f(½, ½, ½)) puts the joint of the two spans at (P1 + 2 P2 + P3) / 4.
+        let c = five();
+        let pts = control_polyline(&c, 3);
+        assert_eq!(pts.len(), 2 * CONTROL_SPAN_SAMPLES + 1);
+        assert_eq!((pts.first(), pts.last()), (c.first(), c.last()));
+        let joint = (c[1] + c[2] * 2.0 + c[3]) * 0.25;
+        assert!(pts[CONTROL_SPAN_SAMPLES].dist(joint) < 1e-12, "{:?} is not {joint:?}", pts[CONTROL_SPAN_SAMPLES]);
+        let Some(WireCurve { curve: solidcore_record::brep::Curve::Spline { knots, points }, interval }) = control_curve(&c, 3) else {
+            panic!("a control spline is a record spline")
+        };
+        assert_eq!(knots, vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(points, c.map(|p| [p.x, p.y, p.z]).to_vec());
+        assert_eq!(interval, [0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_control_spline_in_a_plane_is_the_planar_control_spline() {
+        // The same control points on the sketch plane, by the planar spline's own evaluation.
+        let flat: Vec<Vec2> = (0..9).map(|i| Vec2::new(10.0 * f64::from(i), [0.0, 12.0, -7.0, 20.0, 3.0][i as usize % 5])).collect();
+        let lifted: Vec<Vec3> = flat.iter().map(|p| Vec3::new(p.x, p.y, 4.0)).collect();
+        for degree in [1u8, 2, 3, 5] {
+            let pts = control_polyline(&lifted, degree);
+            let planar = crate::curves::spline_polyline(&flat, true, degree);
+            assert_eq!(pts.len(), planar.len(), "degree {degree}");
+            for (p, q) in pts.iter().zip(&planar) {
+                assert!(p.dist(Vec3::new(q.x, q.y, 4.0)) < 1e-11, "degree {degree}: {p:?} is not {q:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_control_wire_keeps_its_control_points_through_a_move_and_a_round_trip() {
+        let mut sk = Sketch::new();
+        let c = five();
+        let id = sk.add_drawn_control_in(&c, 3, WireSpace::Component).unwrap();
+        let w = sk.wires.iter().find(|w| w.id == id).unwrap().clone();
+        assert_eq!(w.fit, c.to_vec());
+        assert_eq!(w.control, Some(WireControl { degree: 3 }));
+        assert_eq!(w.pts, control_polyline(&c, 3));
+        assert!(w.arc.is_none() && w.control_curve().is_some());
+        sk.validate_wires().unwrap();
+        let raw = serde_json::to_value(&w).unwrap();
+        assert_eq!(raw["control"], serde_json::json!({"degree": 3}));
+        assert_eq!(serde_json::from_value::<Wire>(raw).unwrap(), w);
+        // A fit-point curve saves no such field, and a design from before it reads as one.
+        let fit = sk.add_drawn_wire_in(&c, WireSpace::Component).unwrap();
+        let mut raw = serde_json::to_value(sk.wires.iter().find(|w| w.id == fit).unwrap()).unwrap();
+        assert!(raw.get("control").is_none());
+        raw.as_object_mut().unwrap().remove("arc");
+        assert_eq!(serde_json::from_value::<Wire>(raw).unwrap().control, None);
+        // Dragging a control point: the curve is still the spline over the control points, and
+        // the fit-point curve that shares the place moves with it (curves drawn end to end).
+        let to = Vec3::new(30.0, 40.0, 0.0);
+        assert_eq!(sk.move_drawn_point(&id, 2, to).unwrap(), 2);
+        let moved = sk.wires.iter().find(|w| w.id == id).unwrap();
+        let mut want = c;
+        want[2] = to;
+        assert_eq!(moved.fit, want.to_vec());
+        assert_eq!(moved.pts, control_polyline(&want, 3));
+        assert_ne!(moved.pts, fit_polyline(&want));
+        assert_eq!(moved.control, Some(WireControl { degree: 3 }));
+        sk.validate_wires().unwrap();
+    }
+
+    #[test]
+    fn a_control_spline_refuses_hostile_points_and_leaves_the_sketch_alone() {
+        let mut sk = Sketch::new();
+        let c = five();
+        let before = sk.clone();
+        // Two control points are a line; a degree of 0 or above the exact pieces' is no spline.
+        assert!(sk.add_drawn_control_in(&c[..2], 3, WireSpace::World).is_err());
+        assert!(sk.add_drawn_control_in(&c, 0, WireSpace::World).is_err());
+        assert!(sk.add_drawn_control_in(&c, 10, WireSpace::World).is_err());
+        assert!(sk.add_drawn_control_in(&[Vec3::X; 3], 3, WireSpace::World).is_err());
+        assert!(sk.add_drawn_control_in(&[c[0], Vec3::new(f64::NAN, 0.0, 0.0), c[2]], 3, WireSpace::World).is_err());
+        assert!(sk.add_drawn_control_in(&[c[0], Vec3::new(1e100, 0.0, 0.0), c[2]], 3, WireSpace::World).is_err());
+        let many: Vec<Vec3> = (0..=MAX_FIT_POINTS).map(|i| Vec3::new(i as f64, 0.0, 0.0)).collect();
+        assert!(sk.add_drawn_control_in(&many, 3, WireSpace::World).is_err());
+        assert_eq!(sk, before);
+        assert!(control_polyline(&[], 3).is_empty() && control_curve(&c[..1], 3).is_none() && control_curve(&c, 0).is_none());
+        // A control point dragged onto its neighbour is refused, and nothing changed.
+        let id = sk.add_drawn_control_in(&c, 3, WireSpace::World).unwrap();
+        let before = sk.clone();
+        assert!(sk.move_drawn_point(&id, 1, c[2]).is_err());
+        assert_eq!(sk, before);
+    }
+
+    #[test]
+    fn a_saved_control_spline_that_cannot_be_one_is_refused() {
+        let mut sk = Sketch::new();
+        sk.add_drawn_control_in(&five(), 3, WireSpace::World).unwrap();
+        sk.validate_wires().unwrap();
+        let broken = |change: &dyn Fn(&mut Wire)| {
+            let mut bad = sk.clone();
+            change(&mut bad.wires[0]);
+            bad.validate_wires().is_err()
+        };
+        assert!(broken(&|w| w.control = Some(WireControl { degree: 0 })));
+        assert!(broken(&|w| w.control = Some(WireControl { degree: 10 })));
+        assert!(broken(&|w| w.fit.truncate(2)));
+        assert!(broken(&|w| w.link = Some("j1".into())));
+        assert!(broken(&|w| w.arc = arc_from_3_points(Vec3::X, Vec3::Y, Vec3::Z)));
+        assert!(broken(&|w| w.exact = w.control_curve().into_iter().collect()));
     }
 
     #[test]

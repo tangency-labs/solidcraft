@@ -23,4 +23,3 @@ crates/kernel/src/splitface.rs
 crates/kernel/src/step.rs
 crates/kernel/src/step_in/**
 crates/kernel/src/step_out.rs
-crates/step/**

@@ -1,10 +1,35 @@
 newer_file_feature
+frame_end_cap
+  inputs:
+    Angle = cap1.angle (Angle)
+    Offset = cap1.offset (Length)
+    Thickness = cap.thickness (Length)
+    Inset Ratio = cap.ratio (Unitless)
+    Corner Chamfer = cap.chamfer (Length)
+  expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer, 0, 0, 0
+frame_member_turn
+  inputs:
+    Angle = turn.angle (Angle)
+  expressions: turn.angle
+frame_gusset
+  inputs:
+    Angle = gusset1.angle (Angle)
+    Offset = gusset1.offset (Length)
+    Angle = gusset2.angle (Angle)
+    Offset = gusset2.offset (Length)
+    First Leg = gusset.leg1 (Length)
+    Second Leg = gusset.leg2 (Length)
+    Thickness = gusset.thickness (Length)
+    Corner Relief = gusset.relief (Length)
+    Outer Tip Clip = gusset.clip (Length)
+    Joint Offset = gusset.offset (Length)
+  expressions: gusset1.angle, gusset1.offset, gusset2.angle, gusset2.offset, gusset.leg1, gusset.leg2, gusset.thickness, gusset.relief, gusset.clip, gusset.offset, 0, 0, 0, 0, 0, 0
 body_transfer
 sketch
   inputs:
     Angle = sketch.angle (Angle)
     Offset = sketch.offset (Length)
-  expressions: sketch.angle, sketch.offset
+  expressions: sketch.angle, sketch.offset, 0, 0, 0
 sketch_along_path
   inputs:
     Distance (0 to 1) = sketch.t (Unitless)
@@ -73,14 +98,14 @@ cylinder
   inputs:
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
-  expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z
+  expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z, 0, 0, 1
 cylinder_references
   inputs:
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
     Reference distance = cyl.reference1 (Length)
     Reference distance = cyl.reference2 (Length)
-  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0
+  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0, 0, 0, 1
 sphere
   inputs:
     Radius = sph.radius (Length)
@@ -118,7 +143,7 @@ mirror
   inputs:
     Angle = mirror.angle (Angle)
     Offset = mirror.offset (Length)
-  expressions: mirror.angle, mirror.offset
+  expressions: mirror.angle, mirror.offset, 0, 0, 0
 hole_simple
   inputs:
     Diameter = hole.diameter (Length)
@@ -171,29 +196,30 @@ draft
     Angle = draft.angle (Angle)
     Angle = draft_neutral.angle (Angle)
     Offset = draft_neutral.offset (Length)
-  expressions: draft.angle, draft_neutral.angle, draft_neutral.offset
+  expressions: draft.angle, draft_neutral.angle, draft_neutral.offset, 0, 0, 0
 construction_plane
   inputs:
     Angle = cplane.angle (Angle)
     Offset = cplane.offset (Length)
-  expressions: cplane.angle, cplane.offset
+  expressions: cplane.angle, cplane.offset, 0, 0, 0
+construction_plane_square_to_line
 split
   inputs:
     Angle = split.angle (Angle)
     Offset = split.offset (Length)
-  expressions: split.angle, split.offset
+  expressions: split.angle, split.offset, 0, 0, 0
 split_line
   inputs:
     Angle = split_line.angle (Angle)
     Offset = split_line.offset (Length)
-  expressions: split_line.angle, split_line.offset
+  expressions: split_line.angle, split_line.offset, 0, 0, 0
 construction_axis
   inputs:
     Angle = axis_a.angle (Angle)
     Offset = axis_a.offset (Length)
     Angle = axis_b.angle (Angle)
     Offset = axis_b.offset (Length)
-  expressions: axis_a.angle, axis_a.offset, axis_b.angle, axis_b.offset
+  expressions: axis_a.angle, axis_a.offset, axis_b.angle, axis_b.offset, 0, 0, 0, 0, 0, 0
 construction_point_planes
   inputs:
     Angle = pt_a.angle (Angle)
@@ -202,7 +228,7 @@ construction_point_planes
     Offset = pt_b.offset (Length)
     Angle = pt_c.angle (Angle)
     Offset = pt_c.offset (Length)
-  expressions: pt_a.angle, pt_a.offset, pt_b.angle, pt_b.offset, pt_c.angle, pt_c.offset
+  expressions: pt_a.angle, pt_a.offset, pt_b.angle, pt_b.offset, pt_c.angle, pt_c.offset, 0, 0, 0, 0, 0, 0, 0, 0, 0
 construction_point_along
   inputs:
     Distance (0 to 1) = pt.t (Unitless)
@@ -211,7 +237,7 @@ split_face
   inputs:
     Angle = split_face.angle (Angle)
     Offset = split_face.offset (Length)
-  expressions: split_face.angle, split_face.offset
+  expressions: split_face.angle, split_face.offset, 0, 0, 0
 scale
   inputs:
     Scale factor = scale.factor (Unitless)
@@ -241,6 +267,27 @@ frame_member
     Rotation = frame_member.angle (Angle)
   expressions: 40, 3, 40, frame_member.angle
 frame_member_sketch
+frame_trim
+  inputs:
+    Angle = frame_trim.angle (Angle)
+    Offset = frame_trim.offset (Length)
+    Gap = frame_trim.gap (Length)
+  expressions: frame_trim.angle, frame_trim.offset, frame_trim.gap, 0, 0, 0
+frame_plate
+  inputs:
+    Angle = plate.angle (Angle)
+    Offset = plate.offset (Length)
+    Width = plate.width (Length)
+    Height = plate.height (Length)
+    Hole Diameter = plate.hole (Length)
+    Bolt Circle Diameter = plate.pitch (Length)
+    Bolt Pattern Angle = plate.hole_angle (Angle)
+    Thickness = plate.thickness (Length)
+    Offset = plate.offset (Length)
+    X Offset = plate.x (Length)
+    Y Offset = plate.y (Length)
+    Rotation = plate.angle (Angle)
+  expressions: plate.angle, plate.offset, plate.width, plate.height, plate.hole, plate.pitch, plate.hole_angle, plate.thickness, plate.offset, plate.x, plate.y, plate.angle, 0, 0, 0
 emboss
   inputs:
     Depth = emboss.depth (Length)
@@ -254,7 +301,7 @@ replace_face
   inputs:
     Angle = replace_face.angle (Angle)
     Offset = replace_face.offset (Length)
-  expressions: replace_face.angle, replace_face.offset
+  expressions: replace_face.angle, replace_face.offset, 0, 0, 0
 align
 coil
   inputs:
@@ -269,6 +316,15 @@ coil_profile
     Pitch = coil_profile.pitch (Length)
     Revolutions = coil_profile.turns (Unitless)
   expressions: coil_profile.pitch, coil_profile.turns, coil_profile.x, coil_profile.y, coil_profile.z
+cell_grid
+  inputs:
+    Sides = cell_grid.sides (Unitless)
+    Cell size = cell_grid.size (Length)
+    Web = cell_grid.web (Length)
+    Angle = cell_grid.angle (Angle)
+    Margin = cell_grid.margin (Length)
+    Depth = cell_grid.depth (Length)
+  expressions: cell_grid.sides, cell_grid.size, cell_grid.web, cell_grid.angle, cell_grid.margin, cell_grid.depth, cell_grid.x, cell_grid.y, cell_grid.z
 sheet_base
 sheet_contour
   inputs:
@@ -304,8 +360,22 @@ sheet_path
   inputs:
     Bend radius = path.radius (Length)
   expressions: path.radius
+sheet_tab
+sheet_bead
+  inputs:
+    Depth = bead.depth (Length)
+    Width = bead.width (Length)
+    Angle = bead.angle (Angle)
+    Crown width = bead.crown (Length)
+    Base radius = bead.rb (Length)
+    Crown radius = bead.rc (Length)
+    End length = bead.end (Length)
+    Margin = bead.margin (Length)
+  expressions: bead.depth, bead.width, bead.angle, bead.crown, bead.rb, bead.rc, bead.end, bead.margin
 sheet_unfold
 sheet_convert
+sheet_surface_convert
+sheet_recognize
 boss
   inputs:
     Diameter = boss.diameter (Length)
@@ -398,7 +468,7 @@ surface_extend_to_plane
     Distance = extend.distance (Length)
     Angle = extend.angle (Angle)
     Offset = extend.offset (Length)
-  expressions: extend.distance, extend.angle, extend.offset
+  expressions: extend.distance, extend.angle, extend.offset, 0, 0, 0
 surface_extend_to_face
   inputs:
     Distance = extend.distance (Length)
@@ -412,17 +482,17 @@ surface_trim
   inputs:
     Angle = trim.angle (Angle)
     Offset = trim.offset (Length)
-  expressions: trim.angle, trim.offset
+  expressions: trim.angle, trim.offset, 0, 0, 0
 surface_trim_curves
   inputs:
     Angle = trim.angle (Angle)
     Offset = trim.offset (Length)
-  expressions: trim.angle, trim.offset
+  expressions: trim.angle, trim.offset, 0, 0, 0
 surface_trim_mutual
   inputs:
     Angle = trim.angle (Angle)
     Offset = trim.offset (Length)
-  expressions: trim.angle, trim.offset
+  expressions: trim.angle, trim.offset, 0, 0, 0
 move
   inputs:
     X distance = move.x (Length)
@@ -435,6 +505,7 @@ mesh_convert
   inputs:
     Tolerance = mesh_convert.tolerance (Length)
   expressions: mesh_convert.tolerance
+mesh_reduce
 mesh_import
 repair
   inputs:

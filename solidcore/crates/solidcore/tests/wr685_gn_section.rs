@@ -1,6 +1,6 @@
-//! WR-685 (#2250; the SolidCraft fork's tangency-labs/smlib@11ea2d9 = d01d7b0's 0bd3f4d, smlib#78): with
-//! `fixes.fillet_gn_section_generator` a blend-curve round is built by the G^n section
-//! generator, `S(t) = f T1(1 - p1) + (1 - f) T2(p2)` between the rails.
+//! WR-685 (#2250; the SolidCraft fork's tangency-labs/smlib@11ea2d9 = d01d7b0's 0bd3f4d, smlib#78): a
+//! blend-curve round is built by the G^n section generator (on every kernel since its flag,
+//! `fillet_gn_section_generator`, was retired: WR-685 addendum 2026-11-06), `S(t) = f T1(1 - p1) + (1 - f) T2(p2)` between the rails.
 //!
 //! Expected values: the closed form of the section between two planes (the feet are
 //! linear in tau, so the jets past order 1 vanish and `T_i` is the foot line itself), and
@@ -20,7 +20,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_section::section::{GnFaces, GnSectionFsg};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::kernel::{KernelOptions, UpstreamFixes};
+use solidcore::kernel::KernelOptions;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point2, Point3, Vec2, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -106,10 +106,11 @@ fn corner_surface(
             },
         )
         .unwrap();
-    // (a plain B-spline without `fillet_round_as_definition`)
-    let solidcore::surface::surface::SurfaceKind::BSpline(s) = s.into_kind() else {
-        panic!("the G^n section is a B-spline without the definition flag");
+    // the round is its definition; its net is the G^n section's B-spline
+    let solidcore::surface::surface::SurfaceKind::ProceduralBlend(s) = s.into_kind() else {
+        panic!("the G^n section is not its definition");
     };
+    let s = s.net().copy();
     (g, s)
 }
 
@@ -194,26 +195,12 @@ fn volume_of(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-7, &attrs).unwrap()
 }
 
-/// The kernel with the G^n section on or off. With it, the fork's surface-and-plane trace
-/// (WR-682, `fillet_surface_plane_curve_on_plane_equation`, tangency-labs/smlib@5bdcddf =
-/// d01d7b0's 34b7a22, which precedes the G^n section in the fork) is on too: the end ribs
-/// of an order 3 or 4 section (degree 10 or 13 across) against the box's end planes are
-/// traced on the plane, as in the fork; upstream's intersector fails them (1001).
-fn kernel(gn: bool) -> Kernel {
-    let mut fixes = UpstreamFixes::default();
-    fixes.fillet_gn_section_generator = gn;
-    fixes.fillet_surface_plane_curve_on_plane_equation = gn;
-    let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes = fixes;
-    k
-}
-
 /// The box 40 x 30 x 20 with its top back edge rounded r 3 by the order-2 section at
 /// w = 0: it loses 40 times the area the section cuts off, 0.154192655384275 r^2 (the
-/// fork's box-edge case). Without the flag the order-2 blend curve is built.
+/// fork's box-edge case).
 #[test]
 fn box_edge_order_2_round_takes_off_the_section_s_area() {
-    let mut k = kernel(true);
+    let mut k = Kernel::new(&KernelOptions::default());
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let e = pick(&k, &b, [20.0, 30.0, 20.0]);
     fillet_edges(&mut k, &mut b, &[e], 3.0, 2, 2, 0.0).unwrap();
@@ -242,15 +229,6 @@ fn box_edge_order_2_round_takes_off_the_section_s_area() {
     let e = pick(&k, &b, [20.0, 30.0, 20.0]);
     assert!(fillet_edges(&mut k, &mut b, &[e], 3.0, 2, 1, 0.0).is_err());
     assert!(fillet_edges(&mut k, &mut b, &[e], 3.0, 2, 2, 1.0).is_err());
-
-    // off: the blend curve, which takes off a different area
-    let mut k = kernel(false);
-    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
-    let e = pick(&k, &b, [20.0, 30.0, 20.0]);
-    if fillet_edges(&mut k, &mut b, &[e], 3.0, 2, 2, 0.0).is_ok() {
-        let v_off = volume_of(&k, &mut b);
-        assert!((v_off - want).abs() > 1e-4, "{v_off}");
-    }
 }
 
 /// The fork's boss root: an r 8, 10 high cylinder on a 60 x 40 x 10 plate, its root
@@ -260,13 +238,13 @@ fn box_edge_order_2_round_takes_off_the_section_s_area() {
 /// this blend within 3.9e-6 on 227 spans, off the exact blend by 1.75e-7.
 ///
 /// Ignored by default: its certificate takes about 15 minutes in a debug build (run it with
-/// `cargo test --release --test wr685_gn_section -- --ignored`).
+/// `cargo test --release --test blend -- --ignored wr685_gn_section::`).
 #[test]
 #[ignore = "slow in a debug build: a 227-span certificate"]
 fn boss_root_order_2_round_adds_the_section_s_turned_area() {
     use solidcore::boolean::api_brep::boolean_union;
     use solidcore::primitive::api_primitives::create_cylinder;
-    let mut k = kernel(true);
+    let mut k = Kernel::new(&KernelOptions::default());
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(30.0, 20.0, 10.0), 8.0, 10.0).unwrap();
     let mut b = boolean_union(&mut k, plate, boss).unwrap();
@@ -291,7 +269,7 @@ fn pipe_root_order_2_round_takes_the_fork_s_volume() {
     use solidcore::boolean::api_brep::boolean_union;
     use solidcore::geom::axis2_placement::Axis2Placement;
     use solidcore::primitive::api_primitives::create_cylinder;
-    let mut k = kernel(true);
+    let mut k = Kernel::new(&KernelOptions::default());
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
     let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
     let pl = Axis2Placement::new(
@@ -317,7 +295,7 @@ fn pipe_root_order_2_round_takes_the_fork_s_volume() {
 #[test]
 fn box_edge_equal_area_round_takes_off_the_circle_s_area() {
     use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
-    let mut k = kernel(true);
+    let mut k = Kernel::new(&KernelOptions::default());
     let want = 24000.0 - 40.0 * 9.0 * (1.0 - core::f64::consts::FRAC_PI_4);
     for n in 2..=4 {
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
@@ -358,7 +336,7 @@ fn eased_setback_takes_the_order_2_section_at_thumbweight_0() {
         (q.x - 40.0).abs() + (q.y - 40.0).abs() + (q.z - 40.0).abs() < 1e-6
     };
     for (ease, want) in [(0.0, 62421.539577350763), (4.0, 62587.581095107686)] {
-        let mut k = kernel(true);
+        let mut k = Kernel::new(&KernelOptions::default());
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 40.0).unwrap();
         let edges: Vec<EdgeId> = b
             .edges()

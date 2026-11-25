@@ -27,6 +27,15 @@
 //! | `GlobalSolve::identical_solutions` for [`TopologySolver`], `TopologyDomains` (private) | `SmGlobalSolver::IdenticalSolutions` (not overridden upstream: the solutions' `SmObject*` resolve through [`TopologyObjects`]) |
 //!
 //! Deviations:
+//! - **Single projected point/face maxima.** These queries evaluate trimmed UV silhouettes on the
+//!   source surface as UV proposals alongside native knot-cell seeds, avoiding
+//!   a temporary lifted-curve solve and the 3D fit's extra measurement error.
+//!   The tracing tolerance is expressed in geometric units using the norm of the
+//!   double-cross projection, rather than ten times the query tolerance.
+//!   A single projected point/face maximum additionally checks an outward-rounded
+//!   bound over the whole face domain, with exact rectangular trim feasibility
+//!   for a new face candidate. An unavailable or unresolved certificate refuses
+//!   and restores the solver state. Other operation classes are not certified here.
 //! - **Projected tree bounds.** Outward-rounded projected boxes use the queries'
 //!   double-cross metric, including its non-unit-normal scale, and retain answers
 //!   within the query tolerance. Upstream compared an unscaled sphere distance
@@ -98,7 +107,8 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::p9::CurveSolveOptions;
-use crate::error::{Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::{Extent3d, LineHit};
@@ -142,6 +152,12 @@ const OP_FACE_SIL: &str = "intersect::topology_solver::p1::face_silhouettes";
 /// Error for a pointer upstream would dereference while null.
 const fn null_deref(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
+}
+
+/// Error for a null object a solve checks for (upstream's `NER`, `SM_ERR_NULL_POINTER`):
+/// a null object of the caller's trees, or a null handle the caller passed.
+pub(super) fn no_object(operation: &'static str) -> SolidError {
+    SolidError::intersect(operation, IntersectFailure::NoObjectToSolve)
 }
 
 /// The objects a topology solve works on, as seen through their handles: the
@@ -201,10 +217,12 @@ pub trait TopologyObjects<O> {
     fn brep_trees(&self, brep: O) -> Result<super::p2::TopologyTrees<'_, O>> {
         const OP: &str = "intersect::topology_solver::p1::TopologyObjects::brep_trees";
         let cache = self.brep_cache(brep)?;
+        // the caller's cache has no trees until its `build_trees` runs
+        let not_built = || SolidError::intersect(OP, IntersectFailure::NotSetUp);
         Ok(super::p2::TopologyTrees {
-            vertices: cache.vertex_tree().ok_or(SolidError::null_pointer(OP))?,
-            curves: cache.curve_tree().ok_or(SolidError::null_pointer(OP))?,
-            surfaces: cache.surface_tree().ok_or(SolidError::null_pointer(OP))?,
+            vertices: cache.vertex_tree().ok_or_else(not_built)?,
+            curves: cache.curve_tree().ok_or_else(not_built)?,
+            surfaces: cache.surface_tree().ok_or_else(not_built)?,
         })
     }
 
@@ -225,9 +243,12 @@ pub trait TopologyObjects<O> {
         let object = self.shape_member_object(member)?;
         match member {
             ShapeMember::Vertex(_) => Ok(object),
-            ShapeMember::Edge(_) => self.edge_curve(object)?.ok_or(SolidError::null_pointer(
-                "intersect::topology_solver::p2::shape_geometry_object",
-            )),
+            ShapeMember::Edge(_) => self.edge_curve(object)?.ok_or_else(|| {
+                SolidError::intersect(
+                    "intersect::topology_solver::p2::shape_geometry_object",
+                    IntersectFailure::EdgeWithoutCurve,
+                )
+            }),
             ShapeMember::Face(_) => self.face_surface(object),
             ShapeMember::Other => Err(SolidError::invalid_input(
                 "intersect::topology_solver::p2::shape_geometry_object",
@@ -283,6 +304,18 @@ pub trait TopologyObjects<O> {
     /// adapter cannot resolve: a gap in the caller's adapter, which the caller reports.
     fn face_entity(&self, face: O) -> Option<(&crate::topology::Brep, crate::topology::FaceId)> {
         let _ = face;
+        None
+    }
+
+    /// Optional live lend of the B-rep and face record a face handle names, for the face
+    /// members whose lazy queries edit the B-rep as upstream's do (`SmFace::CurveOnClassify`
+    /// makes UV trim curves): `f` runs on the adapter's own B-rep, mutably. `None` (the
+    /// default) leaves the caller to [`TopologyObjects::face_entity`].
+    fn with_face_entity_mut(
+        &self,
+        _face: O,
+        _f: &mut dyn FnMut(&mut crate::topology::Brep, crate::topology::FaceId) -> Result<()>,
+    ) -> Option<Result<()>> {
         None
     }
 
@@ -1050,9 +1083,9 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         object2: Option<O>,
     ) -> Result<()> {
         match self.kind {
-            LocalSolverKind::Base | LocalSolverKind::Point | LocalSolverKind::Curve => {
-                Err(SolidError::sm_err(OP_BASE))
-            }
+            LocalSolverKind::Base | LocalSolverKind::Point | LocalSolverKind::Curve => Err(
+                SolidError::intersect(OP_BASE, IntersectFailure::AbstractLocalSolver),
+            ),
             LocalSolverKind::PointVertex => self.solve_point_vertex(ts, object1, object2),
             LocalSolverKind::VertexVertex => self.solve_vertex_vertex(ts, object1, object2),
             LocalSolverKind::PointCurve => self.solve_point_curve(k, ts, object1, object2),
@@ -1104,14 +1137,14 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         let mut count = 0;
         let vertex;
         if self.swap_order {
-            vertex = object1.ok_or(SolidError::null_pointer(OP_PV))?;
+            vertex = object1.ok_or_else(|| no_object(OP_PV))?;
             push_object(&mut sol.objects, &mut count, Some(vertex));
             if self.point_vertex.is_some() {
                 // If the point represents a vertex then save it in list
                 push_object(&mut sol.objects, &mut count, self.point_vertex);
             }
         } else {
-            vertex = object2.ok_or(SolidError::null_pointer(OP_PV))?;
+            vertex = object2.ok_or_else(|| no_object(OP_PV))?;
             if self.point_vertex.is_some() {
                 // If the point represents a vertex then save it in list
                 push_object(&mut sol.objects, &mut count, self.point_vertex);
@@ -1509,14 +1542,14 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         // we want we can switch the order.
         let surface;
         if self.swap_order {
-            surface = object1.ok_or(SolidError::null_pointer(OP_PF))?;
+            surface = object1.ok_or_else(|| no_object(OP_PF))?;
             push_object(&mut sol_objects, &mut count, Some(surface));
             if self.point_vertex.is_some() {
                 // If the point represents a vertex then save it in list
                 push_object(&mut sol_objects, &mut count, self.point_vertex);
             }
         } else {
-            surface = object2.ok_or(SolidError::null_pointer(OP_PF))?;
+            surface = object2.ok_or_else(|| no_object(OP_PF))?;
             if self.point_vertex.is_some() {
                 // If the point represents a vertex then save it in list
                 push_object(&mut sol_objects, &mut count, self.point_vertex);
@@ -1644,23 +1677,91 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 ts.add_sorted_solution(&sol, SortKey::BySolutionValue, true)?;
             } // end for each solution
         } else if ts.base.projected_operation {
-            let opt_vectors = ts.base.opt_vectors.clone();
-            let (trim_3d_curves, trim_uv_curves) =
-                face_silhouettes(ts.kernel, objects, face, &opt_vectors, tol)?;
-            // When we reach here there should be silhouette curves in sTrim3DCurves
-            // We can use these to do measurement to the surface.  Please note that
-            // the edges bounding the face would have already been measured.
-            for (curve, uv_curve) in trim_3d_curves.iter().zip(&trim_uv_curves) {
-                let mut sub: LocalSolver<'_, O> =
-                    LocalSolver::new(LocalSolverKind::PointCurve, self.swap_order, self.shape);
-                sub.curve_owner = Some(face);
-                sub.interval = curve.natural_interval();
-                sub.surface_curve = Some(uv_curve);
-                sub.point = self.point;
-                sub.point_vertex = self.point_vertex;
-                // (the temporary curve has no handle)
-                sub.point_curve(k, ts, curve, None)?;
+            let certified_maximum = op == SolverOperation::ProjectedMaximize
+                && ts.base.solution_requested == SolutionRequested::Single;
+            let before = certified_maximum.then(|| ts.base.clone());
+            // A two-tree traversal changes the query vertex between leaves.
+            // Its shared incumbent must not be remeasured against this vertex.
+            let mut vertex_solver = (certified_maximum && self.point_vertex.is_some()).then(|| {
+                TopologySolver::new(
+                    ts.kernel,
+                    objects,
+                    op,
+                    SolutionRequested::Single,
+                    tol,
+                    0.0,
+                    &ts.base.opt_vectors,
+                )
+            });
+            let result: Result<()> = (|| {
+                let current = vertex_solver.as_mut().unwrap_or(&mut *ts);
+                let opt_vectors = current.base.opt_vectors.clone();
+                if certified_maximum {
+                    let hints = projected_face_candidate_uv(
+                        current.kernel,
+                        objects,
+                        face,
+                        &opt_vectors,
+                        tol,
+                    )?;
+                    for (uv, value) in super::projected_bound::native_candidates(
+                        k,
+                        objects,
+                        face,
+                        self.point,
+                        &opt_vectors,
+                        &hints,
+                    )? {
+                        let mut sol = Solution::default();
+                        named(&mut sol);
+                        sol.solution_type = SolutionType::SingleValue;
+                        *sol.start.param_mut(0)? = uv.x;
+                        *sol.start.param_mut(1)? = uv.y;
+                        sol.start.solution_value = value;
+                        current.add_sorted_solution(&sol, SortKey::BySolutionValue, true)?;
+                    }
+                } else {
+                    let (trim_3d_curves, trim_uv_curves) =
+                        face_silhouettes(current.kernel, objects, face, &opt_vectors, tol)?;
+                    for (curve, uv_curve) in trim_3d_curves.iter().zip(&trim_uv_curves) {
+                        let mut sub: LocalSolver<'_, O> = LocalSolver::new(
+                            LocalSolverKind::PointCurve,
+                            self.swap_order,
+                            self.shape,
+                        );
+                        sub.curve_owner = Some(face);
+                        sub.interval = curve.natural_interval();
+                        sub.surface_curve = Some(uv_curve);
+                        sub.point = self.point;
+                        sub.point_vertex = self.point_vertex;
+                        sub.point_curve(k, current, curve, None)?;
+                    }
+                }
+                if certified_maximum {
+                    super::projected_bound::refine_candidate(
+                        k,
+                        objects,
+                        face,
+                        self.point,
+                        &mut current.base,
+                    )?;
+                    super::projected_bound::certify(k, objects, face, self.point, &current.base)?;
+                }
+                // The local vertex-face maximum has its own whole-face proof.
+                // Merge only afterward, preserving the global retention policy.
+                if let Some(vertex_solver) = &vertex_solver {
+                    for solution in vertex_solver.base.solutions.as_slice() {
+                        ts.add_sorted_solution(solution, SortKey::BySolutionValue, true)?;
+                    }
+                }
+                Ok(())
+            })();
+            if result.is_err() {
+                if let Some(before) = before {
+                    ts.base = before;
+                }
             }
+            result?;
         } else {
             let best = best_answer_so_far(&ts.base);
             let mut sign = 1.0;
@@ -1727,7 +1828,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     ) -> Result<()> {
         let objects = ts.objects;
         let handle = if self.swap_order { object1 } else { object2 };
-        let handle = handle.ok_or(SolidError::null_pointer(OP_CE))?;
+        let handle = handle.ok_or_else(|| no_object(OP_CE))?;
 
         // Remove Composites - replaced Edge array with single curve Edge
         let edge = objects.curve_edge(handle)?;
@@ -2023,13 +2124,25 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 /// `CreateCurvesByTrimming` leaves on it; an adapter that resolves none returns
 /// [`SolidError::Unported`] for `SmFace::CreateCurvesByTrimming`. A trimmed UV curve
 /// that is not a B-spline (upstream caches it as NULL and `GetCopyOfCurves` fails
-/// on it) is `SM_ERR_NULL_POINTER`.
+/// on it) is a reviewed `Defect` that keeps upstream's `SM_ERR_NULL_POINTER`: the
+/// kernel builds every silhouette UV curve it trims as a B-spline.
 pub(super) fn face_silhouettes<O: SolutionObject>(
     k: &Kernel,
     objects: &dyn TopologyObjects<O>,
     face: O,
     opt_vectors: &[Vec3],
     tolerance_3d: f64,
+) -> Result<(Vec<Curve>, Vec<Curve>)> {
+    face_silhouettes_at_tolerance(k, objects, face, opt_vectors, tolerance_3d * 10.0)
+}
+
+/// Candidate construction shared with the existing pair-query silhouette path.
+fn face_silhouettes_at_tolerance<O: SolutionObject>(
+    k: &Kernel,
+    objects: &dyn TopologyObjects<O>,
+    face: O,
+    opt_vectors: &[Vec3],
+    approx_tol: f64,
 ) -> Result<(Vec<Curve>, Vec<Curve>)> {
     // locals and temporaries
     let surface = objects.face_surface(face)?;
@@ -2042,7 +2155,6 @@ pub(super) fn face_silhouettes<O: SolutionObject>(
         .first()
         .ok_or(null_deref(OP_FACE_SIL, "no view vector"))?;
 
-    let approx_tol = tolerance_3d * 10.0;
     let angle_tol = 20.0 * PI / 180.0;
     let key = AltCacheKey {
         vec: Some(view),
@@ -2115,7 +2227,17 @@ pub(super) fn face_silhouettes<O: SolutionObject>(
         .unwrap_or_default()
         .into_iter()
         .collect::<Option<Vec<Curve>>>()
-        .ok_or(SolidError::null_pointer(OP_FACE_SIL))?;
+        .ok_or_else(|| {
+            Failure::new(
+                OP_FACE_SIL,
+                IntersectFailure::Defect {
+                    why: "trimming the face's silhouettes left a piece with no B-spline UV \
+                          curve, though the kernel built every silhouette UV curve it trims",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
 
     // Register trimmed curves and create copy by getting them again
     cache.add_curves_to_cache(
@@ -2140,8 +2262,52 @@ pub(super) fn face_silhouettes<O: SolutionObject>(
             copies.curves_3d.unwrap_or_default(),
             copies.curves_uv.unwrap_or_default(),
         )),
-        None => Err(SolidError::sm_err(OP_FACE_SIL)),
+        None => Err(SolidError::intersect(
+            OP_FACE_SIL,
+            IntersectFailure::Defect {
+                why: "the trimmed silhouettes are not in the face's cache, though they were \
+                      just added under the same tolerances and key",
+            },
+        )),
     }
+}
+
+/// Candidates for the certified single projected point/face maximum.
+fn projected_face_candidate_uv<O: SolutionObject>(
+    k: &Kernel,
+    objects: &dyn TopologyObjects<O>,
+    face: O,
+    opt_vectors: &[Vec3],
+    tolerance: f64,
+) -> Result<Vec<Curve>> {
+    let view = *opt_vectors
+        .first()
+        .ok_or(null_deref(OP_FACE_SIL, "no view vector"))?;
+    // The metric is |N x d x N|, whose operator norm is |N|^2.
+    // This only guides construction; the whole-domain check certifies the result.
+    let scale = view.length_squared();
+    let approx_tol = tolerance / scale.max(1.0);
+    if !scale.is_finite()
+        || !approx_tol.is_finite()
+        || approx_tol < 0.0
+        || (tolerance > 0.0 && approx_tol == 0.0)
+    {
+        return Err(SolidError::invalid_input(
+            OP_FACE_SIL,
+            "projection tracing tolerance is not representable",
+        ));
+    }
+    let (_, mut uv) = face_silhouettes_at_tolerance(k, objects, face, opt_vectors, approx_tol)?;
+    let domain = objects.face_uv_domain(face)?;
+    // A constrained maximum can lie on a trim even when no silhouette reaches
+    // it. Include the exact boundary independently of tree traversal order.
+    if let Some((b, f)) = objects.face_entity(face) {
+        if let Some(boundary) = super::projected_bound::exact_rectangle_boundary(k, b, f, &domain)?
+        {
+            uv.extend(boundary);
+        }
+    }
+    Ok(uv)
 }
 
 /// `pFace->GetSurface()->GlobalPointSolve(uv_domain, op, point, tol,
@@ -2321,6 +2487,7 @@ pub(super) fn face_point_classify<O: Copy>(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::PreparationRequired { .. }),
@@ -2375,7 +2542,11 @@ fn face_classifies_on_face<O: Copy>(
             Point3dClassifyOptions::default(),
         ) {
             Ok(()) => Ok(true),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => Err(e),
             Err(_) => Ok(false),
         }
     };
@@ -2767,15 +2938,23 @@ pub(crate) mod tests {
             &[],
         );
         let mut ls = LocalSolver::new(LocalSolverKind::Curve, false, None);
-        assert!(ls.solve_it(&k, &mut ts, None, None).is_err());
+        let e = ls.solve_it(&k, &mut ts, None, None).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e}");
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::AbstractLocalSolver),
+            "{e}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported, "{e}");
         let mut ls = LocalSolver::new(LocalSolverKind::FaceFace, false, None);
-        assert!(matches!(
-            ls.solve_it(&k, &mut ts, None, None),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = ls.solve_it(&k, &mut ts, None, None).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::NoObjectToSolve),
+            "{e}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
     }
 
     #[test]

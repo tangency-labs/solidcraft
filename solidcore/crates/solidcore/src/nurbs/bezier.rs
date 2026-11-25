@@ -122,7 +122,7 @@ pub(crate) fn check_short_degree(p: usize, operation: &'static str) -> Result<()
     if p > MAX_SHORT_DEGREE {
         return Err(SolidError::InvalidInput {
             operation,
-            reason: "degree exceeds upstream's NL_DEGREE (short) range",
+            reason: "degree above the largest degree a knot index can hold",
         });
     }
     Ok(())

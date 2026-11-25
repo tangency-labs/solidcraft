@@ -488,7 +488,9 @@ fn dump_state(o: &mut Vec<f64>, s: &BSplineSurface) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -499,6 +501,17 @@ fn side(left: bool) -> Side {
     } else {
         Side::Right
     }
+}
+
+/// The unit's Rust run of `case` on the caller's kernel `k` (a fresh default kernel in
+/// the unit's own runs), so a test can read what the kernel's diagnostics recorded
+/// (e.g. [`Kernel::coons_tangency_log`]).
+///
+/// # Errors
+///
+/// As the unit's runner.
+pub fn run_case_on(k: &Kernel, case: &Case) -> Result<Output, HarnessError> {
+    rust(k, &case.parse()?)
 }
 
 fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
@@ -587,6 +600,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 intersections_with_rails: params.as_deref(),
                 deriv_surfs: ds.as_ref().map(|[a, b]| [a.as_ref(), b.as_ref()]),
                 degree: *degree,
+                section_params: None,
             };
             BSplineSurface::create_skinned_surface(k, &secs, opts).map(|s| {
                 o.push(1.0);

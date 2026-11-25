@@ -1,6 +1,7 @@
 //! Contact Sets, Motion Study and Exploded views.
 
 use solidcraft_geom::prelude::*;
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
@@ -8,12 +9,12 @@ use solidcore_record::Vec3;
 use solidcraft_doc::Mat;
 use solidcraft_doc::joints::{self, JointKind};
 use solidcraft_doc::motion::{ContactSet, ExplodedView, MotionStudy, StudyKey};
-use solidcraft_geom::Aabb3;
+use solidcraft_geom::{Aabb3, Bvh};
 use solidcraft_kernel::Body;
 
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
-use crate::params::{bad, bool_, str_, vec3};
+use crate::params::{bad, bool_, str_, unique_reference, vec3};
 use crate::schema::motion::{
     ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
     ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams,
@@ -21,6 +22,7 @@ use crate::schema::motion::{
     FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo,
     MotionStudyParams, MotionStudySaved,
 };
+use crate::schema::motion_animation::{AnimationExported, ExportAnimationParams};
 use crate::schema::motion_play::{
     DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
 };
@@ -66,6 +68,7 @@ const EXPLODE_LIST_CONTRACT: TypedContract<ExplodeListParams> = TypedContract::n
 const EXPLODE_DELETE_CONTRACT: TypedContract<ExplodeDeleteParams> = TypedContract::new();
 const PLAY_CONTRACT: TypedContract<PlayParams> = TypedContract::new();
 const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
+const EXPORT_ANIMATION_CONTRACT: TypedContract<ExportAnimationParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
@@ -137,8 +140,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_CONTRACT)
         .output(output_schema_for::<StudyExported>)
         .params("study; samples? (default steps + 1); path? (.json or .csv) → occurrence positions per step (the design is not changed)"),
-    CommandSpec::new("motion.export_animation", "Export Motion Animation", animation::export).icon("export").noundo().params(
-        "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
+    CommandSpec::new("motion.export_animation", "Export Motion Animation", crate::checked!("motion.export_animation", animation::export))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_ANIMATION_CONTRACT)
+        .output(output_schema_for::<AnimationExported>)
+        .params(
+            "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
          view: id|name (an exploded view, coming apart from the assembled placement) with back? (default false; true: back together \
          too, exploded at the middle frame of an odd count); path: a .gif file, or a folder for PNG frames (frame-0001.png, \
          frame-0002.png, …); samples? (frames, 2…1000; default the study's steps + 1, 100 for a joint, 41 for a view or 81 with \
@@ -148,7 +156,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          axes) - draws the study as it plays, the joint as it is driven or the view as it explodes, with the headless renderer → \
          path, format, frames, width, height, fps (GIF), bytes, renderer, stopped_at, stopped_by_loop, stopped_by_contact (the \
          design is not changed, nor its placements)",
-    ),
+        ),
     CommandSpec::new("motion.trace", "Motion Trace", crate::checked!("motion.trace", trace))
         .at("SOLID", "ASSEMBLE")
         .icon("trace")
@@ -353,9 +361,10 @@ fn tris(m: &solidcraft_geom::Mesh) -> Vec<[Vec3; 3]> {
     m.triangles.iter().filter_map(|t| m.tri(t)).collect()
 }
 
-/// The deepest any sample point of `a` lies inside `b` (0 if none).
+/// The deepest any sample point of `a` lies inside `b` (0 if none). `b`'s triangles are indexed
+/// once ([`Surface`]), so each point and edge looks only at the triangles near it.
 fn deepest(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64) -> f64 {
-    let tb = tris(b);
+    let sb = Surface::new(tris(b));
     let bx = b.bounds();
     let mut pts: Vec<Vec3> = a.positions.clone();
     let mut edges: Vec<(Vec3, Vec3)> = Vec::new();
@@ -374,23 +383,23 @@ fn deepest(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64) -> f6
         {
             continue;
         }
-        let d = tb.iter().map(|[a, b, c]| closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
-        if d > tol.max(best) && inside(p, &tb) {
+        let d = sb.distance(p, tol.max(best));
+        if d > tol.max(best) && sb.inside(p) {
             best = d;
         }
     }
     for (p, q) in edges.into_iter().take(200_000) {
-        best = best.max(crossing(p, q, &tb, bx, tol));
+        best = best.max(crossing(p, q, &sb, bx, tol));
     }
     best
 }
 
-/// Where the edge `p`→`q` of one mesh reaches through the surface `tb` of the other: the
+/// Where the edge `p`→`q` of one mesh reaches through the surface `sb` of the other: the
 /// depth, or 0 when it misses, only touches, or grazes (the middle of the chord it cuts must
 /// lie inside, deeper than `tol`, as elsewhere in the check). Two plates crossing each other's
 /// faces put no vertex, mid-edge or triangle centre of either inside the other — the chord an
 /// edge cuts is how that crossing is seen (#3323).
-fn crossing(p: Vec3, q: Vec3, tb: &[[Vec3; 3]], bx: Aabb3, tol: f64) -> f64 {
+fn crossing(p: Vec3, q: Vec3, sb: &Surface, bx: Aabb3, tol: f64) -> f64 {
     if p.x.max(q.x) < bx.min.x - tol
         || p.x.min(q.x) > bx.max.x + tol
         || p.y.max(q.y) < bx.min.y - tol
@@ -408,7 +417,7 @@ fn crossing(p: Vec3, q: Vec3, tb: &[[Vec3; 3]], bx: Aabb3, tol: f64) -> f64 {
     // Where the edge crosses the surface, along the edge. A crossing at a vertex or along an
     // edge shared by two triangles is found twice (or more); merges of neighbours leave the
     // entry and exit of each chord as one pair each.
-    let mut hits: Vec<f64> = tb.iter().filter_map(|t| contact_sweep::segment_hits_triangle(p, q, t)).map(|h| (h - p).dot(d) / len2).collect();
+    let mut hits: Vec<f64> = sb.segment_hits(p, q).into_iter().map(|h| (h - p).dot(d) / len2).collect();
     if hits.len() < 2 {
         return 0.0;
     }
@@ -420,43 +429,182 @@ fn crossing(p: Vec3, q: Vec3, tb: &[[Vec3; 3]], bx: Aabb3, tol: f64) -> f64 {
             break;
         }
         let m = p + d * ((pair[0] + pair[1]) * 0.5);
-        let deep = tb.iter().map(|[a, b, c]| closest(m, *a, *b, *c).dist(m)).fold(f64::MAX, f64::min);
-        if deep > tol.max(best) && inside(m, tb) {
+        let deep = sb.distance(m, tol.max(best));
+        if deep > tol.max(best) && sb.inside(m) {
             best = deep;
         }
     }
     best
 }
 
-/// Ray parity along a skew direction (no axis-aligned edge hits).
-fn inside(p: Vec3, tris: &[[Vec3; 3]]) -> bool {
-    // Fixed ray coordinates, not an approximation used to compute Euler's constant.
-    #[allow(clippy::approx_constant)]
-    let dir = Vec3::new(0.577_215_664_9, 0.327_118_441_9, 0.751_891_438_7);
-    let mut n = 0;
-    for [a, b, c] in tris {
-        let (e1, e2) = (*b - *a, *c - *a);
-        let h = dir.cross(e2);
-        let det = e1.dot(h);
-        if det.abs() < 1e-14 {
+/// A closed mesh's triangles under a bounding volume hierarchy, for [`deepest`]: the distance
+/// from a point, ray parity and the hits of a segment, answered as a scan of every triangle
+/// would answer them (the same values, from the same per-triangle tests) while testing only
+/// the triangles near the query.
+///
+/// Each triangle's box is grown by half its longest edge and a millionth of the mesh's
+/// coordinate scale, and a segment's box by half its length. A triangle is left out of a query
+/// only when the query misses its grown box, which is far more than the rounding of the
+/// per-triangle tests can move an answer: they are solved with a condition bounded by their
+/// own thresholds and by the shape test below. Triangles that bound fails for (a vertex that is
+/// not finite, a sliver whose area is all but 0, or a plane all but parallel to `inside`'s ray)
+/// are tested by every query instead.
+struct Surface {
+    tris: Vec<[Vec3; 3]>,
+    tree: Bvh,
+    /// Triangles every query tests, ascending.
+    loose: Vec<u32>,
+}
+
+/// The fixed skew direction of [`inside`]'s ray.
+// Fixed ray coordinates, not an approximation used to compute Euler's constant.
+#[allow(clippy::approx_constant)]
+const RAY: Vec3 = Vec3::new(0.577_215_664_9, 0.327_118_441_9, 0.751_891_438_7);
+
+impl Surface {
+    fn new(tris: Vec<[Vec3; 3]>) -> Surface {
+        let scale = tris.iter().flatten().filter(|v| v.is_finite()).fold(0.0f64, |m, v| m.max(v.x.abs()).max(v.y.abs()).max(v.z.abs()));
+        let mut loose = Vec::new();
+        let boxes: Vec<Aabb3> = tris
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let [a, b, c] = *t;
+                let (ab, ac, bc) = (b - a, c - a, c - b);
+                let (l2, m2, n2) = (ab.dot(ab), ac.dot(ac), bc.dot(bc));
+                let cr = ab.cross(ac);
+                let area2 = cr.dot(cr);
+                let sum = l2 + m2 + n2;
+                let det = ab.dot(RAY.cross(ac));
+                let ill =
+                    !t.iter().all(|v| v.is_finite()) || !(area2 >= 1e-10 * sum * sum) || !(det.abs() >= 1e-6 * l2.sqrt() * m2.sqrt() * RAY.len());
+                if ill {
+                    loose.push(i as u32);
+                    return Aabb3::EMPTY;
+                }
+                let mut bx = Aabb3::EMPTY;
+                for v in t {
+                    bx.add(*v);
+                }
+                bx.inflated(0.5 * l2.max(m2).max(n2).sqrt() + 1e-6 * scale)
+            })
+            .collect();
+        Surface { tree: Bvh::new(&boxes), tris, loose }
+    }
+
+    /// Calls `f` with every triangle `enter` lets through, as the hierarchy's boxes do, and every
+    /// loose one.
+    fn each(&self, mut enter: impl FnMut(&Aabb3) -> bool, mut f: impl FnMut(&[Vec3; 3])) {
+        for &i in &self.loose {
+            if let Some(t) = self.tris.get(i as usize) {
+                f(t);
+            }
+        }
+        self.tree.visit(&mut enter, |i| {
+            if let Some(t) = self.tris.get(i as usize) {
+                f(t);
+            }
+        });
+    }
+
+    /// The distance from `p` to the nearest triangle (`f64::MAX` for none), as the minimum over
+    /// every triangle. Once one is found within `enough`, some distance within it is returned
+    /// instead: the caller only asks whether the nearest lies beyond `enough`.
+    fn distance(&self, p: Vec3, enough: f64) -> f64 {
+        let best = Cell::new(f64::MAX);
+        self.each(|bx| best.get() > enough && box_gap(bx, p) <= best.get(), |[a, b, c]| best.set(best.get().min(closest(p, *a, *b, *c).dist(p))));
+        best.get()
+    }
+
+    /// Whether `p` is inside, by the parity of the triangles [`inside`]'s ray crosses.
+    fn inside(&self, p: Vec3) -> bool {
+        let mut n = 0usize;
+        self.each(
+            |bx| ray_meets(p, RAY, bx),
+            |t| {
+                if ray_crosses(p, t) {
+                    n += 1;
+                }
+            },
+        );
+        n % 2 == 1
+    }
+
+    /// Where the segment `p`→`q` meets the triangles ([`contact_sweep::segment_hits_triangle`]),
+    /// in no particular order.
+    fn segment_hits(&self, p: Vec3, q: Vec3) -> Vec<Vec3> {
+        let mut around = Aabb3::EMPTY;
+        around.add(p);
+        around.add(q);
+        let around = around.inflated(0.5 * p.dist(q) + 1e-6 * p.x.abs().max(p.y.abs()).max(p.z.abs()).max(q.x.abs()).max(q.y.abs()).max(q.z.abs()));
+        let mut hits = Vec::new();
+        self.each(
+            |bx| bx.meets(&around),
+            |t| {
+                if let Some(h) = contact_sweep::segment_hits_triangle(p, q, t) {
+                    hits.push(h);
+                }
+            },
+        );
+        hits
+    }
+}
+
+/// The distance from `p` to box `bx` (0 inside it).
+fn box_gap(bx: &Aabb3, p: Vec3) -> f64 {
+    let axis = |lo: f64, hi: f64, v: f64| (lo - v).max(v - hi).max(0.0);
+    let (x, y, z) = (axis(bx.min.x, bx.max.x, p.x), axis(bx.min.y, bx.max.y, p.y), axis(bx.min.z, bx.max.z, p.z));
+    (x * x + y * y + z * z).sqrt()
+}
+
+/// Whether the ray from `o` along `d` meets box `bx` (sides included).
+fn ray_meets(o: Vec3, d: Vec3, bx: &Aabb3) -> bool {
+    let (mut t0, mut t1) = (0.0f64, f64::INFINITY);
+    for (o, d, lo, hi) in [(o.x, d.x, bx.min.x, bx.max.x), (o.y, d.y, bx.min.y, bx.max.y), (o.z, d.z, bx.min.z, bx.max.z)] {
+        if d == 0.0 {
+            if o < lo || o > hi {
+                return false;
+            }
             continue;
         }
-        let f = 1.0 / det;
-        let sv = p - *a;
-        let u = f * sv.dot(h);
-        if !(0.0..=1.0).contains(&u) {
-            continue;
-        }
-        let q = sv.cross(e1);
-        let v = f * dir.dot(q);
-        if v < 0.0 || u + v > 1.0 {
-            continue;
-        }
-        if f * e2.dot(q) > 0.0 {
-            n += 1;
+        let (a, b) = ((lo - o) / d, (hi - o) / d);
+        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+        t0 = t0.max(a);
+        t1 = t1.min(b);
+        if !(t0 <= t1) {
+            return false;
         }
     }
-    n % 2 == 1
+    true
+}
+
+/// Ray parity along a skew direction (no axis-aligned edge hits).
+fn inside(p: Vec3, tris: &[[Vec3; 3]]) -> bool {
+    tris.iter().filter(|t| ray_crosses(p, t)).count() % 2 == 1
+}
+
+/// Whether the ray from `p` along [`RAY`] crosses triangle `t` (one that lies all but along
+/// the ray never does).
+fn ray_crosses(p: Vec3, t: &[Vec3; 3]) -> bool {
+    let [a, b, c] = t;
+    let (e1, e2) = (*b - *a, *c - *a);
+    let h = RAY.cross(e2);
+    let det = e1.dot(h);
+    if det.abs() < 1e-14 {
+        return false;
+    }
+    let f = 1.0 / det;
+    let sv = p - *a;
+    let u = f * sv.dot(h);
+    if !(0.0..=1.0).contains(&u) {
+        return false;
+    }
+    let q = sv.cross(e1);
+    let v = f * RAY.dot(q);
+    if v < 0.0 || u + v > 1.0 {
+        return false;
+    }
+    f * e2.dot(q) > 0.0
 }
 
 /// The point of triangle abc nearest p.
@@ -499,7 +647,7 @@ fn closest(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// longer close: the values are moved from where they are toward `want` as far as they go. The
 /// `given` values (joint, index) are driven; in a closed loop the others follow. Returns the
 /// answer and the last solve.
-fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
+pub(crate) fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
     drive_with_contact_within(s, want, given, false)
 }
 
@@ -735,12 +883,20 @@ fn set_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`set` must be an id or a name")),
     };
-    s.doc
-        .assembly
-        .contact_sets
-        .iter()
-        .position(|c| c.id.to_string() == key || c.name == key)
-        .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
+    let numeric = p.get("set").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "contact set",
+        &key,
+        s.doc
+            .assembly
+            .contact_sets
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.id.to_string() == key || (!numeric && c.name == key))
+            .map(|(i, c)| (c.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
 }
 
 fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -781,7 +937,8 @@ fn check(s: &mut Session, _p: &Value) -> Result<Value> {
 
 // ---- Motion studies ----
 
-fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+/// The index of the study `p`'s `study` names, by its id or name.
+pub(crate) fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     // A number is an id first, text a name first: a study may be named like another's id.
     let (key, id_first) = match p.get("study") {
         Some(Value::Number(n)) => (n.to_string(), true),
@@ -789,8 +946,12 @@ fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         _ => return Err(bad(cmd, "`study` must be an id or a name")),
     };
     let studies = &s.doc.assembly.studies;
-    let (by_id, by_name) = (studies.iter().position(|m| m.id.to_string() == key), studies.iter().position(|m| m.name == key));
-    if id_first { by_id.or(by_name) } else { by_name.or(by_id) }.ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
+    let by_id = studies.iter().position(|m| m.id.to_string() == key);
+    if id_first && let Some(i) = by_id {
+        return Ok(i);
+    }
+    let by_name = unique_reference(cmd, "motion study", &key, studies.iter().enumerate().filter(|(_, m)| m.name == key).map(|(i, m)| (m.id, i)))?;
+    by_name.or(by_id).ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
 }
 
 fn study(s: &mut Session, p: &Value) -> Result<Value> {
@@ -869,7 +1030,7 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Joint values of a study at a step: (joint, full value vector).
-fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
+pub(crate) fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
     let mut out: Vec<(u64, Vec<f64>)> = Vec::new();
     for k in &m.keys {
         let Some(v) = k.value_at(step) else { continue };
@@ -894,7 +1055,7 @@ fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
 }
 
 /// The values a study keys: (joint, index).
-fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
+pub(crate) fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
     m.keys.iter().map(|k| (k.joint, k.index)).collect()
 }
 
@@ -1189,17 +1350,17 @@ fn keep_sampled_trace(
     };
     let pts: Vec<Value> = points.iter().map(|v| json!([v.x, v.y, v.z])).collect();
     // Made in the root, whatever is being edited, which is then as it was (also on an error).
-    let before = (s.active_sketch, s.active_component, s.active_occurrence_path.take());
+    let before = (s.active_sketch, s.sketching_view, s.active_component, s.active_occurrence_path.take());
     s.active_component = 0;
     let made = (|| {
-        let run = |s: &mut Session, id: &str, q: Value| super::find_command(id).ok_or_else(|| bad(cmd, id.to_string()))?.run_nested(s, &q);
+        let run = |s: &mut Session, id: &str, q: Value| super::find_command(id).ok_or_else(|| bad(cmd, id.to_string()))?.run_nested_continuing(s, &q);
         let made = run(s, "sketch.create", json!({"plane": "XY", "project_edges": false, "name": name}))?;
         let sketch = made.get("sketch").cloned().unwrap_or(Value::Null);
         run(s, "sketch.options", json!({"sketch": sketch, "sketch_3d": true}))?;
         let spline = run(s, "sketch.spline3d", json!({"sketch": sketch, "points": pts}))?;
         Ok::<_, EngineError>((made, spline))
     })();
-    (s.active_sketch, s.active_component, s.active_occurrence_path) = before;
+    (s.active_sketch, s.sketching_view, s.active_component, s.active_occurrence_path) = before;
     s.revision += 1;
     let (made, spline) = made?;
     let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "trace sketch is missing"))?;
@@ -1267,7 +1428,14 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`view` must be an id or a name")),
     };
-    s.doc.assembly.exploded.iter().position(|e| e.id.to_string() == key || e.name == key).ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
+    let numeric = p.get("view").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "exploded view",
+        &key,
+        s.doc.assembly.exploded.iter().enumerate().filter(|(_, e)| e.id.to_string() == key || (!numeric && e.name == key)).map(|(i, e)| (e.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
 }
 
 /// World centre of each top-level occurrence's bodies.
@@ -1277,8 +1445,8 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
         let mut bounds = Aabb3::EMPTY;
         for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(m) = b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-2).max(1e-2))) {
-                bounds = bounds.union(&m.bounds());
+            if let Ok(bb) = b.exact_bounds() {
+                bounds = bounds.union(&bb);
             }
         }
         if !bounds.is_empty() {
@@ -1369,7 +1537,7 @@ pub(crate) fn shows_exploded_view(s: &Session) -> bool {
 /// component moves the way the view gives, not along the component's axes (#13939). A component
 /// placed more than once shares its parts' placements, so there a part moves the way given in
 /// the component's first placement ([`solidcraft_doc::joints::occurrence_world`]).
-fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
+pub(crate) fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
     let placed: std::collections::BTreeMap<u64, (Mat, u64)> = s.doc.occurrences.iter().map(|o| (o.id, (o.transform, o.parent))).collect();
     v.moves
         .iter()
@@ -1386,7 +1554,7 @@ fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
 }
 
 /// The pending moves that show `moves` `amount` of the way out: 0 assembled, 1 exploded.
-fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
+pub(crate) fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
     let mut out = std::collections::BTreeMap::new();
     for (o, m, t) in moves {
         let mut m = *m;

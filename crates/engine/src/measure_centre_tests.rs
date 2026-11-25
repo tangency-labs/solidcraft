@@ -151,6 +151,38 @@ fn solid_edges_measure_the_obtuse_corner() {
     }
 }
 
+/// A face or edge named by body and index alone measures as it does with a point on it (#14011).
+#[test]
+fn faces_and_edges_measure_by_index_without_a_point() {
+    let mut s = Session::default();
+    plate(&mut s);
+    let strip = |mut v: Value| {
+        v.as_object_mut().unwrap().remove("point");
+        v
+    };
+    let (a, b) = (hole(&s, 3.0), hole(&s, 4.0));
+    let r = measure(&mut s, vec![strip(a.clone()), strip(b.clone())]);
+    assert!(close(&r["center_distance"], 30.0, 1e-9) && close(&r["min"], 23.0, 1e-9), "{r}");
+    assert_eq!(r, measure(&mut s, vec![a, b]));
+    let top = flat(&s, |p| (p.z - 10.0).abs() < 1e-9);
+    let r = measure(&mut s, vec![strip(top.clone())]);
+    assert!(r["items"][0]["planar"] == true && r["items"][0]["area_mm2"].as_f64().is_some_and(|a| a > 2300.0 && a < 2400.0), "{r}");
+    assert_eq!(r, measure(&mut s, vec![top]));
+    let e = edge(&s, |p| p.z.abs() < 1e-9 && p.y.abs() < 1e-9);
+    let r = measure(&mut s, vec![strip(e.clone())]);
+    assert!(close(&r["items"][0]["length_mm"], 60.0, 1e-9), "{r}");
+    assert_eq!(r, measure(&mut s, vec![e]));
+    // Neither a point nor an index, or an index the body doesn't have, is refused, not a panic.
+    let name = body(&s);
+    for bad in [
+        json!({"type": "face", "body": name}),
+        json!({"type": "face", "body": name, "index": 9999}),
+        json!({"type": "edge", "body": name, "index": 9999}),
+    ] {
+        assert!(s.execute("inspect.measure", &json!({"items": [bad]})).is_err(), "{bad}");
+    }
+}
+
 #[test]
 fn separate_and_duplicate_lines_keep_the_undirected_angle() {
     let mut s = Session::default();
@@ -353,6 +385,140 @@ fn a_fillet_edge_is_an_arc() {
     assert!(close(&r["angle_deg"], 90.0, 1e-6) && close(&r["arc_length"], 2.5 * PI, 1e-6), "{r}");
     assert!(close(&r["items"][0]["length_mm"], 2.5 * PI, 1e-6), "{r}");
     assert!(close(&r["center"][0], 35.0, 1e-9) && close(&r["center"][1], 25.0, 1e-9), "{r}");
+}
+
+/// Two edges measure between their exact curves, not the display mesh's chords (#17823). A half
+/// arc of radius 20 about the origin and one of radius 35 about (cx, cy), both from -90° to 90°,
+/// joined by lines and extruded 5. A point P of the inner arc is 35 - |P - C| from the outer
+/// circle, and |P - C|² = 400 + cx² + cy² - 40 (cx cos θ + cy sin θ) is largest where P points
+/// away from C. Concentric, the top arcs are 15 apart everywhere. The outer one 2 up, P is the
+/// inner arc's lowest end (0, -20) and its nearest outer point the outer arc's lowest end
+/// (0, -33): 13 apart, between the two lowest points. The outer one 3 to the left, P is (20, 0)
+/// inside the inner arc, nearest (32, 0) inside the outer one: 12 apart. Then two half discs of
+/// radius 10 about (0, 0) and (40, 0), the second's arc running from -10° to 170°: the full
+/// circles come nearest on the line of centres, at 180° on the second, past its end, so the arcs
+/// come nearest at that end E = (40 + 10 cos 170°, 10 sin 170°) and the first arc's point towards
+/// it, |E| - 10 apart, |E|² = 1700 + 800 cos 170°.
+#[test]
+fn edges_measure_between_their_exact_arcs_within_the_arcs() {
+    let point = |v: &Value| Vec3::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap(), v[2].as_f64().unwrap());
+    let pick = |s: &Session, at: [f64; 3]| json!({"type": "edge", "body": body(s), "point": at});
+    // (outer centre, picks on the inner and outer top arcs, distance, witness points or None)
+    type Case = ([f64; 2], [f64; 3], [f64; 3], f64, Option<([f64; 2], [f64; 2])>);
+    let cases: [Case; 4] = [
+        ([0.0, 0.0], [20.0, 0.0, 5.0], [35.0, 0.0, 5.0], 15.0, None),
+        ([0.0, 0.0], [14.142, 14.142, 5.0], [24.749, 24.749, 5.0], 15.0, None),
+        ([0.0, 2.0], [20.0, 0.0, 5.0], [35.0, 2.0, 5.0], 13.0, Some(([0.0, -20.0], [0.0, -33.0]))),
+        ([-3.0, 0.0], [20.0, 0.0, 5.0], [32.0, 0.0, 5.0], 12.0, Some(([20.0, 0.0], [32.0, 0.0]))),
+    ];
+    for ([cx, cy], inner, outer, want, witnesses) in cases {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": [0, -20], "end": [0, 20], "through": [20, 0]}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": [cx, cy - 35.0], "end": [cx, cy + 35.0], "through": [cx + 35.0, cy]}));
+        run(&mut s, "sketch.line", json!({"points": [[0.0, -20.0], [cx, cy - 35.0]]}));
+        run(&mut s, "sketch.line", json!({"points": [[0.0, 20.0], [cx, cy + 35.0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": "5 mm", "operation": "new_body"}));
+        let items = vec![pick(&s, inner), pick(&s, outer)];
+        let r = measure(&mut s, items);
+        assert!(close(&r["distance_mm"], want, 1e-9), "{r}");
+        let (p, q) = (point(&r["from"]), point(&r["to"]));
+        assert!((p.x.hypot(p.y) - 20.0).abs() < 1e-9 && ((q.x - cx).hypot(q.y - cy) - 35.0).abs() < 1e-9, "{r}");
+        assert!(p.x >= -1e-9 && q.x >= cx - 1e-9 && (p.z - 5.0).abs() < 1e-9 && (q.z - 5.0).abs() < 1e-9, "{r}");
+        if let Some(([px, py], [qx, qy])) = witnesses {
+            assert!(p.dist(Vec3::new(px, py, 5.0)) < 1e-9 && q.dist(Vec3::new(qx, qy, 5.0)) < 1e-9, "{r}");
+        }
+    }
+
+    let mut s = Session::default();
+    let at = |c: f64, deg: f64| [c + 10.0 * deg.to_radians().cos(), 10.0 * deg.to_radians().sin()];
+    for (c, from, through, to) in [(0.0, -90.0, 0.0, 90.0), (40.0, -10.0, 80.0, 170.0)] {
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": at(c, from), "end": at(c, to), "through": at(c, through)}));
+        run(&mut s, "sketch.line", json!({"points": [at(c, to), at(c, from)]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": "5 mm", "operation": "new_body"}));
+    }
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    let a = json!({"type": "edge", "body": names[0], "point": [10, 0, 5]});
+    let b = json!({"type": "edge", "body": names[1], "point": [40, 10, 5]});
+    let end = at(40.0, 170.0);
+    let reach = (1700.0 + 800.0 * 170f64.to_radians().cos()).sqrt();
+    let r = measure(&mut s, vec![a, b]);
+    assert!(close(&r["distance_mm"], reach - 10.0, 1e-9), "{r}");
+    let (p, q) = (point(&r["from"]), point(&r["to"]));
+    assert!(q.dist(Vec3::new(end[0], end[1], 5.0)) < 1e-9, "{r}");
+    assert!(p.dist(Vec3::new(end[0], end[1], 0.0) * (10.0 / reach) + Vec3::new(0.0, 0.0, 5.0)) < 1e-9, "{r}");
+}
+
+/// The report's concentric half-cylinder faces are 35 - 20 = 15 mm apart (#19061).
+/// Both witnesses must lie on the exact cylinders, throughout their trimmed height.
+#[test]
+fn faces_measure_between_their_exact_half_cylinders() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -20], "end": [0, 20], "through": [20, 0]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -35], "end": [0, 35], "through": [35, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, -35]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 35]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "5 mm", "operation": "new_body"}));
+    let name = body(&s);
+    for (inner, outer) in [([20.0, 0.0, 2.5], [35.0, 0.0, 2.5]), ([14.142, 14.142, 2.5], [24.749, 24.749, 2.5])] {
+        let pick = |p| json!({"type": "face", "body": name, "point": p});
+        for items in [vec![pick(inner), pick(outer)], vec![pick(outer), pick(inner)]] {
+            let r = measure(&mut s, items);
+            assert!(close(&r["distance_mm"], 15.0, 1e-9), "{r}");
+            assert!(close(&r["min"], 15.0, 1e-9), "{r}");
+            let from: Vec3 = serde_json::from_value(r["from"].clone()).unwrap();
+            let to: Vec3 = serde_json::from_value(r["to"].clone()).unwrap();
+            assert!((from.dist(to) - 15.0).abs() < 1e-9, "{r}");
+            for (key, radius) in [("from", r["items"][0]["radius"].as_f64().unwrap()), ("to", r["items"][1]["radius"].as_f64().unwrap())] {
+                let p: Vec3 = serde_json::from_value(r[key].clone()).unwrap();
+                assert!((p.x.hypot(p.y) - radius).abs() < 1e-9 && p.x >= -1e-9 && p.z >= -1e-9 && p.z <= 5.0 + 1e-9, "{r}");
+            }
+        }
+    }
+    // A failed face solve must report its error instead of substituting display triangles.
+    let _failing = crate::cmd::measure_sel::forced::fail();
+    let error = s
+        .execute(
+            "inspect.measure",
+            &json!({"items": [
+                {"type": "face", "body": name, "point": [20, 0, 2.5]},
+                {"type": "face", "body": name, "point": [35, 0, 2.5]}
+            ]}),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("made to fail"), "{error}");
+}
+
+/// Where the kernel's exact solve can't answer for two edges, they still measure, on the display
+/// mesh, and the reply says the distance is approximate: the issue's concentric arcs (#17823),
+/// whose mesh chords run up to the chord tolerance inside the arcs, so a little under 15.
+#[test]
+fn edges_the_exact_solve_cant_answer_still_measure_marked_approximate() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -20], "end": [0, 20], "through": [20, 0]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -35], "end": [0, 35], "through": [35, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, -35]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 35]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "5 mm", "operation": "new_body"}));
+    let b = body(&s);
+    let items = vec![json!({"type": "edge", "body": b, "point": [20, 0, 5]}), json!({"type": "edge", "body": b, "point": [35, 0, 5]})];
+    let r = {
+        let _failing = crate::cmd::measure_sel::forced::fail();
+        measure(&mut s, items.clone())
+    };
+    assert!(close(&r["distance_mm"], 15.0, 0.1), "{r}");
+    assert_eq!(r["closest_exact"], false, "{r}");
+    assert!(r["closest_note"].as_str().is_some_and(|n| n.starts_with("approximate")), "{r}");
+    let r = measure(&mut s, items);
+    assert!(close(&r["distance_mm"], 15.0, 1e-9) && r.get("closest_exact").is_none(), "{r}");
 }
 
 /// A cylinder's top circle is as long as its circumference, in the same reply: the length

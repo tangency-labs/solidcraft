@@ -65,8 +65,8 @@ fn stroke_colours(shapes: &[egui::epaint::ClippedShape]) -> std::collections::BT
 
 /// Every axis is drawn in one set of X, Y and Z colours, the `axis_*` tokens (#976), in both
 /// themes and every colour vision mode: the Move gizmo's arrows, squares and rings, the view
-/// triad's ends, and the headless picture's origin axes, as the origin axes, the navigation
-/// cube's triad, 3D sketch triads and joint origins draw them.
+/// triad's ends, and the headless picture's origin axes, as the origin axes, the
+/// navigator's triad, 3D sketch triads and joint origins draw them.
 #[test]
 fn every_axis_is_drawn_in_one_set_of_colours() {
     use egui::{Pos2, Rect, vec2};
@@ -75,8 +75,8 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
     let ctx = crate::fonts::test_context();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_viewport::Camera::default();
-    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
-    let triad = crate::gizmo::Triad { center: Vec3::ZERO, translate: true, rotate: true };
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
+    let triad = crate::gizmo::Triad::world(Vec3::ZERO, true, true);
     for (dark, mode) in [false, true].into_iter().flat_map(|d| ColorVision::ALL.map(|m| (d, m))) {
         set_dark(dark);
         set_vision(mode);
@@ -97,7 +97,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
         for (name, d, want) in [("x", Vec3::X, t.axis_x), ("y", Vec3::Y, t.axis_y), ("z", Vec3::Z, t.axis_z)] {
             let at = c + vec2(32.0, 0.0);
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-                crate::icons::navigation::axis_tip_scaled(ui.painter(), c, name, d.into(), at, 0.5, false, t, 1.0)
+                solidcraft_look::compass::axis_tip_scaled(ui.painter(), c, name, d.into(), at, 0.5, false, t, 1.0)
             });
             out.textures_delta.clear();
             let end = out.shapes.iter().find_map(|s| match &s.shape {
@@ -134,8 +134,8 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 }
 
 // Icons no longer take their colours from the caller or from `IconColors`: the SVG masters name
-// palette roles (`assets/icons/ui/design/palette.toml`, light and dark, plus accents) that the
-// kit's renderer (`ui_kit::icons`) resolves in SolidCraft's set (`icon_svg::SET`). `icon_svg`'s
+// palette roles (`crates/look/icons/design/palette.toml`, light and dark, plus accents) that the
+// kit's renderer (`ui_kit::icons`) resolves in SolidCraft's set (`solidcraft_look::icons::SET`). The look crate's
 // own tests hold that every master parses and that only the palette's colours exist, including
 // its colour-vision variants.
 
@@ -146,7 +146,10 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
-    ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
+    ("plugin_shaders.rs", 1, "the white tint that shows a plugin's background as its shader drew it"),
+    ("plugin_tint.rs", 1, "the white tint that shows a plugin's panel tint as its shader answered it"),
+    ("navigation.rs", 1, "the navigator's face shading, made from a token"),
+    ("drawing_sheet_page.rs", 2, "the drawing sheet moves toward white, else black, to stand off the backdrop"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
     (
         "body_gizmo.rs",
@@ -165,8 +168,17 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
+    ("prefs.rs", 1, "a saved sketch dimension colour: the colour is the user's own data"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
-    ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
+    (
+        "app_bar.rs",
+        5,
+        "the link pills' brand fills (Ko-fi coral, Discord blurple: the services' own colours, the same in every theme), their white ink and the hover veil on the x",
+    ),
+    ("view_tiles.rs", 2, "the black shadows under a view card and the name pill: a shadow is black at an opacity in every theme"),
+    ("workspace.rs", 1, "the view kinds' icon strokes, drawn on the Tabs board: a fixed palette per kind in each theme"),
+    ("links.rs", 1, "the link pills' white ink on the brand fills"),
+    ("ui_kit/icons/mod.rs", 3, "the white tint carrying an icon's opacity, greyscale, and a pixel's brightness for a plugin tint"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
 ];
@@ -205,7 +217,7 @@ const COLOUR_LITERALS: &[&str] = &[
 #[test]
 fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let dirs = [root.join("src"), root.join("../../assets/icons/ui/source")];
+    let dirs = [(root.join("src"), ""), (root.join("../look/src"), "look/")];
     let mut found = Vec::new();
     fn scan(dir: &std::path::Path, prefix: &str, found: &mut Vec<String>) {
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -216,23 +228,33 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
                 scan(&path, &format!("{relative}/"), found);
                 continue;
             }
-            if !name.ends_with(".rs") || name.ends_with("_tests.rs") || matches!(name, "theme.rs" | "test_support.rs") {
-                continue;
-            }
-            let src = std::fs::read_to_string(&path).unwrap();
-            if src.trim_start().starts_with("#![cfg(test)]") {
-                continue;
-            }
-            let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
-            let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
-            let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
-            if n > allowed {
-                found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));
-            }
+            check(&path, &relative, found);
         }
     }
-    for dir in &dirs {
-        scan(dir, "", &mut found);
+    fn check(path: &std::path::Path, relative: &str, found: &mut Vec<String>) {
+        let name = relative.rsplit('/').next().unwrap_or(relative);
+        if !name.ends_with(".rs") || name.ends_with("_tests.rs") || matches!(name, "theme.rs" | "test_support.rs") {
+            return;
+        }
+        let src = std::fs::read_to_string(path).unwrap();
+        if src.trim_start().starts_with("#![cfg(test)]") {
+            return;
+        }
+        // Code from the first test-only item on (test code and the kit's test fixtures) is not drawn.
+        let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
+        let code = code.split(r#"#[cfg(any(test, feature = "test-support"))]"#).next().unwrap_or(code);
+        let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
+        let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
+        if n > allowed {
+            found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));
+        }
+    }
+    for (dir, prefix) in &dirs {
+        scan(dir, prefix, &mut found);
+    }
+    // The UI kit and its components, under the names they had here.
+    for (path, name) in crate::test_support::kit_files() {
+        check(&path, &name, &mut found);
     }
     assert!(found.is_empty(), "colour literals outside solidcraft_theme::Tokens: {found:?}");
 }
@@ -256,7 +278,6 @@ fn analysis_shader_colours_come_from_the_uniform() {
     assert_eq!(
         literals,
         [
-            "vec3<f32>(0.0, 0.0, 1.0)",
             "vec3<f32>(1.0, 0.0, 0.0)",
             "vec3<f32>(c)",
             "vec3<f32>(0.32, 0.34, 0.38)",

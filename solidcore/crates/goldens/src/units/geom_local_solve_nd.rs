@@ -511,7 +511,9 @@ fn rust(p: &Parsed) -> Result<Output, HarnessError> {
                     return Ok(o);
                 }
                 match e {
-                    SolidError::Upstream { code, .. } => code,
+                    err if solidcore::error::upstream_status(&err).is_some() => {
+                        solidcore::error::upstream_status(&err).unwrap_or(-1)
+                    }
                     other => return Ok(Output::err(format!("rust_error: {other}"))),
                 }
             }
@@ -561,7 +563,9 @@ fn rust(p: &Parsed) -> Result<Output, HarnessError> {
         }
         Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| {
             Output::err(match e {
-                SolidError::Upstream { code, .. } => format!("status_{code}"),
+                err if solidcore::error::upstream_status(&err).is_some() => {
+                    format!("status_{}", solidcore::error::upstream_status(&err).unwrap_or(-1))
+                }
                 SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => "status_1007".into(),
                 other => format!("rust_error: {other}"),
             })

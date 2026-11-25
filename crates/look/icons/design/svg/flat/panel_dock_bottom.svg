@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Dock panel at the bottom</title>
+  <path d="M10 9L54 9Q59 9 59 14L59 50Q59 55 54 55L10 55Q5 55 5 50L5 14Q5 9 10 9ZM21 35L43 35Q46 35 46 38L46 44Q46 47 43 47L21 47Q18 47 18 44L18 38Q18 35 21 35Z" fill="none" stroke="currentColor" stroke-width="4.25" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32 31L26 22L38 22Z" fill="currentColor"/>
+</svg>

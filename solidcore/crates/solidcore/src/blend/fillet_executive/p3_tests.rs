@@ -54,16 +54,30 @@ struct Access {
     solver_tolerance: Option<f64>,
     brep_tolerances: Vec<f64>,
     stitch_lamina: u64,
+    /// What `keeps_open_result` answers.
+    keeps_open: bool,
+    /// What the open body's own orientation (`just_unify`) returns.
+    unify_error: Option<SolidError>,
     corner_metadata: Option<CornerView<Handle>>,
     corner_predicates: [bool; 2],
     corner_point: Point3,
     constant_results: Vec<bool>,
     corner_fail: Option<&'static str>,
-    /// A hand-built target body: `edges(Handle(0))` lists its edges as
-    /// `Handle(BODY_EDGE + i)` and the manifold check runs on its records.
-    body: Option<Brep>,
+    /// The error each scripted stage fails with, by the stage's name ([`Access::stage`]).
+    stage_errors: BTreeMap<&'static str, SolidError>,
+    /// The corner the scripted rollover test adjusts (else it fails, as `absent`).
+    rollover_adjusts: Option<Handle>,
 }
-const BODY_EDGE: u8 = 100;
+impl Access {
+    /// The result of the stage `name`: its scripted error, if any. A failure at `topology`
+    /// notes the corner's refusal (`SM_FILERR_NO_ROOM`) when `topology_noted` is scripted,
+    /// or that the corner is not built (`CornerUnsupported`) when `topology_unsupported` is;
+    /// `vertices_again` fails only the second vertex geometry of a run, `stitch_faces` the
+    /// fillet body's stitch and `do_stitching` every stitch into the target.
+    fn stage(&self, name: &'static str) -> Result<()> {
+        self.stage_errors.get(name).cloned().map_or(Ok(()), Err)
+    }
+}
 fn absent<T>() -> Result<T> {
     Err(invalid("test handle has no geometry"))
 }
@@ -122,7 +136,15 @@ impl ExecutiveAccess<Handle> for Access {
         if self.corner_enables_global {
             executive.options.global_merge = true;
         }
-        Ok(())
+        if let Some(e) = self.stage_errors.get("topology_noted") {
+            executive.error.code = FilletErrorType::NoRoom as i32;
+            return Err(e.clone());
+        }
+        if let Some(e) = self.stage_errors.get("topology_unsupported") {
+            executive.error.code = FilletErrorType::CornerUnsupported as i32;
+            return Err(e.clone());
+        }
+        self.stage("topology")
     }
     fn corner_error_info(
         &self,
@@ -161,6 +183,23 @@ impl ExecutiveAccess<Handle> for Access {
     }
     fn solver_edge(&self, _: Handle) -> Result<Handle> {
         Ok(Handle(5))
+    }
+    // scripted: every rail and end section on its face (no cliff overflow to choose)
+    fn solver_rails_fit_judged(&mut self, _: &mut Kernel, _: Handle) -> Result<RailsFit> {
+        Ok(RailsFit {
+            fit: true,
+            touches_rim: false,
+            rolls_over: false,
+            into_material: false,
+            boundaries_into_material: false,
+            left_across: Vec::new(),
+            return_across: Vec::new(),
+            continued_cliffs: Vec::new(),
+            wraps_past_both_ends: false,
+        })
+    }
+    fn solver_end_sections_fit(&mut self, _: &mut Kernel, _: Handle) -> Result<bool> {
+        Ok(true)
     }
     fn solver_approx_tolerance(&self, _: Handle) -> Result<f64> {
         Ok(self.solver_tolerance.unwrap_or(0.125))
@@ -209,10 +248,6 @@ impl ExecutiveAccess<Handle> for Access {
         Ok(())
     }
     fn edges(&self, brep: Handle) -> Result<Vec<Handle>> {
-        if let (Some(body), Handle(0)) = (&self.body, brep) {
-            let count = u8::try_from(body.edge_list().len()).unwrap();
-            return Ok((0..count).map(|i| Handle(BODY_EDGE + i)).collect());
-        }
         Ok(if !self.mapped_edges {
             vec![]
         } else if brep == Handle(0) {
@@ -220,16 +255,6 @@ impl ExecutiveAccess<Handle> for Access {
         } else {
             vec![Handle(11), Handle(13)]
         })
-    }
-    fn edge_is_manifold(&self, edge: Handle) -> Result<bool> {
-        match (&self.body, self.body_edge(edge)) {
-            (Some(body), Some(id)) => crate::topology::edge::is_manifold(body, id),
-            // Scripted edges stand for no body.
-            _ => Ok(true),
-        }
-    }
-    fn edge_entity(&self, edge: Handle) -> Option<EntityRef> {
-        self.body_edge(edge).map(EntityRef::Edge)
     }
     fn create_corners(
         &mut self,
@@ -343,12 +368,20 @@ impl ExecutiveAccess<Handle> for Access {
         assert!(!spine);
         self.events.push("stitch_faces");
         Ok(StitchAttempt {
-            status: None,
+            status: self.stage("stitch_faces").err(),
             stitched: 0,
             lamina: 0,
             max_vertex_gap: 0.0,
             max_edge_gap: 0.0,
         })
+    }
+    // the fake has no blend geometry: no face is taken whole (WR-320)
+    fn solvers_faces_outlast(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(true)
+    }
+    // nor do any two blends' bands overlap (WR-542)
+    fn solvers_bands_clear_other_rails(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(true)
     }
     fn piecewise_merge(&mut self, k: &mut Kernel, _: &mut FilletExecutive<Handle>) -> Result<()> {
         assert!(k.context.doing_boolean());
@@ -411,7 +444,10 @@ impl ExecutiveAccess<Handle> for Access {
         );
         self.stitch_tolerances.push(tolerance);
         Ok(StitchAttempt {
-            status: self.stitch_error.then(failure),
+            status: self
+                .stage("do_stitching")
+                .err()
+                .or_else(|| self.stitch_error.then(failure)),
             stitched: 0,
             lamina: self.stitch_lamina,
             max_vertex_gap: 0.0,
@@ -436,7 +472,11 @@ impl ExecutiveAccess<Handle> for Access {
         unify: bool,
         faces: Option<&mut Vec<Handle>>,
     ) -> Result<()> {
-        assert!(outward && !*solid && !unify && faces.is_none());
+        assert!(outward && !*solid && faces.is_none());
+        if unify {
+            self.events.push("unify");
+            return self.unify_error.clone().map_or(Ok(()), Err);
+        }
         self.events.push("orient");
         if self.created_attributes > 0 {
             assert!(
@@ -444,7 +484,11 @@ impl ExecutiveAccess<Handle> for Access {
                 "orientation must see temporary attributes"
             );
         }
-        self.orient_error.clone().map_or(Ok(()), Err) // ordinary errors are ignored
+        self.orient_error.clone().map_or(Ok(()), Err)
+    }
+    fn keeps_open_result(&mut self, _: &mut Kernel, _: Handle, _: &SolidError) -> Result<bool> {
+        self.events.push("keeps_open");
+        Ok(self.keeps_open)
     }
     fn calc_corner_vertices(
         &mut self,
@@ -455,8 +499,16 @@ impl ExecutiveAccess<Handle> for Access {
         self.events.push("corner_vertices");
         if self.corner_fail == Some("vertices") {
             Err(failure())
+        } else if self
+            .events
+            .iter()
+            .filter(|e| **e == "corner_vertices")
+            .count()
+            > 1
+        {
+            self.stage("vertices_again")
         } else {
-            Ok(())
+            self.stage("vertices")
         }
     }
     fn check_degeneracy(
@@ -481,7 +533,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
         self.events.push("adjust");
-        Ok(())
+        self.stage("adjust")
     }
     fn adjust_tangent_corner(
         &mut self,
@@ -490,7 +542,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
         self.events.push("adjust_tangent");
-        Ok(())
+        self.stage("adjust_tangent")
     }
     fn calc_corner_edges(
         &mut self,
@@ -499,7 +551,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
         self.events.push("corner_edges");
-        Ok(())
+        self.stage("edges")
     }
     fn calc_fillet_geom(
         &mut self,
@@ -507,6 +559,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: Handle,
         executive: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
+        self.stage("solver")?;
         executive.error.code = 6;
         Ok(())
     }
@@ -514,10 +567,14 @@ impl ExecutiveAccess<Handle> for Access {
         &mut self,
         _: &mut Kernel,
         _: Handle,
-        _: &mut Vec<Handle>,
+        adjusted: &mut Vec<Handle>,
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
-        absent()
+        let corner = self
+            .rollover_adjusts
+            .ok_or_else(|| invalid("test handle has no geometry"))?;
+        adjusted.push(corner);
+        Ok(())
     }
     fn trim_rails(
         &mut self,
@@ -525,7 +582,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: Handle,
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
-        Ok(())
+        self.stage("trim")
     }
     fn make_face_brep(
         &mut self,
@@ -536,6 +593,7 @@ impl ExecutiveAccess<Handle> for Access {
     ) -> Result<()> {
         assert!(executive.fillet.is_some());
         self.events.push("make_face");
+        self.stage("make_face")?;
         if self.append_geom {
             self.append_geom = false;
             self.geoms.push(Handle(9));
@@ -614,7 +672,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
         self.events.push("corner_geom");
-        Ok(())
+        self.stage("corner_geom")
     }
     fn geom_has_surface(&self, _: Handle) -> Result<bool> {
         absent()
@@ -748,12 +806,13 @@ fn state() -> FilletExecutive<Handle> {
         vertex_corner_map: BTreeMap::new(),
         edgeuse_solver_map: BTreeMap::new(),
         self_intersection_handler: None,
-        blend_curve_at_thirds: false,
         mark_corner_patches: false,
         cliff_overflow: false,
+        continued_cliffs: BTreeMap::new(),
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
+        roll_over_pass: false,
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),
@@ -762,6 +821,7 @@ fn state() -> FilletExecutive<Handle> {
         fit_edge: None,
         fit_kind: FitKind::Radius,
         fit_setback: -1.0,
+        rollover_adjusting: false,
     }
 }
 
@@ -794,13 +854,13 @@ fn null_create_status_is_remapped_by_do_filleting_and_boolean_restores() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.create_fillet_brep(&mut k, &mut access, None),
-        Err(SolidError::Upstream { code: 1006, .. })
+        Err(ref e) if e.upstream_status() == Some(1006)
     ));
     for prior in [false, true] {
         k.context.set_doing_boolean(prior);
         assert!(matches!(
             executive.do_filleting(&mut k, &mut access, None),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(ref e) if e.upstream_status() == Some(1001)
         ));
         assert_eq!(k.context.doing_boolean(), prior);
     }
@@ -885,23 +945,71 @@ fn piecewise_return_restores_both_temporary_flags_on_success_and_error() {
     }
 }
 
+/// The stitch is retried five times with doubled tolerances; then the orientation's
+/// failure is the fillet's (fork 873c7c9, `SER( m_pTargetBrep->OrientTrimmedSurfaces(..) )`;
+/// upstream ignores it, WR-661). The one failure passed over is the closed-solid check's
+/// "face uses gathered from both sides" on a result left open (lamina edges), and only
+/// when `keeps_open_result` keeps that body (an open input whose boundary the result
+/// keeps, level-2 clean) and the open body's own orientation (outward, just unifying the
+/// normals, as `StitchAndOrient` runs it for lamina) then succeeds; otherwise the
+/// closed-solid check's failure is returned. No other failure asks.
 #[test]
-fn stitching_retries_exactly_five_times_doubles_tolerance_and_ignores_orientation_error() {
-    let mut executive = state();
-    executive.options.trimming = true;
-    let mut access = Access {
-        stitch_lamina: 1,
-        orient_error: Some(failure()),
-        ..Access::default()
-    };
-    let mut k = Kernel::default();
-    executive.do_filleting(&mut k, &mut access, None).unwrap();
-    assert_eq!(access.stitch_tolerances, [0.125, 0.25, 0.5, 1.0, 2.0]);
-    assert_eq!(access.events.last(), Some(&"orient"));
-    assert!(access.events.contains(&"post"));
-    assert!(executive.fillet.is_none());
-    assert!(executive.intersector.other_brep().is_none());
-    assert!(!access.editing);
+fn stitching_retries_exactly_five_times_doubles_tolerance_then_passes_on_orientation_error() {
+    let gathered = SolidError::topology(
+        "topology::brep::p3",
+        crate::error::topology::TopologyFailure::GatheredBothSides,
+    );
+    // (lamina, orientation error, keeps_open answer, unify error, asked, kept)
+    for (lamina, error, keeps_open, unify_error, asked, kept) in [
+        (1, failure(), true, None, false, false),
+        (1, gathered.clone(), true, None, true, true),
+        // the open body's own orientation fails: the closed-solid failure is returned
+        (1, gathered.clone(), true, Some(failure()), true, false),
+        // the open result is not kept (closed input left open, a gap, level-2 failure)
+        (1, gathered.clone(), false, None, true, false),
+        (0, gathered.clone(), true, None, false, false),
+    ] {
+        let unifies = asked && keeps_open;
+        let mut executive = state();
+        executive.options.trimming = true;
+        let mut access = Access {
+            stitch_lamina: lamina,
+            orient_error: Some(error.clone()),
+            keeps_open,
+            unify_error,
+            ..Access::default()
+        };
+        let mut k = Kernel::default();
+        let result = executive.do_filleting(&mut k, &mut access, None);
+        if kept {
+            assert_eq!(result, Ok(()), "lamina {lamina}");
+        } else {
+            assert_eq!(result, Err(error.clone()), "lamina {lamina}");
+        }
+        assert_eq!(
+            access.events.contains(&"keeps_open"),
+            asked,
+            "lamina {lamina} keeps_open {keeps_open}"
+        );
+        access.events.retain(|event| *event != "keeps_open");
+        assert_eq!(
+            access.events.last() == Some(&"unify"),
+            unifies,
+            "lamina {lamina} keeps_open {keeps_open}"
+        );
+        access.events.retain(|event| *event != "unify");
+        let tolerances: &[f64] = if lamina == 0 {
+            &[0.125]
+        } else {
+            &[0.125, 0.25, 0.5, 1.0, 2.0]
+        };
+        assert_eq!(access.stitch_tolerances, tolerances, "lamina {lamina}");
+        assert_eq!(access.events.last(), Some(&"orient"), "lamina {lamina}");
+        assert!(access.events.contains(&"post"));
+        assert!(executive.fillet.is_none());
+        assert!(executive.intersector.other_brep().is_none());
+        assert!(!access.editing);
+    }
 }
 
 #[test]
@@ -915,7 +1023,7 @@ fn final_stitch_failure_sets_bad_merge_and_stops_before_cleanup_postprocess() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.do_filleting(&mut k, &mut access, None),
-        Err(SolidError::Upstream { code: 1001, .. })
+        Err(ref e) if e.upstream_status() == Some(1001)
     ));
     assert_eq!(access.stitch_tolerances.len(), 5);
     assert_eq!(executive.error.code, 7);
@@ -985,7 +1093,7 @@ fn corner_failure_records_context_and_stops_without_allocating_shell() {
     };
     assert!(matches!(
         executive.create_fillet_brep(&mut Kernel::default(), &mut access, None),
-        Err(SolidError::Upstream { code: 1001, .. })
+        Err(ref e) if e.upstream_status() == Some(1001)
     ));
     assert_eq!(executive.error.code, 3);
     assert_eq!(executive.error.status, 2);
@@ -1029,7 +1137,7 @@ fn corner_error_reporting_preserves_a_null_filleted_vertex() {
     };
     assert!(matches!(
         executive.create_fillet_brep(&mut Kernel::default(), &mut access, None),
-        Err(SolidError::Upstream { code: 1001, .. })
+        Err(ref e) if e.upstream_status() == Some(1001)
     ));
     assert_eq!(executive.error.code, 3);
     assert!(executive.error.vertex.is_none());
@@ -1136,10 +1244,8 @@ fn temporary_attributes_survive_orientation_and_are_cleaned_on_errors_or_deferra
             ..Access::default()
         };
         let result = executive.do_filleting(&mut Kernel::default(), &mut access, None);
-        assert_eq!(
-            result.is_err(),
-            error.as_ref().is_some_and(SolidError::is_unported)
-        );
+        // every orientation failure is passed on (fork 873c7c9 `SER`, WR-661)
+        assert_eq!(result.is_err(), error.is_some());
         assert_eq!(access.created_attributes, 1);
         assert!(access.attributes.is_empty());
         assert_eq!(access.events.last(), Some(&"delete_attr"));
@@ -1218,253 +1324,6 @@ fn solver_tolerance_sentinel_is_converted_at_set_tolerance_call() {
     );
 }
 
-// ---- closed-manifold result check (not upstream, opt-in; WR-212, tangency-labs/solidcore#422) ----
-
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::topology::{
-    Brep, EdgeId, Edgeuse, EdgeuseOwner, Faceuse, LoopEdge, Loopuse, LoopuseStart, ShellId,
-    VertexId,
-};
-
-impl Access {
-    fn body_edge(&self, edge: Handle) -> Option<EdgeId> {
-        let index = edge.0.checked_sub(BODY_EDGE)?;
-        self.body
-            .as_ref()?
-            .edge_list()
-            .get(usize::from(index))
-            .copied()
-    }
-}
-
-/// Adds triangle `corners` to `body` with the use topology SMLib builds: a mated
-/// pair of face uses, one loop use each, and on each side one loop edge use per
-/// edge, linked around the loop and appended to the edge's radial list.
-fn add_triangle(body: &mut Brep, shell: ShellId, corners: [VertexId; 3]) {
-    let mut loop_edges = Vec::new();
-    for (start, end) in [
-        (corners[0], corners[1]),
-        (corners[1], corners[2]),
-        (corners[2], corners[0]),
-    ] {
-        let existing = body.edge_list().iter().copied().find(|&e| {
-            let [a, b] = body.edge(e).unwrap().vertices;
-            (a, b) == (start, end) || (a, b) == (end, start)
-        });
-        let edge = existing.unwrap_or_else(|| body.add_edge(start, end).unwrap());
-        let forward = body.edge(edge).unwrap().vertices[0] == start;
-        loop_edges.push(LoopEdge { edge, forward });
-    }
-    let face = body.add_face(shell).unwrap();
-    let loop_ = body.add_loop(face, loop_edges.clone()).unwrap();
-    let up = body
-        .add_faceuse_record(Faceuse {
-            shell: Some(shell),
-            face: Some(face),
-            orientation: OrientType::Same,
-            ..Faceuse::default()
-        })
-        .unwrap();
-    let down = body
-        .add_faceuse_record(Faceuse {
-            shell: Some(shell),
-            face: Some(face),
-            mate: Some(up),
-            orientation: OrientType::Opposite,
-            ..Faceuse::default()
-        })
-        .unwrap();
-    body.faceuse_mut(up).unwrap().mate = Some(down);
-    body.face_mut(face).unwrap().faceuse = Some(up);
-    let mut loopuses = Vec::new();
-    for (faceuse, reversed) in [(up, false), (down, true)] {
-        let loopuse = body
-            .add_loopuse_record(Loopuse {
-                faceuse: Some(faceuse),
-                loop_: Some(loop_),
-                orientation: if reversed {
-                    OrientType::Opposite
-                } else {
-                    OrientType::Same
-                },
-                ..Loopuse::default()
-            })
-            .unwrap();
-        body.faceuse_mut(faceuse).unwrap().loopuses.push(loopuse);
-        let mut side = loop_edges.clone();
-        if reversed {
-            side.reverse();
-        }
-        let mut uses = Vec::new();
-        for LoopEdge { edge, forward } in side {
-            let edgeuse = body
-                .add_edgeuse_record(Edgeuse {
-                    edge: Some(edge),
-                    owner: EdgeuseOwner::Loopuse(Some(loopuse)),
-                    orientation: if forward == reversed {
-                        OrientType::Opposite
-                    } else {
-                        OrientType::Same
-                    },
-                    ..Edgeuse::default()
-                })
-                .unwrap();
-            body.edge_mut(edge).unwrap().edgeuses.push(edgeuse);
-            uses.push(edgeuse);
-        }
-        for (i, &edgeuse) in uses.iter().enumerate() {
-            let record = body.edgeuse_mut(edgeuse).unwrap();
-            record.ccw = Some(uses[(i + 1) % uses.len()]);
-            record.cw = Some(uses[(i + uses.len() - 1) % uses.len()]);
-        }
-        body.loopuse_mut(loopuse).unwrap().start = LoopuseStart::Edgeuse(Some(uses[0]));
-        loopuses.push(loopuse);
-    }
-    body.loopuse_mut(loopuses[0]).unwrap().mate = Some(loopuses[1]);
-    body.loopuse_mut(loopuses[1]).unwrap().mate = Some(loopuses[0]);
-    body.loop_mut(loop_).unwrap().loopuse = Some(loopuses[0]);
-}
-
-/// A unit tetrahedron with the outward faces listed by `faces` (indices 0..4).
-fn tetrahedron(faces: &[usize]) -> (Brep, [VertexId; 4]) {
-    let mut body = Brep::new();
-    let shell = body.add_shell().unwrap();
-    let v = [
-        Point3::new(0.0, 0.0, 0.0),
-        Point3::new(1.0, 0.0, 0.0),
-        Point3::new(0.0, 1.0, 0.0),
-        Point3::new(0.0, 0.0, 1.0),
-    ]
-    .map(|p| body.add_vertex(p).unwrap());
-    let all = [
-        [v[0], v[2], v[1]],
-        [v[0], v[1], v[3]],
-        [v[0], v[3], v[2]],
-        [v[1], v[2], v[3]],
-    ];
-    for &face in faces {
-        add_triangle(&mut body, shell, all[face]);
-    }
-    (body, v)
-}
-
-fn edge_between(body: &Brep, a: VertexId, b: VertexId) -> EdgeId {
-    body.edge_list()
-        .iter()
-        .copied()
-        .find(|&e| {
-            let [s, t] = body.edge(e).unwrap().vertices;
-            (s, t) == (a, b) || (s, t) == (b, a)
-        })
-        .unwrap()
-}
-
-fn fillet_body(body: Brep) -> (FilletExecutive<Handle>, Access, Result<()>) {
-    let mut executive = state();
-    let mut access = Access {
-        body: Some(body),
-        ..Access::default()
-    };
-    let mut k = Kernel::default();
-    k.fixes.fillet_refuse_non_manifold_result = true;
-    let result = executive.do_fillet(&mut k, &mut access);
-    (executive, access, result)
-}
-
-#[test]
-fn open_result_is_accepted_without_the_opt_in_check() {
-    // Upstream (the default): DoFillet returns success for an open target.
-    let mut executive = state();
-    let mut access = Access {
-        body: Some(tetrahedron(&[0, 1, 2]).0),
-        ..Access::default()
-    };
-    let mut k = Kernel::default();
-    executive.do_fillet(&mut k, &mut access).unwrap();
-    assert_eq!(executive.error.code, 0);
-    assert!(executive.error.edge.is_none());
-}
-
-#[test]
-fn hand_built_tetrahedron_is_a_closed_manifold_solid() {
-    let (body, _) = tetrahedron(&[0, 1, 2, 3]);
-    assert_eq!(body.edge_list().len(), 6);
-    for &e in body.edge_list() {
-        assert_eq!(body.edge(e).unwrap().edgeuses.len(), 4);
-        assert!(crate::topology::edge::is_manifold(&body, e).unwrap());
-    }
-}
-
-#[test]
-fn closed_manifold_result_is_accepted_unchanged() {
-    let (executive, access, result) = fillet_body(tetrahedron(&[0, 1, 2, 3]).0);
-    result.unwrap();
-    assert_eq!(access.events.first(), Some(&"corners"));
-    assert_eq!(executive.error.code, 0);
-    assert!(executive.error.edge.is_none());
-}
-
-#[test]
-fn open_result_is_refused_naming_its_first_laminar_edge() {
-    // Face 3 is missing: its edges (1,2), (1,3) and (2,3) have one face each, and
-    // (1,2) comes first in the edge list.
-    let (body, v) = tetrahedron(&[0, 1, 2]);
-    let laminar = edge_between(&body, v[1], v[2]);
-    let index = body.edge_list().iter().position(|&e| e == laminar).unwrap();
-    assert!(body.edge_list()[..index]
-        .iter()
-        .all(|&e| crate::topology::edge::is_manifold(&body, e).unwrap()));
-    let (executive, _, result) = fillet_body(body);
-    assert_eq!(
-        result,
-        Err(SolidError::Upstream {
-            operation: OP,
-            code: 1001,
-            entity: Some(EntityRef::Edge(laminar)),
-        })
-    );
-    assert_eq!(executive.error.code, 7); // SM_FILERR_BAD_MERGE
-    assert_eq!(executive.error.status, 2); // SM_FIL_FAILURE
-    assert_eq!(
-        executive.error.edge,
-        Some(Handle(BODY_EDGE + u8::try_from(index).unwrap()))
-    );
-    assert_eq!(
-        executive.error.comment,
-        "Fillet Merge Failure: Result Is Not A Closed Manifold Solid"
-    );
-}
-
-#[test]
-fn result_with_a_fin_on_an_edge_is_refused_naming_that_edge() {
-    // A closed tetrahedron plus a fifth face on edge (0,1): six edge uses there.
-    let (mut body, v) = tetrahedron(&[0, 1, 2, 3]);
-    let fin = body.add_vertex(Point3::new(1.0, -1.0, 0.0)).unwrap();
-    let shell = body.shells().ids().next().unwrap();
-    add_triangle(&mut body, shell, [v[0], v[1], fin]);
-    let shared = edge_between(&body, v[0], v[1]);
-    assert_eq!(body.edge(shared).unwrap().edgeuses.len(), 6);
-    let (executive, _, result) = fillet_body(body);
-    assert!(matches!(
-        result,
-        Err(SolidError::Upstream { code: 1001, entity: Some(EntityRef::Edge(e)), .. })
-            if e == shared
-    ));
-    assert_eq!(executive.error.code, 7);
-}
-
-#[test]
-fn do_filleting_alone_does_not_check_the_result() {
-    let mut executive = state();
-    let mut access = Access {
-        body: Some(tetrahedron(&[0, 1, 2]).0),
-        ..Access::default()
-    };
-    let mut k = Kernel::default();
-    executive.do_filleting(&mut k, &mut access, None).unwrap();
-    assert_eq!(executive.error.code, 0);
-}
-
 #[test]
 fn tag_merge_component_retains_allocated_markers_when_merge_fails() {
     let mut executive = state();
@@ -1487,4 +1346,474 @@ fn tag_merge_component_retains_allocated_markers_when_merge_fails() {
     assert_eq!(access.attributes.get(&Handle(30)), Some(&vec![Handle(11)]));
     assert_eq!(access.events, ["new_attr", "merge"]);
     assert_eq!(executive.topo_edges, [Some(Handle(20))]);
+}
+
+// ---- a failed stage keeps its error as the cause of the executive's failure (#13790) ----
+
+/// The executive's run of `create_fillet_brep` (one corner, one solver with one geometry)
+/// whose stage `stage` fails with `error`.
+fn failing_at(stage: &'static str, error: SolidError) -> (FilletExecutive<Handle>, Result<()>) {
+    let mut executive = state();
+    executive.corners.push(Handle(7));
+    executive.solvers.push(Handle(3));
+    let mut access = Access {
+        corner_metadata: Some(corner()),
+        geoms: vec![Handle(8)],
+        stage_errors: BTreeMap::from([(stage, error)]),
+        ..Access::default()
+    };
+    let result = executive.create_fillet_brep(&mut Kernel::default(), &mut access, None);
+    (executive, result)
+}
+
+/// A stage error with no class (a bare status), a stage failure (a defect), and failures
+/// whose own causes are a refusal, a cancellation and an unported call: none of them is
+/// passed on by the executive, whatever their causes hold (decisions 2 and 3 of #19801).
+fn stage_errors() -> [SolidError; 5] {
+    use crate::error::blend::BlendFailure;
+    let over = |cause: SolidError| {
+        Failure::new("test::stage", BlendFailure::Failed("the stage failed"))
+            .caused_by(cause)
+            .into_error()
+    };
+    [
+        SolidError::sm_err("test::stage"),
+        SolidError::blend("test::stage", BlendFailure::StageFailed),
+        over(SolidError::blend(
+            "test::corner",
+            BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+        )),
+        over(SolidError::Cancelled {
+            operation: "test::corner",
+        }),
+        over(SolidError::unported("SmTest::Call", "blend.test")),
+    ]
+}
+
+/// `e` is the executive's failure as it was before its cause was kept (the same operation,
+/// phrase, status and kind), now keeping `cause`, whose class it takes.
+fn assert_failure_keeps(e: &SolidError, cause: &SolidError) {
+    let bare = failure();
+    assert_eq!(e.operation(), OP, "{e:?}");
+    assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
+    assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
+    assert_eq!(e.upstream_status(), bare.upstream_status(), "{e:?}");
+    assert_eq!(e.kind(), bare.kind(), "{e:?}");
+    assert_eq!(e.entity(), None, "{e:?}");
+    assert_eq!(e.cause(), Some(cause), "{e:?}");
+    let source = std::error::Error::source(e.failure().unwrap()).map(ToString::to_string);
+    assert_eq!(source, Some(cause.to_string()));
+    assert_eq!(e.to_string(), format!("{bare}; caused by {cause}"));
+    // the kernel's chain-following properties now follow the kept cause
+    assert_eq!(e.is_defect(), cause.is_defect(), "{e:?}");
+    assert_eq!(e.is_refusal(), cause.is_refusal(), "{e:?}");
+    assert_eq!(e.sized(), cause.sized(), "{e:?}");
+    assert_eq!(e.is_port_failure(), cause.is_port_failure(), "{e:?}");
+    // a status answer (the failure has a status) unless its kept chain holds a port failure
+    // or a cancellation
+    let stopped = std::iter::successors(Some(cause), |c| c.cause()).any(SolidError::is_cancelled);
+    assert_eq!(
+        e.is_status_answer(),
+        !cause.is_port_failure() && !stopped,
+        "{e:?}"
+    );
+}
+
+/// Each stage whose failure the executive reports with its own failure (a corner's topology,
+/// vertex geometry, topology adjustment, tangent adjustment, edges and face geometry; a
+/// solver's geometry, rail trim and face) notes the same error info as before and returns
+/// the same failure, now keeping the stage's error as its cause.
+#[test]
+fn a_failed_stage_keeps_its_error_as_the_executives_cause() {
+    // (stage, (error code, error status, comment))
+    let corner = |comment| (3, 2, comment);
+    let solver = |status, comment| (4, status, comment);
+    let stages = [
+        (
+            "topology",
+            corner("Fillet Corner Error: Unable to Make Topology"),
+        ),
+        (
+            "vertices",
+            corner("Fillet Corner Error: Unable to Compute Geometry"),
+        ),
+        (
+            "adjust",
+            corner("Fillet Corner Error: Topology Adjustment Failure"),
+        ),
+        ("solver", solver(10, "Fillet Surface Computation Failure")),
+        (
+            "adjust_tangent",
+            corner("Fillet Corner Error: Topology Adjustment Failure"),
+        ),
+        (
+            "edges",
+            corner("Fillet Corner Error: Corner Edge Computation Failure"),
+        ),
+        (
+            "trim",
+            solver(
+                7,
+                "Fillet Surface Computation Failure: Unable to Trim Rail Curve",
+            ),
+        ),
+        (
+            "corner_geom",
+            corner("Fillet Corner Error: Corner Geometry Computation Failure"),
+        ),
+        (
+            "make_face",
+            solver(
+                2,
+                "Fillet Surface Computation Failure: Fillet Face Creation Error",
+            ),
+        ),
+    ];
+    for (stage, (code, status, comment)) in stages {
+        for cause in stage_errors() {
+            let (executive, result) = failing_at(stage, cause.clone());
+            let e = result.unwrap_err();
+            assert_failure_keeps(&e, &cause);
+            assert_eq!(executive.error.code, code, "{stage}");
+            assert_eq!(executive.error.status, status, "{stage}");
+            assert_eq!(executive.error.comment, comment, "{stage}");
+        }
+    }
+}
+
+/// A corner that noted its refusal at its topology (`SM_FILERR_NO_ROOM`) keeps that note,
+/// and the failure keeps the topology's error as its cause.
+#[test]
+fn a_corner_refused_at_its_topology_keeps_the_topologys_error() {
+    for cause in stage_errors() {
+        let (executive, result) = failing_at("topology_noted", cause.clone());
+        assert_failure_keeps(&result.unwrap_err(), &cause);
+        assert_eq!(executive.error.code, FilletErrorType::NoRoom as i32);
+        assert_eq!(
+            executive.error.comment,
+            ErrorInfo::<Handle>::default().comment
+        );
+    }
+}
+
+/// An unported call, a cancellation or unavailable face trims at a stage is passed on as it
+/// is, noting nothing (the stage's error itself decides, as before); a refusal of a corner's
+/// vertex geometry is passed on as it is, while a refusal at a stage that does not pass
+/// refusals on (the corner's edges) is the executive's failure, keeping it.
+#[test]
+fn a_stage_passes_on_only_what_it_passed_on_before() {
+    use crate::error::blend::BlendFailure;
+    let passed = [
+        SolidError::unported("SmTest::Call", "blend.test"),
+        SolidError::Cancelled {
+            operation: "test::stage",
+        },
+        SolidError::FaceTrimsUnavailable {
+            operation: "test::stage",
+            entity: crate::error::EntityRef::Face(crate::topology::FaceId::from_index(2)),
+        },
+    ];
+    for stage in ["topology", "vertices", "solver", "edges", "make_face"] {
+        for error in passed.clone() {
+            let (executive, result) = failing_at(stage, error.clone());
+            assert_eq!(result, Err(error), "{stage}");
+            // no corner or solver failure noted (the scripted solver geometry notes 6)
+            let noted_by_stages = if ["edges", "make_face"].contains(&stage) {
+                6
+            } else {
+                0
+            };
+            assert_eq!(executive.error.code, noted_by_stages, "{stage}");
+        }
+    }
+    let refusal = SolidError::blend(
+        "test::corner",
+        BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+    );
+    let (executive, result) = failing_at("vertices", refusal.clone());
+    assert_eq!(result, Err(refusal.clone()));
+    assert_eq!(executive.error.code, 0);
+    let (executive, result) = failing_at("edges", refusal.clone());
+    assert_failure_keeps(&result.unwrap_err(), &refusal);
+    assert_eq!(executive.error.code, 3);
+}
+
+/// A refusal or a cancellation among a stage error's causes changes nothing about what the
+/// executive passes on (decisions 2 and 3 of #19801): the corner's vertex geometry, which
+/// passes on a refusal it is given, reports the executive's failure for a failure over a
+/// refusal, and for a failure over a cancellation. Only the chain-following properties of the
+/// returned failure see them.
+#[test]
+fn a_refusal_or_a_cancellation_under_a_stage_error_is_not_passed_on() {
+    let [_, _, over_refusal, over_cancellation, _] = stage_errors();
+    for cause in [&over_refusal, &over_cancellation] {
+        assert!(!cause.is_unported_or_cancelled());
+        let (executive, result) = failing_at("vertices", cause.clone());
+        assert_failure_keeps(&result.unwrap_err(), cause);
+        assert_eq!(executive.error.code, 3);
+        assert_eq!(
+            executive.error.comment,
+            "Fillet Corner Error: Unable to Compute Geometry"
+        );
+    }
+    let refused = failing_at("vertices", over_refusal).1.unwrap_err();
+    assert_eq!(refused.blend_failure(), failure().blend_failure());
+    assert!(refused.is_refusal() && refused.sized() && refused.is_status_answer());
+    let stopped = failing_at("vertices", over_cancellation).1.unwrap_err();
+    assert!(!stopped.is_cancelled() && !stopped.is_status_answer());
+}
+
+/// `DoFilleting`'s failure for a `CreateFilletBrep` that failed keeps that failure, which
+/// keeps its stage's error; a cancellation at a stage is passed on through both.
+#[test]
+fn do_filleting_keeps_the_failure_of_the_fillet_body() {
+    let run = |error: SolidError| {
+        let mut executive = state();
+        executive.corners.push(Handle(7));
+        let mut access = Access {
+            corner_metadata: Some(corner()),
+            stage_errors: BTreeMap::from([("vertices", error)]),
+            ..Access::default()
+        };
+        executive.do_filleting(&mut Kernel::default(), &mut access, None)
+    };
+    let stage = SolidError::sm_err("test::stage");
+    let e = run(stage.clone()).unwrap_err();
+    let created = e.cause().unwrap().clone();
+    assert_failure_keeps(&created, &stage);
+    assert_failure_keeps(&e, &created);
+    assert_eq!(e.root_cause(), &stage);
+    let cancelled = SolidError::Cancelled {
+        operation: "test::stage",
+    };
+    assert_eq!(run(cancelled.clone()), Err(cancelled));
+}
+
+/// The preview's corner stages and the rail classification's rollover keep their errors as
+/// the failure's cause too, noting the same error info.
+#[test]
+fn the_preview_and_the_rollover_keep_the_stages_error() {
+    for (stage, comment) in [
+        ("topology", "Fillet Corner Error: Unable to Make Topology"),
+        (
+            "vertices",
+            "Fillet Corner Error: Unable to Compute Geometry",
+        ),
+    ] {
+        for cause in stage_errors() {
+            let mut executive = state();
+            executive.corners.push(Handle(7));
+            let mut access = Access {
+                corner_metadata: Some(corner()),
+                stage_errors: BTreeMap::from([(stage, cause.clone())]),
+                ..Access::default()
+            };
+            let e = executive
+                .preview_fillet_geometry(&mut Kernel::default(), &mut access)
+                .unwrap_err();
+            assert_failure_keeps(&e, &cause);
+            assert_eq!(executive.error.code, 3, "{stage}");
+            assert_eq!(executive.error.comment, comment, "{stage}");
+        }
+    }
+    // the scripted rollover test fails with the access's own error
+    let mut executive = state();
+    executive.solvers.push(Handle(3));
+    executive.options.classification = true;
+    let mut access = Access::default();
+    let e = executive
+        .classify_solver_rails(&mut Kernel::default(), &mut access)
+        .unwrap_err();
+    assert_failure_keeps(&e, &invalid("test handle has no geometry"));
+    assert_eq!(executive.error.code, 4);
+    assert_eq!(executive.error.status, 7);
+    assert_eq!(executive.error.edge, Some(Handle(5)));
+    assert_eq!(
+        executive.error.comment,
+        "Fillet Solver Error: Unable to Process Rollover"
+    );
+}
+
+/// The corner-edge loop's repeated vertex geometry, a corner its topology noted as not built
+/// (`CornerUnsupported`) and the fillet body's own stitch keep the stage's error, noting the
+/// same error info as before.
+#[test]
+fn the_repeated_vertex_geometry_the_unsupported_corner_and_the_stitch_keep_the_error() {
+    for cause in stage_errors() {
+        let (executive, result) = failing_at("vertices_again", cause.clone());
+        assert_failure_keeps(&result.unwrap_err(), &cause);
+        assert_eq!(executive.error.code, 3);
+        assert_eq!(
+            executive.error.comment,
+            "Fillet Corner Error: Vertex Computation Failure"
+        );
+
+        let (executive, result) = failing_at("topology_unsupported", cause.clone());
+        assert_failure_keeps(&result.unwrap_err(), &cause);
+        assert_eq!(
+            executive.error.code,
+            FilletErrorType::CornerUnsupported as i32
+        );
+
+        let (executive, result) = failing_at("stitch_faces", cause.clone());
+        assert_failure_keeps(&result.unwrap_err(), &cause);
+        assert_eq!(executive.error.code, 7);
+        assert_eq!(
+            executive.error.comment,
+            "Fillet Stitching Failure: Error Stitching Fillets Together"
+        );
+    }
+}
+
+/// A refusal of the vertex geometry is passed on as it is at the corner-edge loop's
+/// repeated call and at the preview, as at the first call.
+#[test]
+fn a_refused_vertex_geometry_is_passed_on_at_every_call() {
+    use crate::error::blend::BlendFailure;
+    let refusal = SolidError::blend(
+        "test::corner",
+        BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+    );
+    let (executive, result) = failing_at("vertices_again", refusal.clone());
+    assert_eq!(result, Err(refusal.clone()));
+    assert_ne!(executive.error.code, 3);
+    let mut executive = state();
+    executive.corners.push(Handle(7));
+    let mut access = Access {
+        corner_metadata: Some(corner()),
+        stage_errors: BTreeMap::from([("vertices", refusal.clone())]),
+        ..Access::default()
+    };
+    assert_eq!(
+        executive.preview_fillet_geometry(&mut Kernel::default(), &mut access),
+        Err(refusal)
+    );
+    assert_eq!(executive.error.code, 0);
+}
+
+/// The merge's stitch into the target, failing on its fifth try, keeps the stitch's error.
+#[test]
+fn the_stitch_into_the_target_keeps_its_error() {
+    for cause in stage_errors() {
+        let mut executive = state();
+        executive.options.trimming = true;
+        let mut access = Access {
+            stage_errors: BTreeMap::from([("do_stitching", cause.clone())]),
+            ..Access::default()
+        };
+        let e = executive
+            .do_filleting(&mut Kernel::default(), &mut access, None)
+            .unwrap_err();
+        assert_failure_keeps(&e, &cause);
+        assert_eq!(access.stitch_tolerances.len(), 5);
+        assert_eq!(executive.error.code, 7);
+        assert_eq!(
+            executive.error.comment,
+            "Fillet Stitching Failure: Error Stitching Fillets To Original Brep"
+        );
+    }
+}
+
+/// The edges of a corner the rollover adjusted keep their error: as the corner's failure,
+/// or, for an End refused as passing over its end face, as the failure that keeps that
+/// refusal's note.
+#[test]
+fn the_edges_after_a_rollover_keep_their_error() {
+    for passes_over_end in [false, true] {
+        for cause in stage_errors() {
+            let mut executive = state();
+            executive.solvers.push(Handle(3));
+            executive.options.classification = true;
+            if passes_over_end {
+                executive.error.code = FilletErrorType::NoRoom as i32;
+                executive.error.no_room = Some(NoRoomReason::EndPassesOverEndFace);
+            }
+            let mut access = Access {
+                corner_metadata: Some(corner()),
+                rollover_adjusts: Some(Handle(7)),
+                stage_errors: BTreeMap::from([("edges", cause.clone())]),
+                ..Access::default()
+            };
+            let e = executive
+                .classify_solver_rails(&mut Kernel::default(), &mut access)
+                .unwrap_err();
+            assert_failure_keeps(&e, &cause);
+            if passes_over_end {
+                assert_eq!(executive.error.code, FilletErrorType::NoRoom as i32);
+            } else {
+                assert_eq!(executive.error.code, 3);
+                assert_eq!(
+                    executive.error.comment,
+                    "Fillet Corner Error: Edge Computation Failure After Rollover Adjustment"
+                );
+            }
+        }
+    }
+}
+
+/// A face of an End refused as passing over its end face keeps the face's error, keeping
+/// that refusal's note.
+#[test]
+fn a_face_past_its_end_face_keeps_the_faces_error() {
+    for cause in stage_errors() {
+        let mut executive = state();
+        executive.solvers.push(Handle(3));
+        executive.error.code = FilletErrorType::NoRoom as i32;
+        executive.error.no_room = Some(NoRoomReason::EndPassesOverEndFace);
+        let mut access = Access {
+            geoms: vec![Handle(8)],
+            stage_errors: BTreeMap::from([("make_face", cause.clone())]),
+            ..Access::default()
+        };
+        let e = executive
+            .build_fillet_faces(&mut Kernel::default(), &mut access)
+            .unwrap_err();
+        assert_failure_keeps(&e, &cause);
+        assert_eq!(
+            executive.error.no_room_reason(),
+            Some(NoRoomReason::EndPassesOverEndFace)
+        );
+    }
+}
+
+/// A solver-geometry access whose ease before the setbacks fails with its error.
+struct Easing(SolidError);
+impl SolverGeometryAccess<Handle> for Easing {
+    fn geometry_calculate(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &mut FilletExecutive<Handle>,
+    ) -> Result<()> {
+        Ok(())
+    }
+    fn geometry_edge(&self, solver: Handle) -> Result<Handle> {
+        Ok(solver)
+    }
+    fn geometry_ease_set_back_sections(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<()> {
+        Err(self.0.clone())
+    }
+}
+
+/// The ease before the setbacks keeps its error, noting the same error info as before; an
+/// unported easing or a cancellation is passed on as it is.
+#[test]
+fn the_ease_before_the_setbacks_keeps_its_error() {
+    for cause in stage_errors() {
+        let mut executive = state();
+        let e = executive
+            .ease_set_back_sections(&mut Kernel::default(), &mut Easing(cause.clone()))
+            .unwrap_err();
+        assert_failure_keeps(&e, &cause);
+        assert_eq!(executive.error.code, FilletErrorType::EdgeProblem as i32);
+    }
+    let cancelled = SolidError::Cancelled {
+        operation: "test::stage",
+    };
+    let mut executive = state();
+    assert_eq!(
+        executive.ease_set_back_sections(&mut Kernel::default(), &mut Easing(cancelled.clone())),
+        Err(cancelled)
+    );
+    assert_eq!(executive.error.code, 0);
 }

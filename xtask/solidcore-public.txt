@@ -5,3 +5,9 @@
 solidcore-ops
 solidcore-tess
 solidcore-record
+# STEP import and export, until its build is kernel primitives under an ops recipe (RFC 0003, 1.6).
+solidcore-step
+# CADIR read and write (crates/kernel only, which io reaches through solidcraft_kernel::services::cadir): CADIR read
+# into records through solidcore-step's assembly stage, until that stage is reached through an ops recipe as STEP
+# import will be (RFC 0003, 1.6).
+solidcore-cadir

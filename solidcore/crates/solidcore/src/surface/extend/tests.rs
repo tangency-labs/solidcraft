@@ -1343,7 +1343,7 @@ fn the_ruled_product_form_past_the_largest_degree_keeps_the_rows_refusal() {
 /// leader (0, 2, 2) -> (10, 2, 2), of order `order`, on a toy net (a unit square, bound
 /// 1e-3); with `certified`, on its own net and bound ([`net_of_definition`]). The planes
 /// run to x = 20, so the feet have room along.
-fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
+pub(crate) fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
     round_blend_with(order, certified, 0.5)
 }
 
@@ -1354,9 +1354,7 @@ fn round_blend_with(order: u32, certified: bool, thumbweight: f64) -> (Kernel, P
     use crate::geom::vector3d::Point3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::surface::procedural_blend::BlendDefinitionInput;
-    let mut kk = k();
-    kk.fixes.fillet_gn_section_generator = true;
-    kk.fixes.fillet_round_as_definition = true;
+    let kk = k();
     let (l, r) = (10.0, 2.0);
     let bilinear =
         |p: [Point3; 4]| BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap();
@@ -1650,6 +1648,62 @@ fn an_equal_area_gn_section_continues_over_its_thumbweights_proved_enclosure() {
     // a constant thumbweight is its own
     let (kk, pb) = round_blend(2, true);
     assert!(recertify_with_thumbweight(&kk, &pb).unwrap().1.is_none());
+}
+
+/// An ask along a blend's spine whose span's certificate spent its work budget is passed on
+/// as an error, as a cancellation is (work given up is never another ask's result); a span
+/// that failed with a plain status, or is not proved, is an ask that does not work (`None`).
+/// The certificate's budget is not reachable through `span_of_definition` today, so the
+/// ask's decision is tested on the span's result.
+#[test]
+fn a_span_past_its_work_budget_is_passed_on_not_an_ask_that_does_not_work() {
+    use super::blend::span_of_ask;
+    use crate::blend::fillet_section::recertify::DefinitionSpan;
+    use crate::error::blend::BlendFailure;
+    let span = |certified: f64| DefinitionSpan {
+        homog: Vec::new(),
+        weights: Vec::new(),
+        certified,
+        ld: 0,
+        stations: Vec::new(),
+    };
+    let feet = |_: &DefinitionSpan| Ok(true);
+    let budget = SolidError::blend(
+        "t",
+        BlendFailure::NotCertified {
+            halvings: 1,
+            stations: 2,
+        },
+    );
+    assert!(budget.upstream_status().is_some());
+    assert_eq!(
+        span_of_ask(Err(budget.clone()), feet).err(),
+        Some(budget),
+        "a certificate past its budget is passed on"
+    );
+    let cancelled = SolidError::cancelled("t");
+    assert_eq!(
+        span_of_ask(Err(cancelled.clone()), feet).err(),
+        Some(cancelled)
+    );
+    // a plain status failure, an invalid input and an unproved span: no ask
+    let failed = SolidError::blend("t", BlendFailure::Failed("x"));
+    assert!(failed.upstream_status().is_some() && !failed.is_unported_or_cancelled());
+    assert!(matches!(span_of_ask(Err(failed), feet), Ok(None)));
+    let invalid = SolidError::invalid_input("t", "x");
+    assert!(matches!(span_of_ask(Err(invalid), feet), Ok(None)));
+    assert!(matches!(
+        span_of_ask(Ok(span(f64::INFINITY)), feet),
+        Ok(None)
+    ));
+    assert!(matches!(
+        span_of_ask(Ok(span(1e-9)), |_| Ok(false)),
+        Ok(None)
+    ));
+    let ran = span_of_ask(Ok(span(1e-9)), feet)
+        .unwrap()
+        .expect("the span");
+    assert_eq!(ran.certified, 1e-9);
 }
 
 #[test]
@@ -2180,6 +2234,73 @@ fn a_rounding_sized_distance_leaves_a_widened_cylinder_unchanged() {
     assert!(e.is_some());
 }
 
+/// A straight analytic iso has a distance-sized rounding budget even when the widening is
+/// much shorter than the cylinder's radius. The axial parameter runs to 3, where one ulp
+/// (4.4e-16) is already `STOP` of a distance of 4.4e-7: below that no stored parameter
+/// meets the distance, and the answer is none or a refusal, never a claim that it does.
+#[test]
+fn a_cylinder_widens_by_small_distances_along_its_axis() {
+    let kk = k();
+    let s = unit_cylinder(&kk);
+    for d in [1e-6, 2e-6, 5e-6] {
+        let e = s
+            .extended_by_distance(&kk, &dom(&s), BoxSide::VMax, Continuity::Natural, d)
+            .unwrap_or_else(|err| panic!("by {d:e}: {err:?}"))
+            .unwrap_or_else(|| panic!("by {d:e}: not extended"));
+        meets(&e, d);
+    }
+    for d in [5e-9, 1e-8, 1e-7] {
+        match s.extended_by_distance(&kk, &dom(&s), BoxSide::VMax, Continuity::Natural, d) {
+            Ok(None) | Err(SolidError::ExtendRefused { .. }) => {}
+            other => panic!("by {d:e}: {:?}", other.map(|e| e.map(|e| e.across))),
+        }
+    }
+}
+
+/// A ball patch far from the origin keeps the same small-distance certificate as at the
+/// origin; the sphere centre is the local frame for its iso.
+#[test]
+fn a_far_ball_patch_extends_by_the_same_small_distance_as_at_the_origin() {
+    use crate::surface::implicit::{lies_on, Implicit};
+    let kk = k();
+    for o in [0.0, 1e3, 1e5] {
+        let c = Vec3::new(o, o, 0.0);
+        let r = 2.0;
+        let (net, _, _) = crate::blend::blend_corner::ball::ball_triangle_patch(
+            c,
+            r,
+            &[Vec3::X, Vec3::Y, Vec3::Z],
+            0,
+            false,
+        )
+        .unwrap();
+        let s = Surface::from(crate::surface::ball_patch::BallPatch::create(&net, c, r).unwrap());
+        let d = 1e-3;
+        let e = s
+            .extended_sides(&kk, &[BoxSide::UMin], Continuity::Natural, d)
+            .unwrap_or_else(|err| panic!("at {o:e} by {d:e}: {err:?}"));
+        let SideExtension::Extended(a) = e.sides[0] else {
+            panic!("at {o:e}: {:?}", e.sides);
+        };
+        assert!(exact(&a, e.extension, d), "at {o:e}: {a:?}");
+        assert!(
+            (a.enclosure.mid() - d).abs() <= 1e-12 * d,
+            "at {o:e}: {a:?}"
+        );
+        let SurfaceKind::BallPatch(out) = e.surface.kind() else {
+            panic!("not a ball patch");
+        };
+        assert!(lies_on(
+            out.net(),
+            &Implicit::Sphere {
+                centre: c,
+                radius: r
+            }
+        )
+        .unwrap());
+    }
+}
+
 /// A finite plane kept on its parameters at a rounding-sized reach (the local operation's
 /// margin beside a face whose new surface passes through its old edges): every side
 /// `Unchanged`, and the result is still the plane's own B-spline form over its box (the
@@ -2632,12 +2753,10 @@ fn a_pyramid_side_extends_by_its_tolerance_past_its_base_after_its_ends() {
     assert!(e.extension <= 1e-6 * d, "{}", e.extension);
 }
 
-/// tangency-labs/solidcore#2980 (open): the cone of the test above, a quarter turn, moved
-/// off the origin and extended round its axis by a tolerance-sized distance. At the origin and at 1e3 it is certified (rounding about 2e-12
-/// and 5e-12); at 1e5 the closed form's rounding is sized on the part's position
-/// (`gamma(64) (length + size)`, 2.8e-10) and 1e-5 and 1e-4 are refused `NotExact`.
+/// The cone of the test above, a quarter turn, moved off the origin and extended round its
+/// axis by a tolerance-sized distance. The widened path measures the analytic's chord in
+/// the part's own frame, so the rounding is the same at the origin and at 1e5.
 #[test]
-#[ignore = "tangency-labs/solidcore#2980: the analytic closed forms' rounding is position-sized"]
 fn a_far_cone_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
     let kk = k();
     for o in [0.0, 1e3, 1e5] {
@@ -2649,6 +2768,69 @@ fn a_far_cone_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
         for d in [1e-5, 1e-4, 1e-3] {
             let e = c
                 .extended_by_distance(&kk, &dom(&c), BoxSide::UMin, Continuity::Natural, d)
+                .unwrap_or_else(|err| panic!("at {o:e} by {d:e}: {err:?}"))
+                .unwrap_or_else(|| panic!("at {o:e} by {d:e}: not extended"));
+            meets(&e, d);
+        }
+    }
+}
+
+/// A sphere patch far from the origin, over longitudes far from zero, extended round its
+/// axis by a tolerance-sized distance as at the origin. The angle comes through the polar
+/// converter, so its own rounding is in the bound and an inexact conversion is refused.
+#[test]
+fn a_far_sphere_patch_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
+    use crate::surface::sphere::{Sphere, SphereOptions};
+    let kk = k();
+    for o in [0.0, 1e3, 1e5] {
+        let pl = Axis2Placement::new(Vec3::new(o, o, 0.0), Vec3::Z, Vec3::X);
+        let s = Surface::from(
+            Sphere::new(
+                &kk,
+                pl.origin(),
+                pl.x_axis(),
+                pl.y_axis(),
+                Extent2d::from_bounds(300.0, 40.0, 340.0, 60.0),
+                2.0,
+                SphereOptions::default(),
+            )
+            .unwrap(),
+        );
+        for d in [1e-4, 1e-3] {
+            let e = s
+                .extended_by_distance(&kk, &dom(&s), BoxSide::UMin, Continuity::Natural, d)
+                .unwrap_or_else(|err| panic!("at {o:e} by {d:e}: {err:?}"))
+                .unwrap_or_else(|| panic!("at {o:e} by {d:e}: not extended"));
+            meets(&e, d);
+        }
+    }
+}
+
+/// A torus patch far from the origin, over major angles far from zero, extended round its
+/// axis by a tolerance-sized distance as at the origin. Its sweep and tube conversions are
+/// both closed forms here; an inexact one is refused.
+#[test]
+fn a_far_torus_patch_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
+    use crate::surface::torus::{Torus, TorusOptions};
+    let kk = k();
+    for o in [0.0, 1e3, 1e5] {
+        let pl = Axis2Placement::new(Vec3::new(o, o, 0.0), Vec3::Z, Vec3::X);
+        let s = Surface::from(
+            Torus::new(
+                &kk,
+                pl.origin(),
+                pl.x_axis(),
+                pl.y_axis(),
+                Extent2d::from_bounds(300.0, 20.0, 340.0, 40.0),
+                6.0,
+                2.0,
+                TorusOptions::default(),
+            )
+            .unwrap(),
+        );
+        for d in [1e-3, 1e-2] {
+            let e = s
+                .extended_by_distance(&kk, &dom(&s), BoxSide::UMin, Continuity::Natural, d)
                 .unwrap_or_else(|err| panic!("at {o:e} by {d:e}: {err:?}"))
                 .unwrap_or_else(|| panic!("at {o:e} by {d:e}: not extended"));
             meets(&e, d);
@@ -3215,6 +3397,103 @@ fn a_distance_the_stored_net_cannot_resolve_is_refused_naming_the_reachable_leng
         .unwrap_or_else(|err| panic!("the named {named:e}: {err:?}"))
         .expect("extended");
     meets(&e, named);
+}
+
+/// The second patch of the generated offset executive case gen0522, a polynomial
+/// surface about 1e-6 across. Its first ruled side would end near -1e14 for a reach
+/// of 5e7. Normalising that knot vector would merge the patch's own u knots.
+#[test]
+fn a_ruled_extension_that_would_merge_source_knots_names_a_distance_that_works() {
+    let kk = k();
+    let [x, y, z] = [
+        2.009227715334107e-7,
+        8.538757715081911e-7,
+        -7.006783908209526e-7,
+    ];
+    let row = |u: f64| {
+        [0.0, 1.0]
+            .into_iter()
+            .map(|v| {
+                [
+                    x + 1e-6 * u,
+                    y + 1e-6 * v,
+                    z + 1e-6 * (0.125 * u * v + 0.0625 * u * u),
+                    1.0,
+                ]
+            })
+            .collect()
+    };
+    let s = spline(
+        &[row(0.0), row(0.5), row(1.0)],
+        2,
+        1,
+        &[-4.0, -4.0, -4.0, -2.0, -2.0, -2.0],
+        &[-2.0, -2.0, -0.5, -0.5],
+        false,
+    );
+    let SurfaceKind::BSpline(form) = s.kind() else {
+        panic!("the source must be a B-spline");
+    };
+    let source = form.gw_nurb().unwrap();
+    let d = 5e7;
+
+    // The single-side call names a reach on that side.
+    let one =
+        |reach| s.extended_by_distance(&kk, &dom(&s), BoxSide::UMin, Continuity::Ruled, reach);
+    let err = one(d).expect_err("the extension would merge source knots");
+    let SolidError::ExtendRefused {
+        refusal: ExtendRefusal::NotExact,
+        distance: Some(named),
+        ..
+    } = err
+    else {
+        panic!("expected a typed refusal with a usable distance: {err:?}");
+    };
+    assert!(named > 0.0 && named < d, "{named:e}");
+    let grown = one(named)
+        .unwrap()
+        .expect("the named distance extends the side");
+    meets(&grown, named);
+    let SurfaceKind::BSpline(form) = grown.surface.kind() else {
+        panic!("the extension must be a B-spline");
+    };
+    assert!(keeps(source, form.gw_nurb().unwrap(), BoxSide::UMin).unwrap());
+
+    // A distance from the first side is not necessarily usable on every requested side.
+    let all =
+        |reach| s.extended_sides_keeping_parameters(&kk, &BoxSide::ALL, Continuity::Ruled, reach);
+    let err = all(d).expect_err("the requested distance cannot extend all sides");
+    let SolidError::ExtendRefused {
+        refusal: ExtendRefusal::NotExact,
+        distance: Some(named),
+        ..
+    } = err
+    else {
+        panic!("expected a typed refusal with a distance for all sides: {err:?}");
+    };
+    assert!(named > 0.0 && named < d, "{named:e}");
+    let grown = all(named).unwrap_or_else(|err| panic!("the named {named:e}: {err:?}"));
+    assert_eq!(grown.source, 0.0);
+    assert!(
+        grown
+            .sides
+            .iter()
+            .all(|side| matches!(side, SideExtension::Extended(_))),
+        "{:?}",
+        grown.sides
+    );
+    let SurfaceKind::BSpline(form) = grown.surface.kind() else {
+        panic!("the extension must be a B-spline");
+    };
+    let out = form.gw_nurb().unwrap();
+    assert_eq!(&out.u_knots()[3..7], &[-4.0, -4.0, -2.0, -2.0]);
+    assert_eq!(&out.v_knots()[2..4], &[-2.0, -0.5]);
+    let bits = |p: &CPoint| [p.x, p.y, p.z, p.w].map(f64::to_bits);
+    for (i, row) in source.cpts().iter().enumerate() {
+        for (j, p) in row.iter().enumerate() {
+            assert_eq!(bits(p), bits(&out.cpt(i + 2, j + 1).unwrap()));
+        }
+    }
 }
 
 /// (#3093, jyviko's review of #3177) A degree 1 piece over `[0, 10]` (the issue's extrusion,

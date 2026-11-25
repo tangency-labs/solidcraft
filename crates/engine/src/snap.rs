@@ -172,7 +172,7 @@ fn whole_arc(s: &Session, sel: &Sel, center: Vec3, axis: UnitVec3, radius: f64) 
     let tol = (radius * 1e-6).max(1e-9);
     let on = |e: &Vec<Vec3>| e.iter().all(|p| (p.dist(center) - radius).abs() <= tol * 10.0 && (*p - center).dot(axis).abs() <= tol * 10.0);
     let mut left: Vec<usize> =
-        m.tangent_chain(*index, 2f64.to_radians()).into_iter().filter(|&i| i != *index && m.edges.get(i).is_some_and(on)).collect();
+        m.tangent_chain(*index, solidcraft_geom::TANGENT_CHAIN).into_iter().filter(|&i| i != *index && m.edges.get(i).is_some_and(on)).collect();
     let mut arc = m.edges.get(*index).filter(|e| on(e))?.clone();
     // Add pieces at either end while one starts or ends there (capped by the pieces there are).
     while let Some((k, at_end, rev)) = left.iter().enumerate().find_map(|(k, &i)| {

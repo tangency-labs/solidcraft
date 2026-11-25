@@ -164,7 +164,7 @@ fn topology_key(e: EntityRef) -> solidcore::geom::object::ObjectRef {
 }
 
 fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = solidcore::geom::attribute::AttributeStore::default();
     let mut notifications = solidcore::topology::edge::NotifyEnv {
@@ -436,7 +436,9 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(solidcore::SolidError::Upstream { code, .. }) => code,
+                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                }
                 Err(_) => solidcore::error::SM_ERR,
             };
             // `GetFaces` / `GetEdges` / `GetVertices` as the shim reads them (a traversal
@@ -470,7 +472,9 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(solidcore::SolidError::Upstream { code, .. }) => code,
+                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                }
                 Err(_) => solidcore::error::SM_ERR,
             };
             record.extend([
@@ -527,7 +531,9 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(solidcore::SolidError::Upstream { code, .. }) => code,
+                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                }
                 Err(_) => solidcore::error::SM_ERR,
             };
             // On success Boolean2D returns A (here moved into the output slot) and
@@ -682,5 +688,100 @@ impl UnitDiff for Runner {
             }
         };
         serde_json::to_value(Inputs { op, data }).ok()
+    }
+}
+
+/// #14246 G1 (WR-662 retired): the linear-sweep rows whose success became a refusal, each
+/// with the closed-form reason the requested body does not exist. A sweep through
+/// distance zero has no extent (every side face has zero area); end caps need a closed
+/// profile to bound them, and an open profile (a line, a 90-degree arc) bounds no region;
+/// a sweep of no profile curves is nothing. The capped open rows keep the swept sheet
+/// main returned (one face, four edges, four vertices) and add the status saying its caps
+/// were not made; the zero-distance and empty rows keep main's empty body.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Reason {
+        Zero,
+        OpenCapped,
+        NoProfile,
+    }
+
+    fn reason(i: &Inputs) -> Reason {
+        let v = &i.data;
+        assert_eq!(value(v, 0), 9.0, "a linear sweep");
+        let k = Kernel::default();
+        let curves = v
+            .get(20..)
+            .unwrap_or_default()
+            .as_chunks::<7>()
+            .0
+            .iter()
+            .map(|chunk| sweep_curve(&k, chunk, value(v, 6) != 0.0).unwrap())
+            .collect::<Vec<_>>();
+        if curves.is_empty() {
+            return Reason::NoProfile;
+        }
+        if value(v, 1) == 0.0 {
+            return Reason::Zero;
+        }
+        let (first, last) = (curves.first().unwrap(), curves.last().unwrap());
+        let start = first.evaluate_point(&k, first.natural_interval().min()).unwrap();
+        let end = last.evaluate_point(&k, last.natural_interval().max()).unwrap();
+        assert!(value(v, 7) != 0.0, "capped");
+        assert!((end - start).length() > 0.1, "open: {start:?} {end:?}");
+        Reason::OpenCapped
+    }
+
+    /// (row, status, reason)
+    const ROWS: [(&str, f64, Reason); 29] = [
+        ("linear_analytic_arc_cap0_distance0", 1001.0, Reason::Zero),
+        ("linear_analytic_arc_cap1_distance-1", 1001.0, Reason::OpenCapped),
+        ("linear_analytic_arc_cap1_distance0", 1001.0, Reason::Zero),
+        ("linear_analytic_arc_cap1_distance2", 1001.0, Reason::OpenCapped),
+        ("linear_analytic_circle_cap0_distance0", 1001.0, Reason::Zero),
+        ("linear_analytic_circle_cap1_distance0", 1001.0, Reason::Zero),
+        ("linear_analytic_line_cap0_distance0", 1007.0, Reason::Zero),
+        ("linear_analytic_line_cap1_distance-1", 1001.0, Reason::OpenCapped),
+        ("linear_analytic_line_cap1_distance0", 1007.0, Reason::Zero),
+        ("linear_analytic_line_cap1_distance2", 1001.0, Reason::OpenCapped),
+        ("linear_analytic_skew_line_cap0_distance0", 1001.0, Reason::Zero),
+        ("linear_analytic_skew_line_cap1_distance-1", 1001.0, Reason::OpenCapped),
+        ("linear_analytic_skew_line_cap1_distance0", 1001.0, Reason::Zero),
+        ("linear_analytic_skew_line_cap1_distance2", 1001.0, Reason::OpenCapped),
+        ("linear_arc_cap0_distance0", 1001.0, Reason::Zero),
+        ("linear_arc_cap1_distance-1", 1001.0, Reason::OpenCapped),
+        ("linear_arc_cap1_distance0", 1001.0, Reason::Zero),
+        ("linear_arc_cap1_distance2", 1001.0, Reason::OpenCapped),
+        ("linear_circle_cap0_distance0", 1001.0, Reason::Zero),
+        ("linear_circle_cap1_distance0", 1001.0, Reason::Zero),
+        ("linear_line_cap0_distance0", 1007.0, Reason::Zero),
+        ("linear_line_cap1_distance-1", 1001.0, Reason::OpenCapped),
+        ("linear_line_cap1_distance0", 1007.0, Reason::Zero),
+        ("linear_line_cap1_distance2", 1001.0, Reason::OpenCapped),
+        ("linear_skew_line_cap0_distance0", 1001.0, Reason::Zero),
+        ("linear_skew_line_cap1_distance-1", 1001.0, Reason::OpenCapped),
+        ("linear_skew_line_cap1_distance0", 1001.0, Reason::Zero),
+        ("linear_skew_line_cap1_distance2", 1001.0, Reason::OpenCapped),
+        ("primitive_9", 1001.0, Reason::NoProfile),
+    ];
+
+    #[test]
+    fn each_moved_sweep_row_is_refused_for_its_reason() {
+        for (name, status, expected) in ROWS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            assert_eq!(reason(&i), expected, "{name}: reason");
+            let record = rust(&i).unwrap();
+            assert_eq!(record.first(), Some(&status), "{name}: status");
+            let kept: &[f64] = if expected == Reason::OpenCapped {
+                &[1.0, 4.0, 4.0]
+            } else {
+                &[0.0, 0.0, 0.0]
+            };
+            assert_eq!(record.get(3..6), Some(kept), "{name}: faces, edges, vertices kept");
+        }
     }
 }

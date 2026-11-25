@@ -38,7 +38,7 @@ use solidcore::topology::{EdgeId, FaceId};
 use solidcore::{Brep, EntityRef, Kernel, SolidError};
 use std::collections::BTreeSet;
 
-/// A distinct identity per entity kind and index.
+/// A distinct identity per entity kind and index, under the entity's own type code.
 fn key_of(e: EntityRef) -> ObjectRef {
     let (kind, index) = match e {
         EntityRef::Brep(x) => (0, x.index()),
@@ -54,7 +54,7 @@ fn key_of(e: EntityRef) -> ObjectRef {
         EntityRef::Vertex(x) => (10, x.index()),
     };
     ObjectRef {
-        type_code: 0,
+        type_code: solidcore::topology::loopuse::notify_ref(e).type_code,
         key: ObjectKey((1u64 << 40) * (kind + 1) + u64::from(index)),
     }
 }

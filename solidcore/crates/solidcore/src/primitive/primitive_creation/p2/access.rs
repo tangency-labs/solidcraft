@@ -15,6 +15,7 @@
 //! pcurves (`pbOptCrvOnSurf`).
 
 use crate::curve::composite_curve::OffsetMapAttribute;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::math::{Point3, Vec3};
@@ -181,7 +182,7 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
     /// too); `SM_ERR_NULL_POINTER` for a tree that leaves no B-rep, where upstream would
     /// go on with a null `pSweepBrep`.
     fn boolean_trees(&mut self, breps: &mut Vec<BrepId>, tree: &[i64]) -> Result<()> {
-        const OP: &str = "SmMerge::BooleanTrees";
+        const OP: &str = "primitive::primitive_creation::p2::boolean_trees";
         let first = *breps
             .first()
             .ok_or_else(|| SolidError::invalid_input(OP, "no B-reps to combine"))?;
@@ -212,7 +213,15 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         }
         let count = operands.len();
         if count > breps.len() {
-            return Err(SolidError::sm_err(OP));
+            // only a tree that names a B-rep twice and combines neither leaf leaves more
+            // B-reps than it was given (each operator takes two and leaves one)
+            return Err(SolidError::primitive(
+                OP,
+                PrimitiveFailure::TreeLeavesMoreBreps {
+                    left: count,
+                    given: breps.len(),
+                },
+            ));
         }
         let mut missing = false;
         for (&id, operand) in breps.iter().zip(operands) {
@@ -226,7 +235,7 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         }
         breps.truncate(count);
         if missing {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::TreeLeftNoBrep));
         }
         Ok(())
     }

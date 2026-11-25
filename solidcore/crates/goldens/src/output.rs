@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use solidcore::error::nurbs::NurbsFailure;
 use solidcore::SolidError;
 
 /// What the runner produced for a case.
@@ -228,9 +229,75 @@ impl Topology {
     }
 }
 
+/// The status of an [`SolidError::Upstream`], or of a typed failure that replaced one, as the
+/// blend runners read a status: a typed blend failure (solidcore's `BlendFailure`, #13790), or
+/// a B-spline failure (`NurbsFailure::BSpline`, #19848), whose sites keep the status they had
+/// as bare statuses and which `upstream_status` reads the same way. Other errors, including
+/// other areas' typed failures, give `None`, as they did before those sites were converted, so
+/// a runner's rows stay as they were.
+#[must_use]
+pub fn blend_status(e: &SolidError) -> Option<i32> {
+    match e {
+        SolidError::Upstream { code, .. } => Some(*code),
+        e if e.blend_failure().is_some() => solidcore::error::upstream_status(e),
+        e if matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_))) => {
+            solidcore::error::upstream_status(e)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::float_bits;
+    use super::{blend_status, float_bits};
+    use solidcore::curve::hyperbola::Hyperbola;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::geom::vector3d::Vec3;
+    use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
+    use solidcore::SolidError;
+
+    /// A B-spline failure reads as the bare `SM_ERR` it replaced; an invalid input and another
+    /// area's typed failure still read as no status.
+    #[test]
+    fn blend_status_reads_a_b_spline_failure_as_its_old_status() {
+        let no_nurb = BSplineCurve::new(3).make_nurb().unwrap_err();
+        assert!(no_nurb.nurbs_failure().is_some(), "{no_nurb:?}");
+        assert_eq!(blend_status(&no_nurb), Some(1001));
+        let t = 1e-9_f64;
+        let sweep = BSplineCurve::create_arc_from_points(
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(t.cos(), t.sin(), 0.0),
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap_err();
+        assert!(sweep.nurbs_failure().is_some(), "{sweep:?}");
+        assert_eq!(blend_status(&sweep), Some(1001));
+
+        let invalid = SolidError::InvalidInput {
+            operation: "nurbs::b_spline_curve::p1::BSplineCurve::evaluate",
+            reason: "t is NaN",
+        };
+        assert_eq!(blend_status(&invalid), None);
+        let mut hyperbola = Hyperbola::new(
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Extent1d::from_min_max(-1.0, 1.0),
+            1.0,
+            1.0,
+            3,
+        );
+        let curve = hyperbola
+            .transform(&Axis2Placement::IDENTITY, Some(Vec3::new(1.0, 2.0, 1.0)))
+            .unwrap_err();
+        assert!(
+            curve.nurbs_failure().is_none() && solidcore::error::upstream_status(&curve).is_some(),
+            "{curve:?}"
+        );
+        assert_eq!(blend_status(&curve), None);
+    }
 
     #[test]
     fn float_bits_records_one_nan_and_keeps_every_other_value() {

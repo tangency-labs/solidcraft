@@ -51,6 +51,7 @@
 //! | [`section::GnSectionFsg::contact_order_at`] | `ContactOrderAt` |
 //! | [`section::ArcSection`], [`section::GnSectionFsg::circle`], [`section::GnSectionFsg::build_with_radius`] | `SmArcSection`, `SmGnSectionFSG(const SmArcSection &)` (3aae1c4), `Build`'s `dRadius` and its order 1 (cc08236) |
 //! | [`certificate::arc_rows`], [`certificate::arc_row_terms_over`] | `sm_ArcRows`, `sm_ArcRowTermsOver` (cc08236) |
+//! | [`taylor_model::Tm`], [`certificate::ArcTerms`], [`certificate::arc_terms_over`], [`certificate::centred_tm`] | — (not the fork's: the arc's row terms from Taylor models over a piece, #14405) |
 //! | [`definition::T2Of`], [`definition::TvOf`], [`definition::T2Scalar`] | `sm_T2Of`, `sm_TVT`, `sm_PositiveFinite`, `sm_PowOf` (c5b6bb7: `sm_T2` and `sm_TV` over `double` or `sm_Ivl`) |
 //! | [`certificate::SpanAt`], [`certificate::gn_enclose_over`], [`certificate::face_partials_over`] | `sm_GnSpanAt`, `sm_GnEncloseOver`, `sm_FacePartialsOver` (c5b6bb7) |
 //! | [`definition_box`] | `sm_GnDefPiece`, `sm_GnDefFace`, `sm_GnDefs`, `sm_DefinitionEnclosable`, `sm_GnDefFaceOf`, `sm_DefPieceAt`, `sm_BernTaylorOver`, `sm_DefinitionPartialsNaive`, `sm_DefinitionPartialsOverBox` (c5b6bb7) |
@@ -78,6 +79,13 @@
 //!   `c[0][5]` over `c[1][0]`, unused at sigma order 0. The series here store one more eps
 //!   column ([`series::STORE_E`]) that only that truncation uses, so the values are the
 //!   ones the fork's layout gives, without the overrun.
+//! - **Structural zeros (not the fork's).** `sm_GnEvaluate`'s powers `du^a dv^b` of the
+//!   feet's steps (which have no constant term) and `sm_SerInvSqrt`'s powers of `z` are 0
+//!   below their degree by construction: [`series::Ser::mul_valued`] and
+//!   [`series::Ser::add_scaled_from`] leave those terms out, and the monomials past the
+//!   degree a truncation computes are not formed. In f64 the results are the fork's bit for
+//!   bit (the terms left out are signed zeros); in intervals they enclose the same values
+//!   and are the same or narrower (fewer roundings of exact zeros).
 //! - **`std::min`/`std::max`.** Kept as `(b < a) ? b : a` / `(a < b) ? b : a`, not
 //!   `f64::min`/`f64::max`, so a NaN operand propagates as in the fork.
 //! - **Out-params.** `sm_SerInvSqrt` returns its series; `sm_HermitePoints`,
@@ -104,6 +112,7 @@ pub mod certificate;
 pub mod continuation;
 pub mod definition;
 pub mod definition_box;
+pub mod feet_tm;
 pub mod form;
 pub mod interval;
 pub mod offset_box;
@@ -114,3 +123,4 @@ pub mod smooth_interior;
 pub mod smooth_interior_plan;
 pub mod station;
 pub mod tay;
+pub mod taylor_model;

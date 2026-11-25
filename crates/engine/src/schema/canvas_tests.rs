@@ -1,9 +1,9 @@
 use serde_json::{Value, json};
-use solidcraft_doc::canvas::base64_encode;
 
 use super::{
     CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited,
-    CanvasInsertParams, CanvasPlaced, CanvasPlane, DecalFace,
+    CanvasFrameSketchParams, CanvasInsertParams, CanvasPlaced, CanvasPlane, CanvasStraightenParams, CanvasStraightened, CanvasToSketchParams,
+    CanvasTraced, DecalFace,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -15,22 +15,28 @@ fn png() -> String {
     b.extend(400u32.to_be_bytes());
     b.extend(200u32.to_be_bytes());
     b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    base64_encode(&b)
+    crate::tests::image_file(&b)
 }
 
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<CanvasInsertParams>(),
-        &["angle", "at", "center", "data", "flip", "name", "offset", "opacity", "path", "plane", "width"],
+        &["angle", "at", "center", "flip", "frame", "name", "offset", "opacity", "path", "plane", "resolution", "width"],
     );
     assert_keys(
         input_schema_for::<CanvasDecalParams>(),
-        &["angle", "at", "center", "data", "face", "flip", "name", "offset", "opacity", "path", "width"],
+        &["angle", "at", "center", "face", "flip", "frame", "name", "offset", "opacity", "path", "resolution", "width"],
     );
-    assert_keys(input_schema_for::<CanvasEditParams>(), &["angle", "canvas", "center", "flip", "locked", "name", "opacity", "visible", "width"]);
+    assert_keys(
+        input_schema_for::<CanvasEditParams>(),
+        &["anchor", "angle", "canvas", "center", "flip", "locked", "name", "opacity", "visible", "width"],
+    );
+    assert_keys(input_schema_for::<CanvasFrameSketchParams>(), &["canvas", "name"]);
     assert_keys(input_schema_for::<CanvasCalibrateParams>(), &["a", "b", "canvas", "distance"]);
+    assert_keys(input_schema_for::<CanvasStraightenParams>(), &["a", "angle", "b", "canvas"]);
     assert_keys(input_schema_for::<CanvasDeleteParams>(), &["canvas"]);
+    assert_keys(input_schema_for::<CanvasToSketchParams>(), &["canvas", "name"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `canvas`,
@@ -48,27 +54,35 @@ fn strict_keeps_todays_errors() {
         ("canvas.delete", json!({"canvas": ["Canvas1"]})),
         ("canvas.calibrate", json!({})),
         ("canvas.calibrate", json!({"canvas": {}})),
-        ("canvas.decal", json!({"data": png()})),
-        ("canvas.decal", json!({"data": png(), "face": null})),
-        ("canvas.decal", json!({"data": png(), "face": [1, 2]})),
-        ("canvas.decal", json!({"data": png(), "face": "top"})),
-        ("canvas.decal", json!({"data": png(), "face": {"face": [1, 2, 3], "body": "Box1"}})),
-        ("canvas.decal", json!({"data": png(), "face": {"face": [1, 2, 3], "fixed": 1}})),
-        ("canvas.decal", json!({"data": png(), "face": {"face": [1, 2, 3], "body": "Box1", "index": -1}})),
-        ("canvas.decal", json!({"data": png(), "face": {"face": [1, 2, 3], "path": [0]}})),
-        ("canvas.insert", json!({"data": png(), "plane": null})),
-        ("canvas.insert", json!({"data": png(), "plane": true})),
-        ("canvas.insert", json!({"data": png(), "plane": [1, 0, 0]})),
-        ("canvas.insert", json!({"data": png(), "plane": -1})),
-        ("canvas.insert", json!({"data": png(), "plane": 1.5})),
-        ("canvas.insert", json!({"data": png(), "plane": {"x_dir": [1, 0, 0]}})),
-        ("canvas.insert", json!({"data": png(), "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 1]}})),
-        ("canvas.insert", json!({"data": png(), "plane": {"x_dir": [1, 0, 0], "y_dir": [2, 0, 0]}})),
-        ("canvas.insert", json!({"data": png(), "plane": {"origin": ["w", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})),
-        ("canvas.insert", json!({"data": png(), "plane": {"face": [1, 2]}})),
-        ("canvas.insert", json!({"data": png(), "width": 0})),
-        ("canvas.insert", json!({"data": png(), "width": -5})),
-        ("canvas.insert", json!({"data": png(), "width": 1e7})),
+        ("canvas.straighten", json!({})),
+        ("canvas.straighten", json!({"canvas": [1]})),
+        ("canvas.decal", json!({"path": png()})),
+        ("canvas.decal", json!({"path": png(), "face": null})),
+        ("canvas.decal", json!({"path": png(), "face": [1, 2]})),
+        ("canvas.decal", json!({"path": png(), "face": "top"})),
+        ("canvas.decal", json!({"path": png(), "face": {"face": [1, 2, 3], "body": "Box1"}})),
+        ("canvas.decal", json!({"path": png(), "face": {"face": [1, 2, 3], "fixed": 1}})),
+        ("canvas.decal", json!({"path": png(), "face": {"face": [1, 2, 3], "body": "Box1", "index": -1}})),
+        ("canvas.decal", json!({"path": png(), "face": {"face": [1, 2, 3], "path": [0]}})),
+        ("canvas.insert", json!({"path": png(), "plane": null})),
+        ("canvas.insert", json!({"path": png(), "plane": true})),
+        ("canvas.insert", json!({"path": png(), "plane": [1, 0, 0]})),
+        ("canvas.insert", json!({"path": png(), "plane": -1})),
+        ("canvas.insert", json!({"path": png(), "plane": 1.5})),
+        ("canvas.insert", json!({"path": png(), "plane": {"x_dir": [1, 0, 0]}})),
+        ("canvas.insert", json!({"path": png(), "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 1]}})),
+        ("canvas.insert", json!({"path": png(), "plane": {"x_dir": [1, 0, 0], "y_dir": [2, 0, 0]}})),
+        ("canvas.insert", json!({"path": png(), "plane": {"origin": ["w", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})),
+        ("canvas.insert", json!({"path": png(), "plane": {"face": [1, 2]}})),
+        ("canvas.insert", json!({"path": png(), "width": 0})),
+        ("canvas.insert", json!({"path": png(), "width": -5})),
+        ("canvas.insert", json!({"path": png(), "width": 1e7})),
+        // `canvas.to_sketch` reads `canvas: null` as the last canvas, so it is refused for the
+        // design, not the key; a key it cannot read gets its message.
+        ("canvas.to_sketch", json!({})),
+        ("canvas.to_sketch", json!({"canvas": null})),
+        ("canvas.to_sketch", json!({"canvas": true})),
+        ("canvas.to_sketch", json!({"canvas": ["Canvas1"]})),
     ]);
 }
 
@@ -87,12 +101,16 @@ fn strict_keeps_todays_errors_with_a_canvas() {
             ("canvas.calibrate", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "distance": 0})),
             ("canvas.calibrate", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "distance": "5"})),
             ("canvas.calibrate", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "distance": -2})),
+            ("canvas.straighten", json!({"canvas": c, "b": [1, 0]})),
+            ("canvas.straighten", json!({"canvas": c, "a": [0, 0], "b": [1]})),
+            ("canvas.straighten", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "angle": "flat"})),
+            ("canvas.straighten", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "angle": 1e12})),
         ]
     };
-    for index in 0..9 {
+    for index in 0..13 {
         let error = |level: ParamCheck| {
             let mut s = Session { param_check: level, ..Session::default() };
-            let c = s.execute("canvas.insert", &json!({"data": png()})).unwrap()["canvas"].as_u64().unwrap();
+            let c = s.execute("canvas.insert", &json!({"path": png()})).unwrap()["canvas"].as_u64().unwrap();
             let (id, p) = cases(c).into_iter().nth(index).unwrap();
             s.execute(id, &p).err().map(|e| e.to_string())
         };
@@ -104,7 +122,7 @@ fn strict_keeps_todays_errors_with_a_canvas() {
 }
 
 /// What the contracts take and refuse in the schemas as well as the types: the image needs
-/// `path` or `data`, a decal needs `face`, the plane forms and the calibration's keys.
+/// `path`, a decal needs `face`, the plane forms and the calibration's keys.
 #[test]
 fn the_schemas_take_what_the_handlers_read() {
     let check = |schema: schemars::Schema, cases: &[(Value, bool)]| {
@@ -116,29 +134,31 @@ fn the_schemas_take_what_the_handlers_read() {
     check(
         input_schema_for::<CanvasInsertParams>(),
         &[
-            (json!({"data": "abc"}), true),
+            (json!({"path": "abc"}), true),
             (json!({"path": "a.png", "plane": "XZ", "width": 80, "center": [1, 2], "at": [1, 2, 3], "offset": "w / 2"}), true),
-            (json!({"data": "abc", "plane": {"origin": [0, 0, 5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}), true),
-            (json!({"data": "abc", "plane": {"face": [1, 2, 3], "body": "Box1", "index": 4}}), true),
-            (json!({"data": "abc", "plane": 7}), true),
+            (json!({"path": "abc", "plane": {"origin": [0, 0, 5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}), true),
+            (json!({"path": "abc", "plane": {"face": [1, 2, 3], "body": "Box1", "index": 4}}), true),
+            (json!({"path": "abc", "plane": 7}), true),
             (json!({"width": 80}), false),
-            (json!({"data": "abc", "width": 0}), false),
-            (json!({"data": "abc", "plane": {"origin": [0, 0, 0]}}), false),
-            (json!({"data": "abc", "plane": {"origin": null, "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}), true),
-            (json!({"data": "abc", "plane": {"normal": [0, 0, 1]}}), false),
-            (json!({"data": "abc", "opacity": "half"}), false),
-            (json!({"data": "abc", "colour": 1}), false),
+            // An image is a file, never base64 text in the parameters.
+            (json!({"data": "iVBORw0KGgo="}), false),
+            (json!({"path": "abc", "width": 0}), false),
+            (json!({"path": "abc", "plane": {"origin": [0, 0, 0]}}), false),
+            (json!({"path": "abc", "plane": {"origin": null, "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}), true),
+            (json!({"path": "abc", "plane": {"normal": [0, 0, 1]}}), false),
+            (json!({"path": "abc", "opacity": "half"}), false),
+            (json!({"path": "abc", "colour": 1}), false),
         ],
     );
     check(
         input_schema_for::<CanvasDecalParams>(),
         &[
-            (json!({"data": "abc", "face": [1, 2, 3]}), true),
+            (json!({"path": "abc", "face": [1, 2, 3]}), true),
             (json!({"path": "a.png", "face": {"face": [1, 2, 3], "fixed": true}}), true),
-            (json!({"data": "abc"}), false),
+            (json!({"path": "abc"}), false),
             (json!({"face": [1, 2, 3]}), false),
-            (json!({"data": "abc", "face": "top"}), false),
-            (json!({"data": "abc", "face": [1, 2, 3], "plane": "XY"}), false),
+            (json!({"path": "abc", "face": "top"}), false),
+            (json!({"path": "abc", "face": [1, 2, 3], "plane": "XY"}), false),
         ],
     );
     check(
@@ -150,8 +170,33 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"canvas": 1, "a": [0, 0], "b": [20, 0], "distance": 0}), false),
         ],
     );
+    check(
+        input_schema_for::<CanvasStraightenParams>(),
+        &[
+            (json!({"canvas": "Canvas1", "a": [0, 0], "b": {"x": 20, "y": 1}}), true),
+            (json!({"canvas": 1, "a": [0, 0], "b": [20, 1], "angle": 90}), true),
+            (json!({"canvas": 1, "a": [0, 0], "b": [20, 1], "angle": null}), true),
+            (json!({"canvas": 1, "a": [0, 0], "angle": 90}), false),
+            (json!({"a": [0, 0], "b": [20, 1]}), false),
+            (json!({"canvas": 1, "a": [0, 0], "b": [20, 1], "angle": "vertical"}), false),
+            (json!({"canvas": 1, "a": [0, 0], "b": [20, 1], "distance": 5}), false),
+        ],
+    );
     check(input_schema_for::<CanvasEditParams>(), &[(json!({"canvas": 2, "visible": false}), true), (json!({"visible": false}), false)]);
     check(input_schema_for::<CanvasDeleteParams>(), &[(json!({"canvas": "Canvas1"}), true), (json!({}), false)]);
+    check(
+        input_schema_for::<CanvasToSketchParams>(),
+        &[
+            (json!({}), true),
+            (json!({"canvas": 1}), true),
+            (json!({"canvas": "Canvas1", "name": "Traced"}), true),
+            (json!({"canvas": null, "name": null}), true),
+            (json!({"canvas": true}), false),
+            (json!({"canvas": ["Canvas1"]}), false),
+            (json!({"name": 5}), false),
+            (json!({"widht": 5}), false),
+        ],
+    );
 }
 
 /// The plane and face types accept what the handlers read and refuse what they refuse.
@@ -186,11 +231,11 @@ fn replies_match_the_output_schema() {
         assert!(conforms(schema, schema, r), "{r} doesn't match {schema}");
     }
     let forms = [
-        json!({"data": png()}),
-        json!({"data": png(), "plane": "XZ", "width": 80, "name": "Plan", "angle": 15, "opacity": 0.2, "flip": true}),
-        json!({"data": png(), "plane": {"origin": [0, 0, 5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "center": [3, 4]}),
-        json!({"data": png(), "plane": {"face": [15, 15, 10]}, "at": [5, 5, 10]}),
-        json!({"data": png(), "plane": "XY", "offset": 12}),
+        json!({"path": png()}),
+        json!({"path": png(), "plane": "XZ", "width": 80, "name": "Plan", "angle": 15, "opacity": 0.2, "flip": true}),
+        json!({"path": png(), "plane": {"origin": [0, 0, 5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "center": [3, 4]}),
+        json!({"path": png(), "plane": {"face": [15, 15, 10]}, "at": [5, 5, 10]}),
+        json!({"path": png(), "plane": "XY", "offset": 12}),
     ];
     for p in forms {
         let r = run(&mut s, "canvas.insert", p);
@@ -198,11 +243,11 @@ fn replies_match_the_output_schema() {
         assert_eq!(r["pixels"], json!([400, 200]), "{r}");
     }
     assert_eq!(s.doc.canvases[1].name, "Plan");
-    assert_eq!(s.execute("canvas.insert", &json!({"data": png()})).unwrap()["name"], "Canvas5");
+    assert_eq!(s.execute("canvas.insert", &json!({"path": png()})).unwrap()["name"], "Canvas5");
     for p in [
-        json!({"data": png(), "face": [15, 15, 10], "width": 20}),
-        json!({"data": png(), "face": {"face": [15, 15, 10], "fixed": true}, "name": "Logo", "opacity": 0.8, "flip": true, "angle": 90, "center": [1, 1]}),
-        json!({"data": png(), "face": {"x": 10, "y": 10, "z": 10}, "at": [12, 12, 10], "offset": 0}),
+        json!({"path": png(), "face": [15, 15, 10], "width": 20}),
+        json!({"path": png(), "face": {"face": [15, 15, 10], "fixed": true}, "name": "Logo", "opacity": 0.8, "flip": true, "angle": 90, "center": [1, 1]}),
+        json!({"path": png(), "face": {"x": 10, "y": 10, "z": 10}, "at": [12, 12, 10], "offset": 0}),
     ] {
         let r = run(&mut s, "canvas.decal", p);
         matches(output_schema_for::<CanvasPlaced>(), &r);
@@ -220,6 +265,15 @@ fn replies_match_the_output_schema() {
     let r = run(&mut s, "canvas.calibrate", json!({"canvas": "Renamed", "a": [0, 0], "b": {"x": 20, "y": 0}, "distance": 50}));
     matches(output_schema_for::<CanvasCalibrated>(), &r);
     assert!((r["width"].as_f64().unwrap_or_default() - 150.0).abs() < 1e-9, "{r}");
+    for p in [
+        json!({"canvas": "Renamed", "a": [0, 0], "b": {"x": 20, "y": 2}}),
+        json!({"canvas": first, "a": [0, 0], "b": [20, 2], "angle": 90}),
+        json!({"canvas": first, "a": [1, 1], "b": [-20, 3], "angle": null}),
+    ] {
+        let r = run(&mut s, "canvas.straighten", p);
+        matches(output_schema_for::<CanvasStraightened>(), &r);
+        assert_eq!(r["canvas"], json!(first), "{r}");
+    }
     let r = run(&mut s, "canvas.delete", json!({"canvas": first}));
     matches(output_schema_for::<CanvasDeleted>(), &r);
     assert_eq!(r, json!({"deleted": first}));
@@ -227,7 +281,7 @@ fn replies_match_the_output_schema() {
     let r = run(&mut s, "canvas.edit", json!({"canvas": second, "opacity": 7, "name": ""}));
     assert_eq!(r, json!({"canvas": second}));
     assert_eq!((s.doc.canvases[0].opacity, s.doc.canvases[0].name.as_str()), (1.0, "Plan"));
-    let r = run(&mut s, "canvas.insert", json!({"data": png(), "name": ""}));
+    let r = run(&mut s, "canvas.insert", json!({"path": png(), "name": ""}));
     assert_eq!(r["name"], "");
     assert_eq!(r.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()), Some(vec!["canvas".into(), "name".into(), "pixels".into()]));
     let r = run(&mut s, "canvas.calibrate", json!({"canvas": second, "a": [0, 0], "b": [1, 0], "distance": 2}));
@@ -240,4 +294,62 @@ fn replies_match_the_output_schema() {
     s.param_check = ParamCheck::Strict;
     let error = s.execute("canvas.edit", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`widht`"), "{error}");
+}
+
+/// A picture the tracer can read: a black square on white paper.
+fn picture() -> String {
+    let mut img = image::RgbaImage::from_pixel(60, 40, image::Rgba([255, 255, 255, 255]));
+    for (x, y, px) in img.enumerate_pixels_mut() {
+        if (10..50).contains(&x) && (10..30).contains(&y) {
+            *px = image::Rgba([0, 0, 0, 255]);
+        }
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    crate::tests::image_file(&out.into_inner())
+}
+
+/// A real canvas traced into a sketch: the answer matches the output schema, `canvas: null` is the
+/// last canvas, and the sketch is named after the canvas. A key the contract doesn't list only
+/// warns in warn and is refused in strict; a `name` that is not text is the one case where the
+/// wording moves, because the handler reads it as absent.
+#[test]
+fn a_canvas_traced_into_a_sketch_replies_as_its_schema_says() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let placed =
+        s.execute("canvas.insert", &json!({"path": picture(), "plane": "XY", "width": 60.0, "name": "Pic"})).unwrap_or_else(|e| panic!("{e}"));
+    let canvas = placed["canvas"].as_u64().unwrap_or_else(|| panic!("{placed}"));
+    let schema = output_schema_for::<CanvasTraced>();
+    let schema = schema.as_value();
+
+    let r = s.execute("canvas.to_sketch", &json!({"canvas": "Pic"})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert_eq!(r["name"], "Pic sketch", "the name no caller gives comes from the canvas");
+    assert_eq!(r["canvas"], json!(canvas), "{r}");
+    assert_eq!((r["outlines"].as_u64(), r["holes"].as_u64()), (Some(1), Some(0)), "{r}");
+    assert!(r["curves"].as_u64().is_some_and(|c| c > 0), "{r}");
+    assert!(r["info"]["solved"].is_boolean() && r["info"]["dof"].is_number(), "{r}");
+    assert!(r.get("param_warnings").is_none(), "{r}");
+
+    // `canvas: null` is the last canvas, as the parameter text says. A key the contract doesn't
+    // list only adds a warning here; the answer still matches.
+    let p = json!({"canvas": null, "widht": 5});
+    let r = s.execute("canvas.to_sketch", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{r}");
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    // A second trace of the same canvas takes the next free sketch name, not a refused repeat.
+    assert_eq!(r["name"], "Pic sketch (2)", "{r}");
+
+    // A `name` that is not text: the handler reads it as absent and names the sketch after the
+    // canvas, and the warning says what the key takes.
+    let r = s.execute("canvas.to_sketch", &json!({"name": 5})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(r["name"], "Pic sketch (3)", "{r}");
+    assert!(r["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("`name`")))), "{r}");
+
+    // Strict refuses both before anything runs.
+    s.param_check = ParamCheck::Strict;
+    let error = s.execute("canvas.to_sketch", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`widht`"), "{error}");
+    let error = s.execute("canvas.to_sketch", &json!({"name": 5})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert_eq!(error, "invalid parameters for `canvas.to_sketch`: `name` must be text");
 }

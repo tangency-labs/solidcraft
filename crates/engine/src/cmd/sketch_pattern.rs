@@ -10,7 +10,7 @@ use crate::schema::sketch_modify::PatternResult;
 pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
     let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
     let (out, info) = edit(s, p, cmd, true, |sk, doc| {
-        if sk.patterns.len() >= solidcraft_sketch::MAX_CONSTRAINTS {
+        if sk.patterns.len() >= solidcraft_sketch::limits::max_constraints() {
             return Err(bad(cmd, "too many sketch patterns"));
         }
         let old_index = str_(p, "pattern").and_then(|id| sk.patterns.iter().position(|x| x.id == id));
@@ -200,6 +200,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             None => sk.fresh("pat")?,
         };
         let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
+        let reported_curve_count = entity_ids.iter().filter(|id| sk.curve_index(id).is_some()).count();
         // Removing old copies can retire an earlier pattern seeded by one, so the old index may be past the end.
         let index = old_index.unwrap_or(sk.patterns.len()).min(sk.patterns.len());
         let pattern = SketchPattern {
@@ -213,12 +214,12 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         sk.patterns.insert(index, pattern);
         sk.update_pattern(index, kind)?;
         let pattern = sk.patterns.get(index).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
-        let curves: Vec<_> = pattern.instances.iter().flat_map(|i| i.curves.iter().cloned()).collect();
+        let curves: Vec<_> = pattern.instances.iter().flat_map(|instance| instance.curves.iter().take(reported_curve_count).cloned()).collect();
         let constraints: Vec<_> = pattern.instances.iter().flat_map(|i| i.constraints.iter().cloned()).collect();
         Ok((id, center_id, curves, constraints))
     })?;
     let (pattern, center, curves, constraints) = out;
-    reply(cmd, PatternResult { pattern, center, curves, constraints, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, PatternResult { pattern, center, curves, constraints, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn count(p: &Value, k: &str, cmd: &str) -> Result<usize> {

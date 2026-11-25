@@ -1,9 +1,11 @@
-//! Edit Feature must replace the selections as well as the numerical definition.
+//! Edit Feature must replace the selections as well as the numerical definition; the selection
+//! commands (`select.set`, `selection.get`).
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_geom::MeshGeom;
 
-use crate::{Sel, Session};
+use crate::{EngineError, Sel, Session};
 
 fn run(s: &mut Session, id: &str, params: Value) -> Value {
     s.execute(id, &params).unwrap_or_else(|e| panic!("{id} {params}: {e}"))
@@ -162,6 +164,67 @@ fn roll_to_takes_a_number_or_end_and_refuses_anything_else() {
         let e = s.execute(cmd, &json!({"position": "start"})).unwrap_err().to_string();
         assert!(e.contains(&format!("`{cmd}`")), "named as asked: {e}");
     }
+}
+
+/// The History bar's Back and Forward controls are click-only, so they carry no key. The same
+/// steps are commands, which is what the shortcut editor binds: one feature at a time, staying at
+/// either end of the history, and taking no parameters.
+#[test]
+fn history_steps_are_commands_moving_the_marker_one_feature() {
+    let mut s = Session::default();
+    for name in ["A", "B", "C"] {
+        run(&mut s, "solid.box", json!({"name": name, "length": 10, "width": 10, "height": 10}));
+    }
+    // The end of the history is "no marker", not a position.
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert_eq!(s.doc.features.len(), 3);
+    assert!(s.doc.marker.is_none(), "a new design sits at the end of its history");
+
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 2);
+    assert_eq!(s.doc.marker, Some(2));
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 1);
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 2);
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 3);
+    assert!(s.doc.marker.is_none(), "stepping past the last feature is the end again");
+
+    // Either end stays put instead of wrapping around.
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 3);
+    assert!(s.doc.marker.is_none());
+    for _ in 0..5 {
+        run(&mut s, "timeline.step_back", json!({}));
+    }
+    assert_eq!(s.doc.marker, Some(0), "back stops at the first feature");
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 0);
+    assert_eq!(s.doc.marker, Some(0));
+
+    // Both ends are reachable by key too. A keybinding cannot pass `position`, so `roll_to`'s
+    // start needs a command of its own.
+    run(&mut s, "timeline.roll_to_end", json!({}));
+    assert!(s.doc.marker.is_none(), "roll_to_end builds the whole history");
+    assert_eq!(run(&mut s, "timeline.roll_to_start", json!({}))["marker"], 0);
+    assert_eq!(s.doc.marker, Some(0), "roll_to_start rolls every feature back");
+    assert_eq!(run(&mut s, "timeline.roll_to_start", json!({}))["marker"], 0, "at the start it stays");
+    assert_eq!(run(&mut s, "timeline.roll_to_end", json!({}))["marker"], 3);
+    assert_eq!(run(&mut s, "timeline.roll_to_end", json!({}))["marker"], 3, "at the end it stays");
+
+    // A step clears the selection, as the marker commands do.
+    let id = s.doc.features[0].id;
+    assert_eq!(run(&mut s, "select.set", json!({"items": [{"type": "feature", "id": id}]}))["selected"], 1);
+    run(&mut s, "timeline.step_forward", json!({}));
+    assert!(s.selection.is_empty(), "a step clears the selection");
+
+    // They are registry commands, which is what makes them bindable and searchable.
+    for id in ["timeline.step_back", "timeline.step_forward", "timeline.roll_to_start", "timeline.roll_to_end"] {
+        let spec = crate::find_command(id).unwrap_or_else(|| panic!("{id} is a command"));
+        assert!(spec.undoable, "{id} is an undoable marker move, as roll_to is");
+    }
+
+    // No parameters: a position is refused, not silently ignored.
+    let mut strict = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    run(&mut strict, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let e = strict.execute("timeline.step_back", &json!({"position": 1})).unwrap_err().to_string();
+    assert!(e.contains("timeline.step_back"), "named as asked: {e}");
+    assert!(strict.doc.marker.is_none(), "the refused call changed nothing");
 }
 
 /// #7077: Repeat Last Command is a command (its key can change, command search finds it), but
@@ -602,6 +665,8 @@ fn inserting_variable_fillet_control_preserves_parameters_at_existing_positions(
     );
     let parameters = s.doc.find_feature("Round").unwrap().param_names.clone();
     run(&mut s, "solid.box", json!({"length": parameters[2], "width": parameters[3], "height": 2, "corner": [50, 0, 0], "name": "Dependent"}));
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    let original = volume(&mut s);
     run(
         &mut s,
         "timeline.redefine",
@@ -617,6 +682,20 @@ fn inserting_variable_fillet_control_preserves_parameters_at_existing_positions(
     let width = run(&mut s, "expr.evaluate", json!({"expression": parameters[3]}));
     assert_eq!(length["value"], 3.0);
     assert_eq!(width["value"], 4.0);
+    let edited_names = s.doc.find_feature("Round").unwrap().param_names.clone();
+    let edited_volume = volume(&mut s);
+    assert!(edited_volume < original);
+    let bytes = solidcraft_io::write_design_container(&s.doc).unwrap();
+    let mut reopened = Session::new(solidcraft_io::read_design(&bytes).unwrap());
+    assert_eq!(reopened.doc.find_feature("Round").unwrap().param_names, edited_names);
+    assert!(reopened.model.result(dependent).unwrap().error.is_none());
+    assert!((volume(&mut reopened) - edited_volume).abs() < 1e-6);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.find_feature("Round").unwrap().param_names, parameters);
+    assert!((volume(&mut s) - original).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.find_feature("Round").unwrap().param_names, edited_names);
+    assert!((volume(&mut s) - edited_volume).abs() < 1e-6);
 }
 
 #[test]
@@ -644,6 +723,56 @@ fn timeline_folders_are_command_backed_saved_undoable_and_follow_feature_ids() {
     assert_eq!(s.doc.timeline_groups[0].features, vec![round], "deleted features leave folders cleanly");
     run(&mut s, "timeline.ungroup", json!({"group": group}));
     assert!(s.doc.timeline_groups.is_empty());
+}
+
+/// #14884: deleting the last feature behind the rollback marker leaves the marker at the end of
+/// the history. Nothing is rolled back then, but the commands that move bodies, features and
+/// placements into a component still refused as if it were. While a feature is still behind the
+/// marker, they keep refusing.
+#[test]
+fn deleting_the_last_feature_behind_the_marker_lets_things_move_into_a_component() {
+    for command in ["component.from_bodies", "component.move_bodies", "component.move_features", "browser.reparent", "occurrence.reparent"] {
+        let mut s = Session::default();
+        let part = run(&mut s, "component.create", json!({"name": "Part"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let other = run(&mut s, "component.create", json!({"name": "Other"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "name": "BoxA"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "BoxB"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 50, 0], "operation": "new_body", "name": "BoxC"}));
+        run(&mut s, "timeline.rollback", json!({"position": 1}));
+        run(&mut s, "timeline.delete", json!({"feature": "BoxB"}));
+        assert_eq!(s.doc.marker, Some(s.doc.features.len() - 1), "{command}: BoxC is behind the marker");
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).expect("BoxA's body");
+        let params = match command {
+            "component.from_bodies" => json!({"bodies": [body]}),
+            "component.move_bodies" | "browser.reparent" => json!({"bodies": [body], "component": part["component"]}),
+            "component.move_features" => json!({"features": ["BoxA"], "component": part["component"]}),
+            _ => json!({"occurrence": part["occurrence"], "parent": other["component"]}),
+        };
+        let refused = s.execute(command, &params).unwrap_err().to_string();
+        assert!(refused.contains("finish timeline rollback"), "{command}: BoxC is still behind the marker: {refused}");
+        run(&mut s, "timeline.delete", json!({"feature": "BoxC"}));
+        assert_eq!(s.doc.marker, Some(s.doc.features.len()), "{command}: the marker stays at the end of the history");
+        let reply = run(&mut s, command, params);
+        assert!(!s.doc.marker.is_some_and(|m| m < s.doc.features.len()), "{command}: nothing is behind the marker afterwards");
+        let target = part["component"].as_u64();
+        match command {
+            "occurrence.reparent" => {
+                let moved = s.doc.occurrences.iter().find(|o| Some(o.id) == part["occurrence"].as_u64()).expect("Part's placement");
+                assert_eq!(Some(moved.parent), other["component"].as_u64(), "{command}: Part sits in Other now");
+            }
+            "component.move_features" => {
+                assert_eq!(s.doc.find_feature("BoxA").map(|f| f.component), target, "{command}: BoxA is in Part now");
+            }
+            _ => {
+                let expected = if command == "component.from_bodies" { reply["components"][0]["component"].as_u64() } else { target };
+                let moved = s.model.state().bodies.iter().find(|b| b.name == body).map(|b| s.doc.model_body_component(b));
+                assert_eq!(moved, expected, "{command}: the body is in the target component now");
+                assert_ne!(moved, Some(0), "{command}: the body left the root component");
+            }
+        }
+    }
 }
 
 /// #9373: editing a feature inside a timeline folder left the id of the edit's trial feature in
@@ -1235,6 +1364,59 @@ fn counted_body_names_stay_when_the_timeline_changes() {
     assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
 }
 
+/// Once every feature is deleted no body keeps a number, so the next body is `Body1` again, in a
+/// design that was saved and opened in between (#20922).
+#[test]
+fn deleting_every_body_feature_starts_body_names_again_at_body1() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [x, 0, 0], "name": name}));
+    }
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None, None);
+    run(&mut s, "timeline.delete", json!({"features": ["A", "B"]}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "name": "C"}));
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, vec!["Body1".to_string()]);
+}
+
+/// A design saved before body names were pinned, and saved rolled back, is pinned as it opens
+/// for the features after the marker too (#14008): a body made at the marker does not take the
+/// number of a later body, so the later bodies keep the names they were saved with and a combine
+/// that names them still joins the same bodies.
+#[test]
+fn counted_body_names_after_the_marker_stay_in_a_design_saved_before_pinning() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40), ("D", 50)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "name": name}));
+    }
+    run(&mut s, "solid.combine", json!({"target": "Body3", "tools": ["Body4"], "operation": "join", "name": "Join"}));
+    // As a file written before names were pinned: no stored names, and rolled back to after A.
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    doc.marker = Some(1);
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap(), None, None);
+    assert_eq!(s.doc.find_feature("C").map(|f| f.body_names.clone()), Some(vec!["Body3".to_string()]));
+    assert!(["Body1", "Body2", "Body3", "Body4"].iter().all(|n| s.doc.reserved_body_names.contains(*n)));
+    // Opening changed nothing the user can see: the design is still rolled back, and not dirty.
+    assert_eq!(s.doc.marker, Some(1));
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(!s.is_dirty());
+    assert!(s.undo.is_empty());
+
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0], "name": "N"}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    let st = s.model.state();
+    let names: Vec<(String, String)> =
+        st.bodies.iter().map(|b| (b.name.clone(), s.doc.feature(b.feature).map(|f| f.name.clone()).unwrap_or_default())).collect();
+    let want: Vec<(String, String)> =
+        [("Body1", "A"), ("Body5", "N"), ("Body2", "B"), ("Body3", "C")].iter().map(|(b, f)| (b.to_string(), f.to_string())).collect();
+    assert_eq!(names, want, "C and D are joined into Body3, N takes a new number");
+    assert!(s.doc.features.iter().all(|f| s.model.result(f.id).is_some_and(|r| r.error.is_none())));
+}
+
 /// Pinning reads each feature's bodies once and keeps them with the state it read them from;
 /// the names it pins and reserves, and the fingerprints it leaves, are those of reading every
 /// feature's bodies again: random boxes (named and counted), moves, suppressions, deletions,
@@ -1433,7 +1615,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     run(&mut s, "browser.visibility", json!({"items": ["Guide"], "visible": false}));
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "Shelf", "width": 40}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "Shelf", "width": 40}));
     run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
     run(&mut s, "sketch.project", json!({"refs": [{"plane": "Shelf"}]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -1456,7 +1638,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     run(&mut s, "timeline.rename", json!({"feature": "Shelf", "name": "Ledge"}));
     run(&mut s, "timeline.rename", json!({"feature": "Guide", "name": "Rail"}));
     assert_eq!(plane_link(&s), "Ledge");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Rail"]);
     assert_eq!(s.selection, [Sel::Plane { name: "Ledge".into() }]);
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
@@ -1469,7 +1651,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(plane_link(&s), "Shelf");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Guide"], "the hidden plane stays hidden");
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
     assert!((projected_z(&mut s) - 20.0).abs() < 1e-9);
@@ -1501,6 +1683,92 @@ fn a_reorder_keeps_the_model_it_was_checked_on() {
     let mut fresh = solidcraft_doc::Model::new();
     fresh.evaluate(&s.doc);
     assert_eq!(fresh.state().bodies.len(), bodies(&s));
+}
+
+/// #18107: Invert Selection swaps faces for the other faces of their body, edges for the other
+/// edges of theirs, and bodies for the other shown bodies. A body selected with some of its faces
+/// inverts inside it; items of other kinds stay; nothing to invert is refused. No undo step.
+#[test]
+fn select_invert_swaps_each_kind_within_its_body_and_keeps_history() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    let history = (s.undo.len(), s.redo.len());
+    let faces = |s: &Session, body: &str| -> Vec<usize> {
+        s.selection
+            .iter()
+            .filter_map(|x| match x {
+                Sel::Face { body: b, index, .. } if b == body => Some(*index),
+                _ => None,
+            })
+            .collect()
+    };
+    // Two faces of A: the other four.
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"A","index":0},{"type":"face","body":"A","index":3}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [1, 2, 4, 5]);
+    assert_eq!(s.selection.len(), 4, "only faces of A");
+    // Inverting again gives the first two back.
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [0, 3]);
+    // One edge of B: the other eleven.
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"B","index":5}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection.len(), 11);
+    assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { body, index, .. } if body == "B" && *index != 5)));
+    // A body: the other shown bodies; a hidden one is left out.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection, [Sel::Body { name: "B".into() }, Sel::Body { name: "C".into() }]);
+    s.visibility.hidden_bodies.push("C".into());
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection, [Sel::Body { name: "B".into() }]);
+    // A body with a face of it selected: the other faces of that body, not the other bodies.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"},{"type":"face","body":"A","index":2},{"type":"feature","id":1}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [0, 1, 3, 4, 5]);
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Body { .. })), "the body is where the faces invert");
+    assert!(s.selection.contains(&Sel::Feature { id: 1 }), "a feature stays selected");
+    // Another body beside it: A is still not taken back as a whole body.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"},{"type":"face","body":"A","index":0},{"type":"body","name":"B"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [1, 2, 3, 4, 5]);
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Body { .. })), "neither A nor B (C is hidden)");
+    // Nothing of those kinds: refused, the selection unchanged.
+    run(&mut s, "select.set", json!({"items":[{"type":"feature","id":1}]}));
+    let before = s.selection.clone();
+    assert!(s.execute("select.invert", &json!({})).is_err());
+    assert_eq!(s.selection, before);
+    run(&mut s, "select.clear", json!({}));
+    assert!(s.execute("select.invert", &json!({})).is_err());
+    assert!(s.execute("select.invert", &json!({"kind":"face"})).is_err(), "no parameters");
+    assert_eq!((s.undo.len(), s.redo.len()), history, "not an undo step");
+}
+
+/// Invert Selection leaves out bodies a hidden folder hides, and its 10,000 limit counts the
+/// items it keeps; a refusal leaves the selection as it was.
+#[test]
+fn select_invert_skips_folder_hidden_bodies_and_counts_kept_items_in_its_limit() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+    assert!(!s.body_visible("B"));
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert!(s.selection.is_empty(), "B is hidden by its folder: {:?}", s.selection);
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": true}));
+
+    // 9,999 kept features and one face of A: five faces more would be 10,004 items.
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"A","index":0}]}));
+    s.selection.extend((1..10_000).map(|id| Sel::Feature { id }));
+    let before = s.selection.clone();
+    let err = s.execute("select.invert", &json!({})).unwrap_err().to_string();
+    assert!(err.contains("too many items"), "{err}");
+    assert_eq!(s.selection, before, "the selection stays as it was");
 }
 
 #[test]
@@ -1541,6 +1809,57 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     assert_eq!(history, (s.undo.len(), s.redo.len(), s.evaluations));
 }
 
+/// #18105: Select Sharp Edges takes the edges whose faces turn by more than the threshold,
+/// judged on the exact faces. A 20 mm box with one edge rounded keeps its 11 other edges and gains
+/// the round's two end arcs, all at 90°; the round's two tangent edges are never taken.
+#[test]
+fn select_sharp_edges_takes_creases_over_the_angle_and_never_a_rounds_tangent_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":20,"width":20,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 10, 20]], "radius": 4}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 30}))["selected"], 13);
+    for sel in &s.selection {
+        let Sel::Edge { body, point, .. } = sel else { panic!("not an edge: {sel:?}") };
+        assert_eq!(body, "Block");
+        let tangent = |x: f64, z: f64| (point.x - x).abs() < 1e-6 && (point.z - z).abs() < 1e-6;
+        assert!(!tangent(16.0, 20.0) && !tangent(20.0, 16.0), "a tangent edge is taken at {point:?}");
+    }
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 89, "body": "Block"}))["selected"], 13);
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 91}))["selected"], 0);
+    // With no angle (command search, a key, the menu) it takes 30°.
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({}))["selected"], 13);
+    assert_eq!(run(&mut s, "select.sharp_edges", Value::Null)["selected"], 13);
+    // An edge already picked, at another point than the analysis's, is not added twice.
+    let Some(Sel::Edge { body, index, .. }) = s.selection.first().cloned() else { panic!("no edge: {:?}", s.selection) };
+    s.selection = vec![Sel::Edge { body, index, point: Default::default() }];
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"add": true}))["selected"], 13);
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 45, "add": true}))["selected"], 14);
+    // A surface body (an open tube with square corners) is not searched, and refused by name.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [50, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Square", "distance": "10 mm", "name": "Tube", "body_name": "Tube"}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({}))["selected"], 13);
+    assert!(s.execute("select.sharp_edges", &json!({"body": "Tube"})).is_err());
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 45, "add": true}))["selected"], 14);
+    let history = (s.undo.len(), s.redo.len());
+    let selected = s.selection.clone();
+    for params in [
+        json!({"angle_deg": 0}),
+        json!({"angle_deg": 180}),
+        json!({"angle_deg": "30"}),
+        json!({"angle_deg": 30, "body": "missing"}),
+        json!({"angle_deg": 30, "extra": 1}),
+        json!([]),
+    ] {
+        assert!(s.execute("select.sharp_edges", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected);
+    }
+    assert_eq!(history, (s.undo.len(), s.redo.len()));
+}
+
 /// A body changed by a few hundred features in a row whose names nothing asks for, then
 /// filleted: reordering or moving an earlier feature evaluates them all again, and the fillet
 /// finds its edge by the names of the body before it, which are worked out from the body before
@@ -1570,6 +1889,34 @@ fn a_move_before_a_long_history_of_one_body_fits_a_window_threads_stack() {
         .unwrap()
         .join();
     assert!(moved.is_ok());
+}
+
+/// A fillet on the curved top edge of an extruded spline profile certifies its blend with
+/// series whose coefficient tables, held inline, filled a window thread's 1 MB stack before the
+/// kernel finished (#16147, #16489). On a thread with that stack, the design is built and the
+/// fillet's result is its own, not an aborted process.
+#[test]
+fn a_fillet_on_a_spline_edge_fits_a_window_threads_stack() {
+    let built = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "profile"}));
+            run(&mut s, "sketch.spline.fit_point", json!({"points": [[10, 10], [15, 14], [20, 15.5], [25, 14], [30, 10]]}));
+            run(&mut s, "sketch.line", json!({"points": [[30, 10], [10, 10]]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "profile", "distance": 20, "operation": "new", "name": "boss", "body_name": "boss"}));
+            run(
+                &mut s,
+                "solid.fillet",
+                json!({"body": "boss", "edges": [[20.0, 15.5, 20.0]], "radius": 1, "tangent_chain": false, "name": "top_fillet"}),
+            );
+            let fillet = s.doc.features.last().map(|f| f.id).unwrap();
+            assert!(s.model.result(fillet).is_some());
+        })
+        .unwrap()
+        .join();
+    assert!(built.is_ok());
 }
 
 #[test]
@@ -1665,7 +2012,7 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
     png.resize(64 << 10, 0);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "width": 40}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "XY", "width": 40}));
     for i in 0..20 {
         run(&mut s, "parameters.add", json!({"name": format!("p{i}"), "expression": "10 mm"}));
     }
@@ -1676,7 +2023,32 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(s.doc.canvases[0].data.as_ptr(), image, "undo brings back the same image");
-    assert_eq!(s.doc.canvases[0].bytes().as_deref(), Some(png.as_slice()));
+    assert_eq!(s.doc.canvases[0].bytes(), png.as_slice());
+}
+
+#[test]
+fn app_bar_reset_is_registered_and_only_requests_a_ui_reset() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.revision, s.undo.len(), s.redo.len());
+    let spec = crate::find_command("ui.appBarReset").unwrap();
+    assert_eq!(spec.label, "Reset App Bar");
+    assert_eq!(spec.part, crate::cmd::Part::Any);
+    assert!((spec.enabled)(&s).is_ok());
+    assert!(!spec.undoable && !spec.reads_model);
+    assert_eq!(spec.tab, "", "palette command, without a ribbon placement");
+    assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"reset":true}));
+    assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
+}
+
+#[test]
+fn app_bar_customize_validates_without_opening_or_changing_a_design() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.revision, s.undo.len(), s.redo.len());
+    let spec = crate::find_command("ui.appBarCustomize").unwrap();
+    assert!(spec.info(&s).enabled);
+    assert!(!spec.undoable);
+    assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"available":true}));
+    assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
 }
 
 #[test]
@@ -1694,6 +2066,18 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
     let spec = crate::find_command("ui.palette").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("S"), "", false));
+    // Show/Hide likewise (#13241): V is its default key, and a script names what to hide.
+    let error = s.execute("ui.toggle_visibility", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.toggle_visibility").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("V"), "", false));
+    // Dialog OK likewise (#17416): it has no default key; the user binds one.
+    let error = s.execute("ui.dialog_ok", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.dialog_ok").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (None, "", false));
 }
 
 #[test]
@@ -1737,4 +2121,1096 @@ fn reorder_refusal_after_a_feature_that_removes_its_body_does_not_blame_the_orde
     run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 30, "corner": [-10, -10, -10], "operation": "cut", "name": "Clear"}));
     let e = s.execute("timeline.reorder", &json!({"feature": "Round", "position": 2})).unwrap_err().to_string();
     assert!(e.contains("breaks Round") && e.contains("changes what it works on") && !e.contains("earlier first"), "{e}");
+}
+
+/// A model parameter named on a segment's height stays on that stretch when the feature is
+/// redefined with a stretch inserted before it (#5927, #5928): each segment input is keyed by its
+/// edge and segment, so the name cannot land on another stretch that shares the "Segment height"
+/// label. The corner relief's name keeps its own input too.
+#[test]
+fn redefining_a_segmented_flange_keeps_a_named_height_on_its_stretch() {
+    fn value(s: &mut Session, name: &str) -> f64 {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).and_then(|p| p["value"].as_f64()).unwrap_or(f64::NAN)
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg","corner_relief":"2 mm","name":"Lip"}),
+    );
+    // The model parameter of each segment height, in input order, and the corner relief's.
+    let (heights, relief) = {
+        let f = s.doc.find_feature("Lip").unwrap();
+        let inputs = f.kind.inputs();
+        let heights: Vec<String> =
+            inputs.iter().enumerate().filter(|(_, (label, _, _))| *label == "Segment height").map(|(i, _)| f.param_names[i].clone()).collect();
+        let relief = inputs.iter().position(|(label, _, _)| *label == "Corner relief").map(|i| f.param_names[i].clone()).unwrap();
+        (heights, relief)
+    };
+    assert_eq!(heights.len(), 2, "{heights:?}");
+    run(&mut s, "parameters.rename", json!({"name": heights[1], "new_name": "Tall"}));
+    run(&mut s, "parameters.rename", json!({"name": relief, "new_name": "Relief"}));
+    assert_eq!(value(&mut s, "Tall"), 15.0);
+    assert_eq!(value(&mut s, "Relief"), 2.0);
+    // A stretch inserted before the named one: the name stays on the 15 mm stretch.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Lip","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0,"to":0.25,"height":"20 mm"},
+                {"from":0.25,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":1,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg","corner_relief":"2 mm"}}),
+    );
+    assert_eq!(value(&mut s, "Tall"), 15.0, "the name reads the stretch it was put on");
+    assert_eq!(value(&mut s, "Relief"), 2.0, "the corner relief keeps its own name");
+    let f = s.doc.find_feature("Lip").unwrap();
+    let inputs = f.kind.inputs();
+    let named: Vec<(String, String)> = inputs
+        .iter()
+        .enumerate()
+        .filter(|(_, (label, _, _))| *label == "Segment height")
+        .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+        .collect();
+    assert!(named.iter().any(|(name, expression)| name == "Tall" && expression == "15 mm"), "{named:?}");
+    let relief_index = inputs.iter().position(|(label, _, _)| *label == "Corner relief").unwrap();
+    assert_eq!(f.param_names[relief_index], "Relief");
+}
+
+/// A name follows the material it was given to, not the order of the input list: deleting one of two
+/// named stretches keeps the survivor's own name, drops the deleted stretch's, and an expression that
+/// reads the survivor's name still reads its height. A deleted stretch's name never lands on a
+/// stretch whose value came from elsewhere (#5927, #5928).
+#[test]
+fn deleting_a_stretch_keeps_the_surviving_stretches_own_name() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn has(s: &mut Session, name: &str) -> bool {
+        param(s, name)["value"].as_f64().is_some()
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Segment height" input of `Lip`, in the walk's order.
+    fn segment_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Lip").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Segment height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    // A 200 × 100 base, a two-stretch flange on its y = 0 edge with each height named, and a flange on
+    // the opposite edge whose height reads one of those names.
+    fn built(heights: [&str; 2], spans: [f64; 2], reader: &str) -> Session {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0,"to":spans[0],"height":heights[0]},
+                {"from":spans[0],"to":1,"height":heights[1]}]}],
+                "height":"20 mm","angle":"90 deg","name":"Lip"}),
+        );
+        let names: Vec<String> = segment_names(&mut s).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        run(&mut s, "parameters.rename", json!({"name": names[0], "new_name": "Short"}));
+        run(&mut s, "parameters.rename", json!({"name": names[1], "new_name": "Tall"}));
+        run(&mut s, "sheet.flange", json!({"edges":[[100,100,2]],"height":reader,"angle":"90 deg","name":"Reader"}));
+        s
+    }
+    let redefine = |s: &mut Session, segments: Value| {
+        run(
+            s,
+            "timeline.redefine",
+            json!({"feature":"Lip","command":"sheet.flange","params":{
+                "type":"edge","edges":[{"point":[100,0,2],"segments":segments}],
+                "height":"20 mm","angle":"90 deg"}}),
+        );
+    };
+    // Deleting the first stretch: the survivor is the 15 mm stretch, and keeps its own name.
+    let mut s = built(["20 mm", "15 mm"], [0.5, 1.0], "Tall");
+    assert_eq!(param(&mut s, "Short")["value"].as_f64(), Some(20.0));
+    assert_eq!(param(&mut s, "Tall")["value"].as_f64(), Some(15.0));
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"15 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Tall".to_string(), "15 mm".to_string())], "the survivor keeps its own name");
+    assert!(has(&mut s, "Tall") && !has(&mut s, "Short"), "the deleted stretch's name is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Tall");
+    assert_eq!(reader["value"].as_f64(), Some(15.0), "an expression reading Tall still reads the survivor's height: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    // Deleting the second stretch: the survivor is the 20 mm stretch, and keeps its own name.
+    let mut s = built(["20 mm", "15 mm"], [0.5, 1.0], "Short");
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"20 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Short".to_string(), "20 mm".to_string())], "the survivor keeps its own name");
+    assert!(has(&mut s, "Short") && !has(&mut s, "Tall"), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Short");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "an expression reading Short still reads the survivor's height: {reader}");
+    // A merge whose surviving value came from the first stretch: it keeps the first stretch's name
+    // even though the second stretch's span is the larger part of the merged stretch.
+    let mut s = built(["20 mm", "15 mm"], [0.25, 1.0], "Short");
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"20 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Short".to_string(), "20 mm".to_string())], "the merged stretch keeps the name of the value it carries");
+    assert!(has(&mut s, "Short") && !has(&mut s, "Tall"), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "{reader}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+/// Two edges of one flange, each split into stretches with named heights, swapped in the `edges`
+/// list: each name stays on its own physical edge, the point the flange was made on, not on the
+/// list position. Swapping moved the names between the edges' heights, so an expression reading the
+/// 20 mm name read 15 mm (#5927, #5928).
+#[test]
+fn swapping_two_edges_keeps_each_named_height_on_its_own_edge() {
+    fn param(s: &mut Session, name: &str) -> f64 {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).and_then(|p| p["value"].as_f64()).unwrap_or(f64::NAN)
+    }
+    fn segment_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Segment height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Both edges are split at the same fractions; the y = 0 edge's first stretch is 20 mm, the
+    // y = 100 edge's first is 15 mm.
+    let front = json!({"point":[100,0,2],"segments":[
+        {"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]});
+    let back = json!({"point":[100,100,2],"segments":[
+        {"from":0,"to":0.5,"height":"15 mm"},{"from":0.5,"to":1,"height":"20 mm"}]});
+    run(&mut s, "sheet.flange", json!({"type":"edge","edges":[front, back],"height":"20 mm","angle":"90 deg","name":"Bands"}));
+    let names = segment_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm", "15 mm", "20 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[2].0, "new_name": "Back15"}));
+    assert_eq!((param(&mut s, "Front20"), param(&mut s, "Back15")), (20.0, 15.0));
+    // The same two edges, swapped in the list: the physical edges did not change.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[back, front],"height":"20 mm","angle":"90 deg"}}),
+    );
+    assert_eq!(param(&mut s, "Front20"), 20.0, "the name on the y = 0 edge's 20 mm stretch now reads another height: {:?}", segment_names(&mut s));
+    assert_eq!(param(&mut s, "Back15"), 15.0, "the name on the y = 100 edge's 15 mm stretch now reads another height: {:?}", segment_names(&mut s));
+    let names = segment_names(&mut s);
+    assert!(names.iter().any(|(name, expression)| name == "Front20" && expression == "20 mm"), "{names:?}");
+    assert!(names.iter().any(|(name, expression)| name == "Back15" && expression == "15 mm"), "{names:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// An edge-level height name follows the edge it was put on, by the pick point its key carries:
+/// deleting one edge and inserting another in the same redefine must not put the deleted edge's
+/// name on the new edge's height, which matched by label and kind alone (#5927, #5928).
+#[test]
+fn deleting_an_edge_does_not_move_its_named_height_to_another_edge() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Edge height" input of `Bands`, in the walk's order.
+    fn edge_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Edge height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Two edges with their own heights: 20 mm on the y = 0 edge, 15 mm on the y = 100 edge.
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg","name":"Bands"}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[1].0, "new_name": "Back15"}));
+    assert_eq!((param(&mut s, "Front20")["value"].as_f64(), param(&mut s, "Back15")["value"].as_f64()), (Some(20.0), Some(15.0)));
+    // The y = 0 edge is deleted and an edge on the x = 0 edge is inserted in the same redefine.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100,100,2],"height":"15 mm"},{"point":[0,50,2],"height":"25 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    assert_eq!(param(&mut s, "Back15")["value"].as_f64(), Some(15.0), "the surviving edge keeps its own name");
+    assert!(param(&mut s, "Front20")["value"].is_null(), "the deleted edge's name is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["15 mm", "25 mm"], "{names:?}");
+    assert!(names.iter().any(|(name, expression)| name == "Back15" && expression == "15 mm"), "{names:?}");
+    assert!(names.iter().all(|(name, _)| name != "Front20"), "the new edge's height took the deleted edge's name: {names:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A pick point that moves by a hair still names the same edge: the height named on that edge, and
+/// an expression reading it downstream, keep their values. Matching the point by its f64 bits gave
+/// every key a new identity, so the edge's inputs fell back to the constructor's names and the
+/// expression that read the user's name broke (#5927, #5928).
+#[test]
+fn a_pick_point_that_moves_a_hair_keeps_the_edges_name() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Edge height" input of `Bands`, in the walk's order.
+    fn edge_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Edge height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Two edges with their own heights: 20 mm on the y = 0 edge, 15 mm on the y = 100 edge.
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg","name":"Bands"}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[1].0, "new_name": "Back15"}));
+    // A later flange whose height reads the named edge's height.
+    run(&mut s, "sheet.flange", json!({"edges":[[0,50,2]],"height":"Front20","angle":"90 deg","name":"Reader"}));
+    assert_eq!(param(&mut s, "Front20")["value"].as_f64(), Some(20.0), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Front20");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "{reader}");
+    // The same physical edge picked a hair away: only the pick point moves.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100.001,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(
+        names,
+        [("Front20".to_string(), "20 mm".to_string()), ("Back15".to_string(), "15 mm".to_string())],
+        "the edge whose pick moved lost its name: {names:?}"
+    );
+    assert_eq!(param(&mut s, "Front20")["value"].as_f64(), Some(20.0), "the named height is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    assert_eq!(param(&mut s, "Back15")["value"].as_f64(), Some(15.0), "the other edge's name moved: {:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Front20");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "the expression reading Front20 broke: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A stretch's name follows its edge through a pick point that moved by a hair, and an edge
+/// inserted in the same redefine keeps the constructor's name rather than taking a name that
+/// belongs to another edge or stretch (#5927, #5928).
+#[test]
+fn a_pick_point_that_moves_a_hair_keeps_its_stretches_name_and_a_new_edge_keeps_its_own() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The names and expressions of `Lip`'s inputs with `label`, in the walk's order.
+    fn names(s: &mut Session, label: &str) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Lip").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (l, _, _))| *l == label)
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    let segments = json!([{"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":segments}],
+            "height":"20 mm","angle":"90 deg","name":"Lip"}),
+    );
+    let stretches = names(&mut s, "Segment height");
+    assert_eq!(stretches.len(), 2, "{stretches:?}");
+    run(&mut s, "parameters.rename", json!({"name": stretches[1].0, "new_name": "Tall"}));
+    run(&mut s, "sheet.flange", json!({"edges":[[0,50,2]],"height":"Tall","angle":"90 deg","name":"Reader"}));
+    assert_eq!(param(&mut s, "Tall")["value"].as_f64(), Some(15.0));
+    // The y = 0 edge's pick moves by a hair and a genuinely different edge (y = 100) is inserted.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Lip","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100.001,0,2],"segments":segments},{"point":[100,100,2],"height":"25 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    let stretches = names(&mut s, "Segment height");
+    assert!(
+        stretches.iter().any(|(name, expression)| name == "Tall" && expression == "15 mm"),
+        "the stretch lost its name with the pick: {stretches:?}"
+    );
+    assert_eq!(
+        param(&mut s, "Tall")["value"].as_f64(),
+        Some(15.0),
+        "the named stretch height is gone: {:?}",
+        run(&mut s, "parameters.list", json!({}))
+    );
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Tall");
+    assert_eq!(reader["value"].as_f64(), Some(15.0), "the expression reading Tall broke: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    // The inserted edge is its own edge: it took neither the moved edge's nor the stretch's name.
+    let edges = names(&mut s, "Edge height");
+    assert_eq!(edges.len(), 1, "the inserted edge's height is not one input: {edges:?}");
+    assert_eq!(edges[0].1, "25 mm", "{edges:?}");
+    assert!(edges[0].0 != "Tall", "the new edge took the stretch's name: {edges:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+// `selection.get`: the selection read back, resolved, without changing anything.
+
+fn close(v: &Value, want: f64) -> bool {
+    v.as_f64().is_some_and(|x| (x - want).abs() < 1e-6)
+}
+
+fn close3(v: &Value, want: [f64; 3]) -> bool {
+    v.as_array().is_some_and(|a| a.len() == 3 && a.iter().zip(want).all(|(x, w)| close(x, w)))
+}
+
+/// A 40 × 30 × 20 box with a Ø10 hole through it at (20, 15).
+fn holed_box(s: &mut Session) -> String {
+    run(s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(s, "solid.cylinder", json!({"radius": 5, "height": 22, "base": [20, 15, -1], "operation": "cut"}));
+    s.model.state().bodies.first().unwrap().name.clone()
+}
+
+/// The face of the first body whose surface satisfies `want`, as a pick.
+fn face_pick(s: &Session, want: impl Fn(solidcraft_kernel::FaceSurface) -> bool) -> Value {
+    let st = s.model.state();
+    let b = st.bodies.first().unwrap();
+    let m = b.mesh();
+    let n = m.tri_face.iter().map(|f| *f as usize + 1).max().unwrap();
+    let f = (0..n).find(|&f| solidcraft_kernel::face_surface(&b.body, f).is_some_and(&want)).expect("face");
+    let p = m.triangles.iter().zip(&m.tri_face).find(|(_, tf)| **tf as usize == f).and_then(|(t, _)| m.tri(t)).unwrap()[0];
+    json!({"type": "face", "body": b.name, "index": f, "point": p})
+}
+
+/// The mesh edge all of whose points satisfy `on`, as a pick.
+fn edge_pick(s: &Session, on: impl Fn(Vec3) -> bool) -> Value {
+    let st = s.model.state();
+    let b = st.bodies.first().unwrap();
+    let m = b.mesh();
+    let i = m.edges.iter().position(|e| e.iter().all(|p| on(*p))).expect("edge");
+    let e = &m.edges[i];
+    json!({"type": "edge", "body": b.name, "index": i, "point": e[e.len() / 2]})
+}
+
+#[test]
+fn empty_selection_is_an_empty_list() {
+    let mut s = Session::default();
+    assert_eq!(run(&mut s, "selection.get", json!({})), json!({"count": 0, "items": []}));
+    holed_box(&mut s);
+    assert_eq!(run(&mut s, "selection.get", json!({"detail": false})), json!({"count": 0, "items": []}));
+}
+
+#[test]
+fn faces_edges_and_bodies_are_resolved() {
+    let mut s = Session::default();
+    let body = holed_box(&mut s);
+    let top = face_pick(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Plane { normal, .. } if normal.z > 0.99));
+    let hole = face_pick(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Cylinder { .. }));
+    // The top front edge: y = 0, z = 20, along X.
+    let line = edge_pick(&s, |p| p.y.abs() < 1e-9 && (p.z - 20.0).abs() < 1e-9);
+    // The hole's rim on the top face.
+    let rim = edge_pick(&s, |p| (p.z - 20.0).abs() < 1e-9 && ((p.x - 20.0).hypot(p.y - 15.0) - 5.0).abs() < 1e-6);
+    let items = json!([top, hole, line, rim, {"type": "body", "name": body}]);
+    run(&mut s, "select.set", json!({ "items": items }));
+    let revision = s.revision;
+    let (undo, dirty, doc) = (s.undo.len(), s.is_dirty(), s.doc.clone());
+
+    let r = run(&mut s, "selection.get", json!({}));
+    assert_eq!(r["count"], 5, "{r}");
+    let it = r["items"].as_array().unwrap();
+
+    let top = &it[0];
+    assert_eq!(top["kind"], "face");
+    assert_eq!(top["type"], "face", "items keep the select.set form");
+    assert_eq!(top["body"], json!(body));
+    assert_eq!(top["surface"]["type"], "plane", "{top}");
+    assert!(close3(&top["surface"]["normal"], [0.0, 0.0, 1.0]), "{top}");
+    let area = 40.0 * 30.0 - std::f64::consts::PI * 25.0;
+    assert!(top["area_mm2"].as_f64().is_some_and(|a| (a - area).abs() < area * 1e-3), "{top}");
+    assert!(top["name"].as_str().is_some_and(|n| !n.is_empty()), "persistent face name: {top}");
+    assert!(top["name_exact"].is_boolean());
+
+    let hole = &it[1];
+    assert_eq!(hole["surface"]["type"], "cylinder", "{hole}");
+    assert!(close(&hole["surface"]["radius"], 5.0), "{hole}");
+    assert!(hole["surface"]["axis"].as_array().is_some_and(|a| a[2].as_f64().is_some_and(|z| z.abs() > 0.999)), "{hole}");
+    assert!(close(&hole["diameter"], 10.0), "{hole}");
+
+    let line = &it[2];
+    assert_eq!(line["kind"], "edge");
+    assert_eq!(line["curve"], "line", "{line}");
+    assert!(close(&line["length_mm"], 40.0), "{line}");
+    let ends: Vec<f64> = [&line["start"], &line["end"]].iter().map(|p| p[0].as_f64().unwrap()).collect();
+    assert!(ends.iter().any(|x| x.abs() < 1e-9) && ends.iter().any(|x| (x - 40.0).abs() < 1e-9), "{line}");
+    assert!(line["name"].as_str().is_some_and(|n| n.contains('|')), "edge names join their faces' names: {line}");
+
+    let rim = &it[3];
+    assert_eq!(rim["curve"], "circle", "{rim}");
+    assert!(close(&rim["radius"], 5.0), "{rim}");
+    assert!(close3(&rim["center"], [20.0, 15.0, 20.0]), "{rim}");
+
+    let b = &it[4];
+    assert_eq!(b["kind"], "body");
+    assert_eq!(b["name"], json!(body));
+    let v = 40.0 * 30.0 * 20.0 - std::f64::consts::PI * 25.0 * 20.0;
+    assert!(b["volume_mm3"].as_f64().is_some_and(|x| (x - v).abs() < v * 1e-2), "{b}");
+    assert!(b["feature"]["name"].is_string(), "{b}");
+    assert_eq!(b["visible"], true);
+    assert!(b.get("component").is_none(), "no component outside an assembly");
+
+    // Read-only: nothing changed.
+    assert_eq!(s.revision, revision);
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.is_dirty(), dirty);
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+    assert_eq!(s.selection.len(), 5);
+
+    // Without detail: identity only.
+    let r = run(&mut s, "selection.get", json!({"detail": false}));
+    let first = r["items"][0].as_object().unwrap();
+    assert!(first.contains_key("index") && first.contains_key("point") && !first.contains_key("surface"), "{r}");
+    // The items go straight back into select.set.
+    let items: Vec<Value> = r["items"].as_array().unwrap().clone();
+    run(&mut s, "select.clear", json!({}));
+    run(&mut s, "select.set", json!({ "items": items }));
+    assert_eq!(s.selection.len(), 5);
+}
+
+#[test]
+fn sketch_entities_name_their_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 7}));
+    let curve = r["created"]["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "select.set", json!({"items": [{"type": "sketch_curve", "id": curve}]}));
+    let r = run(&mut s, "selection.get", json!({}));
+    let it = &r["items"][0];
+    assert_eq!(it["kind"], "sketch_curve");
+    assert_eq!(it["entity"], "circle", "{it}");
+    assert!(close(&it["radius"], 7.0), "{it}");
+    assert_eq!(it["sketch"], json!(s.active_sketch.unwrap()), "{it}");
+    assert!(it["sketch_name"].is_string());
+    // What it returns goes back in as it is.
+    run(&mut s, "select.set", json!({"items": [it.clone()]}));
+    assert_eq!(run(&mut s, "selection.get", json!({}))["items"][0], *it);
+
+    // A curve picked into a dialog names its sketch; the item keeps it.
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "select.set", json!({"items": [{"type": "sketch_curve", "id": curve, "sketch": sketch}]}));
+    let r = run(&mut s, "selection.get", json!({}));
+    let it = &r["items"][0];
+    assert_eq!((&it["sketch"], &it["entity"]), (&json!(sketch), &json!("circle")), "{it}");
+
+    // A line's midpoint: named by its line, reported where it is.
+    let r = run(&mut s, "sketch.line", json!({"points": [[2, 4], [12, 10]]}));
+    let line = r["created"]["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "select.set", json!({"items": [{"type": "sketch_midpoint", "id": line}]}));
+    let r = run(&mut s, "selection.get", json!({}));
+    let it = &r["items"][0];
+    assert_eq!(it["kind"], "sketch_midpoint", "{it}");
+    assert_eq!(it["id"], json!(line), "{it}");
+    assert_eq!(it["entity"], "midpoint", "{it}");
+    assert!(close3(&it["position"], [7.0, 7.0, 0.0]), "{it}");
+    assert_eq!(it["sketch"], json!(s.active_sketch.unwrap()), "{it}");
+}
+
+/// #18233: Select All takes every shown body; in an open sketch, every curve of the sketch
+/// (construction ones too) and its points on no curve, not projected geometry or the origin.
+/// It replaces the selection and is no undo step.
+#[test]
+fn select_all_takes_the_shown_bodies_or_the_open_sketchs_own_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "solid.box", json!({"body_name": "Stowed", "corner": [60, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "browser.visibility", json!({"items": ["Stowed"], "visible": false}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Block", "index": 0}]}));
+    let undo = s.undo.len();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 2);
+    // An ordinary design gets the list it always got: the shown bodies by name.
+    assert_eq!(s.selection, ["Block", "Spare"].map(|name| Sel::Body { name: name.into() }));
+    assert!(!s.selection_all_bodies, "below the cap Select All lists the bodies");
+    assert_eq!(s.undo.len(), undo, "no undo step");
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 0], "body": "Block"}]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 20], [40, 20]], "ids": ["rail"], "connect": false}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 30], [40, 30]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [50, 50], "id": "pin", "connect": false}));
+    let undo = s.undo.len();
+    let doc = s.doc.to_json();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 3);
+    let mut got: Vec<String> = s.selection.iter().map(|x| format!("{x:?}")).collect();
+    got.sort();
+    let mut want: Vec<String> = [
+        Sel::SketchCurve { id: "guide".into(), sketch: None },
+        Sel::SketchCurve { id: "rail".into(), sketch: None },
+        Sel::SketchPoint { id: "pin".into() },
+    ]
+    .iter()
+    .map(|x| format!("{x:?}"))
+    .collect();
+    want.sort();
+    assert_eq!(got, want, "the projected edge and the origin stay out");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo), "selecting edits nothing");
+}
+
+/// What Select All does on a design with more shown bodies than `MAX_SELECTION`: the whole-body
+/// scope. The tests below take it on small designs, where Select All itself lists the bodies.
+fn select_every_shown_body(s: &mut Session) {
+    s.clear_selection();
+    s.selection_all_bodies = true;
+}
+
+#[test]
+fn select_all_lists_bodies_up_to_the_cap_and_takes_the_scope_above_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "select.all", json!({}));
+    let got = run(&mut s, "selection.get", json!({}));
+    assert_eq!(got["count"], json!(1), "{got}");
+    assert_eq!(got["items"].as_array().map(Vec::len), Some(1), "the body is listed: {got}");
+    assert!(got.get("all_bodies").is_none(), "no scope on an ordinary design: {got}");
+    // The cap itself is the line: as many bodies as select.set takes are a list, one more a scope.
+    let bodies = |n: usize| (0..n).map(|i| Sel::Body { name: format!("Body{i}") });
+    assert_eq!(super::listed_bodies(bodies(super::MAX_SELECTION)).map(|l| l.len()), Some(super::MAX_SELECTION));
+    assert_eq!(super::listed_bodies(bodies(super::MAX_SELECTION + 1)), None);
+}
+
+#[test]
+fn a_whole_body_selection_follows_the_bodies_the_design_shows() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    select_every_shown_body(&mut s);
+    assert_eq!(s.selected_count().unwrap(), 1);
+    // A body added later is selected without naming it: the scope resolves against the world.
+    run(&mut s, "solid.box", json!({"body_name": "Later", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    assert_eq!(s.selected_count().unwrap(), 2);
+    assert_eq!(s.selected_items().unwrap().len(), 2);
+    // Hiding one takes it out of the scope, as it left the list before.
+    run(&mut s, "browser.visibility", json!({"items": ["Later"], "visible": false}));
+    assert_eq!(s.selected_count().unwrap(), 1);
+    run(&mut s, "select.clear", json!({}));
+    assert!(!s.selection_all_bodies, "clearing ends the scope");
+    assert!(!s.has_selection());
+}
+
+#[test]
+fn selecting_one_thing_after_select_all_selects_only_that() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    select_every_shown_body(&mut s);
+    assert!(s.selection_all_bodies);
+    run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "Spare"}]}));
+    assert!(!s.selection_all_bodies, "a particular pick replaces the scope");
+    assert_eq!(s.selection, [Sel::Body { name: "Spare".into() }]);
+}
+
+#[test]
+fn delete_takes_every_body_of_a_whole_body_selection() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    select_every_shown_body(&mut s);
+    let done = run(&mut s, "selection.delete", json!({"all_bodies": true}));
+    assert_eq!(done["bodies"], json!(["Block", "Spare"]), "{done}");
+    assert!(s.world_state().unwrap().bodies.is_empty(), "every shown body went");
+}
+
+#[test]
+fn the_whole_body_selection_reports_its_count_without_listing_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    select_every_shown_body(&mut s);
+    let got = run(&mut s, "selection.get", json!({}));
+    assert_eq!(got["count"], json!(2), "{got}");
+    assert_eq!(got["all_bodies"], json!(true), "{got}");
+    assert_eq!(got["items"], json!([]), "a scope names no items");
+}
+
+#[test]
+fn a_whole_body_selection_ends_with_undo_and_waits_in_a_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    select_every_shown_body(&mut s);
+    // Undo clears the selection, the scope with it, as it clears a list.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!s.has_selection(), "undo ends the scope");
+    assert!(!s.selection_all_bodies);
+    select_every_shown_body(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    // In a sketch the bodies are not what Delete or the menus act on.
+    assert!(!s.has_selection(), "an open sketch sets the body scope aside");
+    assert_eq!(s.selected_items().unwrap(), Vec::<Sel>::new());
+}
+
+#[test]
+fn adding_to_a_whole_body_selection_keeps_it_and_a_refused_pick_changes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    select_every_shown_body(&mut s);
+    // A Shift+click on a shown body adds nothing new: the scope stays, still unlisted.
+    let added = run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "Spare"}], "add": true}));
+    assert_eq!(added["selected"], 2, "{added}");
+    assert!(s.all_bodies_selected() && s.selection.is_empty());
+    // Adding something else adds it to the bodies the scope covers.
+    run(&mut s, "select.set", json!({"items": [{"type": "plane", "name": "XY"}], "add": true}));
+    assert!(!s.selection_all_bodies);
+    assert_eq!(s.selection, [Sel::Body { name: "Block".into() }, Sel::Body { name: "Spare".into() }, Sel::Plane { name: "XY".into() }]);
+    // A select that is refused leaves the selection as it was.
+    select_every_shown_body(&mut s);
+    assert!(s.execute("select.set", &json!({"items": [{"type": "body", "name": "Missing"}]})).is_err());
+    assert!(s.all_bodies_selected(), "a refused select keeps the scope");
+}
+
+#[test]
+fn inverting_a_whole_body_selection_leaves_nothing_selected() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    select_every_shown_body(&mut s);
+    assert_eq!(run(&mut s, "select.invert", json!({}))["selected"], 0);
+    assert!(!s.has_selection() && !s.selection_all_bodies, "every shown body was selected");
+}
+
+#[test]
+fn delete_of_all_bodies_takes_the_shown_bodies_whatever_is_selected() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    let first = s.doc.features[0].id;
+    // A feature selected now is not what `all_bodies` names.
+    run(&mut s, "select.set", json!({"items": [{"type": "feature", "id": first}]}));
+    let done = run(&mut s, "selection.delete", json!({"all_bodies": true}));
+    assert_eq!(done["bodies"], json!(["Block", "Spare"]), "{done}");
+    assert_eq!(s.doc.features.iter().filter(|f| f.id == first).count(), 1, "the selected feature stays");
+}
+
+#[test]
+fn delete_of_a_whole_body_selection_keeps_locked_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    s.visibility.locked_bodies.push("Spare".into());
+    select_every_shown_body(&mut s);
+    let done = run(&mut s, "selection.delete", json!({"all_bodies": true}));
+    assert_eq!(done["bodies"], json!(["Block"]), "{done}");
+    let left: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(left, ["Spare"], "a locked body stays, as it does when the selection names it");
+    assert!(!s.has_selection());
+}
+
+#[test]
+fn construction_points_report_their_position() {
+    let mut s = Session::default();
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [15, 6, 7]}, "name": "Pin"}));
+    run(&mut s, "select.set", json!({"items": [{"type": "construction_point", "name": "Pin"}]}));
+    let r = run(&mut s, "selection.get", json!({}));
+    let it = &r["items"][0];
+    assert_eq!(it["kind"], "construction_point", "{it}");
+    assert_eq!(it["name"], "Pin", "{it}");
+    assert!(close3(&it["position"], [15.0, 6.0, 7.0]), "{it}");
+}
+
+#[test]
+fn assembly_bodies_report_their_component_and_placement() {
+    let mut s = Session::default();
+    let created = run(&mut s, "component.create", json!({"name": "Part"}));
+    let component = created["component"].as_u64().unwrap();
+    let first = created["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 2, "width": 3, "height": 4, "body_name": "Block", "operation": "new"}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first}))["occurrence"].as_u64().unwrap();
+    let name = s.occurrence_placement(&[second]).unwrap().bodies[0].world.clone();
+    run(&mut s, "select.set", json!({"items": [{"type": "body", "name": name}, {"type": "occurrence", "path": [second]}]}));
+    let r = run(&mut s, "selection.get", json!({}));
+    let b = &r["items"][0];
+    assert_eq!(b["component"]["id"], component, "{b}");
+    assert_eq!(b["component"]["name"], "Part", "{b}");
+    assert_eq!(b["occurrence_path"], json!([second]), "{b}");
+    assert_eq!(b["source_body"], "Block", "{b}");
+    let o = &r["items"][1];
+    assert_eq!(o["kind"], "occurrence");
+    assert_eq!(o["component"]["id"], component, "{o}");
+    assert_eq!(o["bodies"], json!([name]), "{o}");
+}
+
+#[test]
+fn hostile_params_and_stale_selections_never_fail_badly() {
+    let mut s = Session::default();
+    let body = holed_box(&mut s);
+    // `select.set` refuses a body that isn't there (#9737), so `selection.get` never sees one.
+    let e = s.execute("select.set", &json!({"items": [{"type": "edge", "body": "nope", "index": 0, "point": [0, 0, 0]}]}));
+    assert!(matches!(e, Err(EngineError::BadParams { .. })), "{e:?}");
+    // Items that point at nothing still come back, by identity.
+    let stale = json!([
+        {"type": "face", "body": body, "index": 999_999, "point": [1e300, -1e300, 0]},
+        {"type": "edge", "body": body, "index": usize::MAX, "point": [0, 0, 0]},
+        {"type": "vertex", "body": body, "point": [0, 0, 0]},
+        {"type": "feature", "id": u64::MAX},
+        {"type": "sketch_curve", "id": "zz"},
+        {"type": "sketch_point", "id": "99999999999999999999999:p"},
+        {"type": "sketch_constraint", "id": ""},
+        {"type": "profile", "sketch": 12345, "index": 3},
+        {"type": "plane", "name": "XY"},
+        {"type": "axis", "name": "Q"},
+    ]);
+    run(&mut s, "select.set", json!({ "items": stale }));
+    let r = run(&mut s, "selection.get", json!({}));
+    assert_eq!(r["count"], 10, "{r}");
+    for v in [json!(1), json!("yes"), json!([true]), json!({"a": 1})] {
+        let e = s.execute("selection.get", &json!({ "detail": v })).unwrap_err();
+        assert!(matches!(e, EngineError::BadParams { .. }), "{e}");
+    }
+    for v in [json!(null), json!([]), json!("x"), json!(f64::MAX), json!({"detail": null})] {
+        assert!(s.execute("selection.get", &v).is_ok(), "{v}");
+    }
+}
+
+/// A feature's or a folder's name is 1…128 characters, as the refusal says, not 128 bytes of its
+/// UTF-8: a hundred `ł` (200 bytes) is taken, 129 characters are not.
+#[test]
+fn feature_and_folder_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    let base = s.doc.find_feature("Base").unwrap().id;
+    let group = run(&mut s, "timeline.group", json!({"name": "Housing", "features": [base]}))["group"].as_u64().unwrap();
+    let long = "ł".repeat(100);
+    run(&mut s, "timeline.rename", json!({"feature": base, "name": long}));
+    assert_eq!(s.doc.features.iter().find(|f| f.id == base).map(|f| f.name.as_str()), Some(long.as_str()));
+    run(&mut s, "timeline.rename_group", json!({"group": group, "name": long}));
+    assert_eq!(s.doc.timeline_groups[0].name, long);
+    let too_long = "ł".repeat(129);
+    for (command, params) in
+        [("timeline.rename", json!({"feature": base, "name": too_long})), ("timeline.rename_group", json!({"group": group, "name": too_long}))]
+    {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("1…128 characters"), "{command}: {error}");
+    }
+    // A new folder is given such a name too.
+    let made = run(&mut s, "timeline.group", json!({"name": too_long.chars().skip(1).collect::<String>()}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups.iter().find(|g| g.id == made).map(|g| g.name.chars().count()), Some(128));
+    // A design with such names is saved and opens again.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).map_err(|e| e.to_string());
+    assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
+}
+
+/// #19632: `solid.hole` takes length expressions as `position`, but the stored hole keeps them in
+/// `at` and `position` is the evaluated point, so editing `position` with an expression failed
+/// with "expected f64". The edit takes it as the creation command does and the hole follows it.
+#[test]
+fn a_hole_position_edited_with_an_expression_follows_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "p", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.hole", json!({"position": ["p", "20", "10"], "diameter": "6 mm", "name": "H"}));
+    let reply = run(&mut s, "timeline.edit", json!({"feature": "H", "set": {"position": ["p + 10 mm", "20", "10"]}}));
+    assert_eq!(reply["recomputed"].as_u64(), Some(1), "{reply}");
+    let hole = serde_json::to_value(s.doc.find_feature("H").unwrap()).unwrap();
+    assert_eq!(hole["at"][0], "p + 10 mm", "the expression is stored in `at`: {hole}");
+    assert_eq!(hole["position"][0], 20.0, "`position` keeps the point the hole was made at: {hole}");
+    let id = s.doc.find_feature("H").unwrap().id;
+    assert_eq!(s.model.result(id).and_then(|r| r.error.clone()), None, "the hole rebuilds");
+}
+
+/// `select.mode` (#4255) names every selection mode and gives it back; anything else is refused.
+/// A window setting: the design, its history and the selection are untouched.
+#[test]
+fn select_mode_takes_each_mode_and_leaves_the_design_alone() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "Body1"}]}));
+    let (doc, undo, selection) = (s.doc.to_json(), s.undo.len(), s.selection.clone());
+    for mode in crate::PickMode::ALL {
+        let name = serde_json::to_value(mode).unwrap();
+        assert_eq!(run(&mut s, "select.mode", json!({"mode": name})), json!({"mode": name}));
+    }
+    for p in [json!({}), json!({"mode": "edges"}), json!({"mode": 1}), json!({"mode": null}), json!({"mode": "Bodies"})] {
+        assert!(s.execute("select.mode", &p).is_err(), "{p}");
+    }
+    assert_eq!((s.doc.to_json(), s.undo.len(), s.selection.clone()), (doc, undo, selection));
+}
+
+/// A body's faces, edges, vertices and volume, as Remove History must keep them.
+fn body_shape(s: &Session, body: &str) -> (usize, usize, usize, f64) {
+    let state = s.model.state();
+    let b = state.body(body).unwrap_or_else(|| panic!("no body {body}"));
+    let volume = solidcraft_kernel::measure(&b.body).unwrap().volume;
+    (b.body.face_count(), b.body.edge_count(), b.body.vertex_count(), volume)
+}
+
+fn same_body_shape(a: (usize, usize, usize, f64), b: (usize, usize, usize, f64)) {
+    assert_eq!((a.0, a.1, a.2), (b.0, b.1, b.2), "faces, edges and vertices");
+    assert!((a.3 - b.3).abs() <= 1e-6 * a.3.abs().max(1.0), "volume {} -> {}", a.3, b.3);
+}
+
+/// Remove History (#18698): a body built by several features becomes one base feature holding the
+/// same B-rep; undo brings the history back and redo takes it away again.
+#[test]
+fn remove_history_freezes_a_body_built_by_several_features_and_undoes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10, "name": "Base Box"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 20, "operation": "join", "name": "Tower"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1, "name": "Round"}));
+    // A 10 mm cube with a 5 x 5 x 10 tower on it, less the fillet's corner along one 10 mm edge.
+    let corner = (1.0 - std::f64::consts::PI / 4.0) * 10.0;
+    let before = body_shape(&s, "Block");
+    assert!((before.3 - (1250.0 - corner)).abs() < 1e-6, "{before:?}");
+    let history = s.doc.features.clone();
+
+    let out = run(&mut s, "body.remove_history", json!({"body": "Block"}));
+    assert_eq!(out["removed"], json!(["Base Box", "Tower", "Round"]), "{out}");
+    assert_eq!(out["kept"], json!([]), "{out}");
+    assert_eq!(out["broken"], json!([]), "{out}");
+    assert!(out.get("remove").is_none(), "nothing kept builds the body: no Remove feature: {out}");
+    assert_eq!(feature_names(&s), ["Block Base"]);
+    assert!(matches!(s.doc.features[0].kind, solidcraft_doc::FeatureKind::Import { .. }));
+    same_body_shape(before, body_shape(&s, "Block"));
+    assert_eq!(out["faces"], before.0);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    // Edited directly afterwards, as an imported body is.
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 5, 0]], "radius": 1, "body": "Block"}));
+    assert!(body_shape(&s, "Block").3 < before.3);
+    run(&mut s, "edit.undo", json!({}));
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features, history, "one undo step brings the history back");
+    same_body_shape(before, body_shape(&s, "Block"));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(feature_names(&s), ["Block Base"]);
+    same_body_shape(before, body_shape(&s, "Block"));
+
+    // Nothing left to remove, and bad bodies, are refused without changing the design.
+    let doc = s.doc.clone();
+    for p in [json!({"body": "Block"}), json!({"body": "Nope"}), json!({"body": ""}), json!({}), json!({"body": 3})] {
+        assert!(s.execute("body.remove_history", &p).is_err(), "{p}");
+        assert_eq!(s.doc, doc, "{p}");
+    }
+}
+
+/// A feature that also builds another body stays, with this body's features before it, and the
+/// other body keeps its history and its shape; the base replaces the body after a Remove.
+#[test]
+fn remove_history_keeps_a_feature_another_body_shares() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "A", "length": 10, "width": 10, "height": 10, "name": "Box A"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"body_name": "B", "corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "Box B"}),
+    );
+    run(&mut s, "solid.move", json!({"bodies": ["A", "B"], "translate": [0, 0, 5], "name": "Lift"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 15]], "radius": 2, "body": "A", "name": "Round A"}));
+    let (a, b) = (body_shape(&s, "A"), body_shape(&s, "B"));
+
+    let out = run(&mut s, "body.remove_history", json!({"body": "A"}));
+    assert_eq!(out["removed"], json!(["Round A"]), "{out}");
+    assert_eq!(out["kept"], json!(["Box A", "Lift"]), "{out}");
+    assert_eq!(out["broken"], json!([]), "{out}");
+    let remove = out["remove"].as_str().unwrap().to_string();
+    assert_eq!(feature_names(&s), ["Box A", "Box B", "Lift", "Remove A", "A Base"]);
+    assert_eq!(remove, "Remove A");
+    same_body_shape(a, body_shape(&s, "A"));
+    same_body_shape(b, body_shape(&s, "B"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    // One undo step brings A's fillet back.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(feature_names(&s), ["Box A", "Box B", "Lift", "Round A"]);
+    run(&mut s, "edit.redo", json!({}));
+
+    // With the last feature that built A also moving B, nothing of A's can go: refused, unchanged.
+    let mut t = Session::default();
+    run(&mut t, "solid.box", json!({"body_name": "A", "length": 10, "width": 10, "height": 10}));
+    run(&mut t, "solid.box", json!({"body_name": "B", "corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new_body"}));
+    run(&mut t, "solid.move", json!({"bodies": ["A", "B"], "translate": [0, 0, 5]}));
+    let doc = t.doc.clone();
+    let err = t.execute("body.remove_history", &json!({"body": "A"})).unwrap_err().to_string();
+    assert!(err.contains("nothing to remove"), "{err}");
+    assert_eq!(t.doc, doc);
+}
+
+/// The base feature's B-rep is saved inside the design as a binary part, not text in its JSON,
+/// and reopens as the same body with references to its faces still found.
+#[test]
+fn remove_history_saves_and_reopens_the_same_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1}));
+    run(&mut s, "solid.box", json!({"body_name": "Other", "corner": [30, 0, 0], "length": 4, "width": 4, "height": 4, "operation": "new_body"}));
+    let before = body_shape(&s, "Block");
+    run(&mut s, "body.remove_history", json!({"body": "Block"}));
+    let bytes = solidcraft_io::write_design_container(&s.doc).unwrap();
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+    let parts: Vec<String> = archive.file_names().map(|name| name.unwrap().to_string()).collect();
+    assert!(parts.iter().any(|n| n.starts_with("blobs/") && n.ends_with(".step")), "{parts:?}");
+    let mut reopened = Session::new(solidcraft_io::read_design(&bytes).unwrap());
+    reopened.refresh();
+    same_body_shape(before, body_shape(&reopened, "Block"));
+    assert_eq!(feature_names(&reopened), feature_names(&s));
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+}
+
+/// A design saved in an older format still opens, and Remove History works on it.
+#[test]
+fn remove_history_on_an_older_format_design() {
+    let bytes = include_bytes!("../tests/fixtures/cubeish-chamfer-too-large.sc");
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes[..])).unwrap();
+    let mut saved = String::new();
+    std::io::Read::read_to_string(&mut archive.by_name("document.json").unwrap(), &mut saved).unwrap();
+    assert!(saved.contains("\"format\":\"solidcraft/19\""), "the fixture is a format-19 design");
+    let doc = solidcraft_io::read_design(bytes).unwrap();
+    let mut s = Session::new(doc);
+    s.refresh();
+    let failing_before: Vec<String> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.name.clone()).collect();
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).expect("a body");
+    let before = body_shape(&s, &body);
+    let out = run(&mut s, "body.remove_history", json!({"body": body}));
+    assert_eq!(out["broken"], json!([]), "{out}");
+    same_body_shape(before, body_shape(&s, &body));
+    let failing_after: Vec<String> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.name.clone()).collect();
+    assert!(failing_after.iter().all(|f| failing_before.contains(f)), "{failing_before:?} -> {failing_after:?}");
+}
+
+/// A sketch on the body's face that builds another body stays, and still finds its face on the
+/// base feature; a face's appearance moves to the same face.
+#[test]
+fn remove_history_keeps_references_to_the_body_faces() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 0]], "radius": 1, "name": "Round"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 10]}, "name": "On Top"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [4, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"profiles": [{"point": [3, 3]}], "distance": 5, "operation": "new_body", "body_name": "Peg", "name": "Peg Pad"}),
+    );
+    run(&mut s, "appearance.assign", json!({"faces": [[5, 5, 10]], "color": "#ff0000"}));
+    let (block, peg) = (body_shape(&s, "Block"), body_shape(&s, "Peg"));
+    assert!((peg.3 - 20.0).abs() < 1e-6, "{peg:?}");
+    let sketch_before = serde_json::to_value(s.doc.find_feature("On Top").unwrap()).unwrap();
+
+    let out = run(&mut s, "body.remove_history", json!({"body": "Block"}));
+    assert_eq!(out["broken"], json!([]), "{out}");
+    assert_eq!(out["removed"].as_array().map(Vec::len), Some(2), "the box and the fillet: {out}");
+    assert_eq!(out["removed"][1], "Round", "{out}");
+    assert!(s.doc.find_feature("On Top").is_some() && s.doc.find_feature("Peg Pad").is_some(), "Peg's features stay");
+    assert_ne!(serde_json::to_value(s.doc.find_feature("On Top").unwrap()).unwrap(), sketch_before, "the sketch's face moved to the base");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().filter_map(|r| r.error.clone()).collect::<Vec<_>>());
+    same_body_shape(block, body_shape(&s, "Block"));
+    same_body_shape(peg, body_shape(&s, "Peg"));
+    let state = s.model.state();
+    let names = solidcraft_doc::naming::face_names(state.body("Block").unwrap());
+    let painted = s.doc.appearances.faces.iter().find(|f| f.body == "Block").and_then(|f| f.name.clone()).expect("the face keeps its appearance");
+    assert!(names.contains(&painted), "{painted} is a face of the base: {names:?}");
+}
+
+/// A sketch on the body's face that comes before the body's last features keeps the features
+/// before it, which made its face: only the features after it go, and the sketch still builds the
+/// other body.
+#[test]
+fn remove_history_keeps_what_a_sketch_on_the_body_needs() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10, "name": "Block Box"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 10]}, "name": "On Top"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [4, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"profiles": [{"point": [3, 3]}], "distance": 5, "operation": "new_body", "body_name": "Peg", "name": "Peg Pad"}),
+    );
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 0]], "radius": 1, "body": "Block", "name": "Round"}));
+    let (block, peg) = (body_shape(&s, "Block"), body_shape(&s, "Peg"));
+
+    let out = run(&mut s, "body.remove_history", json!({"body": "Block"}));
+    assert_eq!(out["removed"], json!(["Round"]), "{out}");
+    assert_eq!(out["kept"], json!(["Block Box"]), "{out}");
+    assert_eq!(out["broken"], json!([]), "{out}");
+    assert_eq!(feature_names(&s), ["Block Box", "On Top", "Peg Pad", "Remove Block", "Block Base"]);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    same_body_shape(block, body_shape(&s, "Block"));
+    same_body_shape(peg, body_shape(&s, "Peg"));
 }

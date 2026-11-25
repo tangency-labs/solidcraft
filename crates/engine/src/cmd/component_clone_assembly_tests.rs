@@ -6,7 +6,24 @@ use solidcraft_doc::motion::{ContactSet, ExplodedView, MotionStudy, StudyKey};
 use solidcraft_doc::{IDENTITY, Occurrence};
 
 fn at(occurrence: u64) -> JointOrigin {
-    JointOrigin { occurrence, snap: Snap::Point { point: Vec3::ZERO, z: None, x: None } }
+    JointOrigin::new(occurrence, Snap::Point { point: Vec3::ZERO, z: None, x: None })
+}
+
+#[test]
+fn secondary_construction_axis_clone_remaps_the_feature_identity() {
+    let source = JointOrigin::new(
+        1,
+        Snap::Plane {
+            plane: Box::new(solidcraft_doc::PlaneRef::Origin { name: "XY".into() }),
+            pick: None,
+            x: Some(serde_json::from_value(serde_json::json!({"reference": {"type": "construction", "feature": 17}})).unwrap()),
+        },
+    );
+    let doc = Document::default();
+    let copied = origin(&source, &BTreeMap::from([(1, 101)]), &BTreeMap::from([(17, 117)]), &BTreeMap::new(), &doc).unwrap();
+    let wire = serde_json::to_value(&copied).unwrap();
+    assert_eq!(wire["snap"]["x"]["reference"]["feature"], 117);
+    assert!(origin(&source, &BTreeMap::from([(1, 101)]), &BTreeMap::new(), &BTreeMap::new(), &doc).is_none());
 }
 
 fn joint(id: u64, a: u64, b: u64) -> Joint {
@@ -23,11 +40,24 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         angle: 0.1,
         suppressed: false,
         exprs: Default::default(),
+        offset_xy: [3.0, -4.0],
+        captured: None,
+        constraint: None,
+        dynamics: Vec::new(),
     }
 }
 
 fn occurrence(id: u64) -> Occurrence {
-    Occurrence { id, component: id, parent: 0, name: format!("Occurrence{id}"), transform: IDENTITY, grounded: false }
+    Occurrence {
+        id,
+        component: id,
+        parent: 0,
+        name: format!("Occurrence{id}"),
+        transform: IDENTITY,
+        grounded: false,
+        expressed_moves: Vec::new(),
+        bom_type: None,
+    }
 }
 
 fn documents() -> (Document, Document) {
@@ -36,20 +66,22 @@ fn documents() -> (Document, Document) {
     source.assembly.origins = vec![
         NamedOrigin {
             name: "Typed origin".into(),
-            origin: JointOrigin {
-                occurrence: 1,
-                snap: Snap::FaceCenter {
+            origin: JointOrigin::new(
+                1,
+                Snap::FaceCenter {
                     pick: Vec3::new(1.0, 2.0, 3.0),
                     face: Some("F1:start@F10.2".into()),
                     x: Some(XRef::Face { face: "F10:side".into(), pick: None }),
                 },
-            },
+            ),
+            export_frame: false,
         },
         NamedOrigin {
             name: "Foreign geometry".into(),
-            origin: JointOrigin { occurrence: 1, snap: Snap::CircleCenter { pick: Vec3::ZERO, face: Some("F99:end".into()), end: None, x: None } },
+            origin: JointOrigin::new(1, Snap::CircleCenter { pick: Vec3::ZERO, face: Some("F99:end".into()), end: None, x: None }),
+            export_frame: false,
         },
-        NamedOrigin { name: "Outside".into(), origin: at(9) },
+        NamedOrigin { name: "Outside".into(), origin: at(9), export_frame: false },
     ];
     source.assembly.links = vec![
         MotionLink { a: 1, ia: 0, b: 2, ib: 0, ratio: -2.0, offset: 0.3, coupling: None, lift: Vec::new() },
@@ -74,6 +106,46 @@ fn documents() -> (Document, Document) {
 }
 
 #[test]
+fn secondary_alignment_hole_axis_clone_remaps_cylinder_face_and_occurrence() {
+    use solidcraft_doc::joints::AlignmentRef;
+    let (mut source, mut destination) = documents();
+    source.assembly.joints[0].a.snap = Snap::FaceCenter {
+        pick: Vec3::ZERO,
+        face: Some("F1:top".into()),
+        x: Some(XRef::Reference { reference: AlignmentRef::Cylinder { name: "F10:bore:side:0".into() }, reverse: true }),
+    };
+    clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+        .unwrap();
+    let a = &destination.assembly.joints[4].a;
+    assert_eq!(a.occurrence, 101);
+    assert!(
+        matches!(&a.snap,Snap::FaceCenter{x:Some(XRef::Reference{reference:AlignmentRef::Cylinder{name},reverse:true}),..} if name=="F110:bore:side:0")
+    );
+}
+
+#[test]
+fn secondary_alignment_circle_center_clone_remaps_both_rim_identities() {
+    use solidcraft_doc::joints::AlignmentRef;
+    let (mut source, mut destination) = documents();
+    source.assembly.joints[0].a.snap = Snap::FaceCenter {
+        pick: Vec3::ZERO,
+        face: Some("F1:top".into()),
+        x: Some(XRef::Reference {
+            reference: serde_json::from_value::<AlignmentRef>(serde_json::json!({"type":"circle_center","name":"F10:bore:side:0","end":"F1:top"}))
+                .unwrap(),
+            reverse: true,
+        }),
+    };
+    clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+        .unwrap();
+    let a = &destination.assembly.joints[4].a;
+    assert_eq!(a.occurrence, 101);
+    assert!(
+        matches!(&a.snap,Snap::FaceCenter{x:Some(XRef::Reference{reference:AlignmentRef::CircleCenter(rim),reverse:true}),..} if rim.name=="F110:bore:side:0" && rim.end=="F11:top")
+    );
+}
+
+#[test]
 fn internal_relationships_receive_independent_ids_and_remapped_typed_references() {
     let (source, mut destination) = documents();
     destination.next_id = 1000;
@@ -86,6 +158,7 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
     assert_eq!((a.joints[4].a.occurrence, a.joints[4].b.occurrence), (101, 102));
     assert_eq!(a.joints[4].values, source.assembly.joints[0].values);
     assert_eq!(a.joints[4].limits, source.assembly.joints[0].limits);
+    assert_eq!(a.joints[4].offset_xy, source.assembly.joints[0].offset_xy);
     assert_eq!(a.joints[4].name, "Joint1 (2)");
     assert_eq!(a.origins.len(), 4);
     // Its x reference's face is the copy's too.
@@ -110,16 +183,40 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
     assert_eq!(source.assembly.joints[0].values[0], 0.25);
 }
 
+#[test]
+fn secondary_alignment_copy_remaps_face_names_and_keeps_independent_inversion() {
+    let (mut source, mut destination) = documents();
+    source.assembly.joints[0].a.snap =
+        Snap::FaceCenter { pick: Vec3::ZERO, face: Some("F1:top".into()), x: Some(XRef::Planar { planar_face: "F10:side".into(), reverse: true }) };
+    clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+        .unwrap();
+    assert!(matches!(&destination.assembly.joints[4].a.snap,
+        Snap::FaceCenter { face: Some(face), x: Some(XRef::Planar { planar_face, reverse: true }), .. }
+        if face=="F11:top" && planar_face=="F110:side"));
+    assert_eq!(source.assembly.joints[0].a.snap.face_names(), [&"F1:top".to_string(), &"F10:side".to_string()]);
+}
+
+#[test]
+fn secondary_alignment_feedback_copy_remaps_construction_and_sketch_author_features() {
+    use solidcraft_doc::joints::AlignmentRef;
+    for reference in [AlignmentRef::Construction { feature: 10 }, AlignmentRef::SketchLine { sketch: 10, curve: "l1".into() }] {
+        let (mut source, mut destination) = documents();
+        source.assembly.joints[0].a.snap =
+            Snap::FaceCenter { pick: Vec3::ZERO, face: Some("F1:top".into()), x: Some(XRef::Reference { reference, reverse: true }) };
+        clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+            .unwrap();
+        let Snap::FaceCenter { x: Some(XRef::Reference { reference, reverse: true }), .. } = &destination.assembly.joints[4].a.snap else { panic!() };
+        assert!(matches!(reference, AlignmentRef::Construction { feature: 110 } | AlignmentRef::SketchLine { sketch: 110, .. }));
+    }
+}
+
 /// A gear's picked round face is on the copy's occurrence and face; one picked on geometry the
 /// copy doesn't have is reported, not pointed back at the original.
 #[test]
 fn copied_gears_take_their_picked_faces_along() {
     let (mut source, _) = documents();
     let circle = |face: &str| {
-        Size::Circle(JointOrigin {
-            occurrence: 1,
-            snap: Snap::CircleCenter { pick: Vec3::X, face: Some(face.into()), end: Some("F1:top".into()), x: None },
-        })
+        Size::Circle(JointOrigin::new(1, Snap::CircleCenter { pick: Vec3::X, face: Some(face.into()), end: Some("F1:top".into()), x: None }))
     };
     let gear = |ra| Coupling::Gear { ra, rb: Size::Length(5.0), internal: false, reverse: false };
     source.assembly.links = vec![
@@ -145,7 +242,7 @@ fn copied_gears_take_their_picked_faces_along() {
 fn naming_remaps_exact_tokens_unicode_and_legacy_body_identity() {
     let features = BTreeMap::from([(1, 21), (10, 30)]);
     let bodies = BTreeMap::from([("Wheel: inner".into(), "Wheel copy: inner".into())]);
-    assert_eq!(face_name("F1:blend:F10:start@F1.3", &features, &bodies).as_deref(), Some("F21:blend:F30:start@F21.3"));
+    assert_eq!(face_name("F1:blend:F10:start@F1.3", &features, &bodies).as_deref(), Some("F21:blend(F30:start@F21.3)"));
     assert_eq!(face_name("F1:side:曲線F10", &features, &bodies).as_deref(), Some("F21:side:曲線F10"));
     assert_eq!(face_name("F1:side:F100.7", &features, &bodies).as_deref(), Some("F21:side:F100.7"));
     assert_eq!(face_name("Wheel: inner:face:7", &features, &bodies).as_deref(), Some("Wheel copy: inner:face:7"));
@@ -248,16 +345,17 @@ fn an_edge_origin_is_copied_onto_the_copys_edges() {
     let mut source = source;
     source.assembly.origins = vec![NamedOrigin {
         name: "Corner".into(),
-        origin: JointOrigin {
-            occurrence: 1,
-            snap: Snap::Edge {
+        origin: JointOrigin::new(
+            1,
+            Snap::Edge {
                 pick: Vec3::new(1.0, 2.0, 3.0),
                 edge: edge("F1:top|F1:side"),
                 face: edge("F1:top"),
                 corner: edge("F1:top|F10:end"),
                 axis: None,
             },
-        },
+        ),
+        export_frame: false,
     }];
     destination.assembly.origins.clear();
     clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())

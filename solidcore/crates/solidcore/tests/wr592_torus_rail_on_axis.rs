@@ -2,8 +2,8 @@
 //! round's end arc of the ball's own radius is a torus whose rail on the end face
 //! collapses onto the arc's axis. With a sketch's residues (a bar profile whose corners
 //! are 1e-10 off) that rail point came out 7e-11 off the axis and the surface of
-//! revolution was nearly singular, not exactly. `fixes.fillet_torus_rail_on_axis` puts a
-//! rail point within the tolerance of the axis on the axis. The case follows the fork's
+//! revolution was nearly singular, not exactly. The solver puts a rail point within the
+//! tolerance of the axis on the axis. The case follows the fork's
 //! capi test `corner_ball_after_a_round_is_exactly_singular`: a bar's front top edge
 //! rounded r 2, then its vertical front left edge, its left top edge and the first
 //! round's end arc rounded r 2 together.
@@ -132,9 +132,8 @@ fn collapsed_rail_extent(k: &Kernel, b: &Brep) -> f64 {
 }
 
 /// The corner round's collapsed rail extent, the volume it removes and its check report.
-fn corner_round(fix: bool) -> (f64, f64, Vec<String>) {
+fn corner_round() -> (f64, f64, Vec<String>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_torus_rail_on_axis = fix;
     let mut b = bar(&mut k);
     let front_top = nearest_edge(&k, &b, Point3::new(20.0, 0.0579, 10.0));
     fillet_edges(&mut k, &mut b, &[front_top], 2.0, 1, 1, 1.0).unwrap();
@@ -171,8 +170,8 @@ fn removed() -> f64 {
 }
 
 #[test]
-fn corner_round_rail_is_on_the_axis_with_the_fix() {
-    let (extent, removed_volume, report) = corner_round(true);
+fn corner_round_rail_is_on_the_axis() {
+    let (extent, removed_volume, report) = corner_round();
     assert!(extent < 1e-13, "collapsed rail extent {extent:e}");
     // 20.979356723289 (pinned SMLib with the fork's hunk: the same)
     assert!(
@@ -183,29 +182,4 @@ fn corner_round_rail_is_on_the_axis_with_the_fix() {
     // the loop gap is gone, and the swap keeps the surface of revolution's polar circle
     // (WR-701): no #7
     assert_eq!(report, Vec::<String>::new());
-}
-
-#[test]
-fn corner_round_rail_stays_off_the_axis_without_the_fix() {
-    // upstream: the rail point keeps the residues, a circle about 1e-10 across
-    let (extent, removed_volume, report) = corner_round(false);
-    assert!(
-        extent > 1e-11 && extent < 1e-9,
-        "collapsed rail extent {extent:e}"
-    );
-    // 20.979356723547 (the pinned SMLib: the same)
-    assert!(
-        near_removed(removed_volume),
-        "{removed_volume} {}",
-        removed()
-    );
-    // upstream: the nearly collapsed rail is a loop gap not on a singularity, which
-    // stops the check before AssertValid (whose SmSurface #5 is the fork's "before")
-    assert_eq!(
-        report,
-        [
-            "SmTrimmingTools::Test #2 UVEdge/UVEdge Gap: too large V Dir gap between loop Edge endPoints that are not on a singularity (offset=     1, tolerance=   0.1) [owner SmLoop]",
-            "AssertValid skipped: ValidatePointers failed",
-        ]
-    );
 }

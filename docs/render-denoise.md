@@ -51,7 +51,9 @@ immediate neighbors agree with its geometry and material guides and every
 supporting neighbor is much dimmer. The suppression scales RGB together to
 retain its hue. A bright neighbor on the same surface can preserve a thin
 highlight. This display heuristic can still attenuate a genuine unresolved
-glint, so keep the raw EXR for radiometry.
+glint, so keep the raw EXR for radiometry. Speckle the filter leaves on smooth
+metal can be limited with the separate, biased
+[indirect clamp](render-path.md#clamping-indirect-light).
 
 Guide generation and diagnostic eligibility are independent of the optical-filter
 preference. Turning it off bypasses filtering of Optical pixels; their diagnostic

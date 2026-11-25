@@ -595,8 +595,9 @@ fn rescale(t: &mut Vec3, fac: f64) -> Result<()> {
 /// # Errors
 ///
 /// [`NurbsFailure::Input`] for a given knot vector whose knots are all equal, `p < 2`,
-/// `per` outside `[0, 1]`, `u` not spanning a given knot vector, or `p > k + 1`
-/// with one tangent; [`NurbsFailure::Knots`] for an invalid given knot vector;
+/// `per` outside `[0, 1]`, `u` not spanning a given knot vector, `p > k + 1` with
+/// one tangent, or a fit with fewer control points than `p + 1` (`p > k` without
+/// tangents); [`NurbsFailure::Knots`] for an invalid given knot vector;
 /// `NL_GEO_ERR` for a tangent that cannot be normalised; errors of
 /// [`interp_given_params`], [`interp_knots_and_deriv`] and
 /// [`interp_knots_and_derivs`]; `InvalidInput` for empty `a`, too few parameters, a
@@ -639,7 +640,7 @@ pub fn interp_knots_and_tangents(
     if pu > MAX_DEGREE {
         return Err(SolidError::InvalidInput {
             operation: OP,
-            reason: "degree above NL_MAXDEG (upstream scratch array size)",
+            reason: "degree above the largest degree the NURBS routines handle",
         });
     }
     if per < 0.0 || per > 1.0 {
@@ -777,6 +778,12 @@ pub fn interp_knots_and_tangents(
         EndTangents::Both(ts, te) => interp_knots_and_derivs(a, &ul, &kni, pu, **ts, **te)?,
         EndTangents::Same(t) => interp_knots_and_derivs(a, &ul, &kni, pu, **t, **t)?,
     };
+    // A curve of degree p needs p + 1 control points. Without a tangent upstream returns one
+    // with fewer from too few points (`N_FitCalcKnotVector` fills the knots it has room
+    // for), which no reader accepts (WR-16922); refuse it as `N_FitCrvInterp` does.
+    if cur.n() < cur.degree() {
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
+    }
 
     // Update input knot vector.
     match knt.as_deref() {
@@ -1290,6 +1297,36 @@ mod tests {
             r,
             Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
+    }
+
+    #[test]
+    fn knots_and_tangents_refuses_fewer_points_than_the_degree_needs() {
+        // two or three points cannot carry a cubic: the fit used to return two or three
+        // control points of degree 3, a curve the .smb reader refuses
+        let a = pts();
+        for few in [&a[..2], &a[..3]] {
+            let r = interp_knots_and_tangents(
+                few,
+                None,
+                EndTangents::None,
+                VectorKind::Tangent,
+                &mut None,
+                1.0,
+                3,
+            );
+            assert!(r.is_err(), "{} points: {r:?}", few.len());
+        }
+        let c = interp_knots_and_tangents(
+            &a[..3],
+            None,
+            EndTangents::None,
+            VectorKind::Tangent,
+            &mut None,
+            1.0,
+            2,
+        )
+        .unwrap();
+        assert_eq!((c.n(), c.degree(), c.m()), (2, 2, 5));
     }
 
     #[test]

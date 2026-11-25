@@ -32,6 +32,8 @@ pub(super) struct View {
     pub export_denoise_mask: bool,
     pub tone_map: ToneMap,
     pub denoise: bool,
+    /// Kept from a loaded setup so saving it again keeps it; the workspace has no control for it yet.
+    pub clamp_indirect: Option<f64>,
     pub denoise_settings: solidcraft_engine::render::job::DenoiseSettings,
     pub denoise_diagnostics: bool,
     pub supersampling: u32,
@@ -71,6 +73,7 @@ impl Default for View {
             export_denoise_mask: false,
             tone_map: ToneMap::Reinhard,
             denoise: false,
+            clamp_indirect: None,
             denoise_settings: Default::default(),
             denoise_diagnostics: false,
             supersampling: 1,
@@ -109,6 +112,9 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     let view = &app.render_workspace.view.studio;
     params["tone_map"] = json!(view.tone_map);
     params["denoise"] = json!(view.denoise);
+    if let Some(limit) = view.clamp_indirect {
+        params["clamp_indirect"] = json!(limit);
+    }
     params["denoise_settings"] = json!(view.denoise_settings);
     params["denoise_diagnostics"] = json!(view.denoise_diagnostics);
     params["supersampling"] = json!(view.supersampling);

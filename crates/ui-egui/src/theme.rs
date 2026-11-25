@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 
 use egui::Color32;
 use serde::{Deserialize, Serialize};
-use solidcraft_theme::{
-    AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
-};
+use solidcraft_theme::{AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, set_custom, set_published};
 
 #[derive(Clone)]
 struct PreparedTheme {
@@ -125,10 +123,11 @@ impl TabThemeState {
                 Tokens::themed(environment.dark, environment.vision)
             };
             let accent = crate::workspace::tab_accent(&window, tab);
-            let window = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), vision())) };
+            let own = Tokens::viewport_own(environment.vision);
+            let window = own.map_or(window, |view| window.with_viewport(view));
             let target = TabTarget {
                 tokens: window.with_background(environment.background),
-                view: Tokens::themed(viewport_dark(), vision()).with_background(environment.background),
+                view: own.unwrap_or_else(|| Tokens::themed(environment.dark, environment.vision)).with_background(environment.background),
                 accent,
             };
             self.targets.insert(tab.to_owned(), target);
@@ -168,7 +167,7 @@ impl TabThemeState {
             tokens.protect_tab_panel();
         }
         self.shown = Some(Surfaces::of(tokens));
-        let mut view = if viewport_dark() == is_dark() { tokens } else { target.view };
+        let mut view = if environment.viewport.is_none() { tokens } else { target.view };
         view.viewport_top = tokens.viewport_top;
         view.viewport_bottom = tokens.viewport_bottom;
         let tab_surfaces = self.prepared.as_ref().is_some_and(|p| p.enabled && !p.file.tabs.is_empty());
@@ -207,7 +206,7 @@ pub(crate) fn scoped_file(file: &crate::theme_files::ThemeFile) -> impl Drop {
     let restore = Restore(solidcraft_theme::custom(), crate::icon_svg::theme_palette_state());
     let values = BTreeMap::new();
     let tokens = crate::theme_files::resolve_with(file, &values);
-    set_file_palette(Some(FilePalette { dark: is_dark(), tokens, icons: crate::theme_files::resolve_icon_palette(file, &values) }));
+    set_file_palette(Some(FilePalette { dark: solidcraft_theme::is_dark(), tokens, icons: crate::theme_files::resolve_icon_palette(file, &values) }));
     restore
 }
 
@@ -308,7 +307,7 @@ mod tests {
     use solidcraft_theme::{ColorVision, apply, composite, contrast_ratio, set_dark, set_viewport_background, set_viewport_dark, set_vision};
 
     fn tabs_state(base: &str, overrides: BTreeMap<String, crate::theme_files::OptionValue>) -> TabThemeState {
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         let values = crate::theme_files::effective_values(&file, &overrides).0;
         let (enabled, fade_ms) = crate::theme_options::tab_settings(&file, &values);
         let base = FilePalette {
@@ -436,7 +435,7 @@ mod tests {
     fn tabs_cache_invalidates_for_theme_values_vision_and_viewport_overrides() {
         crate::test_support::host_data();
         let ctx = egui::Context::default();
-        let mut file = crate::theme_files::tab_fixture("dark");
+        let mut file = crate::test_support::tab_fixture("dark");
         let normalizations = Cell::new(0);
         let prepare = |file: &crate::theme_files::ThemeFile, raw: Option<&BTreeMap<String, serde_json::Value>>| {
             let custom = prepare_tabs(&ctx, Some(file), raw, || {
@@ -522,6 +521,7 @@ mod tests {
 
     #[test]
     fn built_in_selected_tab_labels_hold_wcag_small_text_contrast() {
+        crate::test_support::host_data();
         let mut themes = vec![("Dark", super::Tokens::dark()), ("Light", super::Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
@@ -558,7 +558,7 @@ mod tests {
         use crate::theme_files::{OptionValue, ThemeFile};
         for base in ["dark", "light"] {
             let ctx = crate::fonts::test_context();
-            let file = crate::theme_files::tab_fixture(base);
+            let file = crate::test_support::tab_fixture(base);
             set_dark(file.base.is_dark());
             set_vision(ColorVision::Off);
             set_viewport_dark(None);

@@ -23,7 +23,10 @@
 
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::round_room::RoundRefusal;
-use crate::error::{Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
+use crate::error::blend::BlendFailure;
+use crate::error::{
+    EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER,
+};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -59,8 +62,10 @@ fn smos_min(a: f64, b: f64) -> f64 {
 
 /// The `SmStatus` the fork's `SER` returns for a failed callee.
 fn status_of(e: &SolidError) -> i32 {
+    if let Some(code) = e.upstream_status() {
+        return code;
+    }
     match e {
-        SolidError::Upstream { code, .. } => *code,
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => SM_ERR,
     }
@@ -81,7 +86,8 @@ fn status_of(e: &SolidError) -> i32 {
 ///
 /// # Errors
 ///
-/// `SM_ERR_NULL_POINTER` for a solver without its first edge use's edge or curve; those
+/// A [`BlendFailure::Defect`] (`SM_ERR_NULL_POINTER`) for a solver without its first edge
+/// use or its edge, [`BlendFailure::EdgeWithoutCurve`] for an edge without its curve; those
 /// of the curve and surface evaluations and the drops.
 pub(crate) fn extend_trace_to_its_rails(
     k: &Kernel,
@@ -94,12 +100,27 @@ pub(crate) fn extend_trace_to_its_rails(
     };
     let offsets = [first.surface.clone(), second.surface.clone()];
     let bases: [&Surface; 2] = [offsets[0].base_surface(), offsets[1].base_surface()];
-    let edgeuse = base
-        .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let null_defect = |why| {
+        Failure::new(OP, BlendFailure::Defect { why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    };
+    let edgeuse = base.edgeuse(0)?.ok_or_else(|| {
+        null_defect(
+            "a round's solver with both offset surfaces has no first edge use: the solver is \
+             set up on the filleted edge's edge uses",
+        )
+    })?;
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| {
+        null_defect(
+            "a round's solver's first edge use has no edge: the solver was set up on that edge \
+             use of the filleted edge",
+        )
+    })?;
     let curve = edge::curve(target, edge_id)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| {
+            SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge_id))
+        })?
         .clone();
     let interval = edge::interval(target, edge_id)?;
 

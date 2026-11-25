@@ -26,7 +26,6 @@
 //! | `impl FilletSolverOps for VariableRadiusFs`              | the `SmVariableRadiusFS` virtuals (`GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`, `GetType`, `IsKindOf`, `GetSolverType`) |
 //! | `impl FilletSolverOps for ConstantDistanceFs`            | the `SmConstantDistanceFS` virtuals (`CanMakeAnalytic`, `GetJacobianSize`, `GetSolverType`, `LoadJacobian`, `LoadInitialValues`, `SetupOffsetValues`, `GetType`, `IsKindOf`) and `GetDistance` |
 //! | [`CircularCrossSectionFsg::create_surface`]              | `SmCircularCrossSectionFSG::CreateSurface`            |
-//! | [`BlendCurveCrossSectionFsg::create_surface`]            | `SmBlendCurveCrossSectionFSG::CreateSurface`          |
 //! | [`SurfaceSurfaceFs::new`]                                | `SmSurfaceSurfaceFS::SmSurfaceSurfaceFS`              |
 //! | [`SurfaceSurfaceFs::calc_fillet_geom`], [`SurfaceSurfaceFs::calc_fillet_start`], [`SurfaceSurfaceStart`] | `SmSurfaceSurfaceFS::CalcFilletGeom` (up to `GetPseudoBrep`; the rest is `surface_surface`'s) |
 //! | [`SurfaceSurfaceFs::is_kind_of`]                         | `SmSurfaceSurfaceFS::IsKindOf`                        |
@@ -105,10 +104,6 @@
 //!   the other base is the edge use's own UV point. Upstream reads an existing curve only and
 //!   otherwise solves globally on the base, which finds a point on a closed surface's seam
 //!   once at each end of the period and refuses the two answers.
-//! - **The drop onto the other offset** (solidcore's): when that offset continues as itself
-//!   (`offset_continues_as_itself`) `LoadInitialValues` drops the rail end onto the face's own
-//!   domain, not the extended one, which holds a second root of the rail-end solve on the far
-//!   side of the whole circle (the solve's interval is the extended one, as upstream's).
 
 use crate::blend::fillet_custom_solver::{
     face_owner, offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
@@ -120,21 +115,24 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_intersector::FilletIntersector;
 use crate::blend::fillet_solver::p1::{
-    FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, OffsetSurfaceSlot,
+    seam_periods, wrap_closed_directions, FilletSolver, FilletSolverOps, FilletSphereSolveEnfo,
+    OffsetSurfaceSlot, SeamDomain,
 };
 use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::blend::fillet_solver::p4::IntersectorSolver;
 use crate::blend::fillet_standard_solver::p1::SolverRails;
 use crate::blend::fillet_standard_solver::p1::{
-    constant_radius_is_kind_of, BlendCurveCrossSectionFsg, BoundaryTrimmingType,
-    CircularCrossSectionFsg, ConstantDistanceFs, ConstantRadiusFs, CurveBasedFs,
-    DistanceInitialValues, FilletLaw, FilletSolverType, JacobianSurfaces, RailSurface,
-    SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_ASSISTED_FS_TYPE, CURVE_BASED_FS_TYPE,
+    constant_radius_is_kind_of, BoundaryTrimmingType, CircularCrossSectionFsg, ConstantDistanceFs,
+    ConstantRadiusFs, CurveBasedFs, DistanceInitialValues, FilletLaw, FilletSolverType,
+    JacobianSurfaces, SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_ASSISTED_FS_TYPE,
+    CURVE_BASED_FS_TYPE, FIRST_PARTIALS,
 };
 use crate::blend::law_corners::{ArcApproximation, LawCornerPieces};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::blend::trace::defect;
+use crate::error::blend::{BlendFailure, FilletSetUp, SolverFailure, TraceFailure};
+use crate::error::{ignored, Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_closest_point;
@@ -151,7 +149,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
-use crate::surface::offset_surface::{offset_continues_as_itself, SS_UNKNOWN};
+use crate::surface::offset_surface::{closed_turn, SS_UNKNOWN};
 use crate::surface::surface::p3::{out_of_bounds_enabled, set_out_of_bounds_enabled};
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as edgeuse;
@@ -208,16 +206,89 @@ fn interval_at<'a>(ivls: &'a mut ExtentNd, i: usize, op: &'static str) -> Result
         .ok_or_else(|| SolidError::invalid_input(op, "rIntervals index out of range"))
 }
 
-/// `if (status != SM_SUCCESS) return SM_ERR;`: a failure becomes `SM_ERR`, but
-/// [`SolidError::Unported`] and [`SolidError::InvalidInput`] (an input upstream reads
-/// out of bounds) are kept.
+/// The variable radius solver's stations on a closed edge (its curve ends where it starts),
+/// their t (`user_doubles[0]`) unwrapped along the loop; `None` where the edge is open or no t
+/// moves. Each station's t is its foot on the edge's curve, and the station that closes the
+/// loop, at the point where the curve both starts and ends, takes the curve's first parameter
+/// rather than its last: sorted by t, the loop's last station came first, the round's
+/// stations stopped short of its end, and `Build` seeded its stations from feet a loop apart
+/// (a variable round of a cylinder's rim failed, #18542). In the trace's order (the stations'
+/// curve parameter) each t is moved by whole loops to within half a loop of the one before,
+/// and all of them then by whole loops to put their middle within the curve's interval.
+fn closed_loop_ts(
+    leader: &BSplineCurve,
+    points: &[TsectPnt],
+    tol: f64,
+) -> Result<Option<Vec<TsectPnt>>> {
+    let whole = leader.natural_interval();
+    let period = whole.length();
+    if !(period > 0.0 && period.is_finite()) || points.len() < 2 {
+        return Ok(None);
+    }
+    let start = leader.evaluate_point(whole.min())?;
+    let end = leader.evaluate_point(whole.max())?;
+    if start.distance(end) > tol {
+        return Ok(None);
+    }
+    let mut order: Vec<usize> = (0..points.len()).collect();
+    order.sort_by(|&i, &j| {
+        let cp = |i: usize| points.get(i).map_or(f64::NAN, |p| p.curve_parameter);
+        cp(i).total_cmp(&cp(j))
+    });
+    let mut out = points.to_vec();
+    let mut prev: Option<f64> = None;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &i in &order {
+        let Some(slot) = out.get_mut(i).and_then(|p| p.user_doubles.first_mut()) else {
+            continue;
+        };
+        if !slot.is_finite() {
+            continue;
+        }
+        if let Some(p) = prev {
+            *slot += ((p - *slot) / period).round() * period;
+        }
+        prev = Some(*slot);
+        lo = lo.min(*slot);
+        hi = hi.max(*slot);
+    }
+    // (the stations' middle within the curve's interval: a whole loop's stations then start
+    // at its first parameter, one piece's lie on its own part of the loop)
+    let shift = if lo.is_finite() && hi.is_finite() {
+        let mid = 0.5 * (lo + hi);
+        let within = 0.5 * (whole.min() + whole.max());
+        ((within - mid) / period).round() * period
+    } else {
+        0.0
+    };
+    let mut moved = false;
+    for (p, q) in out.iter_mut().zip(points) {
+        if let (Some(t), Some(&t0)) = (p.user_doubles.first_mut(), q.user_doubles.first()) {
+            if t.is_finite() {
+                *t += shift;
+                moved |= *t != t0;
+            }
+        }
+    }
+    Ok(moved.then_some(out))
+}
+
+/// Upstream `if (status != SM_SUCCESS) return SM_ERR;` after loading the equations: any
+/// failure becomes `SM_ERR`, as [`SolverFailure::JacobianNotLoaded`] caused by the
+/// failure; [`SolidError::Unported`] and [`SolidError::InvalidInput`] (an input upstream
+/// reads out of bounds) pass through.
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
+        // a certificate's work budget spent: never flattened into a status
+        e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
+        | SolidError::OutOfFuel { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. } => e,
-        _ => SolidError::sm_err(op),
+        _ => Failure::new(op, BlendFailure::Solver(SolverFailure::JacobianNotLoaded))
+            .caused_by(e)
+            .into_error(),
     }
 }
 
@@ -513,6 +584,20 @@ pub fn constant_radius_load_initial_values<S: ConstantRadiusOps + ?Sized>(
     r
 }
 
+/// One direction of the extended `domain` of an offset continued as itself, on its closed
+/// turn `closed` (`closed_turn`, wrapping there when `wraps`): the interval the rail-end solve
+/// takes and whether it wraps. Where the extension spans the closed turn, the closed turn,
+/// wrapped as it says; otherwise the extension cut to the closed turn, not wrapped: the
+/// extension names each of its points once, and a turn wider than it reaches round to the far
+/// side of the circle.
+fn within_closed_turn(domain: Extent1d, closed: Extent1d, wraps: bool) -> (Extent1d, bool) {
+    let slack = EFF_ZERO * (1.0 + closed.length().abs());
+    if domain.min() <= closed.min() + slack && domain.max() >= closed.max() - slack {
+        return (closed, wraps);
+    }
+    (domain.intersect(&closed).unwrap_or(domain), false)
+}
+
 /// [`constant_radius_load_initial_values`] inside the temporary change.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
@@ -605,16 +690,15 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 SolutionRequested::Single,
                 &GlobalPointSolveOptions::<ObjectHandle>::default(),
             )?;
-            if sols.len() != 1 {
-                return Err(SolidError::sm_err(OP));
-            }
+            let [sol] = sols.as_slice() else {
+                return Err(SolidError::blend_solver(
+                    OP,
+                    SolverFailure::NoSingleCurveFoot { count: sols.len() },
+                ));
+            };
 
             // get OtherFilletEdge Parameter
-            let mut fillet_edge_t = sols
-                .get(0)
-                .ok_or_else(|| SolidError::sm_err(OP))?
-                .start
-                .param(0)?;
+            let mut fillet_edge_t = sol.start.param(0)?;
 
             // If the curve is closed, and the solution is within tol of an
             // end point, snap the solution to whichever end (start or finish)
@@ -663,12 +747,12 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 .get(1)
                 .and_then(|r| r.first())
                 .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| defect(OP, FIRST_PARTIALS))?;
             let dv = mat
                 .first()
                 .and_then(|r| r.get(1))
                 .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| defect(OP, FIRST_PARTIALS))?;
             let mut deg = du.angle_between(dv)?;
             deg *= 180.0 / PI;
             // (not a range test: a NaN angle keeps the guess, as upstream)
@@ -695,13 +779,12 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 pnt,
                 EFF_ZERO_SQ,
             )?;
-            if sols.len() != 1 {
-                return Err(SolidError::sm_err(OP));
-            }
-            let s = sols
-                .first()
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let [s] = *sols.as_slice() else {
+                return Err(SolidError::blend_trace(
+                    OP,
+                    TraceFailure::NoSingleSurfaceFoot { count: sols.len() },
+                ));
+            };
             srf2_guess_uv.x = s.x;
             srf2_guess_uv.y = s.y;
         }
@@ -710,13 +793,7 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
         // to get a better guess
         let uv_guess = Point2::new(srf2_guess_uv.x, srf2_guess_uv.y);
         let mut domain = base2.natural_uv_domain_with_nurb(k)?;
-        // Not upstream (#3045): an offset continued as itself is the whole circle, not upstream's
-        // tangent extension that stays near the face. The drop on the extended domain finds the
-        // nearest point of that circle, whose far side holds a second root of the rail-end solve
-        // outside the face; the rail end lies on the face's edge, so the drop stays on the face.
-        if !offset_continues_as_itself(k, base2) {
-            solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
-        }
+        solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
 
         if let Some((sol_uv, dist)) = offset_local_point_solve(k, surface2, &domain, pnt, uv_guess)?
         {
@@ -736,11 +813,7 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 pnt,
                 EFF_ZERO_SQ,
             )?;
-            if sols.len() == 1 {
-                let s = sols
-                    .first()
-                    .copied()
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+            if let [s] = *sols.as_slice() {
                 srf2_guess_uv.x = s.x;
                 srf2_guess_uv.y = s.y;
             }
@@ -751,15 +824,49 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
     // the next two entries in rIntervals and rPeriodicities.
     let mut domain = base2.natural_uv_domain_with_nurb(k)?;
     solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
+    let mut ivls = [
+        Extent1d::from_min_max(domain.min().x, domain.max().x),
+        Extent1d::from_min_max(domain.min().y, domain.max().y),
+    ];
+    let mut periodic = [false, false];
+    // Not upstream (#13538): an offset continued as itself names each of its points by one
+    // parameter pair inside its closed turn (`closed_turn`): round the axis it wraps there
+    // (WR-650), along a circle generator it ends there. Solved on the extension's multiple
+    // turns, a rail end found the right point by another turn's parameters, which the face's
+    // trim reads as off the face. The closed turn only narrows the extension
+    // ([`within_closed_turn`]): where the extension is shorter than the turn (a face of less
+    // than half a turn, extended by half its length either side) it already names each point
+    // once, and the solve keeps upstream's interval, not wrapped. Widened to the whole turn,
+    // the rail ends of an R 5 round along a 45 degree chamfer round a block's R 7 corners
+    // (quarter-turn cylinders and cones) were solved off the extension and the round was
+    // refused ("Corner Edge Computation Failure").
+    if let Some(dirs) = closed_turn(k, base2)? {
+        for ((ivl, p), dir) in ivls.iter_mut().zip(periodic.iter_mut()).zip(dirs) {
+            if let Some((closed, wraps)) = dir {
+                (*ivl, *p) = within_closed_turn(*ivl, closed, wraps);
+            }
+        }
+    }
+    // Not upstream (#15767): the ball's section solve wraps a closed base across its seam
+    if fs.solver.seam_domain == SeamDomain::Wrapped {
+        for ((ivl, p), period) in ivls
+            .iter_mut()
+            .zip(periodic.iter_mut())
+            .zip(seam_periods(k, base2)?)
+        {
+            if let Some(period) = period {
+                *ivl = period;
+                *p = true;
+            }
+        }
+    }
 
     let surface2_index = guess_t.len();
-    *interval_at(intervals, surface2_index, OP)? =
-        Extent1d::from_min_max(domain.min().x, domain.max().x);
-    *interval_at(intervals, plus(surface2_index, 1, OP)?, OP)? =
-        Extent1d::from_min_max(domain.min().y, domain.max().y);
+    let [ivl_u, ivl_v] = ivls;
+    *interval_at(intervals, surface2_index, OP)? = ivl_u;
+    *interval_at(intervals, plus(surface2_index, 1, OP)?, OP)? = ivl_v;
 
-    periodicities.push(false);
-    periodicities.push(false);
+    periodicities.extend(periodic);
 
     // set output
     guess_t.push(srf2_guess_uv.x);
@@ -972,15 +1079,13 @@ impl EvalNFunctions for GuessSphereEnfo<'_> {
 
 /// `SmLocalSolveNd(sEvalFun, &sIntervals, &sPeriodicities)` set up as both plane
 /// solves do: desired accuracy `SM_EFF_ZERO_SQ`, at most 8 total boundary hits, 30
-/// iterations; `k`'s `fixes.oscillating_skips_failed_guesses` is passed on.
+/// iterations.
 fn plane_local_solver<'a, E: EvalNFunctions + ?Sized>(
-    k: &Kernel,
     eval: &'a mut E,
     intervals: &'a ExtentNd,
     periodicities: &'a [bool],
 ) -> LocalSolveNd<'a, E> {
     let mut ls = LocalSolveNd::new(eval, Some(intervals), Some(periodicities));
-    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     ls.set_desired_accuracy(EFF_ZERO_SQ);
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
     ls.set_maximum_iterations(30);
@@ -1076,7 +1181,7 @@ impl ConstantRadiusAssistedFs {
         let plane_d = -plane_orig.dot(plane_normal);
         let approx_tol_3d = self.solver.approx_tol_3d;
         let mut eval = GuessSphereEnfo::new(k, plane_normal, plane_d, self);
-        let mut ls = plane_local_solver(k, &mut eval, &intervals, &periodicities);
+        let mut ls = plane_local_solver(&mut eval, &intervals, &periodicities);
 
         // Solve it
         let mut sol = ls.solve_it(&guess_t, approx_tol_3d)?;
@@ -1134,6 +1239,12 @@ pub fn point_on_plane_solve(
     let jacobian_size = solver.jacobian_size()?;
     let mut intervals = plane_intervals(jacobian_size, uv_domain1, uv_domain2)?;
     let mut periodicities = vec![false; 2];
+    // Not upstream (#15767): the ball's section solve wraps a closed base across its seam (the
+    // second surface's in `LoadInitialValues`)
+    if solver.solver().seam_domain == SeamDomain::Wrapped {
+        let base = rail_offset(solver.solver(), 0)?.base_surface().clone();
+        wrap_closed_directions(k, &base, &mut intervals, &mut periodicities, 0)?;
+    }
     let mut guess_t = vec![uv1.x, uv1.y];
 
     let mut surface1 = rail_offset(solver.solver(), 0)?.clone();
@@ -1200,7 +1311,14 @@ pub fn point_on_plane_solve(
         if norm.length_squared() < EFF_ZERO_SQ {
             norm = offset_evaluate_normal(k, rail_offset_mut(solver.solver_mut(), rail)?, uv)?;
             if norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_solver(
+                    OP,
+                    SolverFailure::OffsetNormalVanishes {
+                        side: rail,
+                        u: uv.x,
+                        v: uv.y,
+                    },
+                ));
             }
         }
         // (the Unitize status is ignored: the normal is not zero here)
@@ -1264,7 +1382,7 @@ fn fillet_sphere_solve(
     let approx_tol_3d = solver.solver().approx_tol_3d;
     // (the constructor's "sphere centre and radius" are the plane normal and D)
     let mut eval = SphereEquations(k, FilletSphereSolveEnfo::new(plane_normal, plane_d, solver));
-    let mut ls = plane_local_solver(k, &mut eval, intervals, periodicities);
+    let mut ls = plane_local_solver(&mut eval, intervals, periodicities);
 
     // Solve equations with NewtonRaphson iteration
     let mut sol = ls.solve_it(guess_t, approx_tol_3d)?;
@@ -1675,7 +1793,13 @@ impl VariableRadiusFs {
 
         // pCurve = pOptRefCurve; NER(pCurve); (m_vFilletGeoms[0] is read before, but
         // first dereferenced in the rail loop)
-        let curve = ref_curve.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = ref_curve.ok_or_else(|| {
+            Failure::new(
+                OP,
+                BlendFailure::FilletSetUpInvalid(FilletSetUp::ReferenceCurve),
+            )
+            .into_error()
+        })?;
         let fillet_geom = *self
             .curve_based
             .solver
@@ -1701,10 +1825,25 @@ impl VariableRadiusFs {
             // (m_vOtherRails1 / m_vOtherRails2 are not appended upstream)
             let all_rails = [pseudo.geom(fillet_geom)?.rail(i)];
             for rail in all_rails {
-                let rail = rail.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let rail = rail.ok_or_else(|| {
+                    SolidError::blend_solver(
+                        OP,
+                        SolverFailure::FilletGeomWithoutRail {
+                            fillet_geom,
+                            side: i,
+                        },
+                    )
+                })?;
                 let fil_eus = edge::edgeuses(pseudo.brep(), rail, None, None)?;
                 if fil_eus.len() != 2 {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_solver(
+                        OP,
+                        SolverFailure::RailEdgeUseCount {
+                            fillet_geom,
+                            side: i,
+                            count: fil_eus.len(),
+                        },
+                    ));
                 }
                 for &eu in &fil_eus {
                     let vu = pseudo.brep().edgeuse(eu)?.vertexuse.ok_or_else(|| {
@@ -1735,14 +1874,15 @@ impl VariableRadiusFs {
                         SolutionRequested::Single,
                         &GlobalPointSolveOptions::<ObjectHandle>::default(),
                     )?;
-                    if solutions.len() != 1 {
-                        return Err(SolidError::sm_err(OP));
-                    }
-                    let mut t = solutions
-                        .get(0)
-                        .ok_or_else(|| SolidError::sm_err(OP))?
-                        .start
-                        .param(0)?;
+                    let [solution] = solutions.as_slice() else {
+                        return Err(SolidError::blend_solver(
+                            OP,
+                            SolverFailure::NoSingleCurveFoot {
+                                count: solutions.len(),
+                            },
+                        ));
+                    };
+                    let mut t = solution.start.param(0)?;
                     if b3d_test && ivl.is_value_on_boundary(t, EFF_ZERO).0 && is_closed_solver_edge
                     {
                         // Do this logical test if dT is on boundary of a
@@ -1795,11 +1935,13 @@ impl VariableRadiusFs {
         // (bUseNormalAveraging and bUniformSteps are TRUE; the uniform-steps flag and
         // the angle tolerance are unused by DoLawIntersection)
         let orientations = solver.orientations;
-        let original = self
-            .curve_based
-            .original
-            .clone()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let original = self.curve_based.original.clone().ok_or_else(|| {
+            Failure::new(
+                OP,
+                BlendFailure::FilletSetUpInvalid(FilletSetUp::SolverOriginalCurve),
+            )
+            .into_error()
+        })?;
         let opts = LawIntersectionOptions {
             law_orient: self.law_orientation,
             point_curve: &original,
@@ -1831,8 +1973,12 @@ impl VariableRadiusFs {
         }
         traced?;
         for &vu in tsect_pnts.iter().skip(1) {
-            if pseudo.fillet_vertexuse(vu)?.tsect_pnt().curve_parameter < 0.0 {
-                return Err(SolidError::sm_err(OP));
+            let parameter = pseudo.fillet_vertexuse(vu)?.tsect_pnt().curve_parameter;
+            if parameter < 0.0 {
+                return Err(SolidError::blend_solver(
+                    OP,
+                    SolverFailure::IntersectionPointBeforeCurve { parameter },
+                ));
             }
         }
 
@@ -1919,7 +2065,10 @@ impl VariableRadiusFs {
             || sdug.length_squared() < EFF_ZERO_SQ
             || sdvg.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_trace(
+                OP,
+                TraceFailure::BaseDerivativeZero,
+            ));
         }
 
         let diff1 = sf - sg;
@@ -2047,11 +2196,10 @@ impl VariableRadiusFs {
             SolutionRequested::All,
             &GlobalPointSolveOptions::<ObjectHandle>::default(),
         )?;
-        if sols.len() == 2 {
+        if let [sol0, sol1] = sols.as_slice() {
             // [B391]
-            let sol = |i: usize| sols.get(i).ok_or_else(|| SolidError::sm_err(OP));
-            let t0 = sol(0)?.start.param(0)?;
-            let t1 = sol(1)?.start.param(0)?;
+            let t0 = sol0.start.param(0)?;
+            let t1 = sol1.start.param(0)?;
             let dist0 = self.law_interval.distance_from(t0);
             let dist1 = self.law_interval.distance_from(t1);
             if dist0 < dist1 / 2.0 {
@@ -2059,8 +2207,8 @@ impl VariableRadiusFs {
             } else if dist1 < dist0 / 2.0 {
                 sols.remove_at(0, 1);
             } else {
-                let val0 = sol(0)?.start.solution_value;
-                let val1 = sol(1)?.start.solution_value;
+                let val0 = sol0.start.solution_value;
+                let val1 = sol1.start.solution_value;
                 if val0 < val1 * 0.9 {
                     sols.remove_at(1, 1);
                 } else if val1 < val0 * 0.9 {
@@ -2072,14 +2220,13 @@ impl VariableRadiusFs {
                 }
             }
         }
-        if sols.len() != 1 {
-            return Err(SolidError::sm_err(OP));
-        }
-        let drop_t = sols
-            .get(0)
-            .ok_or_else(|| SolidError::sm_err(OP))?
-            .start
-            .param(0)?;
+        let [sol] = sols.as_slice() else {
+            return Err(SolidError::blend_solver(
+                OP,
+                SolverFailure::NoSingleCurveFoot { count: sols.len() },
+            ));
+        };
+        let drop_t = sol.start.param(0)?;
         let mut fillet_edge_t = drop_t;
 
         if !ivl.contains_value(fillet_edge_t, -EFF_ZERO) {
@@ -2157,11 +2304,7 @@ impl VariableRadiusFs {
                     pnt,
                     EFF_ZERO_SQ,
                 )?;
-                if sols.len() == 1 {
-                    let s = sols
-                        .first()
-                        .copied()
-                        .ok_or_else(|| SolidError::sm_err(OP))?;
+                if let [s] = *sols.as_slice() {
                     s2d.x = s.x;
                     s2d.y = s.y;
                 }
@@ -2477,9 +2620,8 @@ impl CircularCrossSectionFsg {
     /// pRail1Curve, pRail2Curve, crFilletPoints, pSurf1, pUV1, pSurf2, pUV2,
     /// rpFilletSurface)`: [`CircularCrossSectionFsg::create_surface_from_curves`] at the
     /// solver's tolerance, without `G1` continuity (upstream keeps it off for every
-    /// solver type). The fillet points and surfaces are not used. With
-    /// `fixes.fillet_gn_section_generator` a variable-radius or constant-distance
-    /// solver's sections are the balls' touch circles
+    /// solver type). The fillet points and surfaces are not used. A variable-radius or
+    /// constant-distance solver's sections are the balls' touch circles
     /// ([`CircularCrossSectionFsg::create_surface_from_curves_of_balls`]; WR-685).
     ///
     /// # Errors
@@ -2501,11 +2643,7 @@ impl CircularCrossSectionFsg {
         // ball changes its radius along the round (a radius law, or a constant chord
         // between faces whose angle changes); the others' balls touch the round along
         // their great circles.
-        let ball_radius_varies = k.fixes.fillet_gn_section_generator
-            && matches!(
-                solver_type,
-                FilletSolverType::VariableRadius | FilletSolverType::ConstDist
-            );
+        let ball_radius_varies = solver_type.ball_radius_varies();
         // the centre line is a plain SmBSplineCurve here, so its virtuals are the
         // B-spline ones
         let mut cl = Curve::from(core::mem::take(center_line));
@@ -2555,6 +2693,60 @@ struct PieceDefinitions {
     uvs: [Vec<BSplineCurve>; 2],
 }
 
+/// Puts `piece`'s weights on `joined`'s homogeneous scale where `piece`'s u-min side
+/// meets `joined`'s u-max side (#14405): one factor on every weight of `piece`, which
+/// leaves it the same surface, matching the weights at the joint's two ends, where the
+/// rails' pieces meet (the geometric mean of the two ends' ratios where they differ).
+/// `BSplineCurve::create_by_joining` scales the rails' pieces so, and `JoinSurface`
+/// averages the boundary rows as they are: unmatched, the joined row's weights are
+/// neither piece's and move the spans either side of the joint off both, the rails' iso
+/// curves with them. Nothing to do unless both surfaces are rational.
+///
+/// # Errors
+///
+/// `SM_ERR` for a weight at the joint's ends that is not positive.
+fn scale_to_joint(joined: &BSplineSurface, piece: &mut BSplineSurface) -> Result<()> {
+    let (Some(a), Some(b)) = (joined.gw_nurb(), piece.gw_nurb()) else {
+        return Ok(());
+    };
+    if !(a.is_rational() && b.is_rational()) {
+        return Ok(());
+    }
+    let ratio = |ja: usize, jb: usize| -> Result<f64> {
+        let wa = a.cpt(a.n(), ja)?.w;
+        let wb = b.cpt(0, jb)?.w;
+        let r = wa / wb;
+        if wa > 0.0 && wb > 0.0 && r.is_finite() {
+            Ok(r)
+        } else {
+            Err(SolidError::blend_trace(
+                OP_PIECEWISE,
+                TraceFailure::JointWeightNotPositive {
+                    joined: wa,
+                    piece: wb,
+                },
+            ))
+        }
+    };
+    let (r0, r1) = (ratio(0, 0)?, ratio(a.m(), b.m())?);
+    let scale = if r0 == r1 {
+        r0
+    } else {
+        crate::geom::vector3d::sqrt(r0 * r1)
+    };
+    if scale == 1.0 {
+        return Ok(());
+    }
+    let nurb = piece.get_or_create_gw_nurb()?;
+    for i in 0..=nurb.n() {
+        for j in 0..=nurb.m() {
+            let c = nurb.cpt_mut(i, j)?;
+            *c = c.scale(scale);
+        }
+    }
+    Ok(())
+}
+
 /// The joined curve of `pieces`, end to end in order (`CreateByJoining`).
 fn joined_curve(mut pieces: Vec<BSplineCurve>) -> Result<BSplineCurve> {
     let mut joined = BSplineCurve::create_by_joining(&mut pieces, None)?;
@@ -2577,8 +2769,11 @@ impl CircularCrossSectionFsg {
     /// Not the fork's (#430): with `definition`, where each piece is a round by its
     /// definition ([`Self::definition_surface`] on its own curves and stations, the law
     /// trimmed to its span, [`LawBall::span`]), the pieces are those definitions and the
-    /// joined surface is their nets'; the centre line, the rails and their uv curves are
-    /// then the pieces' rebuilt ones joined, as a whole round's definition rebuilds them.
+    /// joined surface is their nets', each net first put on the joined surface's
+    /// homogeneous scale at its joint (#14405: each net's weights are centred on 1, and
+    /// `JoinSurface` averages unmatched boundary rows); the centre line, the rails and their
+    /// uv curves are then the pieces' rebuilt ones joined, as a whole round's definition
+    /// rebuilds them.
     ///
     /// # Errors
     ///
@@ -2631,9 +2826,15 @@ impl CircularCrossSectionFsg {
             {
                 let crate::surface::surface::SurfaceKind::ProceduralBlend(pb) = surface.kind()
                 else {
-                    return Err(SolidError::sm_err(OP_PIECEWISE));
+                    return Err(defect(OP_PIECEWISE, PIECE_IS_PROCEDURAL_BLEND));
                 };
-                (pb.net().copy(), surface.clone())
+                let mut net = pb.net().copy();
+                // each definition's net is on its own homogeneous scale (its section's
+                // weights centred on 1): the joined surface's, at their joint
+                if let Some(j) = joined.as_ref() {
+                    scale_to_joint(j, &mut net)?;
+                }
+                (net, surface.clone())
             } else {
                 let mut trimmed = [center_line.copy(), rail1.copy(), rail2.copy()];
                 for curve in &mut trimmed {
@@ -2659,7 +2860,7 @@ impl CircularCrossSectionFsg {
             }
             joined = Some(next);
         }
-        let joined = joined.ok_or_else(|| SolidError::sm_err(OP_PIECEWISE))?;
+        let joined = joined.ok_or_else(|| defect(OP_PIECEWISE, PIECES_JOINED))?;
         let kept = if ball_radius_varies {
             Some(LawCornerPieces::classify(
                 k,
@@ -2724,6 +2925,17 @@ impl CircularCrossSectionFsg {
         };
         let [center_line, rail1, rail2] = curves;
         let [uv1, uv2] = &inputs.uv;
+        // (the whole loop's stations unwrapped before they are shared out, so that each
+        // piece's lie on its own part of a closed edge)
+        let unwrapped = match inputs.ball.law.as_ref() {
+            Some(LawBall {
+                has_edgeuse: true,
+                edge: Some(edge),
+                ..
+            }) => closed_loop_ts(edge, inputs.points, approx_tol_3d)?,
+            _ => None,
+        };
+        let all_points = unwrapped.as_deref().unwrap_or(inputs.points);
         for span in ends.windows(2) {
             let [from, to] = *span else {
                 continue;
@@ -2739,8 +2951,7 @@ impl CircularCrossSectionFsg {
                 let mut interval = Extent1d::from_min_max(from, to);
                 curve.trim(k, &mut interval, TrimMode::Notify)?;
             }
-            let points: Vec<TsectPnt> = inputs
-                .points
+            let points: Vec<TsectPnt> = all_points
                 .iter()
                 .filter(|p| from <= p.curve_parameter && p.curve_parameter <= to)
                 .cloned()
@@ -2789,6 +3000,20 @@ impl CircularCrossSectionFsg {
 }
 
 const OP_PIECEWISE: &str = "blend::fillet_standard_solver::p2::piecewise_surface";
+/// Why a piece's definition is a procedural blend: [`CircularCrossSectionFsg::piece_definitions`]
+/// keeps only what [`CircularCrossSectionFsg::definition_surface`] built, and that is
+/// `build_given_ball`'s `ProceduralBlend::create` or nothing.
+const PIECE_IS_PROCEDURAL_BLEND: &str = "a piece's definition is the procedural blend \
+     `definition_surface` built for it, which builds no other kind";
+/// Why [`CircularCrossSectionFsg::piecewise_surface`] joins at least one piece: its ends
+/// are the first rail's two ends with the corners between, so there is at least one span,
+/// and each span joins its piece or returns.
+const PIECES_JOINED: &str = "the spans between the rail's two ends and its corners number \
+     at least one, and each joins its piece";
+/// Why the law curve's canonical data has a multiplicity for each knot: `GetCanonical`
+/// gives the unique knots and their multiplicities as pairs.
+const KNOT_MULTIPLICITIES: &str =
+    "a B-spline curve's canonical data gives one multiplicity for each unique knot";
 
 /// The most bisection steps a variable round's definition takes to find where its law falls
 /// to the tolerance in the span of stations where it stops being positive (64: past the
@@ -2880,7 +3105,7 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
             for i in 0..lk {
                 let kk = if db > 0.0 { i } else { lk - 1 - i };
                 let (Some(&kn), Some(&m)) = (c.knots.get(kk), c.knot_multiplicities.get(kk)) else {
-                    return Err(SolidError::sm_err(OP_LAW));
+                    return Err(defect(OP_LAW, KNOT_MULTIPLICITIES));
                 };
                 t_knots.push((kn - da) / db);
                 t_mult.push(m);
@@ -2888,11 +3113,13 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
             let mut t_cps = Vec::new();
             let mut t_wts = Vec::new();
             let rational = c.weights.len() == lc;
-            for i in 0..lc {
-                let kk = if db > 0.0 { i } else { lc - 1 - i };
-                let Some(&cp) = c.control_points.get(kk) else {
-                    return Err(SolidError::sm_err(OP_LAW));
-                };
+            // the control points in their order along t (index kk = i, or lc - 1 - i)
+            let mut ordered: Vec<_> = c.control_points.iter().copied().enumerate().collect();
+            let forward = db > 0.0;
+            if !forward {
+                ordered.reverse();
+            }
+            for (kk, cp) in ordered {
                 t_cps.push(cp);
                 if rational {
                     t_wts.push(c.weights.get(kk).copied().unwrap_or(f64::NAN));
@@ -2941,36 +3168,8 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
-/// Not the fork's (#2500): the face a round's ball rolls on, for the round by its
-/// definition: the offset's base surface, or, for a surface of revolution of a circle's arc
-/// that the offset extends as itself (`offset_extension_as_itself`, the fork's 43fd6b6) and
-/// whose extension it holds, that extension. Past its generator's interval a surface of
-/// revolution revolves the generator's extrapolation, not its circle, so a ball the trace
-/// rolls on past the face (out to an End, round the tube) has no foot on the base there: the
-/// station solve failed and the round was built as the trace's B-spline. A cylinder, cone,
-/// sphere or torus continues as itself on its own, and keeps its analytic kind in the
-/// definition.
-fn rolled_on<'a>(
-    k: &Kernel,
-    offset: &'a crate::surface::offset_surface::OffsetSurface,
-) -> &'a Surface {
-    let base = offset.base_surface();
-    match offset.extended_base_surface() {
-        Some(extended)
-            if matches!(
-                base.kind(),
-                crate::surface::surface::SurfaceKind::SurfOfRevolution(_)
-            ) && offset_continues_as_itself(k, base) =>
-        {
-            extended
-        }
-        _ => base,
-    }
-}
-
 impl CircularCrossSectionFsg {
-    /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
-    /// `fixes.fillet_gn_section_generator` and `fixes.fillet_round_as_definition`,
+    /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548;
     /// WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
     /// its definition, the order-1 section's `Build` with the rails and uv curves
     /// replaced ([`GnSectionFsg::build_given_ball`]), unless the rails or the centre line
@@ -3010,14 +3209,13 @@ impl CircularCrossSectionFsg {
         use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
         use crate::blend::fillet_section::definition_box::definition_enclosable;
         use crate::blend::fillet_section::interval::Ivl;
-        use crate::blend::fillet_section::section::{ArcSection, GnLawRound, GnSectionFsg};
+        use crate::blend::fillet_section::section::{
+            rolled_on, ArcSection, GnLawRound, GnSectionFsg,
+        };
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
         use crate::surface::surface::SurfaceKind;
-        if !(k.fixes.fillet_gn_section_generator && k.fixes.fillet_round_as_definition) {
-            return Ok(None);
-        }
         let [rail1, rail2] = rails;
         let corners =
             fillet_curve_corners(center_line, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
@@ -3039,7 +3237,8 @@ impl CircularCrossSectionFsg {
         if !arcs.is_exact_circle() {
             return Ok(None);
         }
-        let bases = [rolled_on(k, o1), rolled_on(k, o2)];
+        let rolled = [rolled_on(o1), rolled_on(o2)];
+        let bases = [rolled[0].as_ref(), rolled[1].as_ref()];
         // (a face that is itself a blend by its definition takes a ball of one radius, on a
         // round of one radius between NURBS faces: the definition its certificate encloses;
         // c5b6bb7, WR-714)
@@ -3083,6 +3282,34 @@ impl CircularCrossSectionFsg {
                     return Ok(None);
                 }
                 let mut leader = edge.copy();
+                // (on a closed edge the station that closes the loop is dropped on its start:
+                // its t unwrapped to the loop's end)
+                let unwrapped = closed_loop_ts(&leader, points, approx_tol_3d)?;
+                let points = unwrapped.as_deref().unwrap_or(points);
+                // The edge's curve cut to where the stations are: an unbounded line is held as a
+                // NURB a million times the part's size, whose control points round at about
+                // 1e-9 mm, and every move of the round's frame (its recertificate is taken in its
+                // own) carries that rounding into the leader, past the round's bound. Cut, its
+                // control points are of the part's size; the round is built on the cut curve.
+                let station_ts = points
+                    .iter()
+                    .filter_map(|p| p.user_doubles.first().copied())
+                    .filter(|t| t.is_finite());
+                let (lo, hi) = station_ts
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| {
+                        (lo.min(t), hi.max(t))
+                    });
+                let whole = leader.natural_interval();
+                if lo < hi {
+                    let mut cut = Extent1d::from_min_max(lo.max(whole.min()), hi.min(whole.max()));
+                    if cut.length() > 0.0 && cut != whole {
+                        leader.trim(
+                            k,
+                            &mut cut,
+                            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                        )?;
+                    }
+                }
                 leader.set_out_of_bounds_enabled(true);
                 let Some(mut law) = law_in_parameter(lb)? else {
                     return Ok(None);
@@ -3274,17 +3501,20 @@ impl CircularCrossSectionFsg {
 }
 
 impl super::p1::LinearCrossSectionFsg {
-    /// A chamfer by its definition (solidcore's, #2486; with
-    /// `fixes.fillet_gn_section_generator` and `fixes.fillet_round_as_definition`): the
+    /// A chamfer by its definition (solidcore's, #2486): the
     /// section generator's chord, order 0, between the feet of the point at the solver's
     /// offsets off the two faces ([`GnSectionFsg::build_chord`]), keeping the chamfer's
     /// sizes: those the solver was made for, else its two offsets' setbacks at the wedge
     /// at the rails' start, or a constant-distance solver's chord between planes. The
     /// rails and uv curves become the stations' feet. `None` (built as before): a face
     /// that is not an offset of a NURBS surface (or is a blend by its definition), rails
-    /// or a centre line that turn at a knot, rails that meet at an end, a
-    /// constant-distance solver on a face that is not a plane (its offsets vary along
-    /// the edge), a solver of another kind, or rails that are not those feet.
+    /// or a centre line that turn at a knot, rails that meet at an end, a centre line or a
+    /// rail of no length (the offsets meet on an axis: a cylinder's rim chamfered by its
+    /// radius is a cone to its apex, whose centre line and rail on the top are one point,
+    /// and a section has no length to run along), a
+    /// fixed chord on a curved face, a solver of another kind, or rails that are
+    /// not those feet. An equal-setback solver gets its offsets from the wedge
+    /// between the supports at the two feet.
     ///
     /// # Errors
     ///
@@ -3301,16 +3531,22 @@ impl super::p1::LinearCrossSectionFsg {
         uv: [&mut BSplineCurve; 2],
         ball: &CircleBall,
     ) -> Result<Option<Surface>> {
-        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::blend::fillet_section::section::{rolled_on, GnSectionFsg};
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         use crate::surface::surface::SurfaceKind;
-        if !(k.fixes.fillet_gn_section_generator && k.fixes.fillet_round_as_definition) {
+        let [rail1, rail2] = rails;
+        // a centre line or a rail of no length: the stations along it are one (a
+        // cylinder's rim chamfered by its radius, a cone to its apex: built as before, a
+        // traced net the blend definition ledger lists, #17875)
+        if center_line.is_degenerate(k, approx_tol_3d, None)?
+            || rail1.is_degenerate(k, approx_tol_3d, None)?
+            || rail2.is_degenerate(k, approx_tol_3d, None)?
+        {
             return Ok(None);
         }
-        let [rail1, rail2] = rails;
         let corners =
             fillet_curve_corners(center_line, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
         if !corners.is_empty() {
@@ -3322,7 +3558,8 @@ impl super::p1::LinearCrossSectionFsg {
         else {
             return Ok(None);
         };
-        let bases = [rolled_on(k, o1), rolled_on(k, o2)];
+        let rolled = [rolled_on(o1), rolled_on(o2)];
+        let bases = [rolled[0].as_ref(), rolled[1].as_ref()];
         let mut planes = true;
         for b in bases {
             match b.kind() {
@@ -3387,6 +3624,17 @@ impl super::p1::LinearCrossSectionFsg {
             // a chord's offsets are constant only where the wedge is: between planes
             (FilletSolverType::ConstDist, _, Some(l)) if planes => {
                 let sizes = ChamferDefinition::new(ChamferSize::Chord(l), wedge)?;
+                (sizes.offsets()?, sizes)
+            }
+            (FilletSolverType::ConstDist, _, None) => {
+                let Some(c) = ball.chamfer else {
+                    return Ok(None);
+                };
+                let sizes = if planes {
+                    ChamferDefinition::new(c.size, wedge)?
+                } else {
+                    c.at_every_station()?
+                };
                 (sizes.offsets()?, sizes)
             }
             _ => return Ok(None),
@@ -3574,46 +3822,6 @@ fn chord_between_planes(
 const OP_LINEAR_DEF: &str =
     "blend::fillet_standard_solver::p2::LinearCrossSectionFsg::definition_surface";
 
-impl BlendCurveCrossSectionFsg {
-    /// `SmBlendCurveCrossSectionFSG::CreateSurface(rFilletSolver, pCenterLine,
-    /// pRail1Curve, pRail2Curve, crFilletPoints, pSurf1, pUV1, pSurf2, pUV2,
-    /// rpFilletSurface)`:
-    /// [`BlendCurveCrossSectionFsg::create_surface_from_curves`] at the solver's
-    /// tolerance, with `G1` continuity for a constant-radius solver
-    /// (`SM_FS_CONST_RADIUS`). The fillet points are not used.
-    ///
-    /// # Errors
-    ///
-    /// Those of [`BlendCurveCrossSectionFsg::create_surface_from_curves`].
-    #[allow(clippy::too_many_arguments)]
-    pub fn create_surface(
-        &self,
-        k: &Kernel,
-        approx_tol_3d: f64,
-        solver_type: FilletSolverType,
-        center_line: &mut BSplineCurve,
-        rail1: &mut BSplineCurve,
-        rail2: &mut BSplineCurve,
-        side1: RailSurface<'_>,
-        side2: RailSurface<'_>,
-    ) -> Result<BSplineSurface> {
-        let mut need_g1_continuity = false;
-        if solver_type == FilletSolverType::ConstRadius {
-            need_g1_continuity = true;
-        }
-        self.create_surface_from_curves(
-            k,
-            center_line,
-            rail1,
-            rail2,
-            approx_tol_3d,
-            need_g1_continuity,
-            side1,
-            side2,
-        )
-    }
-}
-
 // ---- SmSurfaceSurfaceFS ---------------------------------------------------------------------------
 
 impl SurfaceSurfaceFs {
@@ -3714,7 +3922,11 @@ impl SurfaceSurfaceFs {
         if self.calc_fillet_start(k)?.is_none() {
             return Ok(());
         }
-        Err(SolidError::null_pointer(OP_SS_CALC))
+        Err(Failure::new(
+            OP_SS_CALC,
+            BlendFailure::FilletSetUpInvalid(FilletSetUp::SolverExecutive),
+        )
+        .into_error())
     }
 
     /// `SmSurfaceSurfaceFS::CalcFilletGeom` up to `m_pExecutive->GetPseudoBrep()`: the
@@ -3753,7 +3965,10 @@ impl SurfaceSurfaceFs {
         let n2 = offset_evaluate_normal(k, self.base.surface_mut(1)?, g1)?;
         *curr.crv_deriv_mut() = n1.cross(n2);
         if curr.crv_deriv().length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_solver(
+                OP,
+                SolverFailure::OffsetNormalsParallel,
+            ));
         }
 
         let mut step = 0.0001;
@@ -3849,6 +4064,212 @@ pub struct SurfaceSurfaceStart {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A G^n section certificate that spent its work budget is not flattened to `SM_ERR`.
+    #[test]
+    fn a_certificate_past_its_budget_is_not_flattened_to_sm_err() {
+        let e = SolidError::blend(
+            "t",
+            BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(as_sm_err(e.clone(), "op"), e);
+    }
+
+    /// Another failure of loading the equations becomes `SM_ERR` as
+    /// [`SolverFailure::JacobianNotLoaded`], carrying the failure as its cause, which
+    /// decides the defect-or-refusal reading.
+    #[test]
+    fn a_failed_jacobian_load_keeps_its_cause() {
+        let inner = SolidError::blend_null_defect("blend::inner", "why");
+        let e = as_sm_err(inner.clone(), "op");
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Solver(SolverFailure::JacobianNotLoaded))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.cause(), Some(&inner));
+        assert!(e.is_defect());
+    }
+
+    /// The causes this file's sites name keep their sites' statuses, take their classes
+    /// from the cause, and read as no phrase.
+    #[test]
+    fn p2_causes_keep_their_status_and_class() {
+        use crate::error::{ErrorKind, SM_ERR, SM_ERR_NULL_POINTER};
+        let fillet_geom = FilletGeomId(0);
+        let cases = [
+            (
+                BlendFailure::FilletSetUpInvalid(FilletSetUp::ReferenceCurve),
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                BlendFailure::FilletSetUpInvalid(FilletSetUp::SolverOriginalCurve),
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                BlendFailure::FilletSetUpInvalid(FilletSetUp::SolverExecutive),
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                BlendFailure::Solver(SolverFailure::FilletGeomWithoutRail {
+                    fillet_geom,
+                    side: 1,
+                }),
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                BlendFailure::Solver(SolverFailure::RailEdgeUseCount {
+                    fillet_geom,
+                    side: 0,
+                    count: 1,
+                }),
+                ErrorKind::InvalidInput,
+                SM_ERR,
+            ),
+            (
+                BlendFailure::Solver(SolverFailure::IntersectionPointBeforeCurve {
+                    parameter: -0.5,
+                }),
+                ErrorKind::OutsideDomain,
+                SM_ERR,
+            ),
+            (
+                BlendFailure::Solver(SolverFailure::NoSingleCurveFoot { count: 0 }),
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                BlendFailure::Solver(SolverFailure::OffsetNormalVanishes {
+                    side: 1,
+                    u: 0.5,
+                    v: 0.25,
+                }),
+                ErrorKind::Degenerate,
+                SM_ERR,
+            ),
+            (
+                BlendFailure::Solver(SolverFailure::OffsetNormalsParallel),
+                ErrorKind::Degenerate,
+                SM_ERR,
+            ),
+            (
+                BlendFailure::Trace(TraceFailure::BaseDerivativeZero),
+                ErrorKind::Degenerate,
+                SM_ERR,
+            ),
+            (
+                BlendFailure::Trace(TraceFailure::NoSingleSurfaceFoot { count: 2 }),
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                BlendFailure::Trace(TraceFailure::JointWeightNotPositive {
+                    joined: 1.0,
+                    piece: 0.0,
+                }),
+                ErrorKind::Unsupported,
+                SM_ERR,
+            ),
+        ];
+        for (cause, class, status) in cases {
+            let e = Failure::new("blend::op", cause).into_error();
+            assert_eq!(e.kind(), class, "{cause:?}");
+            assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(!e.is_defect(), "{cause:?}");
+        }
+        for why in [
+            FIRST_PARTIALS,
+            PIECE_IS_PROCEDURAL_BLEND,
+            PIECES_JOINED,
+            KNOT_MULTIPLICITIES,
+        ] {
+            let e = defect("blend::op", why);
+            assert!(e.is_defect());
+            assert_eq!(e.upstream_status(), Some(SM_ERR));
+        }
+    }
+
+    /// A rational biquadratic Bezier patch with weight `w` on every control point.
+    fn rational_patch(w: f64) -> BSplineSurface {
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        let net = (0..3)
+            .map(|i| {
+                (0..3)
+                    .map(|j| CPoint::weighted(Vec3::new(f64::from(i), f64::from(j), 0.0), w))
+                    .collect()
+            })
+            .collect();
+        let k = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        BSplineSurface::from_gw_nurb(&NurbSurface::new(net, 2, 2, k.clone(), k).unwrap())
+    }
+
+    #[test]
+    fn a_joint_weight_that_is_not_positive_is_named() {
+        let mut piece = rational_patch(2.0);
+        // equal weights: the piece is already on the joined surface's scale
+        scale_to_joint(&rational_patch(2.0), &mut piece).unwrap();
+        let mut joined = rational_patch(2.0);
+        let nurb = joined.get_or_create_gw_nurb().unwrap();
+        let n = nurb.n();
+        nurb.cpt_mut(n, 0).unwrap().w = 0.0;
+        let e = scale_to_joint(&joined, &mut piece).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Trace(TraceFailure::JointWeightNotPositive {
+                joined: 0.0,
+                piece: 2.0,
+            }))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
+    }
+
+    #[test]
+    fn a_reversed_rational_law_reverses_its_points_and_weights() {
+        use crate::blend::fillet_standard_solver::p1::{FilletLaw, FilletLawKind};
+        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+        let cps = [p(1.0, 0.0, 0.0), p(2.0, 0.0, 0.0), p(4.0, 0.0, 0.0)];
+        let law_curve = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &cps,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, 3.0, 5.0]),
+            trim: None,
+        })
+        .unwrap();
+        let law = FilletLaw::new(FilletLawKind::BSpline {
+            law_curve,
+            extended_law: None,
+        });
+        let ball = |reverse| LawBall {
+            has_edgeuse: true,
+            edge: None,
+            law: law.clone(),
+            interval: Extent1d::from_raw(0.0, 1.0),
+            reverse,
+            span: None,
+        };
+        let forward = law_in_parameter(&ball(false)).unwrap().unwrap();
+        let forward = forward.canonical().unwrap();
+        assert_eq!(forward.control_points, cps.to_vec());
+        assert_eq!(forward.weights, vec![1.0, 3.0, 5.0]);
+        let reversed = law_in_parameter(&ball(true)).unwrap().unwrap();
+        let reversed = reversed.canonical().unwrap();
+        assert_eq!(reversed.control_points, vec![cps[2], cps[1], cps[0]]);
+        assert_eq!(reversed.weights, vec![5.0, 3.0, 1.0]);
+    }
     use crate::blend::fillet_standard_solver::p1::{
         FilletLawKind, CONSTANT_RADIUS_FS_TYPE, SURFACE_SURFACE_FS_TYPE, VARIABLE_RADIUS_FS_TYPE,
     };
@@ -4109,10 +4530,12 @@ mod tests {
             g,
         )
         .expect("solver");
-        assert!(matches!(
-            fs.calc_fillet_geom(&k),
-            Err(SolidError::Upstream { .. })
-        ));
+        let e = fs.calc_fillet_geom(&k).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Solver(SolverFailure::OffsetNormalsParallel))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         let mut fs = SurfaceSurfaceFs::new(
             &k,
             &mut FilletBrep::new(),
@@ -4129,13 +4552,14 @@ mod tests {
             g,
         )
         .expect("solver");
-        assert!(matches!(
-            fs.calc_fillet_geom(&k),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = fs.calc_fillet_geom(&k).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::FilletSetUpInvalid(
+                FilletSetUp::SolverExecutive
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -4181,10 +4605,16 @@ mod tests {
         assert!(vr.is_kind_of(VARIABLE_RADIUS_FS_TYPE) && vr.is_kind_of(CURVE_BASED_FS_TYPE));
         assert!(!vr.is_kind_of(CONSTANT_RADIUS_FS_TYPE));
         let mut pseudo = FilletBrep::new();
-        assert!(matches!(
-            vr.re_calc_fillet_geom(&k, &mut pseudo, false, None, None),
-            Err(SolidError::Upstream { .. })
-        ));
+        let e = vr
+            .re_calc_fillet_geom(&k, &mut pseudo, false, None, None)
+            .unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::FilletSetUpInvalid(
+                FilletSetUp::ReferenceCurve
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
         // (no fillet geometry: upstream reads m_vFilletGeoms[0] out of bounds)
         assert!(matches!(
             vr.re_calc_fillet_geom(&k, &mut pseudo, false, None, Some(&centre)),
@@ -4209,23 +4639,84 @@ mod tests {
             .expect("circular");
         let corner = s.evaluate_point(Point2::new(0.0, 0.0)).expect("point");
         assert!(corner.distance(p(0.0, 0.0, 1.0)) < 1e-6);
-        let none = RailSurface {
-            surface: None,
-            uv_curve: None,
+    }
+
+    /// A quarter of the unit cylinder about the x axis over `x0..x1`: a cubic in u whose
+    /// rows' weights are `rows` (a rational parameterisation of x) by the quarter circle in
+    /// v, every weight times `scale` (the same surface for every `scale`).
+    fn quarter_cylinder(x0: f64, x1: f64, rows: [f64; 4], scale: f64) -> BSplineSurface {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
+        use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
+        let h = core::f64::consts::FRAC_1_SQRT_2;
+        let arc = [(1.0, 0.0, 1.0), (1.0, 1.0, h), (0.0, 1.0, 1.0)];
+        let mut cps = Vec::new();
+        let mut wts = Vec::new();
+        for (i, f) in rows.into_iter().enumerate() {
+            let x = x0 + (x1 - x0) * i as f64 / 3.0;
+            for (y, z, w) in arc {
+                cps.push(p(x, y, z));
+                wts.push(scale * f * w);
+            }
+        }
+        BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 2,
+            control_points: &cps,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[4, 4],
+            v_multiplicities: &[3, 3],
+            u_knots: &[x0, x1],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&wts),
+            uv_domain: None,
+        })
+        .expect("surface")
+    }
+
+    #[test]
+    fn a_definition_net_joins_on_the_joined_surface_s_weight_scale() {
+        // #14405: each definition's net centres its weights on 1, so neighbouring pieces
+        // meet on different homogeneous scales. Joined as they are, the joint row's
+        // weights are averaged to neither piece's: the spans either side leave both pieces
+        // at the same parameters (here by over 1e-2), the rails' iso curves with them, and
+        // the rails (joined by `create_by_joining`, which matches the weights) no longer
+        // lie on the surface where the trim looks for them. Put on the joined surface's
+        // scale first, the join is the two pieces.
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        let a = quarter_cylinder(0.0, 1.0, [1.0, 1.3, 0.8, 1.0], 1.0);
+        let b = quarter_cylinder(1.0, 2.0, [1.0, 0.9, 1.2, 1.0], 1.7);
+        let off = |joined: &BSplineSurface| {
+            let mut d = 0.0_f64;
+            for i in 0..=40 {
+                let u = 2.0 * f64::from(i) / 40.0;
+                let piece = if u <= 1.0 { &a } else { &b };
+                for v in [0.0, 0.25, 0.5, 1.0] {
+                    let uv = Point2::new(u, v);
+                    let want = piece.evaluate_point(uv).expect("piece");
+                    d = d.max(joined.evaluate_point(uv).expect("joined").distance(want));
+                }
+            }
+            d
         };
-        let mut c = line(p(0.0, 1.0, 1.0), p(5.0, 1.0, 1.0));
-        let (mut a, mut b) = (r1.copy(), r2.copy());
-        b.insert_one_knot(0.5, 1).expect("knot");
-        let r = BlendCurveCrossSectionFsg::default().create_surface(
-            &k,
-            1e-6,
-            FilletSolverType::VariableRadius,
-            &mut c,
-            &mut a,
-            &mut b,
-            none,
-            none,
-        );
-        assert!(matches!(r, Err(SolidError::Upstream { .. })));
+        let mut plain = b.copy();
+        let averaged = a
+            .copy()
+            .join_surface(&mut plain, SurfParamType::U, 0.0)
+            .expect("join");
+        assert!(off(&averaged) > 1e-2, "{:e}", off(&averaged));
+        let mut scaled = b.copy();
+        scale_to_joint(&a, &mut scaled).expect("scale");
+        let joined = a
+            .copy()
+            .join_surface(&mut scaled, SurfParamType::U, 0.0)
+            .expect("join");
+        assert!(off(&joined) < 1e-14, "{:e}", off(&joined));
+        // the pieces' own scales match: nothing to do
+        let mut same = quarter_cylinder(1.0, 2.0, [1.0, 0.9, 1.2, 1.0], 1.0);
+        let before = same.copy();
+        scale_to_joint(&a, &mut same).expect("scale");
+        assert_eq!(same.control_points().ok(), before.control_points().ok());
     }
 }

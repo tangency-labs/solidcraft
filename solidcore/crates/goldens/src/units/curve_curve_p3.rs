@@ -566,7 +566,9 @@ fn pv(o: &mut Vec<f64>, v: Vec3) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -691,7 +693,7 @@ fn leaves(tree: &Tree<Obj>) -> Result<Vec<NodeId>, HarnessError> {
 
 #[allow(clippy::too_many_lines)]
 fn rust(op: &OpIn) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o: Vec<f64> = Vec::new();
     match op {
         OpIn::Normal { curves } => {
@@ -1724,6 +1726,105 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// A constant curve has one distance everywhere, so a different target has no root.
+    #[test]
+    fn review_constant_curve_cannot_satisfy_another_distance() {
+        let case = crate::case::regression_case(&Runner, "gen0101");
+        let input: OpIn = case.parse().unwrap();
+        let OpIn::PointSolve {
+            curve: CurveIn::Hermite(ref h),
+            p,
+            target,
+            ..
+        } = input
+        else {
+            panic!("constant Hermite");
+        };
+        assert_eq!(h.p1, h.p2);
+        assert_eq!(h.d1, [0.0; 3]);
+        assert_eq!(h.d2, [0.0; 3]);
+        assert!((v3(h.p1).distance(v3(p)) - target.unwrap()).abs() > 0.04);
+        let output = rust(&input).unwrap();
+        assert_eq!(
+            output.values["out"][0], 0.0,
+            "an unevaluated guess is not a root"
+        );
+    }
+
+    /// One bound hit cannot establish a minimum while another parameter remains free.
+    #[test]
+    fn review_projected_minimum_requires_stationarity_or_a_known_failure() {
+        let case = crate::case::regression_case(&Runner, "gen0607");
+        let input: OpIn = case.parse().unwrap();
+        let OpIn::CurveSolve {
+            c1: CurveIn::Line(line),
+            c2: CurveIn::Hermite(h),
+            ivl1,
+            ivl2,
+            sop,
+            tol,
+            vecs,
+            ..
+        } = &input
+        else {
+            panic!("line and cubic Hermite projected minimum");
+        };
+        assert_eq!(*sop, SolverOperation::ProjectedMinimize as i32);
+        assert_eq!(line.scale, 1.0);
+        assert!(!line.inside_out);
+        assert_eq!(h.dim, 3);
+        let output = rust(&input).unwrap();
+        assert_eq!(output.ints["status"], [0]);
+        let values = &output.values["out"];
+        if values[0] == 0.0 {
+            return; // A local solver may refuse rather than claim a minimum.
+        }
+        let (u, v) = (values[7], values[8]);
+        assert!((ivl1[0]..=ivl1[1]).contains(&u));
+        assert!((ivl2[0]..=ivl2[1]).contains(&v));
+
+        // Closed-form definitions, independent of the solver's evaluator and Jacobian.
+        let direction = v3(line.v) / v3(line.v).length();
+        let point = v3(line.p) + direction * u;
+        let hermite = v3(h.p1) * (2.0 * v * v * v - 3.0 * v * v + 1.0)
+            + v3(h.d1) * (v * v * v - 2.0 * v * v + v)
+            + v3(h.p2) * (-2.0 * v * v * v + 3.0 * v * v)
+            + v3(h.d2) * (v * v * v - v * v);
+        let derivative = v3(h.p1) * (6.0 * v * v - 6.0 * v)
+            + v3(h.d1) * (3.0 * v * v - 4.0 * v + 1.0)
+            + v3(h.p2) * (-6.0 * v * v + 6.0 * v)
+            + v3(h.d2) * (3.0 * v * v - 2.0 * v);
+        let normal = v3(vecs[0]);
+        let project = |p: Vec3| normal.cross(p).cross(normal);
+        let gap = project(point - hermite);
+        assert!((gap.length() - values[6]).abs() < 1e-10);
+
+        // Gap components along projected unit directions have the caller tol's units.
+        let meets_bound_condition = |t: f64, domain: [f64; 2], tangent: Vec3| {
+            let length = tangent.length();
+            if length == 0.0 {
+                return true;
+            }
+            let slope = gap.dot(tangent) / length;
+            if t == domain[0] {
+                slope >= -*tol
+            } else if t == domain[1] {
+                slope <= *tol
+            } else {
+                slope.abs() <= *tol
+            }
+        };
+        let stationary = meets_bound_condition(u, *ivl1, project(direction))
+            && meets_bound_condition(v, *ivl2, -project(derivative));
+        let known =
+            crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
+        assert!(
+            stationary || known.contains_key(&case.name),
+            "accepted projected pair ({u}, {v}) violates constrained stationarity; \
+             it must be repaired or recorded as known wrong, never blessed"
+        );
+    }
+
     /// Generated cases cover every op, with passing (not deferred) cases for the ops
     /// that can be ported now.
     #[test]
@@ -1754,5 +1855,63 @@ mod tests {
             );
         }
         assert_eq!(stats.len(), 10);
+    }
+
+    // ---- WR-587: every blessed `Normal` row is its loop's area normal ----------------
+
+    /// Every committed `Normal` row (not only the ones the retirement moved) is certified by
+    /// [`crate::wr587_replay::certify`]: a success is the direction of the exact area vector
+    /// of the loop's samples within a derived rounding bound, a 1007 refusal an exact area
+    /// vector shorter than `SM_EFF_ZERO`. So the rows are right by construction, not by
+    /// comparison with the code that blessed them.
+    #[test]
+    fn wr587_every_normal_row_is_the_area_normal() {
+        use crate::wr587_replay::{certify, Answer, Cert};
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let golden = crate::golden::read(&crate::golden::default_dir(), Runner.id()).unwrap();
+        let k = Kernel::default();
+        let mut counts: BTreeMap<Cert, usize> = BTreeMap::new();
+        let mut deferred = 0;
+        for case in &cases {
+            let Ok(OpIn::Normal { curves }) = case.parse::<OpIn>() else {
+                continue;
+            };
+            let row = &golden[&case.name];
+            if !row["deferred"].is_null() {
+                deferred += 1;
+                continue;
+            }
+            let status = row["ints"]["status"][0].as_i64().unwrap();
+            let out: Vec<f64> = row["values"]["out"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            let answer = match status {
+                0 => Answer::Normal(Vec3::new(out[0], out[1], out[2])),
+                1007 => Answer::ZeroNormal,
+                _ => Answer::OtherRefusal,
+            };
+            let built: Vec<Curve> = curves.iter().map(|c| build(c).unwrap()).collect();
+            let cert = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                certify(&k, &built, answer)
+            }))
+            .unwrap_or_else(|_| panic!("{}: not the certified area normal", case.name));
+            if cert == Cert::SingleLinear {
+                // a single line's refusal is `SM_ERR`, not an area refusal's 1007
+                assert_eq!(status, 1001, "{}: a single line's status", case.name);
+            }
+            *counts.entry(cert).or_default() += 1;
+        }
+        eprintln!("WR-587 Normal rows by class: {counts:?}; deferred {deferred}");
+        assert_eq!(
+            format!("{counts:?}; deferred {deferred}"),
+            "{AreaNormal: 271, ZeroArea: 1, BelowEffZero: 2, SingleLinear: 28}; deferred 0"
+        );
     }
 }

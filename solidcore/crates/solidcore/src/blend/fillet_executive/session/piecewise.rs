@@ -44,7 +44,8 @@ use crate::blend::fillet_executive::p3::FilletFinishAccess;
 use crate::blend::fillet_geom::p1::{FilletGeomType, FilletSurfaceStorage};
 use crate::boolean::merge::p4::{notification_key, KernelManifoldIntersector};
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{ids, Attribute, AttributeValue, Behavior, ObjectKey};
 use crate::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use crate::geom::object::ObjectRef;
@@ -61,6 +62,32 @@ use crate::topology::{
 };
 
 const OP: &str = "blend::fillet_executive::session::piecewise";
+
+/// A reviewed defect for something of the merge or of the body it built that the kernel
+/// made and should be there, `why` saying why (status `SM_ERR_NULL_POINTER`, upstream `NER`).
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// A face of the target without a surface ([`BlendFailure::FaceHasNoSurface`] at the face;
+/// status `SM_ERR_NULL_POINTER`, upstream `NER` of `GetSurface()`). After the merge the
+/// target holds the caller's faces and the fillet faces merged in. Each fillet face was made
+/// on its surface (`make_face_with_curves` takes the `Surface` by value and sets it), and the
+/// merge moves or splits faces together with their surfaces, so a face here without one is
+/// one of the caller's faces.
+fn face_without_surface(face: FaceId) -> SolidError {
+    Failure::new(OP, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
+
+/// Why a face use of the merged body has its mate and shell: a face is made with a pair of
+/// mated face uses, each in a shell, and the merge keeps them so.
+const FACEUSE_LINKS: &str = "a face use of the merged body has no mate or no shell: every face \
+     is made with two mated face uses, each in a shell, and the merge keeps them so";
 
 /// The store handle of the target (the first body the store receives).
 const TARGET: BrepId = BrepId::from_index(0);
@@ -201,11 +228,24 @@ pub(super) fn naming_owner(
 
 /// `pRegion->IsVoid()` of the region of `brep`'s edge use (`NER` on each null).
 fn edgeuse_region_is_void(brep: &Brep, eu: Option<crate::topology::EdgeuseId>) -> Result<i32> {
-    let eu = eu.ok_or_else(|| SolidError::null_pointer(OP))?;
-    brep.edgeuse(eu)?
-        .edge
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let shell = edgeuse::p1::shell(brep, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let eu = eu.ok_or_else(|| {
+        null_defect(
+            "a solver of the merge has no first edge use: every solver is set up on the \
+             filleted edge's edge uses",
+        )
+    })?;
+    brep.edgeuse(eu)?.edge.ok_or_else(|| {
+        null_defect(
+            "a solver's first edge use has no edge: the solver was set up on that edge use of \
+             the filleted edge",
+        )
+    })?;
+    let shell = edgeuse::p1::shell(brep, eu)?.ok_or_else(|| {
+        null_defect(
+            "a solver's first edge use is in no shell: it is an edge use of a face of the \
+             target, whose face uses are each in a shell",
+        )
+    })?;
     // pShell->GetRegion()->IsVoid() dereferences the region unchecked.
     let region = brep
         .shell(shell)?
@@ -310,7 +350,12 @@ impl FilletSession<'_> {
                     _ => None,
                 };
                 for rail in rails {
-                    let rail = rail.ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let rail = rail.ok_or_else(|| {
+                        null_defect(
+                            "a fillet geometry has no rail edge on a side: the geometry's \
+                             rails are made with it, one on each side",
+                        )
+                    })?;
                     let original = self.objects.pseudo.fillet_edge(rail)?.original_face();
                     let original_surface = original
                         .map(|face| target_surface(self.objects.target, target_serial, face))
@@ -509,10 +554,11 @@ impl FilletSession<'_> {
         let result = (|| {
             issued?;
             let context = context?;
-            let target = bodies
-                .0
-                .take()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let target = bodies.0.take().ok_or_else(|| {
+                null_defect(
+                    "the target body moved into the merge's store is gone: it is moved there once",
+                )
+            })?;
             let id = store.adopt_brep(context, target)?;
             if id != TARGET {
                 return Err(invalid("target store handle"));
@@ -520,7 +566,11 @@ impl FilletSession<'_> {
             let other = bodies
                 .1
                 .take()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| {
+                    null_defect(
+                        "the intermediate body moved into the merge's store is gone: it is moved there once",
+                    )
+                })?;
             let id = store.adopt_brep(context, other)?;
             if id != INTERMEDIATE {
                 return Err(invalid("intermediate store handle"));
@@ -575,7 +625,7 @@ impl FilletSession<'_> {
         let faces = p1::faces(target, None)?;
         for &f in &faces {
             let Some(surface_key) = target_surface(target, serial, f)?.map(|s| s.key) else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(face_without_surface(f));
             };
             if attributes
                 .find_attribute(surface_key, ids::FILLET_EDGEMAP)
@@ -589,11 +639,15 @@ impl FilletSession<'_> {
                 .face(f)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| face_without_surface(f))?;
             let normal: Vec3 = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
             let [_, _, _, _, _, dvv] = surface.evaluate_2nd_derivatives(k, uv, true, true)?;
-            let mut faceuse =
-                face::p2::upward_faceuse(target, f)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let mut faceuse = face::p2::upward_faceuse(target, f)?.ok_or_else(|| {
+                null_defect(
+                    "a face of the merged body has no upward face use: every face is made \
+                         with its two face uses",
+                )
+            })?;
             // See if the top Faceuse on the inside of the fillet
             if dvv.length() < EFF_ZERO {
                 continue;
@@ -602,20 +656,20 @@ impl FilletSession<'_> {
                 faceuse = target
                     .faceuse(faceuse)?
                     .mate
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| null_defect(FACEUSE_LINKS))?;
             }
             let region_of = |fu| -> Result<Option<RegionId>> {
                 let shell = target
                     .faceuse(fu)?
                     .shell
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| null_defect(FACEUSE_LINKS))?;
                 Ok(target.shell(shell)?.region)
             };
             let region = region_of(faceuse)?;
             let mate = target
                 .faceuse(faceuse)?
                 .mate
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| null_defect(FACEUSE_LINKS))?;
             if region_of(mate)? == region {
                 continue;
             }
@@ -644,7 +698,7 @@ impl FilletSession<'_> {
         // Now clean up attributes
         for &f in &faces {
             let Some(surface_key) = target_surface(target, serial, f)?.map(|s| s.key) else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(face_without_surface(f));
             };
             for id in [ids::FILLET_EDGEMAP, ids::FILLET_VERTMAP] {
                 if let Some(h) = attributes.find_attribute(surface_key, id) {

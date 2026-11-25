@@ -1,12 +1,17 @@
-//! 3D sketching in the viewport (the Sketch Palette's 3D Sketch option): the Line, Arc, Spline
-//! and Point tools take points off the sketch plane by snapping to model vertices, edges and
-//! faces and to points already drawn in 3D; segments that stay on the plane are ordinary sketch
-//! lines and arcs. The 3D Line, Arc, Spline and Point commands have their own tools: every point
-//! they take is a world point, with no on-plane downgrade.
-//! A drawn 3D point (or curve end) clicked without a tool gets a move triad:
-//! drag an arrow to move along X, Y or Z, or the square to move parallel to the sketch plane.
-//! Everything runs `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.point3d`,
-//! `sketch.move3d`, `sketch.line` and `sketch.arc.three_point`.
+//! 3D sketching in the viewport (the Sketch Palette's 3D Sketch option): the Line, Arc, Spline,
+//! Control Point Spline and Point tools take points off the sketch plane by snapping to model
+//! vertices, edges and faces and to points already drawn in 3D; segments that stay on the plane
+//! are ordinary sketch lines and arcs. The 3D Line, Arc, Spline, Control Point Spline and Point
+//! commands have their own tools: every point they take is a world point, with no on-plane
+//! downgrade.
+//! A drawn 3D point drags parallel to the sketch plane, as other sketch points do; moving along
+//! X, Y or Z is Move/Copy's job (its triad, `sketch.move` with `z`). A control point spline drawn
+//! in 3D shows its control polygon, dashed: its inner control points lie off the curve.
+//! Everything runs `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`,
+//! `sketch.spline3d.control_point`, `sketch.point3d`, `sketch.move3d`, `sketch.move_point`,
+//! `sketch.line`, `sketch.arc.three_point`, `sketch.spline.fit_point` and
+//! `sketch.spline.control_point`.
+//! The Older sketch move handles preference gives a clicked drawn point arrows of its own instead.
 
 use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
@@ -23,21 +28,23 @@ use solidcraft_theme::Tokens;
 thread_local! {
     /// Points of the curve being drawn in 3D (with the tool they belong to).
     static CHAIN: RefCell<(Option<&'static str>, Vec<Vec3>)> = const { RefCell::new((None, Vec::new())) };
-    /// The drawn point with the triad: wire id and fit index.
-    static TRIAD: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
-    /// A triad drag: axis (None: in the sketch plane), undo depth, grab offset.
-    static DRAG: RefCell<Option<(Option<Vec3>, usize, Vec3)>> = const { RefCell::new(None) };
+    /// The selected drawn 3D point (wire id, fit index), for Delete.
+    static SELECTED: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
+    /// A drawn point being dragged.
+    static DRAG: RefCell<Option<Drag>> = const { RefCell::new(None) };
     /// Where the cursor would put a point (for the rubber band), and its snap label.
     static HOVER: RefCell<Option<(Vec3, &'static str)>> = const { RefCell::new(None) };
 }
 
-/// Triad arrow length (screen px).
+/// A clicked drawn point's arrow length (screen px), under the Older sketch move handles preference.
 const ARROW: f32 = 60.0;
 
 /// Is the sketch being edited a 3D sketch?
 pub fn active(app: &SolveApp) -> bool {
-    let st = crate::open_meshing::session_world(&app.session);
-    app.session.active_sketch.and_then(|s| st.sketch(s)).is_some_and(|ss| ss.sketch.view.three_d)
+    // Asked at every frame: with no sketch open (a joint drag runs only then), the world is not
+    // asked for, which would place a drag's frame, every moved body again (#6325).
+    let Some(sketch) = app.session.active_sketch else { return false };
+    crate::open_meshing::session_world(&app.session).sketch(sketch).is_some_and(|ss| ss.sketch.view.three_d)
 }
 
 fn takes(cmd: &str) -> bool {
@@ -50,9 +57,40 @@ fn takes(cmd: &str) -> bool {
             | "sketch.point"
             | "sketch.line3d"
             | "sketch.spline3d"
+            | "sketch.spline3d.control_point"
             | "sketch.point3d"
     )
 }
+
+/// The planar Control Point Spline tool: it is the planar tool, with all it does on the plane,
+/// until a click lands off the sketch plane. From that click on, the points clicked are the
+/// control points of a 3D curve.
+fn lifts(cmd: &str) -> bool {
+    cmd == "sketch.spline.control_point"
+}
+
+/// The two tools that draw a control point spline: the points clicked are its control points.
+fn control_tool(cmd: &str) -> bool {
+    lifts(cmd) || cmd == "sketch.spline3d.control_point"
+}
+
+/// Whether the curve `cmd`'s tool is drawing has left the plane: its points are in the chain.
+fn lifted(cmd: &str) -> bool {
+    CHAIN.with(|c| {
+        let c = c.borrow();
+        c.0 == Some(cmd) && !c.1.is_empty()
+    })
+}
+
+/// The points a planar tool has taken so far, as world points on the sketch plane.
+fn plane_points(app: &SolveApp, tool: &Tool) -> Vec<Vec3> {
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return Vec::new() };
+    tool.pts.iter().map(|(q, _)| ss.plane.to_world(*q)).collect()
+}
+
+/// Degree of the curve the control point spline tools draw, for their preview.
+const CONTROL_DEGREE: u8 = 3;
 
 /// Only 3D point-placing tools broaden sketch-point picking; ordinary selection stays local.
 pub fn drawing(app: &SolveApp) -> bool {
@@ -64,6 +102,14 @@ fn drawn_points(app: &SolveApp) -> Vec<(String, usize, Vec3)> {
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return Vec::new() };
     ss.sketch.wires.iter().flat_map(|w| w.fit.iter().enumerate().map(|(i, p)| (w.id.clone(), i, *p))).collect()
+}
+
+/// The control polygons of the control point splines drawn in 3D: each one's control points in
+/// order.
+pub fn control_polygons(app: &SolveApp) -> Vec<Vec<Vec3>> {
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return Vec::new() };
+    ss.sketch.wires.iter().filter(|w| w.control.is_some()).map(|w| w.fit.clone()).collect()
 }
 
 /// Closest point of segment a–b to the ray (o, d).
@@ -90,12 +136,14 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
     let (o, d) = proj.ray(pos);
     for h in pick_3d(app, proj, pos) {
         match h {
+            Hit::SketchPoint3d { at, .. } => return Some((at, "Pt")),
             Hit::SketchPoint { sketch, at, .. } => {
                 if let Some(source) = st.sketch(sketch) {
                     return Some((source.plane.to_world(at), "Pt"));
                 }
             }
             Hit::Vertex { point, .. } => return Some((point, "Vertex")),
+            Hit::PointCloudPoint { point, .. } => return Some((point, "Cloud")),
             Hit::Edge { body, index, .. } => {
                 let ws = crate::open_meshing::session_world(&app.session);
                 let m = ws.body(&body)?.mesh();
@@ -131,12 +179,31 @@ fn set_chain(cmd: Option<&'static str>, pts: Vec<Vec3>) {
 
 /// The pointer moved: remember where a click would put the point.
 pub fn on_hover(app: &SolveApp, proj: &Proj, pos: Pos2) {
-    let h = if app.tool.as_ref().is_some_and(|t| takes(t.cmd)) && active(app) { point_at(app, proj, pos) } else { None };
+    let h = if app.tool.as_ref().is_some_and(|t| takes(t.cmd) || lifts(t.cmd)) && active(app) { point_at(app, proj, pos) } else { None };
     HOVER.with(|x| *x.borrow_mut() = h);
 }
 
 /// A click while a drawing tool is active in a 3D sketch (true: handled here).
 pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> bool {
+    if lifts(tool.cmd) && active(app) {
+        // On the plane the planar tool takes the click, as in any sketch. The first click off
+        // the plane lifts the curve: the points taken so far go with it.
+        let Some((p, _)) = point_at(app, proj, pos) else { return false };
+        let mut c = if lifted(tool.cmd) {
+            chain()
+        } else if on_plane(app, p).is_some() {
+            return false;
+        } else {
+            let taken = plane_points(app, tool);
+            tool.pts.clear();
+            tool.picks.clear();
+            crate::sketch_dims::reset(tool);
+            taken
+        };
+        c.push(p);
+        set_chain(Some(tool.cmd), c);
+        return true;
+    }
     if !takes(tool.cmd) || !active(app) {
         return false;
     }
@@ -201,8 +268,9 @@ fn report(app: &mut SolveApp, r: Result<Value, String>) {
     }
 }
 
-/// Right-click / Esc while drawing in 3D: a spline is made from its points, a line chain ends
-/// (true: handled here; the tool stays for the next curve).
+/// Right-click / Esc while drawing in 3D: a spline is made from its points (a control point
+/// spline in 3D needs three), a line chain ends (true: handled here; the tool stays for the next
+/// curve).
 pub fn finish(app: &mut SolveApp) -> bool {
     let (cmd, pts) = CHAIN.with(|c| c.borrow().clone());
     let Some(cmd) = cmd.filter(|c| app.tool.as_ref().is_some_and(|t| t.cmd == *c)) else {
@@ -223,8 +291,14 @@ pub fn finish(app: &mut SolveApp) -> bool {
         };
         report(app, r);
     }
+    if lifts(cmd) && pts.len() >= 2 {
+        // The planar tool's curve left the plane: it is the 3D control point spline.
+        let q: Vec<Value> = pts.iter().map(|p| json!([p.x, p.y, p.z])).collect();
+        let r = app.run("sketch.spline3d.control_point", json!({ "points": q }));
+        report(app, r);
+    }
     // The dedicated 3D tools keep every point as a world point: no on-plane downgrade.
-    if matches!(cmd, "sketch.line3d" | "sketch.spline3d") && pts.len() >= 2 {
+    if matches!(cmd, "sketch.line3d" | "sketch.spline3d" | "sketch.spline3d.control_point") && pts.len() >= 2 {
         let q: Vec<Value> = pts.iter().map(|p| json!([p.x, p.y, p.z])).collect();
         let r = app.run(cmd, json!({ "points": q }));
         report(app, r);
@@ -235,14 +309,23 @@ pub fn finish(app: &mut SolveApp) -> bool {
 
 /// Rubber band and snap marker of the curve being drawn in 3D (true: drawn here).
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -> bool {
-    if !takes(t.cmd) || !active(app) {
+    let hover = HOVER.with(|h| *h.borrow());
+    // The planar Control Point Spline tool draws its own preview until its curve has left the
+    // plane, or the cursor is where a click would lift it.
+    let lifting = lifts(t.cmd) && active(app) && (lifted(t.cmd) || hover.is_some_and(|(h, _)| on_plane(app, h).is_none()));
+    if !lifting && (!takes(t.cmd) || !active(app)) {
         return false;
     }
     // Drawn straight onto the view: its side's colours (#4146).
     let tk = Tokens::view();
     let stroke = Stroke::new(1.5, tk.sketch_accent);
-    let pts = if CHAIN.with(|c| c.borrow().0) == Some(t.cmd) { chain() } else { Vec::new() };
-    let hover = HOVER.with(|h| *h.borrow());
+    let pts = if lifts(t.cmd) && !lifted(t.cmd) {
+        plane_points(app, t)
+    } else if CHAIN.with(|c| c.borrow().0) == Some(t.cmd) {
+        chain()
+    } else {
+        Vec::new()
+    };
     let mut all: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
     if let Some((h, label)) = hover
         && let Some(s) = proj.to_screen(h)
@@ -279,6 +362,20 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
         };
         let screen: Vec<Pos2> = poly.into_iter().filter_map(|p| proj.to_screen(p)).collect();
         painter.add(Shape::line(screen, stroke));
+    } else if control_tool(t.cmd) && all.len() >= 2 {
+        // The control polygon through the points clicked and the cursor, dashed, and the curve
+        // they shape (two points: the polygon's one leg is the curve).
+        let mut w: Vec<Vec3> = pts.clone();
+        if let Some((h, _)) = hover {
+            w.push(h);
+        }
+        let poly: Vec<Pos2> = solidcraft_engine::sketch::control_polyline(&w, CONTROL_DEGREE).into_iter().filter_map(|p| proj.to_screen(p)).collect();
+        if poly.len() >= 2 && w.len() >= 3 {
+            painter.extend(crate::ui_kit::dashed_line(&all, painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 4.0, 3.0));
+            painter.add(Shape::line(poly, stroke));
+        } else {
+            painter.add(Shape::line(all, stroke));
+        }
     } else if matches!(t.cmd, "sketch.spline.fit_point" | "sketch.spline3d") && all.len() >= 2 {
         let mut w: Vec<Vec3> = pts.clone();
         if let Some((h, _)) = hover {
@@ -293,10 +390,16 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
 }
 
 // ---------------------------------------------------------------------------------------------
-// The move triad
+// Dragging drawn points
 
-fn triad_point(app: &SolveApp) -> Option<(String, usize, Vec3)> {
-    let (w, i) = TRIAD.with(|t| t.borrow().clone())?;
+/// The drawn 3D point under `pos`: (wire id, fit index, point).
+pub(crate) fn drawn_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(String, usize, Vec3)> {
+    drawn_points(app).into_iter().find(|(_, _, p)| proj.to_screen(*p).is_some_and(|s| s.distance(pos) < 8.0))
+}
+
+/// The selected drawn point and where it is now.
+pub(crate) fn selected(app: &SolveApp) -> Option<(String, usize, Vec3)> {
+    let (w, i) = SELECTED.with(|t| t.borrow().clone())?;
     drawn_points(app).into_iter().find(|(id, k, _)| *id == w && *k == i)
 }
 
@@ -304,9 +407,12 @@ fn unit(v: egui::Vec2) -> Option<egui::Vec2> {
     (v.length() > 1e-3).then(|| v / v.length())
 }
 
-/// The triad's handles on screen: (axis or None for the plane square, tip, base).
+/// The selected point's arrows (sketch_move_classic only): (axis or None for the square, tip, base).
 fn handles(app: &SolveApp, proj: &Proj) -> Vec<(Option<Vec3>, Pos2, Pos2)> {
-    let Some((_, _, p)) = triad_point(app) else { return Vec::new() };
+    if !app.preferences.sketch_move_classic {
+        return Vec::new();
+    }
+    let Some((_, _, p)) = selected(app) else { return Vec::new() };
     let Some(base) = proj.to_screen(p) else { return Vec::new() };
     let mut out = Vec::new();
     for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
@@ -320,47 +426,60 @@ fn handles(app: &SolveApp, proj: &Proj) -> Vec<(Option<Vec3>, Pos2, Pos2)> {
     out
 }
 
-/// A click without a tool: a drawn 3D point gets the triad (true: handled).
+/// A click without a tool: a drawn 3D point is selected (true: handled).
 pub fn click(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> bool {
-    if !active(app) {
-        TRIAD.with(|t| *t.borrow_mut() = None);
-        return false;
-    }
-    let hit = drawn_points(app).into_iter().find(|(_, _, p)| proj.to_screen(*p).is_some_and(|s| s.distance(pos) < 8.0));
-    let on_handle = handles(app, proj).iter().any(|(_, tip, _)| tip.distance(pos) < 9.0);
-    if on_handle {
+    if handles(app, proj).iter().any(|(_, tip, _)| tip.distance(pos) < 9.0) {
         return true;
     }
-    TRIAD.with(|t| *t.borrow_mut() = hit.as_ref().map(|(w, i, _)| (w.clone(), *i)));
-    if let Some((w, _, p)) = hit {
-        app.set_status(
-            format!(
-                "{w} at {}, {}, {}: drag an arrow (X, Y, Z) or the square (in the sketch plane); Delete removes it",
-                crate::prefs::show_mm(app, p.x, 1),
-                crate::prefs::show_mm(app, p.y, 1),
-                crate::prefs::show_mm(app, p.z, 1)
-            ),
-            false,
-        );
-        return true;
-    }
-    false
+    let hit = if active(app) { drawn_at(app, proj, pos) } else { None };
+    SELECTED.with(|t| *t.borrow_mut() = hit.as_ref().map(|(w, i, _)| (w.clone(), *i)));
+    let Some((w, _, p)) = hit else { return false };
+    let how = if app.preferences.sketch_move_classic {
+        "drag an arrow (X, Y, Z) or the square (in the sketch plane)"
+    } else {
+        "drag it to move it parallel to the sketch plane, or use Move/Copy to move it along X, Y or Z"
+    };
+    app.set_tool_hint(format!(
+        "{w} at {}, {}, {}: {how}; Delete removes it",
+        crate::prefs::show_mm(app, p.x, 1),
+        crate::prefs::show_mm(app, p.y, 1),
+        crate::prefs::show_mm(app, p.z, 1)
+    ));
+    true
 }
 
-/// The drawn curve or point with the triad, for Delete.
+/// The selected drawn curve, for Delete.
 pub fn delete_selected(app: &mut SolveApp) -> bool {
-    let Some((w, _)) = TRIAD.with(|t| t.borrow_mut().take()) else { return false };
+    let Some((w, _)) = SELECTED.with(|t| t.borrow_mut().take()) else { return false };
     let r = app.run("sketch.delete", json!({ "entities": [w] }));
     report(app, r);
     true
 }
 
-/// A drag starting on a triad handle (true: the triad took it).
+/// A drag in progress: its axis or plane, the undo depth when it began and the pointer's offset.
+#[derive(Clone, Copy)]
+struct Drag {
+    axis: Option<Vec3>,
+    depth: usize,
+    grab: Vec3,
+}
+
+/// A drag starting on a drawn 3D point (true: taken).
 pub fn drag_start(app: &SolveApp, proj: &Proj, press: Pos2) -> bool {
-    let Some((axis, _, _)) = handles(app, proj).into_iter().find(|(_, tip, _)| tip.distance(press) < 9.0) else { return false };
-    let Some((_, _, p)) = triad_point(app) else { return false };
+    if !active(app) {
+        return false;
+    }
+    let (axis, p) = if app.preferences.sketch_move_classic {
+        let Some((axis, _, _)) = handles(app, proj).into_iter().find(|(_, tip, _)| tip.distance(press) < 9.0) else { return false };
+        let Some((_, _, p)) = selected(app) else { return false };
+        (axis, p)
+    } else {
+        let Some((w, i, p)) = drawn_at(app, proj, press) else { return false };
+        SELECTED.with(|t| *t.borrow_mut() = Some((w, i)));
+        (None, p)
+    };
     let grab = target(app, proj, press, axis, p).map(|g| p - g).unwrap_or(Vec3::ZERO);
-    DRAG.with(|d| *d.borrow_mut() = Some((axis, app.session.undo.len(), grab)));
+    DRAG.with(|d| *d.borrow_mut() = Some(Drag { axis, depth: app.session.undo.len(), grab }));
     true
 }
 
@@ -368,23 +487,16 @@ pub fn drag_start(app: &SolveApp, proj: &Proj, press: Pos2) -> bool {
 /// parallel to the sketch plane.
 fn target(app: &SolveApp, proj: &Proj, pos: Pos2, axis: Option<Vec3>, p: Vec3) -> Option<Vec3> {
     let (o, d) = proj.ray(pos);
-    match axis {
-        Some(u) => {
-            let w0 = p - o;
-            let (a, b, c) = (u.dot(u), u.dot(d), d.dot(d));
-            let den = a * c - b * b;
-            if den.abs() < 1e-12 {
-                return None;
-            }
-            Some(p + u * ((b * d.dot(w0) - c * u.dot(w0)) / den))
-        }
-        None => {
-            let st = crate::open_meshing::session_world(&app.session);
-            let n = app.session.active_sketch.and_then(|s| st.sketch(s))?.plane.normal();
-            let den = d.dot(n);
-            (den.abs() > 1e-12).then(|| o + d * ((p - o).dot(n) / den))
-        }
+    if let Some(u) = axis {
+        let w0 = p - o;
+        let (a, b, c) = (u.dot(u), u.dot(d), d.dot(d));
+        let den = a * c - b * b;
+        return (den.abs() >= 1e-12).then(|| p + u * ((b * d.dot(w0) - c * u.dot(w0)) / den));
     }
+    let st = crate::open_meshing::session_world(&app.session);
+    let n = app.session.active_sketch.and_then(|s| st.sketch(s))?.plane.normal();
+    let den = d.dot(n);
+    (den.abs() > 1e-12).then(|| o + d * ((p - o).dot(n) / den))
 }
 
 pub fn dragging() -> bool {
@@ -392,8 +504,8 @@ pub fn dragging() -> bool {
 }
 
 pub fn drag_to(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
-    let Some((axis, depth, grab)) = DRAG.with(|d| *d.borrow()) else { return };
-    let Some((w, i, p)) = triad_point(app) else { return };
+    let Some(Drag { axis, depth, grab }) = DRAG.with(|d| *d.borrow()) else { return };
+    let Some((w, i, p)) = selected(app) else { return };
     let Some(to) = target(app, proj, pos, axis, p).map(|t| t + grab) else { return };
     if app.session.execute("sketch.move3d", &json!({"wire": w, "index": i, "to": [to.x, to.y, to.z]})).is_ok() {
         app.session.undo.truncate(depth + 1);
@@ -404,14 +516,21 @@ pub fn drag_end() {
     DRAG.with(|d| *d.borrow_mut() = None);
 }
 
-/// Draw the drawn 3D points and the triad.
+/// Draw the drawn 3D points (the selected one in the accent colour).
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.session.active_sketch.is_none() {
         return;
     }
     // Drawn straight onto the view: its side's colours (#4146).
     let tk = Tokens::view();
-    let sel = TRIAD.with(|t| t.borrow().clone());
+    // A control point spline's control polygon, under its points: which points shape which curve.
+    for polygon in control_polygons(app) {
+        let legs: Vec<Pos2> = polygon.iter().filter_map(|p| proj.to_screen(*p)).collect();
+        if legs.len() == polygon.len() {
+            painter.extend(crate::ui_kit::dashed_line(&legs, painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 4.0, 3.0));
+        }
+    }
+    let sel = SELECTED.with(|t| t.borrow().clone());
     for (w, i, p) in drawn_points(app) {
         if let Some(s) = proj.to_screen(p) {
             let on = sel.as_ref().is_some_and(|(sw, si)| *sw == w && *si == i);
@@ -447,7 +566,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
 }
 
-/// Test hook: screen positions of the triad handles (axis name or "plane", tip).
+/// Test hook: screen positions of a clicked point's arrows (axis name or "plane", tip).
 pub fn handle_points(app: &SolveApp, proj: &Proj) -> Vec<(&'static str, Pos2)> {
     handles(app, proj)
         .into_iter()

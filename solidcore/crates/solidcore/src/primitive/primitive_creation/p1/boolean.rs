@@ -16,12 +16,13 @@
 //! code. The closing `StitchFaces` runs on the caller's notification state, as
 //! upstream's glues notify A's own objects. No recursion.
 
-use super::primitives::{detailed_face, Boolean2d};
+use super::primitives::{detailed_face_with_owners, Boolean2d};
 use crate::boolean::merge::p4::{
     BooleanKernels, KernelManifoldIntersector, ManifoldIntersector, ManifoldKernelAdapter,
     ManifoldNotificationKeys,
 };
-use crate::error::{ignore_or_pass_on, EntityRef, Result, SolidError};
+use crate::error::primitive::PrimitiveFailure;
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{Context, MarkLock};
 use crate::geom::object::ObjectRef;
@@ -100,6 +101,7 @@ pub(super) fn finish(
             attributes,
             context,
             key_of,
+            other_key_of,
             curve: &curve,
         };
         finish_with(k, a, b, first, operation, result, marks, session)
@@ -107,6 +109,12 @@ pub(super) fn finish(
 }
 
 const OP: &str = "primitive::boolean_2d";
+/// A coincident faceuse's face: a faceuse is made with its face, and the radial search
+/// returns the faceuse of an edgeuse around the shared edge.
+const FACEUSE_FACE: &str = "the radial search's coincident faceuse has no face, though a faceuse is made with its face and the search returns the faceuse of an edgeuse around the shared edge";
+/// The covering face's surface: the covering face is the first face, whose surface
+/// `boolean_2d` read before calling [`finish`], or the face this loop built on a surface.
+const COVERING_SURFACE: &str = "the covering face has no surface, though it is the first face, whose surface boolean_2d read, or a face this loop built on a surface";
 
 /// The local `SmTopologyIntersector` and the caller's notification state.
 struct Session<'s, 'k, 'c> {
@@ -114,6 +122,7 @@ struct Session<'s, 'k, 'c> {
     attributes: &'s mut AttributeStore,
     context: &'s mut Option<&'c mut Context>,
     key_of: &'s dyn Fn(EntityRef) -> ObjectRef,
+    other_key_of: &'s dyn Fn(EntityRef) -> ObjectRef,
     /// The primary operand's edge curve identities (for the stitch's split curves).
     curve: &'s dyn Fn(EdgeId, i64) -> Result<ObjectRef>,
 }
@@ -141,7 +150,6 @@ fn finish_with(
     mut session: Session<'_, '_, '_>,
 ) -> Result<()> {
     // fork c8f6a31 (WR-662): Boolean2D's Relate and DeleteFaces are SER.
-    let p = k.fixes.sweep_statuses_pass_on;
     // intersect, merge, and relate the intersection geometry between the two topology graphs
     session.ti.intersect_insert_relate(
         &mut BooleanKernels {
@@ -152,9 +160,7 @@ fn finish_with(
         b,
         session.attributes,
     )?;
-    let fixes = k.fixes;
-    let mut lock =
-        MarkLock::new_pair_with_fixes(core::slice::from_mut(&mut k.context), 0, 0, &fixes)?;
+    let mut lock = MarkLock::new_pair(core::slice::from_mut(&mut k.context), 0, 0)?;
     let mark_a = lock.mark_type1();
     let mark_b = lock.mark_type2();
     let (marks_a, marks_b) = marks;
@@ -162,6 +168,28 @@ fn finish_with(
         // get coincident edges, then coincident vertices
         let (edges, other_edges) = session.ti.common_edges(a, b)?;
         for (primary, other) in edges.iter().zip(&other_edges) {
+            let source_key = session.other_key_of;
+            let target = (session.key_of)(EntityRef::Edge(*primary));
+            let mut env = session.env();
+            env.key_of = source_key;
+            env.records.or_default(target.key);
+            edge::notify(
+                b,
+                *other,
+                &mut env,
+                crate::geom::object::NotifyOperation::Copy,
+                [Some(target), None, None],
+            )?;
+            let target_other = (session.other_key_of)(EntityRef::Edge(*other));
+            let mut env = session.env();
+            env.records.or_default(target_other.key);
+            edge::notify(
+                a,
+                *primary,
+                &mut env,
+                crate::geom::object::NotifyOperation::Copy,
+                [Some(target_other), None, None],
+            )?;
             marks_a.mark(k, Entity::Edge(*primary), mark_a);
             marks_b.mark(k, Entity::Edge(*other), mark_b);
         }
@@ -177,7 +205,8 @@ fn finish_with(
                 .into_iter()
                 .step_by(2)
             {
-                let face = eu::face(a, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let face = eu::face(a, edgeuse)?
+                    .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::EdgeWithoutFace))?;
                 if marks_a.is_marked(k, Entity::Face(face), mark_a) {
                     continue;
                 }
@@ -194,14 +223,15 @@ fn finish_with(
                 )?;
                 if let Some(faceuse) = sector.coincident_faceuse {
                     let mate = eu::faceuse_face(b, faceuse)?
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        .ok_or_else(|| SolidError::primitive_broken_link(OP, FACEUSE_FACE))?;
                     marks_b.mark(k, Entity::Face(mate), mark_b);
                     // sTI.Relate(pF,pOFace), its status unchecked
-                    ignore_or_pass_on(session.ti.relate_faces(a, face, b, mate), p)?;
+                    session.ti.relate_faces(a, face, b, mate)?;
                 }
             }
             for edgeuse in edge::edgeuses(b, other, None, None)?.into_iter().step_by(2) {
-                let face = eu::face(b, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let face = eu::face(b, edgeuse)?
+                    .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::EdgeWithoutFace))?;
                 if marks_b.is_marked(k, Entity::Face(face), mark_b) {
                     continue;
                 }
@@ -222,7 +252,7 @@ fn finish_with(
                 };
                 if let Some(faceuse) = sector.coincident_faceuse {
                     let mate = eu::faceuse_face(a, faceuse)?
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        .ok_or_else(|| SolidError::primitive_broken_link(OP, FACEUSE_FACE))?;
                     marks_a.mark(k, Entity::Face(mate), mark_a);
                     session.ti.relate_faces(a, mate, b, face)?;
                 }
@@ -260,14 +290,16 @@ fn finish_with(
                     .face(covering)?
                     .surface
                     .as_ref()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::primitive_broken_link(OP, COVERING_SURFACE))?;
                 let surface = if original.owner().is_some() {
                     original.copy(k)?
                 } else {
                     original.clone_for_evaluation()?
                 };
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
-                covering = detailed_face(
+                let source_edges = boundary.edges.clone();
+                let mut owners = Vec::new();
+                covering = detailed_face_with_owners(
                     k,
                     a,
                     a.infinite_region(),
@@ -275,22 +307,38 @@ fn finish_with(
                     surface,
                     domain,
                     &mut session.env(),
+                    &mut owners,
                 )?;
+                for (source, target) in source_edges
+                    .into_iter()
+                    .zip(owners)
+                    .filter_map(|(source, target)| target.map(|target| (source, target)))
+                {
+                    let source_key = session.other_key_of;
+                    let target = (session.key_of)(EntityRef::Edge(target));
+                    let mut env = session.env();
+                    env.key_of = source_key;
+                    env.records.or_default(target.key);
+                    edge::notify(
+                        b,
+                        source,
+                        &mut env,
+                        crate::geom::object::NotifyOperation::Copy,
+                        [Some(target), None, None],
+                    )?;
+                }
             }
         }
         // sTI.DeleteFaces(sDelFaces), its status unchecked
-        ignore_or_pass_on(
-            session.ti.delete_faces(
-                &mut BooleanKernels {
-                    primary: k,
-                    other: None,
-                },
-                a,
-                session.attributes,
-                &delete,
-                None,
-            ),
-            p,
+        session.ti.delete_faces(
+            &mut BooleanKernels {
+                primary: k,
+                other: None,
+            },
+            a,
+            session.attributes,
+            &delete,
+            None,
         )?;
         if operation != Boolean2d::Merge {
             // pBrepA->StitchFaces(pBrepA->GetTolerance()): its glues notify A's own

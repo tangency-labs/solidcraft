@@ -383,7 +383,7 @@ impl Curve {
         if pu > MAX_DEGREE {
             return Err(SolidError::InvalidInput {
                 operation: OP,
-                reason: "degree above NL_MAXDEG (upstream scratch array size)",
+                reason: "degree above the largest degree the NURBS routines handle",
             });
         }
         let der = sx(der, OP)?;

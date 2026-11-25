@@ -9,7 +9,9 @@
 //! The record and the kernel's data differ in four places, each taken care of here:
 //! - A closed shell is one record listed by the two regions it separates; the kernel keeps one
 //!   shell per region, the face used on opposite sides. A sheet's shell holds both sides of its
-//!   faces.
+//!   faces, and the kernel uses each forward: a face the record's open shell uses backward has
+//!   its surface turned over instead ([`backward_sheet_faces`]), so its side crosses in the
+//!   surface and comes back from [`to_record`] as a forward use of the turned surface.
 //! - The infinite region is never a void in the record; the kernel marks it as one.
 //! - A pcurve runs along its edge over the edge's interval in the record; the kernel's UV trim
 //!   runs along its edge over the edge's kernel interval. Trims are carried where the face's
@@ -31,6 +33,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::face_surface;
+use solidcore::surface::procedural_blend::convert::adopt_definitions;
 use solidcore::topology::brep::enclosing::put_enclosing_shells_first;
 use solidcore::topology::brep::p10::{
     heal_made, make_topology_from_data, MakeTopologyOptions, TopologyEnv, HEALER_VERSION,
@@ -39,8 +42,10 @@ use solidcore::topology::brep_data::{
     BrepData, DataSourceType, EdgeData, EuData, FaceData, FaceuseData, Keyed, LoopData, RegionData,
     ShellData, TopologyData, VertexData, NO_OBJECT, UNSURE,
 };
+use solidcore::topology::face::p1::turn_over;
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
+use solidcore::topology::LoopuseStart;
 use solidcore::{Brep, EdgeId, FaceId, SolidError, Vec3, VertexId};
 use solidcore_record::brep as r;
 
@@ -93,6 +98,9 @@ pub struct Order {
     pub edges: Vec<EdgeId>,
     /// Record vertex `i`'s kernel vertex.
     pub vertices: Vec<VertexId>,
+    /// Kernel edges [`to_record`] split because only sheet faces use them more than twice, each
+    /// counted once however many copies its further uses were given (0 for [`to_kernel`]).
+    pub split_edges: usize,
 }
 
 /// A kernel edge solids touch along, as [`to_record`] writes it: one record edge per pair of
@@ -288,7 +296,10 @@ fn build(
         faces: b.face_list().to_vec(),
         edges: b.edge_list().to_vec(),
         vertices: b.vertex_list().to_vec(),
+        split_edges: 0,
     };
+    adopt(k, &mut b, record, &order.faces)?;
+    turn_backward_faces(k, &mut b, record, &order.faces)?;
     if (order.faces.len(), order.edges.len(), order.vertices.len())
         != (
             record.faces.len(),
@@ -309,7 +320,88 @@ fn build(
             && b.vertex_list() == order.vertices.as_slice()
     };
     put_enclosing_shells_first(k, &mut b)?;
+    // the body is assembled field by field, so its cached topology (each face's shell, each
+    // loop's edges) was never derived; rebuilt last, as `Body::from_smb` does before handing out
+    b.refresh_cached_topology();
     Ok((b, kept.then_some(order)))
+}
+
+/// The faces of `record`'s open shells (shells one region lists: a sheet's) that the shell uses
+/// backward (`forward: false`), ascending, each once. The kernel uses every face of an open
+/// shell forward and keeps a sheet face's side in its surface, so these are the faces to turn
+/// over ([`turn_backward_faces`]). A face of a closed shell has the side its material gives it
+/// and is never listed.
+#[must_use]
+pub fn backward_sheet_faces(record: &r::Brep) -> Vec<u32> {
+    let mut out: Vec<u32> = Vec::new();
+    for (s, shell) in record.shells.iter().enumerate() {
+        let r::Shell::Faces { faces, .. } = shell else {
+            continue;
+        };
+        let listed = record
+            .regions
+            .iter()
+            .filter(|g| g.shells.iter().any(|&x| x as usize == s))
+            .count();
+        if listed != 1 {
+            continue;
+        }
+        out.extend(faces.iter().filter(|f| !f.forward).map(|f| f.face));
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// Turns over ([`turn_over`], `SmFace::SwapUV`) each face of `b` that `record` uses backward in
+/// an open shell ([`backward_sheet_faces`]): the data gives an open shell both uses of each face,
+/// the `same` one upward, so the face takes the record's side by its surface turning over (its u
+/// and v swapped, its trims mirrored, the other use upward). `faces` are the body's faces in the
+/// record's order. The kernel keeps every face, edge and vertex, so the record order stands.
+fn turn_backward_faces(k: &Kernel, b: &mut Brep, record: &r::Brep, faces: &[FaceId]) -> R<()> {
+    let backward = backward_sheet_faces(record);
+    if backward.is_empty() {
+        return Ok(());
+    }
+    for i in backward {
+        let f = *faces
+            .get(i as usize)
+            .ok_or(Unsupported::Invalid("a face the body does not have"))?;
+        turn_to_record_side(k, b, f)?;
+    }
+    b.refresh_cached_topology();
+    Ok(())
+}
+
+/// Face `f` of a body built from a record's data, which the record's open shell uses backward,
+/// turned to that side: turned over ([`turn_over`]), and each of its loops started where the
+/// record's walk of a backward face starts. The data starts each loop's other use at the mate
+/// of its first edge use, so the turned face's loops would run from the record's first edge
+/// use against the walk; the record walks a backward face's loops from their last edge use
+/// ([`to_record`]'s canonical order). Started one edge use on, the face's edges and vertices
+/// come back from [`to_record`] numbered as the record numbers them. The caller refreshes the
+/// body's cached topology.
+///
+/// # Errors
+///
+/// Those of [`turn_over`]; a face with no upward face use.
+pub fn turn_to_record_side(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<(), SolidError> {
+    turn_over(k, b, f)?;
+    let Some(up) = b.face(f)?.faceuse else {
+        return Err(SolidError::invalid_input(
+            "solidcore_convert::brep::turn_to_record_side",
+            "a face with no upward face use",
+        ));
+    };
+    let loopuses = b.faceuse(up)?.loopuses.clone();
+    for lu in loopuses {
+        if let LoopuseStart::Edgeuse(Some(start)) = b.loopuse(lu)?.start {
+            if let Some(next) = b.edgeuse(start)?.ccw {
+                b.loopuse_mut(lu)?.start = LoopuseStart::Edgeuse(Some(next));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The record as the kernel's B-rep data: edgeuses face by face, loop by loop, in loop order;
@@ -375,7 +467,8 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
                     .map(|f| (f.face, f.forward == normals_into_this))
                     .collect()
             } else {
-                // An open shell lies in one region and holds both sides of each face.
+                // An open shell lies in one region and holds both sides of each face; a face it
+                // uses backward is turned over once the body is built (`turn_backward_faces`).
                 faces
                     .iter()
                     .flat_map(|f| [(f.face, true), (f.face, false)])
@@ -483,13 +576,20 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     // Faces, their loops and edgeuses.
     let mut eu = 0u64;
     for (fi, f) in rec.faces.iter().enumerate() {
-        let made = face_surface(
-            k,
-            &crate::surface(&f.surface)?,
-            f.nurbs.as_ref().map(crate::surface).transpose()?.as_ref(),
-            f.domain,
-            &boundary(rec, f)?,
-        )?;
+        // A blend face is built on its net, its NURBS form; its definition is given back once
+        // the body is built ([`adopt`]).
+        let made = match (&f.surface, &f.nurbs) {
+            (r::Surface::Blend { .. }, Some(net)) => {
+                face_surface(k, &crate::surface(net)?, None, f.domain, &[])?
+            }
+            _ => face_surface(
+                k,
+                &crate::surface(&f.surface)?,
+                f.nurbs.as_ref().map(crate::surface).transpose()?.as_ref(),
+                f.domain,
+                &boundary(rec, f)?,
+            )?,
+        };
         let mut fd = FaceData::default();
         fd.zone_tol_3d = zone;
         fd.surface = int(d.surfaces.len())?;
@@ -657,6 +757,26 @@ fn own_tolerances(d: &mut BrepData, rec: &r::Brep, zone: f64) -> R<()> {
     d.zone_tol_3d = least;
     for (fd, t) in d.faces.iter_mut().zip(faces) {
         fd.zone_tol_3d = t;
+    }
+    Ok(())
+}
+
+/// Give the record's blend faces their definitions back on the body built from it: each face's
+/// surface, its net, becomes the blend its definition makes, the net certified against it again
+/// ([`adopt_definitions`]); a net its definition does not certify refuses the record. `faces` are
+/// the body's faces in the record's order.
+fn adopt(k: &Kernel, b: &mut Brep, record: &r::Brep, faces: &[FaceId]) -> R<()> {
+    let mut definitions = Vec::new();
+    for (i, f) in record.faces.iter().enumerate() {
+        if let r::Surface::Blend { definition } = &f.surface {
+            let face = *faces
+                .get(i)
+                .ok_or(Unsupported::Invalid("a face the body does not have"))?;
+            definitions.push((face, crate::blend::blend(definition)));
+        }
+    }
+    if !definitions.is_empty() {
+        adopt_definitions(k, b, &notify_ref, &definitions)?;
     }
     Ok(())
 }

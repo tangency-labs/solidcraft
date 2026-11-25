@@ -15,6 +15,7 @@
 //! | [`BSplineCurve::join_with`]                       | `JoinWith`                             |
 //! | [`BSplineCurve::subdivide_at_discontinuity`]      | `SubdivideAtDiscontinuity`             |
 //! | [`BSplineCurve::trim_gap`], [`GapFix`]            | `TrimGap`                              |
+//! | [`BSplineCurve::trim_gap_intersection`], [`GapIntersection`], [`GapCurves`] | the first half of `TrimGap` |
 //! | [`BSplineCurve::assert_valid`]                    | `AssertValid`                          |
 //! | [`BSplineCurve::assert_no_periodic_jump`], [`assert_no_periodic_jump_of`] | `AssertNoPeriodicJump` |
 //! | `is_zero_speed_tangent_end`, `zero_speed_radius_stretch` (private; fork, WR-668) | `sm_IsZeroSpeedTangentEnd`, `sm_ZeroSpeedRadiusStretch` |
@@ -37,19 +38,25 @@
 //! - **Join in place.** `JoinWith` hands `this` and the other curve to
 //!   `CreateByJoining`, which may elevate or flatten them in place; the port moves both
 //!   into the segment slice and back, so the other curve sees the same edits.
-//! - **Ignored statuses.** Where upstream ignores a status (the `TrimGap` evaluations,
-//!   extensions, trims and control point edits, `SubdivideAtDiscontinuity`'s trims,
-//!   `AssertValid`'s evaluations and bounding box), the port does too, except that
-//!   [`SolidError::Unported`] is always passed on. Ignored evaluations leave
-//!   default-constructed `SmVector3d`s ([`Vec3::UNDEF`]), as upstream.
-//!   With the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663) `TrimGap` returns
-//!   `false` (gap not fixed) at the first of those that fails, `HasInternalPole` returns
-//!   `false` when its knots cannot be read, and `AssertValid` fails tests 5/6 when a
-//!   derivative at an interior knot of multiplicity `p` cannot be evaluated (`value`
-//!   `SM_UNDEF_DOUBLE`), fails tests 11/12 or 13/14 (`value` `SM_UNDEF_DOUBLE`) when the
-//!   bounding box or `GlobalPropertyAnalysis` fails, and fails tests 11/12 (`value`
-//!   `SM_UNDEF_DOUBLE`) when a derivative at a first-derivative solution cannot be
-//!   evaluated, as the fork (tangency-labs/smlib 8843967).
+//! - **Ignored statuses (WR-663).** Where upstream ignores a status (the `TrimGap`
+//!   evaluations, extensions, trims and control point edits,
+//!   `SubdivideAtDiscontinuity`'s trims, `HasInternalPole`'s knots, `AssertValid`'s
+//!   evaluations, bounding box and `GlobalPropertyAnalysis`) and reads unset values, the
+//!   port answers as the fork (tangency-labs/smlib 8843967): `TrimGap` returns `false`
+//!   (gap not fixed) at the first of those that fails, `SubdivideAtDiscontinuity` passes
+//!   a failed trim on, `HasInternalPole` returns `false` when its knots cannot be read,
+//!   and `AssertValid` fails tests 5/6 when a derivative at an interior knot of
+//!   multiplicity `p` cannot be evaluated (`value` `SM_UNDEF_DOUBLE`), fails tests
+//!   11/12 or 13/14 (`value` `SM_UNDEF_DOUBLE`) when the bounding box or
+//!   `GlobalPropertyAnalysis` fails, and fails tests 11/12 (`value` `SM_UNDEF_DOUBLE`)
+//!   when a derivative at a first-derivative solution cannot be evaluated.
+//!   [`SolidError::Unported`] is always passed on.
+//! - **A UV trim's corner.** Not upstream: `AssertValid` test 7 on a UV trim of a face
+//!   (a curve checked on its surface) reads the turn at a knot on the trim's image, each
+//!   tangent mapped by the surface's first derivatives on the side its piece lies on
+//!   ([`trim_turn_on_surface`]). Where the trim crosses a knot line across which the
+//!   surface is only `C0` in its parameters, the trim of a smooth curve turns a corner
+//!   and its image does not; anywhere else the image turns as the trim does.
 //! - **Crashes.** Where upstream dereferences a `NULL` (a curve without NURB in
 //!   `GetControlPoint` / `IsSegmentLine`, an extension `TrimGap` did not make, an
 //!   unclamped knot vector indexing before the control points in `HasInternalPole`)
@@ -64,9 +71,9 @@
 //!   applied to the new report before it is added (the same result: they only touch
 //!   a report that was added, and report equality ignores those fields). `WARN`
 //!   messages are not ported.
-//!   Opt-in (WR-668, `Kernel::fixes.curve_check_zero_speed_tangent_end`, the fork's
-//!   tangency-labs/smlib ecf1963, replayed patch for patch as 6ca3405 in
-//!   tangency-labs/smlib#76): at a zero-speed tangent end of an edge's curve or
+//!   Not upstream (WR-668, the fork's tangency-labs/smlib ecf1963, replayed patch for
+//!   patch as 6ca3405 in tangency-labs/smlib#76; the default since its flag was
+//!   retired): at a zero-speed tangent end of an edge's curve or
 //!   trim, test 3 passes over the coincident first control points and tests 13/14
 //!   pass over a radius below the tolerance within the end's growth stretch. The fork
 //!   reads the curve's edge (`GetEdge`, `GetEdgeuse()->GetEdge()`); a Rust curve has
@@ -74,6 +81,16 @@
 //!   ([`BSplineCurve::assert_valid_on_edge`]). The fork takes the smallest radius
 //!   solution (its loop from cc4289d); the port keeps WR-382's first solution and
 //!   takes the first one not passed over.
+//!   Not upstream (WR-560 extended): test 13 of a UV trim measured on its surface also
+//!   passes over a solution below the tolerance where the trim's image on the surface,
+//!   `S(c(t))`, is proved by a rounded-interval bound on its composed coefficients to have a radius of at least
+//!   the tolerance over the whole trim, its zero-speed end stretches (WR-668) to at least
+//!   half the growth line they stand for at each dyadic piece's near edge, out to a sliver
+//!   at each end (one polynomial piece, capped at the first knot) whose UV extent is
+//!   certified to be at the trim's own rounding (`stretch_clears_on_surface`)
+//!   ([`crate::nurbs::b_spline_curve::trim_image`]; at most 4096 pieces, each halved at
+//!   most 64 times, per call, no recursion): the constant metric WR-560 maps the trim by is exact only on a
+//!   plane, and near a pole the exact trim of a smooth curve turns sharply in (u, v).
 //! - **Back-edges.** `HasInternalPole` calls `IsDegenerate` (`p2`); `IsSegmentLine`,
 //!   `IsOnPlane` and `JoinWith` test `IsKindOf(SmLine_TYPE)` (false for a
 //!   `BSplineCurve`; a line is a [`crate::curve::line::Line`], whose `JoinWith`
@@ -95,7 +112,8 @@
 use crate::curve::curve::p2::{Curve, CurvePropertyType};
 use crate::curve::curve::p7::{PropertyAnalysis, PropertyAnalysisOptions};
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::{ignore_or_pass_on, ignored, Result, SolidError};
+use crate::error::nurbs::BSplineFailure;
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -113,9 +131,10 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, max3, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
-use crate::nurbs::b_spline_curve::analysis::{analysis_key, curve_bounds, BOUND_MARGIN};
+use crate::nurbs::b_spline_curve::analysis::analysis_key;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::{BoundingBoxRequest, ControlPointForm};
+use crate::nurbs::b_spline_curve::trim_image::{radius_clears_on_surface, sliver_within};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::geom::dist_cpt_cpt;
 use crate::nurbs::nurbs_crv::to_euclid;
@@ -203,7 +222,7 @@ impl SolutionObject for GapCurve {
 }
 
 /// `SmCurve::GlobalCurveIntersect` of `curve0` over `ivl0` with `curve1` over `ivl1`
-/// at tolerance `tol`: the solutions' types and start ends. The status is ignored
+/// at tolerance `tol`: the solutions' types, start ends and end ends. The status is ignored
 /// upstream: a failed intersection gives no solutions here (upstream keeps those found
 /// before the failure); [`SolidError::Unported`] is passed on.
 fn global_curve_intersect(
@@ -213,7 +232,7 @@ fn global_curve_intersect(
     curve1: &BSplineCurve,
     ivl1: &Extent1d,
     tol: f64,
-) -> Result<Vec<(SolutionType, SolutionEnd)>> {
+) -> Result<Vec<(SolutionType, SolutionEnd, SolutionEnd)>> {
     let c0 = Curve::from(curve0.clone());
     let c1 = Curve::from(curve1.clone());
     let opts = CurveIntersectOptions {
@@ -231,9 +250,40 @@ fn global_curve_intersect(
     Ok(found.map_or_else(Vec::new, |sols| {
         sols.as_slice()
             .iter()
-            .map(|s| (s.solution_type, s.start))
+            .map(|s| (s.solution_type, s.start, s.end))
             .collect()
     }))
+}
+
+/// What the intersection step of [`BSplineCurve::trim_gap`]
+/// ([`BSplineCurve::trim_gap_intersection`]) found.
+#[derive(Debug)]
+pub enum GapIntersection {
+    /// The closest ends are farther apart than `d_min` (`trim_gap` returns `false`).
+    TooLarge,
+    /// The closest ends are within `SM_EFF_ZERO` squared: no gap (`trim_gap` returns
+    /// `true`).
+    NoGap,
+    /// An evaluation or extension failed (`trim_gap` returns `false`).
+    Failed,
+    /// The extended curves and their intersection.
+    Intersected(Box<GapCurves>),
+}
+
+/// The extended curves of [`BSplineCurve::trim_gap`] and their intersection.
+#[derive(Debug)]
+pub struct GapCurves {
+    /// This curve and the other, each extended past its end at the gap.
+    pub curves: [BSplineCurve; 2],
+    /// The intersection tolerance: five times the squared gap, as upstream.
+    pub tolerance: f64,
+    /// The solutions of the intersection: type, start and end (a range's end; a point
+    /// solution's end is unset).
+    pub solutions: Vec<(SolutionType, SolutionEnd, SolutionEnd)>,
+    /// Per curve, whether the gap is at its start, and whether at its end.
+    pub ends: [[bool; 2]; 2],
+    /// Per curve, its start and end points before the extension.
+    pub end_points: [[Point3; 2]; 2],
 }
 
 /// The property `SmCurve::GlobalPropertyAnalysis` minimizes.
@@ -380,13 +430,11 @@ pub(crate) struct DerivedOverrides<'a> {
     /// `IsDegenerate(tol)` over the natural interval.
     pub is_degenerate: &'a dyn Fn(f64) -> Result<bool>,
     /// Not upstream: the surface of the face whose UV trim this curve is
-    /// (`GetEdgeuse()->GetFace()->GetSurface()`), read only with
-    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560); `None` for any other curve.
+    /// (`GetEdgeuse()->GetFace()->GetSurface()`), WR-560; `None` for any other curve.
     pub trim_surface: Option<&'a Surface>,
     /// Not upstream: the edge this curve is the 3D curve or a UV trim of
-    /// (`GetEdge()`, `GetEdgeuse()->GetEdge()`), read only with
-    /// `Kernel::fixes.curve_check_zero_speed_tangent_end` (WR-668); `None` for a curve
-    /// on no edge.
+    /// (`GetEdge()`, `GetEdgeuse()->GetEdge()`), read for WR-668's zero-speed tangent
+    /// ends; `None` for a curve on no edge.
     pub edge_ends: Option<&'a EdgeEnds>,
 }
 
@@ -481,6 +529,12 @@ fn is_zero_speed_tangent_end(
 /// than the curve, or at the stretch's far end the radius is off `radius_tol` by more
 /// than half of it.
 ///
+/// Not upstream (#17744): the curve is read with the end's control point subtracted from
+/// every control point (the same curve, moved). At the stretch's far end `C' x C''` is
+/// about `|C'' x C'''| t² / 2`; read at the curve's own coordinates, `C'` carries their
+/// rounding times the basis' derivatives, which swamps it where the stretch is short (a
+/// G3 round's end rib 40 mm from the origin, stretch 1.9e-6: about 7e-13 against 1e-12).
+///
 /// # Errors
 ///
 /// A [`SolidError::Unported`] of the evaluations (none for a B-spline).
@@ -489,6 +543,16 @@ fn zero_speed_radius_stretch(
     end: usize,
     radius_tol: f64,
 ) -> Result<Option<f64>> {
+    let mut local = curve.clone();
+    if let Some(cur) = local.nurb.as_mut() {
+        let i = if end == 0 { 0 } else { cur.n() };
+        if let Some(o) = cur.cpts().get(i).map(|p| p.to_euclid()) {
+            for pw in cur.cpts_mut() {
+                *pw = pw.translate(-o);
+            }
+        }
+    }
+    let curve = &local;
     let ivl = curve.natural_interval();
     let param = if end == 0 { ivl.min() } else { ivl.max() };
     let pv = match curve.evaluate(param, 3, end == 0, false) {
@@ -531,6 +595,167 @@ fn zero_speed_radius_stretch(
         return Ok(None);
     }
     Ok(Some(stretch))
+}
+
+/// The most dyadic pieces [`stretch_clears_on_surface`] certifies a zero-speed stretch in:
+/// out to `2^-52` of the stretch from its end.
+const STRETCH_PIECES: i32 = 52;
+
+/// The UV extent, in units of `ε` times the trim's largest control point, that the sliver
+/// [`stretch_clears_on_surface`] leaves to a certified extent bound instead of the radius
+/// bound may have: the radius enclosure's coefficients carry absolute widths of a few
+/// `ε |P|` (the trim's own rounding), and a piece whose image shrinks to that cannot clear.
+const STRETCH_SLIVER_ULPS: f64 = 1024.0;
+
+/// Not upstream: whether the image on `surface` of the trim `trim` has, over the
+/// zero-speed stretch of length `stretch` at its end `end` (0: the start, 1: the end of
+/// `domain`), a radius of curvature of at least half the growth line WR-668 reads there,
+/// `r >= (radius_tol / stretch) |t - t_end| / 2`, at each piece's near edge (below),
+/// except within a sliver at the end whose extent is certified at the trim's rounding.
+///
+/// **The sliver.** It runs from the end out to `cut`, the largest of
+/// - `ulp(t_end)` and `stretch 2^-52`: nearer the end, the pieces would round onto the
+///   end itself;
+/// - the parameter length over which the trim `c` covers a UV length of `L / 4`,
+///   `L = STRETCH_SLIVER_ULPS ε |P|_max`, to second order (`|c'| t + |c''| t² / 2 = L / 4`
+///   at the end). The radius enclosure's coefficients carry absolute widths of a few
+///   `ε |P|`, so a piece whose image is that short cannot clear (MEASURED: on the cubic of
+///   `a_genuine_zero_speed_end_clears_its_stretch`, pieces from about 1e-7 of the end
+///   inward do not clear even an eighth of the line);
+///
+/// capped at the first knot from the end, so that the sliver is one polynomial piece (the
+/// cap lets a stretch whose first knot lies inside the uncapped cut be certified at all:
+/// `a_zero_speed_end_with_a_knot_inside_its_sliver_clears`). Its extent is then
+/// certified: [`sliver_within`] bounds its UV diameter from all of its power coefficients
+/// in rounded intervals, at most `L`, at the trim's own coordinate rounding; its 3D
+/// diameter is bounded by that times an enclosure of the surface's Jacobian over the
+/// sliver's UV box (so at most the image of the trim's coordinate rounding). Otherwise (for instance where `ulp(t_end)` binds and the trim moves farther
+/// than `L` within it) the stretch is not certified. Within the sliver the radius vanishes
+/// with the speed, and no positive tolerance can clear it; that an image at the image of
+/// the trim's own rounding holds no corner the trim could represent is ARGUED.
+///
+/// **The pieces.** From `cut` out, the stretch is cut into the dyadic pieces at
+/// `stretch 2^-(j+1)` to `stretch 2^-j` from the end, the last one's near edge at `cut`
+/// (at most [`STRETCH_PIECES`] of them). On each, [`radius_clears_on_surface`] must clear
+/// half the growth line's value at the piece's near edge (`radius_tol 2^-(j+2)` on a whole
+/// dyadic piece; a quarter of the line's value at its far edge). This is a proposed
+/// DEFINITION of the defect inside a zero-speed stretch (the maintainer's decision): a
+/// radius below that is reported (`a_radius_below_half_the_growth_line_is_reported`: 0.4
+/// times the line). A genuine zero-speed end has its radius on the line to first order, so the full line would leave
+/// it no margin at the near edges. It is looser than WR-668's own check, which accepts the
+/// radius at the stretch's far end within half the tolerance of the line (at least
+/// `radius_tol / 2` there), where the outermost piece asks for `radius_tol / 4`.
+///
+/// `false` at the first piece that does not clear, for a sliver that is not certified,
+/// and for a stretch that is not finite and positive or an end that is not finite.
+///
+/// # Errors
+///
+/// Those of [`radius_clears_on_surface`] and [`sliver_within`].
+fn stretch_clears_on_surface(
+    k: &Kernel,
+    trim: &BSplineCurve,
+    surface: &Surface,
+    domain: &Extent1d,
+    end: usize,
+    stretch: f64,
+    radius_tol: f64,
+) -> Result<bool> {
+    let t_end = if end == 0 { domain.min() } else { domain.max() };
+    // the spacing of doubles above |t_end| (`next_up` is past the MSRV)
+    let mag = t_end.abs();
+    let ulp = f64::from_bits(mag.to_bits().saturating_add(1)) - mag;
+    let Ok((points, _)) = trim.control_polygon() else {
+        return Ok(false);
+    };
+    let p_max = points.iter().fold(0.0_f64, |m, p| m.max(p.length()));
+    let (speed, accel) = match trim.evaluate(t_end, 2, end == 0, false) {
+        Ok(d) => (
+            d.get(1).map_or(f64::NAN, |a| a.length()),
+            d.get(2).map_or(f64::NAN, |a| a.length()),
+        ),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(false),
+    };
+    let Ok((knots, _)) = trim.knots(None) else {
+        return Ok(false);
+    };
+    // the first knot from the end, inside the domain (the domain's other end if none)
+    let knot = if end == 0 {
+        knots
+            .iter()
+            .copied()
+            .find(|&x| x > t_end && x < domain.max())
+            .unwrap_or_else(|| domain.max())
+    } else {
+        knots
+            .iter()
+            .rev()
+            .copied()
+            .find(|&x| x < t_end && x > domain.min())
+            .unwrap_or_else(|| domain.min())
+    };
+    let cap = (knot - t_end).abs();
+    // the positive root of `|c''| t² / 2 + |c'| t = L / 4`, in the form that does not cancel
+    let length = STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
+    let quarter = 0.25 * length;
+    let sliver = 2.0 * quarter / (speed + (speed * speed + 2.0 * accel * quarter).sqrt());
+    let wanted = max3(ulp, stretch * 2f64.powi(-STRETCH_PIECES), sliver);
+    // (written to accept: a NaN or infinite stretch, end, sliver or knot certifies nothing)
+    let finite = stretch > 0.0
+        && stretch.is_finite()
+        && ulp.is_finite()
+        && sliver.is_finite()
+        && wanted.is_finite()
+        && cap > 0.0
+        && cap.is_finite();
+    if !finite {
+        return Ok(false);
+    }
+    let capped = wanted >= cap;
+    let cut = if capped { cap } else { wanted };
+    // the sliver's inner edge: the knot itself where the cap binds
+    let edge = match (capped, end) {
+        (true, _) => knot,
+        (false, 0) => t_end + cut,
+        (false, _) => t_end - cut,
+    };
+    let (slo, shi) = if end == 0 {
+        (t_end, edge)
+    } else {
+        (edge, t_end)
+    };
+    if !sliver_within(k, trim, surface, slo, shi, length)? {
+        return Ok(false);
+    }
+    for j in 0..STRETCH_PIECES {
+        let far = stretch * 2f64.powi(-j);
+        if far <= cut {
+            break;
+        }
+        let dyadic = stretch * 2f64.powi(-(j + 1));
+        let last = dyadic <= cut;
+        let near = if last { cut } else { dyadic };
+        let (near_t, far_t) = match (last, end) {
+            (true, 0) => (edge, t_end + far),
+            (true, _) => (edge, t_end - far),
+            (false, 0) => (t_end + near, t_end + far),
+            (false, _) => (t_end - near, t_end - far),
+        };
+        let (lo, hi) = if end == 0 {
+            (near_t, far_t)
+        } else {
+            (far_t, near_t)
+        };
+        let tol = radius_tol * (near / stretch) * 0.5;
+        if !radius_clears_on_surface(k, trim, surface, lo, hi, tol)? {
+            return Ok(false);
+        }
+        if last {
+            break;
+        }
+    }
+    Ok(true)
 }
 
 /// The first fundamental form `[E, F, G]` of `surface` at `uv`, its derivatives taken
@@ -603,6 +828,51 @@ fn trim_metric(
     let b = efg[1] / a;
     let c = (efg[0] * efg[2] - efg[1] * efg[1]).sqrt() / a;
     Ok(Some([a, b, c]))
+}
+
+/// Not upstream: the cosine of the angle the image on `surface` of the UV trim `trim`
+/// turns through at its parameter `param`: the trim's first derivative from each side,
+/// mapped by the surface's first derivatives at the trim's point there, each taken on the
+/// side its piece of the trim lies on (the arriving piece behind its tangent, the leaving
+/// piece ahead of it). The sides differ only at a knot of the surface, where its
+/// parameterisation may be only `C0`. `None` where the trim or the surface cannot be
+/// evaluated, an image tangent vanishes or the image is not finite (the caller keeps the
+/// trim's own turn).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and cancellation.
+fn trim_turn_on_surface(
+    k: &Kernel,
+    surface: &Surface,
+    trim: &BSplineCurve,
+    param: f64,
+) -> Result<Option<f64>> {
+    let image = |leaving: bool| -> Result<Option<Vec3>> {
+        let Some(eval) = ignored(trim.evaluate(param, 1, leaving, false))? else {
+            return Ok(None);
+        };
+        let (Some(point), Some(tangent)) = (eval.first(), eval.get(1)) else {
+            return Ok(None);
+        };
+        // the span starting at the knot is ahead of a rising parameter
+        let rising = |rate: f64| if leaving { rate >= 0.0 } else { rate < 0.0 };
+        let derivatives = surface.evaluate_1st_derivatives(
+            k,
+            Point2::new(point.x, point.y),
+            rising(tangent.x),
+            rising(tangent.y),
+        );
+        Ok(ignored(derivatives)?
+            .and_then(|(_, du, dv)| (du * tangent.x + dv * tangent.y).unitize().ok()))
+    };
+    let (Some(arriving), Some(leaving)) = (image(false)?, image(true)?) else {
+        return Ok(None);
+    };
+    // a non-finite image (a surface with a non-finite pole) decides nothing: the caller
+    // keeps the turn it read in the parameters
+    let turn = arriving.dot(leaving);
+    Ok(turn.is_finite().then_some(turn))
 }
 
 /// A copy of `trim` with its control points mapped by [`trim_metric`]'s `l` (the
@@ -717,7 +987,7 @@ impl BSplineCurve {
         let end = self.evaluate_point(ivl.max())?;
 
         if start.closer_than(EFF_ZERO, end) {
-            return Err(SolidError::sm_err(OP_SCALE));
+            return Err(SolidError::b_spline(OP_SCALE, BSplineFailure::EndsCoincide));
         }
         let mut res = self.clone();
 
@@ -774,13 +1044,9 @@ impl BSplineCurve {
         }
 
         let degree = cur.degree();
-        let (unique_knots, mults) = if k.fixes.query_statuses_pass_on {
-            let Some(km) = ignored(self.knots(None))? else {
-                return Ok(false);
-            };
-            km
-        } else {
-            self.knots(None)?
+        // knots that cannot be read show no pole (the fork, tangency-labs/smlib 8843967)
+        let Some((unique_knots, mults)) = ignored(self.knots(None))? else {
+            return Ok(false);
         };
         let mut knot_count = 0usize;
 
@@ -840,7 +1106,7 @@ impl BSplineCurve {
         tol: f64,
     ) -> Result<SegmentLine> {
         if self.nurb.is_none() {
-            return Err(SolidError::sm_err(OP_SEG));
+            return Err(SolidError::b_spline(OP_SEG, BSplineFailure::NoNurbsForm));
         }
         let mut sample_count = sample_count;
 
@@ -1076,7 +1342,13 @@ impl BSplineCurve {
         let pnt1 = self.evaluate_point(ivl1.evaluate(end_this))?;
         let pnt2 = other.evaluate_point(ivl2.evaluate(end_other))?;
         if pnt1.distance(pnt2) > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::b_spline(
+                OP_JOIN,
+                BSplineFailure::EndsApart {
+                    distance: pnt1.distance(pnt2),
+                    tolerance: tol,
+                },
+            ));
         }
 
         // First let's handle the simple case of two lines with the same vector.
@@ -1121,8 +1393,19 @@ impl BSplineCurve {
         *other = other_back;
         let composite = match composite {
             Ok(c) => c,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_JOIN)),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
+            Err(e) => {
+                return Err(crate::error::Failure::new(
+                    OP_JOIN,
+                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::JoinNotBuilt),
+                )
+                .caused_by(e)
+                .into_error());
+            }
         };
         self.set_from_gw_nurb(composite.gw_nurb())
     }
@@ -1146,10 +1429,8 @@ impl BSplineCurve {
         let (knots, _) = self.knots(None)?; // Unique knot vector
         let (_, continuities) = self.calculate_continuities(k, continuity_angle_tol)?;
 
-        // check state
-        if knots.len() != continuities.len() {
-            return Err(SolidError::sm_err(OP_SUBDIV));
-        }
+        // (upstream's check that the two lengths agree is not ported: `calculate_continuities`
+        // returns one continuity per unique knot of this same curve)
 
         // init iter params
         let mut start = *knots
@@ -1166,12 +1447,9 @@ impl BSplineCurve {
                 // trim it to the interval between discontinuities (may be the whole
                 // curve; may snap the interval to existing knots)
                 let mut trim = Extent1d::from_min_max(start, current);
-                // (status ignored; passed on with the opt-in `query_statuses_pass_on`,
-                // tangency-labs/smlib 8843967)
-                ignore_or_pass_on(
-                    copy.trim(k, &mut trim, TrimMode::Notify),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // (status ignored upstream; passed on as the fork, tangency-labs/smlib
+                // 8843967)
+                copy.trim(k, &mut trim, TrimMode::Notify)?;
 
                 resulting_curves.push(copy);
 
@@ -1182,51 +1460,46 @@ impl BSplineCurve {
         Ok(resulting_curves)
     }
 
-    /// Closes a gap below `d_min` between the closest ends of this curve and `other`
-    /// (`TrimGap`): both curves are extended (G1, by 3% of their domain) past those
-    /// ends and intersected, and the end control points are moved per `fix` (to the
-    /// intersection, or to one curve's end). `false` when the gap is too large or the
-    /// extensions do not intersect; `true` when there was no gap or it was closed.
+    /// The intersection step of [`BSplineCurve::trim_gap`], which `trim_gap` runs before
+    /// it moves any end: the closest ends of this curve and `other`, both curves extended
+    /// (G1, by 3% of their domain) past them, and the extensions intersected at a tolerance of
+    /// five times the squared gap (as upstream). Not upstream as a function (the first half of `TrimGap`); made public so
+    /// that a check of the contacts `trim_gap` uses runs this very step.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] when the intersection of the extended curves reaches
-    /// an unported unit; `InvalidInput` when an
-    /// end point cannot be compared (NaN) or an extension is missing (upstream crashes).
-    pub fn trim_gap(
-        &mut self,
+    /// As [`BSplineCurve::trim_gap`].
+    pub fn trim_gap_intersection(
+        &self,
         k: &Kernel,
-        other: &mut Self,
-        fix: GapFix,
+        other: &Self,
         d_min: f64,
-    ) -> Result<bool> {
+    ) -> Result<GapIntersection> {
         // only close gap if less than dMin
         let d_min_sq = d_min * d_min;
 
-        // with the opt-in fix each failed step leaves the gap unfixed (returns 0), as the
-        // fork has it (tangency-labs/smlib 8843967); upstream goes on with unset values
-        let soft = k.fixes.query_statuses_pass_on;
+        // each failed step leaves the gap unfixed (returns 0), as the fork has it
+        // (tangency-labs/smlib 8843967); upstream goes on with unset values
         macro_rules! or_unfixed {
-            ($r:expr, $default:expr) => {
+            ($r:expr) => {
                 match ignored($r)? {
                     Some(v) => v,
-                    None if soft => return Ok(false),
-                    None => $default,
+                    None => return Ok(GapIntersection::Failed),
                 }
             };
         }
 
         // curve 0 start and end points
-        let mut extent0 = self.natural_interval();
+        let extent0 = self.natural_interval();
         let t0size = extent0.max() - extent0.min();
-        let s0 = or_unfixed!(self.evaluate_point(extent0.min()), Vec3::UNDEF);
-        let e0 = or_unfixed!(self.evaluate_point(extent0.max()), Vec3::UNDEF);
+        let s0 = or_unfixed!(self.evaluate_point(extent0.min()));
+        let e0 = or_unfixed!(self.evaluate_point(extent0.max()));
 
         // curve 1 start and end points
-        let mut extent1 = other.natural_interval();
+        let extent1 = other.natural_interval();
         let t1size = extent1.max() - extent1.min();
-        let s1 = or_unfixed!(other.evaluate_point(extent1.min()), Vec3::UNDEF);
-        let e1 = or_unfixed!(other.evaluate_point(extent1.max()), Vec3::UNDEF);
+        let s1 = or_unfixed!(other.evaluate_point(extent1.min()));
+        let e1 = or_unfixed!(other.evaluate_point(extent1.max()));
 
         // Extend curves based on closest endpoints by domain * 0.3
         let d_s0s1 = (s0 - s1).length_squared();
@@ -1237,10 +1510,10 @@ impl BSplineCurve {
 
         // Test if Gap is greater than dMin
         if dmin > d_min_sq {
-            return Ok(false); // gap is too large to fix
+            return Ok(GapIntersection::TooLarge); // gap is too large to fix
         }
         if dmin < EFF_ZERO {
-            return Ok(true); // curves have no gap
+            return Ok(GapIntersection::NoGap); // curves have no gap
         }
 
         // figure out which end points to move
@@ -1265,43 +1538,93 @@ impl BSplineCurve {
         let mut curve0e = None;
         let mut curve1e = None;
         if start0 {
-            curve0e = or_unfixed!(extend(self, extent0.min() - 0.03 * t0size), None);
+            curve0e = or_unfixed!(extend(self, extent0.min() - 0.03 * t0size));
         }
         if end0 {
-            curve0e = or_unfixed!(extend(self, extent0.max() + 0.03 * t0size), None);
+            curve0e = or_unfixed!(extend(self, extent0.max() + 0.03 * t0size));
         }
         if start1 {
-            curve1e = or_unfixed!(extend(other, extent1.min() - 0.03 * t1size), None);
+            curve1e = or_unfixed!(extend(other, extent1.min() - 0.03 * t1size));
         }
         if end1 {
-            curve1e = or_unfixed!(extend(other, extent1.max() + 0.03 * t1size), None);
+            curve1e = or_unfixed!(extend(other, extent1.max() + 0.03 * t1size));
         }
-        let (Some(mut curve0e), Some(mut curve1e)) = (curve0e, curve1e) else {
+        let (Some(curve0e), Some(curve1e)) = (curve0e, curve1e) else {
             return Err(invalid(OP_GAP, "curve extension missing"));
         };
 
         // intersect the extended curves
+        let tolerance = dmin * 5.0;
         let solutions = global_curve_intersect(
             k,
             &curve0e,
             &curve0e.natural_interval(),
             &curve1e,
             &curve1e.natural_interval(),
-            dmin * 5.0,
+            tolerance,
         )?;
+        Ok(GapIntersection::Intersected(Box::new(GapCurves {
+            curves: [curve0e, curve1e],
+            tolerance,
+            solutions,
+            ends: [[start0, end0], [start1, end1]],
+            end_points: [[s0, e0], [s1, e1]],
+        })))
+    }
 
+    /// Closes a gap below `d_min` between the closest ends of this curve and `other`
+    /// (`TrimGap`): both curves are extended (G1, by 3% of their domain) past those
+    /// ends and intersected ([`BSplineCurve::trim_gap_intersection`]), and the end control
+    /// points are moved per `fix` (to the intersection, or to one curve's end). `false`
+    /// when the gap is too large or the extensions do not intersect; `true` when there
+    /// was no gap or it was closed.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] when the intersection of the extended curves reaches
+    /// an unported unit; `InvalidInput` when an
+    /// end point cannot be compared (NaN) or an extension is missing (upstream crashes).
+    pub fn trim_gap(
+        &mut self,
+        k: &Kernel,
+        other: &mut Self,
+        fix: GapFix,
+        d_min: f64,
+    ) -> Result<bool> {
+        // each failed step leaves the gap unfixed (returns 0), as the fork has it
+        // (tangency-labs/smlib 8843967); upstream goes on with unset values
+        macro_rules! or_unfixed {
+            ($r:expr) => {
+                match ignored($r)? {
+                    Some(v) => v,
+                    None => return Ok(false),
+                }
+            };
+        }
+
+        let GapCurves {
+            curves: [mut curve0e, mut curve1e],
+            solutions,
+            ends: [[start0, end0], [start1, end1]],
+            end_points: [[s0, e0], [s1, e1]],
+            ..
+        } = match self.trim_gap_intersection(k, other, d_min)? {
+            GapIntersection::TooLarge | GapIntersection::Failed => return Ok(false),
+            GapIntersection::NoGap => return Ok(true),
+            GapIntersection::Intersected(g) => *g,
+        };
         // failure - the extended curves don't intersect
         if solutions.is_empty() {
             return Ok(false);
         }
 
         // for every intersection
-        for (solution_type, start) in &solutions {
+        for (solution_type, start, _) in &solutions {
             if *solution_type == SolutionType::SingleValue {
                 let t0 = start.param(0)?; // 1st curve intersection param
                 let t1 = start.param(1)?; // 2nd curve intersection param
-                extent0 = curve0e.natural_interval();
-                extent1 = curve1e.natural_interval();
+                let extent0 = curve0e.natural_interval();
+                let extent1 = curve1e.natural_interval();
 
                 // Trim the domain of the two curves to the intersection
                 let tmin0 = if start0 { t0 } else { extent0.min() };
@@ -1311,8 +1634,8 @@ impl BSplineCurve {
 
                 let mut ext0 = Extent1d::from_min_max(tmin0, tmax0);
                 let mut ext1 = Extent1d::from_min_max(tmin1, tmax1);
-                or_unfixed!(curve0e.trim(k, &mut ext0, TrimMode::Notify), ());
-                or_unfixed!(curve1e.trim(k, &mut ext1, TrimMode::Notify), ());
+                or_unfixed!(curve0e.trim(k, &mut ext0, TrimMode::Notify));
+                or_unfixed!(curve1e.trim(k, &mut ext1, TrimMode::Notify));
 
                 // only do this once
                 break;
@@ -1320,22 +1643,22 @@ impl BSplineCurve {
         }
 
         // Now lets average the two trimmed endpoints
-        extent0 = curve0e.natural_interval(); // after trimming
-        extent1 = curve1e.natural_interval();
+        let extent0 = curve0e.natural_interval(); // after trimming
+        let extent1 = curve1e.natural_interval();
 
         let mut p0 = Vec3::UNDEF;
         let mut p1 = Vec3::UNDEF;
         if start0 {
-            p0 = or_unfixed!(curve0e.evaluate_point(extent0.min()), Vec3::UNDEF);
+            p0 = or_unfixed!(curve0e.evaluate_point(extent0.min()));
         }
         if end0 {
-            p0 = or_unfixed!(curve0e.evaluate_point(extent0.max()), Vec3::UNDEF);
+            p0 = or_unfixed!(curve0e.evaluate_point(extent0.max()));
         }
         if start1 {
-            p1 = or_unfixed!(curve1e.evaluate_point(extent1.min()), Vec3::UNDEF);
+            p1 = or_unfixed!(curve1e.evaluate_point(extent1.min()));
         }
         if end1 {
-            p1 = or_unfixed!(curve1e.evaluate_point(extent1.max()), Vec3::UNDEF);
+            p1 = or_unfixed!(curve1e.evaluate_point(extent1.max()));
         }
 
         // the new common end point
@@ -1360,18 +1683,18 @@ impl BSplineCurve {
         // replace the endpoint of the original curves
         let form = ControlPointForm::NonRational;
         if start0 {
-            or_unfixed!(self.set_control_point(form, 0, mid, 1.0), ());
+            or_unfixed!(self.set_control_point(form, 0, mid, 1.0));
         }
         if end0 {
             let last = self.number_control_points()?.wrapping_sub(1);
-            or_unfixed!(self.set_control_point(form, last, mid, 1.0), ());
+            or_unfixed!(self.set_control_point(form, last, mid, 1.0));
         }
         if start1 {
-            or_unfixed!(other.set_control_point(form, 0, mid, 1.0), ());
+            or_unfixed!(other.set_control_point(form, 0, mid, 1.0));
         }
         if end1 {
             let last = other.number_control_points()?.wrapping_sub(1);
-            or_unfixed!(other.set_control_point(form, last, mid, 1.0), ());
+            or_unfixed!(other.set_control_point(form, last, mid, 1.0));
         }
 
         Ok(true) // success...we have modified the curves
@@ -1415,9 +1738,8 @@ impl BSplineCurve {
     }
 
     /// [`BSplineCurve::assert_valid`] of a UV trim on `trim_surface`, its face's
-    /// surface: with `Kernel::fixes.uv_trim_checks_on_surface` (WR-560) the radius of
-    /// curvature (13) and coincident control point (15) tests measure the trim on that
-    /// surface; otherwise the same as [`BSplineCurve::assert_valid`].
+    /// surface: the radius of curvature (13) and coincident control point (15) tests
+    /// measure the trim on that surface (WR-560).
     ///
     /// # Errors
     ///
@@ -1435,8 +1757,8 @@ impl BSplineCurve {
     }
 
     /// [`BSplineCurve::assert_valid_on`] of the 3D curve or a UV trim of an edge whose
-    /// ends are `edge_ends` (read with `Kernel::fixes.curve_check_zero_speed_tangent_end`,
-    /// WR-668; `None` for a curve on no edge).
+    /// ends are `edge_ends` (read for WR-668's zero-speed tangent ends; `None` for a
+    /// curve on no edge).
     ///
     /// # Errors
     ///
@@ -1557,11 +1879,10 @@ impl BSplineCurve {
             let start_scaled_zero = EFF_ZERO * (1.0 + euclid.max_dimension());
             let start_cpt_dist = dist_cpt_cpt(cpt(0)?, cpt(1)?);
 
-            // not upstream (WR-668, opt-in): not at a zero-speed tangent end, whose first
-            // two control points coincide by construction (the fork's ecf1963)
+            // not upstream (WR-668): not at a zero-speed tangent end, whose first two
+            // control points coincide by construction (the fork's ecf1963)
             if is_zero_to_tol(start_cpt_dist, start_scaled_zero)
-                && !(k.fixes.curve_check_zero_speed_tangent_end
-                    && is_zero_speed_tangent_end(self, 0, start_scaled_zero, ovr.edge_ends)?)
+                && !is_zero_speed_tangent_end(self, 0, start_scaled_zero, ovr.edge_ends)?
             {
                 /*  3 */
                 let ok = !is_zero_to_tol(start_cpt_dist, start_scaled_zero);
@@ -1601,7 +1922,6 @@ impl BSplineCurve {
         let analytic = ovr.analytic;
 
         // for debug - data at failing tests
-        let mut min_radius = BIG_DOUBLE;
         let dim = self.dim;
         if !degenerate && !analytic {
             // for non degenerate curves
@@ -1615,8 +1935,8 @@ impl BSplineCurve {
                     continue;
                 }
 
-                // Lower interval evaluation (status ignored upstream; fails test 5/6
-                // with `query_statuses_pass_on`, tangency-labs/smlib 8843967)
+                // Lower interval evaluation (status ignored upstream; a failure fails
+                // test 5/6, as the fork, tangency-labs/smlib 8843967)
                 let param = knots.get(i).copied().unwrap_or(UNDEF_DOUBLE);
                 let eval1 = ignored(self.evaluate(param, 1, false, false))?;
                 let (v1_len, unit1) = match eval1 {
@@ -1624,8 +1944,7 @@ impl BSplineCurve {
                         let dir = v.get(1).copied().unwrap_or(Vec3::UNDEF);
                         (dir.length(), dir.unitize().ok())
                     }
-                    None if k.fixes.query_statuses_pass_on => (UNDEF_DOUBLE, None),
-                    None => (Vec3::UNDEF.length(), Vec3::UNDEF.unitize().ok()),
+                    None => (UNDEF_DOUBLE, None),
                 };
                 let Some(u1) = unit1 else {
                     let test = if dim == 2 {
@@ -1652,8 +1971,7 @@ impl BSplineCurve {
                         let dir = v.get(1).copied().unwrap_or(Vec3::UNDEF);
                         (dir.length(), dir.unitize().ok())
                     }
-                    None if k.fixes.query_statuses_pass_on => (UNDEF_DOUBLE, None),
-                    None => (Vec3::UNDEF.length(), Vec3::UNDEF.unitize().ok()),
+                    None => (UNDEF_DOUBLE, None),
                 };
                 let Some(u2) = unit2 else {
                     let test = if dim == 2 {
@@ -1675,7 +1993,21 @@ impl BSplineCurve {
                 };
 
                 // Check the angle between the unitized 1st derivatives
-                let dot = u1.dot(u2);
+                let mut dot = u1.dot(u2);
+
+                // Not upstream: a UV trim turns a corner where it crosses a knot line
+                // across which its face's surface is only C0 in its parameters, and its
+                // image on the surface is smooth there. A trim's turn is a kink only
+                // where its image turns: each tangent mapped by the surface's first
+                // derivatives on the side its piece lies on (off such a line the two
+                // sides are one, and the image turns as the trim does).
+                if dot < COSINE_TOL && dim == 2 {
+                    if let Some(surface) = ovr.trim_surface {
+                        if let Some(on_surface) = trim_turn_on_surface(k, surface, self, param)? {
+                            dot = on_surface;
+                        }
+                    }
+                }
 
                 // when angle between lower and upper ivl 1st Derivs is too big - not G1
                 if dot < COSINE_TOL {
@@ -1702,9 +2034,9 @@ impl BSplineCurve {
             // Check for nonregular curve: vanishing first derivative. Allow zero 1st
             // derivatives at the NaturalParameter ends of the curve.
 
-            // Get a representive size (status ignored upstream; with
-            // `query_statuses_pass_on`, an unsized curve fails test 11/12 and skips
-            // the derivative and radius analyses, tangency-labs/smlib 8843967)
+            // Get a representive size (status ignored upstream; an unsized curve fails
+            // test 11/12 and skips the derivative and radius analyses, as the fork,
+            // tangency-labs/smlib 8843967)
             let domain = self.natural_interval();
             let bbox_opt = ignored(self.calculate_bounding_box(
                 &domain,
@@ -1715,21 +2047,17 @@ impl BSplineCurve {
                 },
             ))?
             .and_then(|b| b.normal);
-            let (sized, size_xyz) = if k.fixes.query_statuses_pass_on {
-                let ok = bbox_opt.is_some();
-                rtn &= report(
-                    &mut list,
-                    key,
-                    if dim == 2 { 11 } else { 12 },
-                    ok,
-                    UNDEF_DOUBLE,
-                    UNDEF_DOUBLE,
-                    |_| {},
-                )?;
-                (ok, bbox_opt.map_or(0.0, |b| b.size().length()))
-            } else {
-                (true, bbox_opt.unwrap_or_default().size().length())
-            };
+            let sized = bbox_opt.is_some();
+            rtn &= report(
+                &mut list,
+                key,
+                if dim == 2 { 11 } else { 12 },
+                sized,
+                UNDEF_DOUBLE,
+                UNDEF_DOUBLE,
+                |_| {},
+            )?;
+            let size_xyz = bbox_opt.map_or(0.0, |b| b.size().length());
             let size_t = domain.length();
 
             // finite curves: proportional to the average curve speed; else absolute
@@ -1745,16 +2073,9 @@ impl BSplineCurve {
                 5.0
             };
 
-            // Not upstream (#2568): where the curve's speed is bounded above the tolerance
-            // the search cannot report, and is not run (`analysis`; off without
-            // `Kernel::memoize_curve_caches`, and with `query_statuses_pass_on`, which
-            // reports the search's own status)
-            let shortcut = k.memoize_curve_caches && !k.fixes.query_statuses_pass_on;
-            let bounds = if shortcut { curve_bounds(cur) } else { None };
-            let speed_clear = bounds.is_some_and(|b| b.speed >= tol * BOUND_MARGIN);
-            let solutions = if sized && speed_clear {
-                Vec::new()
-            } else if sized {
+            // the search reports its own status (as the fork, tangency-labs/smlib
+            // 8843967), so it always runs on a sized curve
+            let solutions = if sized {
                 let (first_derivs_ok, sols) = global_property_analysis(
                     k,
                     self,
@@ -1762,17 +2083,15 @@ impl BSplineCurve {
                     CurveProperty::MinimizeFirstDerivative,
                     min_sep,
                 )?;
-                if k.fixes.query_statuses_pass_on {
-                    rtn &= report(
-                        &mut list,
-                        key,
-                        if dim == 2 { 11 } else { 12 },
-                        first_derivs_ok,
-                        tol,
-                        UNDEF_DOUBLE,
-                        |_| {},
-                    )?;
-                }
+                rtn &= report(
+                    &mut list,
+                    key,
+                    if dim == 2 { 11 } else { 12 },
+                    first_derivs_ok,
+                    tol,
+                    UNDEF_DOUBLE,
+                    |_| {},
+                )?;
                 sols
             } else {
                 Vec::new()
@@ -1796,12 +2115,11 @@ impl BSplineCurve {
                 let eval = ignored(self.evaluate(param, 1, false, false))?;
                 let (evaluated, deriv_length) = match eval {
                     Some(pt_der) => (true, pt_der.get(1).copied().unwrap_or(Vec3::UNDEF).length()),
-                    None if k.fixes.query_statuses_pass_on => (false, UNDEF_DOUBLE),
-                    None => (true, Vec3::UNDEF.length()),
+                    None => (false, UNDEF_DOUBLE),
                 };
 
-                // check 1stDeriv > tolerance; with `query_statuses_pass_on` a derivative
-                // that cannot be evaluated fails too
+                // check 1stDeriv > tolerance; a derivative that cannot be evaluated fails
+                // too (the fork, tangency-labs/smlib 8843967)
                 if !evaluated || deriv_length < tol {
                     let min_1st_deriv_param = param;
                     let test = if dim == 2 {
@@ -1830,7 +2148,7 @@ impl BSplineCurve {
             // mapped trim that cannot be sized fails test 13 and is not analysed.
             let mut mapped: Option<BSplineCurve> = None;
             let (mut radius_sized, mut radius_tol, mut radius_sep) = (sized, tol, min_sep);
-            if sized && k.fixes.uv_trim_checks_on_surface {
+            if sized {
                 if let Some(l) = trim_metric(k, self, bounded, ovr.trim_surface, &domain)? {
                     mapped = mapped_trim(self, l);
                     let mapped_box = match mapped.as_ref() {
@@ -1858,22 +2176,8 @@ impl BSplineCurve {
 
             // Another type of kink check: vanishing radius of curvature.
             let mut radii = false;
-            // Not upstream (#2568): the search's solutions only reach a report through
-            // `bspline_check_min_radius` (below); without it, or where the radius is
-            // bounded above the tolerance and the search's objective evaluates everywhere
-            // (a failed evaluation is returned as a radius of 0), it cannot report and is
-            // not run
-            let radius_clear = shortcut
-                && (!k.fixes.bspline_check_min_radius
-                    || match mapped.as_ref() {
-                        None => bounds,
-                        Some(m) => m.nurb.as_ref().and_then(curve_bounds),
-                    }
-                    .is_some_and(|b| b.radius_clears(radius_tol)));
-            let solutions = if radius_sized && radius_clear {
-                radii = true;
-                Vec::new()
-            } else if radius_sized {
+            // (the search reports its own status, as the fork, tangency-labs/smlib 8843967)
+            let solutions = if radius_sized {
                 let (radii_ok, sols) = global_property_analysis(
                     k,
                     copy_curve,
@@ -1881,40 +2185,34 @@ impl BSplineCurve {
                     CurveProperty::MinimizeRadiusOfCurvature,
                     radius_sep,
                 )?;
-                if k.fixes.query_statuses_pass_on {
-                    radii = radii_ok;
-                    rtn &= report(
-                        &mut list,
-                        key,
-                        if dim == 2 { 13 } else { 14 },
-                        radii,
-                        radius_tol,
-                        UNDEF_DOUBLE,
-                        |_| {},
-                    )?;
-                    if radii {
-                        sols
-                    } else {
-                        Vec::new()
-                    }
-                } else {
-                    radii = true;
+                radii = radii_ok;
+                rtn &= report(
+                    &mut list,
+                    key,
+                    if dim == 2 { 13 } else { 14 },
+                    radii,
+                    radius_tol,
+                    UNDEF_DOUBLE,
+                    |_| {},
+                )?;
+                if radii {
                     sols
+                } else {
+                    Vec::new()
                 }
             } else {
                 Vec::new()
             };
 
             // (upstream compares before setting the minimum radius, so the test never
-            // fires; the opt-in `Kernel::fixes.bspline_check_min_radius` reads it first:
-            // WR-382, tangency-labs/solidcore#475)
+            // fires; here it is read first: WR-382, tangency-labs/solidcore#475)
             //
-            // Not upstream (fork tangency-labs/smlib ecf1963, WR-668, opt-in): at a
+            // Not upstream (fork tangency-labs/smlib ecf1963, WR-668): at a
             // zero-speed tangent end the radius vanishes as |t - t_end|. A solution below
             // the tolerance within the stretch where that growth puts it below is that
             // growth and is passed over; the first other solution is read instead.
             let mut stretch = [-1.0, -1.0];
-            if k.fixes.curve_check_zero_speed_tangent_end && radii {
+            if radii {
                 for (end, slot) in stretch.iter_mut().enumerate() {
                     let i = if end == 0 { 0 } else { cur.n() };
                     let end_cpt = cpt(i)?.to_euclid();
@@ -1926,25 +2224,70 @@ impl BSplineCurve {
                     }
                 }
             }
+            // Not upstream: a UV trim measured on its surface (WR-560) has a small
+            // radius only where its image on the surface has one. The constant metric
+            // of `trim_metric` is exact on a plane only: near a singular point of the
+            // surface (a sphere's pole) it overstates the steps along the collapsing
+            // direction, and the exact trim of a smooth curve passing near the pole
+            // turns there through up to half a period over a few times the pole's
+            // distance. A solution below the tolerance is passed over only where the
+            // image on the surface is proved to have a radius of at least the tolerance
+            // over the whole trim, its zero-speed end stretches to at least half the
+            // growth line they stand for ([`radius_clears_on_surface`],
+            // [`stretch_clears_on_surface`]). The bound covers the whole trim, not only
+            // the solution's neighbourhood: the analysis finds solutions on the mapped
+            // trim, and a corner that is sharp on the surface can read above the
+            // tolerance mapped (where a step in u is shorter on the surface than at the
+            // trim's middle) and be no solution at all.
+            let on_surface = match (mapped.as_ref(), ovr.trim_surface) {
+                (Some(_), Some(surface)) => Some(surface),
+                _ => None,
+            };
             let mut first = solutions.first();
-            if stretch.iter().any(|&s| s >= 0.0) {
+            if stretch.iter().any(|&s| s >= 0.0) || on_surface.is_some() {
                 first = None;
+                let mut params = Vec::new();
                 for s in &solutions {
-                    let p = s.param(0)?;
+                    params.push(s.param(0)?);
+                }
+                // the whole trim, certified once
+                let mut whole_clears: Option<bool> = None;
+                for (s, &p) in solutions.iter().zip(&params) {
                     let growth = (p - domain.min()).abs() <= stretch[0]
                         || (p - domain.max()).abs() <= stretch[1];
-                    if !(s.solution_value < radius_tol && growth) {
+                    let smooth_on_surface = match on_surface {
+                        Some(surface) if s.solution_value < radius_tol && !growth => {
+                            if let Some(c) = whole_clears {
+                                c
+                            } else {
+                                let lo = domain.min() + max2(stretch[0], 0.0);
+                                let hi = domain.max() - max2(stretch[1], 0.0);
+                                let mut c =
+                                    radius_clears_on_surface(k, self, surface, lo, hi, radius_tol)?;
+                                // the zero-speed stretches: on the surface, at least half
+                                // the growth line they stand for
+                                for (end, &len) in stretch.iter().enumerate() {
+                                    if c && len >= 0.0 {
+                                        c = stretch_clears_on_surface(
+                                            k, self, surface, &domain, end, len, radius_tol,
+                                        )?;
+                                    }
+                                }
+                                whole_clears = Some(c);
+                                c
+                            }
+                        }
+                        _ => false,
+                    };
+                    if !(s.solution_value < radius_tol && (growth || smooth_on_surface)) {
                         first = Some(s);
                         break;
                     }
                 }
             }
             let first_radius = first.map_or(BIG_DOUBLE, |s| s.solution_value);
-            if k.fixes.bspline_check_min_radius {
-                min_radius = first_radius;
-            }
+            let min_radius = first_radius;
             if min_radius < radius_tol {
-                min_radius = first_radius;
                 let min_radius_param = match first {
                     Some(s) => s.param(0)?,
                     None => 0.0,
@@ -1969,15 +2312,13 @@ impl BSplineCurve {
         /* 15 */
         // Are Curve Internal ControlPoints Coincident
         let pole_tol = ZONE_TOL_3D / 10.0;
-        // Not upstream (fork tangency-labs/smlib 54ca3e0, WR-560, opt-in): the tolerance is
+        // Not upstream (fork tangency-labs/smlib 54ca3e0, WR-560): the tolerance is
         // a length, and a UV trim's control points are measured as lengths on its face's
         // surface, as the radius test above.
         let mut pole_curve: Option<BSplineCurve> = None;
-        if k.fixes.uv_trim_checks_on_surface {
-            let interval = self.natural_interval();
-            if let Some(l) = trim_metric(k, self, ovr.bounded, ovr.trim_surface, &interval)? {
-                pole_curve = mapped_trim(self, l);
-            }
+        let interval = self.natural_interval();
+        if let Some(l) = trim_metric(k, self, ovr.bounded, ovr.trim_surface, &interval)? {
+            pole_curve = mapped_trim(self, l);
         }
         let has_internal_pole = pole_curve
             .as_ref()
@@ -2094,6 +2435,7 @@ mod tests {
     use super::*;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+    use std::f64::consts::PI;
 
     /// A non-rational 3D curve of degree `p` through `pts` with `knots`.
     fn curve(p: usize, pts: &[[f64; 3]], knots: &[f64]) -> BSplineCurve {
@@ -2164,9 +2506,7 @@ mod tests {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::TrimGap): an end point that
         // cannot be evaluated leaves the gap unfixed (0); upstream measures the gap
         // between unset points, finds none and reports the curves joined.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        let on = Kernel::default();
         let mut a = BSplineCurve::new(3);
         assert!(a.evaluate_point(0.0).is_err());
         let mut b = curve(
@@ -2174,10 +2514,6 @@ mod tests {
             &[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
             &[0.0, 0.0, 1.0, 1.0],
         );
-        assert!(a
-            .clone()
-            .trim_gap(&off, &mut b.clone(), GapFix::Both, 0.1)
-            .unwrap());
         assert!(!a.trim_gap(&on, &mut b, GapFix::Both, 0.1).unwrap());
     }
 
@@ -2212,7 +2548,51 @@ mod tests {
             &[[9.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
             &[0.0, 0.0, 1.0, 1.0],
         );
-        assert!(a.join_with(k, true, &mut b, false, Some(0.01)).is_err());
+        let e = a.join_with(k, true, &mut b, false, Some(0.01)).unwrap_err();
+        // the end (4, 0, 0) of `quad` and the start (9, 0, 0) of the line are 5 apart
+        match e.nurbs_failure() {
+            Some(crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::EndsApart {
+                distance,
+                tolerance,
+            })) => {
+                assert!((distance - 5.0).abs() < 1e-12, "{distance}");
+                assert_eq!(*tolerance, 0.01);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    #[test]
+    fn join_with_keeps_the_join_construction_error_as_its_cause() {
+        let k = &Kernel::default();
+        // two lines at an angle, 0.005 apart: within the caller's gap tolerance (0.01), so
+        // join_with reaches CreateByJoining, which refuses ends that far apart
+        let mut a = curve(
+            1,
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let mut b = curve(
+            1,
+            &[[1.005, 0.0, 0.0], [1.005, 1.0, 0.0]],
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let e = a.join_with(k, true, &mut b, false, Some(0.01)).unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                BSplineFailure::JoinNotBuilt
+            ))
+        );
+        // the class is the cause's: an argument check, neither a defect nor a refusal
+        assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        let cause = e.cause().expect("the join construction's error is kept");
+        assert!(
+            cause.to_string().contains("segments not end to end"),
+            "{cause}"
+        );
     }
 
     #[test]
@@ -2267,22 +2647,11 @@ mod tests {
 
     #[test]
     fn assert_valid_reports_tiny_curvature_radius_in_2d_and_3d() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
+        let k = Kernel::default();
         let width = 0.001;
         for (dim, test_index) in [(2, 13), (3, 14)] {
             let c = curvature_test_parabola(dim, width);
             for level_given in [true, false] {
-                let mut default_list = AssertArray::new();
-                assert!(c
-                    .assert_valid(
-                        &Kernel::default(),
-                        Some(&mut default_list),
-                        level_given,
-                        ObjectKey(42)
-                    )
-                    .unwrap());
-                assert!(default_list.is_empty(), "{default_list:?}");
                 let mut list = AssertArray::new();
                 assert!(!c
                     .assert_valid(&k, Some(&mut list), level_given, ObjectKey(42))
@@ -2308,8 +2677,7 @@ mod tests {
 
     #[test]
     fn assert_valid_accepts_regular_curvature_and_linear_empty_analysis() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
+        let k = Kernel::default();
         for dim in [2, 3] {
             let c = curvature_test_parabola(dim, 0.02);
             let mut list = AssertArray::new();
@@ -2332,8 +2700,7 @@ mod tests {
 
     #[test]
     fn assert_valid_accepts_straight_span_joined_to_regular_bend() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
+        let k = Kernel::default();
         // A straight quadratic span followed by a C1 quadratic bend. The radius
         // is infinite on the straight span and at least 1/2 on the bend.
         let c = curve(
@@ -2385,12 +2752,12 @@ mod tests {
     }
 
     /// tangency-labs/solidcore#475 (WR-382): tests 13/14 (an extremely small radius of
-    /// curvature) compare the minimum radius before it is read, so they never fire; the
-    /// opt-in reads it first. A quadratic with a sharp bend: radius 1/h = 1e-3 at its
+    /// curvature) compare the minimum radius before it is read upstream, so they never
+    /// fire; here it is read first. A quadratic with a sharp bend: radius 1/h = 1e-3 at its
     /// middle against a tolerance of about h / 20000 = 0.05.
     #[test]
     fn issue_475_min_radius_of_curvature_test() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let h = 1000.0;
         let c = curve(
             2,
@@ -2407,9 +2774,6 @@ mod tests {
                 .collect();
             (ok, idx)
         };
-        let (_, idx) = tests(&k);
-        assert!(!idx.contains(&14), "{idx:?}");
-        k.fixes.bspline_check_min_radius = true;
         let (ok, idx) = tests(&k);
         assert!(!ok && idx.contains(&14), "{idx:?}");
     }
@@ -2509,16 +2873,11 @@ mod tests {
     /// WR-560 (fork tangency-labs/smlib b4f8c57, #891 item 2): the exact trim of a r 1
     /// circle on a plane spanning 600 x 3 is an ellipse 200 times as long as it is wide
     /// in (u, v), of radius 8.3e-6 at its ends against a tolerance of about 6.7e-5; on
-    /// the plane it is the circle of radius 1. Test 13 needs `bspline_check_min_radius`
-    /// to fire at all (WR-382).
+    /// the plane it is the circle of radius 1.
     #[test]
     fn issue_891_uv_trim_radius_is_measured_on_its_surface() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
+        let k = Kernel::default();
         let (trim, plane) = circle_trim_on_plane((300.0, 1.5, 1.0), (600.0, 3.0));
-        let idx = failed_tests(&k, &trim, Some(&plane));
-        assert!(idx.contains(&13), "{idx:?}");
-        k.fixes.uv_trim_checks_on_surface = true;
         let idx = failed_tests(&k, &trim, Some(&plane));
         assert!(!idx.contains(&13), "{idx:?}");
         // a curve that is no face's trim is tested as it is
@@ -2531,13 +2890,718 @@ mod tests {
     /// pole tolerance `SM_ZONE_TOL_3D / 10`; on the plane they are 0.003 apart.
     #[test]
     fn issue_1524_uv_trim_control_points_are_measured_on_its_surface() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let (trim, plane) = circle_trim_on_plane((2250.0, 2250.0, 0.003), (4500.0, 4500.0));
         let idx = failed_tests(&k, &trim, Some(&plane));
-        assert!(idx.contains(&15), "{idx:?}");
-        k.fixes.uv_trim_checks_on_surface = true;
-        let idx = failed_tests(&k, &trim, Some(&plane));
         assert!(!idx.contains(&15), "{idx:?}");
+    }
+
+    /// [`radius_clears_on_surface`] bounds the radius of the trim's image: on a plane
+    /// spanning 600 x 3 over the unit square, the quadratic trim whose image has the
+    /// control points `(-1, 1) (0, -1) (1, 1)` about the square's centre (a parabola 200
+    /// times as narrow in (u, v) as on the plane) has its least radius, `a^2 / 2b = 0.5`,
+    /// at its apex. It clears 0.25 over the whole trim and does not clear 1.
+    #[test]
+    fn a_trim_on_a_plane_clears_the_radius_of_its_image() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let k = Kernel::default();
+        let plane = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(600.0, 0.0, 0.0),
+                Vec3::new(0.0, 3.0, 0.0),
+                Vec3::new(600.0, 3.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let at = |x: f64, y: f64| [0.5 + x / 600.0, 0.5 + y / 3.0];
+        let trim = uv_bezier(&[at(-1.0, 1.0), at(0.0, -1.0), at(1.0, 1.0)]);
+        assert!(radius_clears_on_surface(&k, &trim, &plane, 0.0, 1.0, 0.25).unwrap());
+        assert!(!radius_clears_on_surface(&k, &trim, &plane, 0.0, 1.0, 1.0).unwrap());
+    }
+
+    /// A r 6 sphere about the origin, its poles on z, and its natural UV domain.
+    fn sphere() -> (Surface, Extent2d) {
+        use crate::surface::sphere::{Sphere, SphereOptions};
+        let k = Kernel::default();
+        let mut sphere = Sphere::new(
+            &k,
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+            6.0,
+            SphereOptions::default(),
+        )
+        .unwrap();
+        sphere.make_nurb(&k).unwrap();
+        let surface = Surface::from(sphere);
+        let dom = surface.natural_uv_domain_if_built();
+        (surface, dom)
+    }
+
+    /// A 2D trim of `degree` through the control points `pts` (one Bezier piece).
+    fn uv_bezier(pts: &[[f64; 2]]) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let control: Vec<Vec3> = pts.iter().map(|p| Vec3::new(p[0], p[1], 0.0)).collect();
+        let m = control.len();
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: m - 1,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[m, m],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// Near a pole: a straight trim along u at fixed v on a r 6 sphere is an arc of a
+    /// circle of latitude, whose radius is its distance from the sphere's axis (about 2e-5
+    /// 1e-6 of the way from either pole, 6 halfway up). The bound clears half that radius
+    /// over the whole trim and does not clear twice it.
+    #[test]
+    fn a_trim_near_a_sphere_pole_clears_the_radius_of_its_image() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        for f in [1e-6, 0.5, 1.0 - 1e-6] {
+            let v = dom.min().y + f * h;
+            let (u0, u1) = (dom.min().x + 0.1 * w, dom.min().x + 0.7 * w);
+            let trim = uv_bezier(&[[u0, v], [u1, v]]);
+            let p = surface
+                .evaluate_point(&k, Point2::new(0.5 * (u0 + u1), v))
+                .unwrap();
+            let radius = (p.x * p.x + p.y * p.y).sqrt();
+            let clears = |tol| radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, tol);
+            assert!(clears(0.5 * radius).unwrap(), "f {f}: {radius}");
+            assert!(!clears(2.0 * radius).unwrap(), "f {f}: {radius}");
+        }
+    }
+
+    /// A trim on the boundary of the sphere's domain: a cubic run 3 % of the way down a
+    /// meridian from either pole (v from an end of its range), at mid longitude and on
+    /// either side of the seam, and one along the seam on either side of the domain, clear
+    /// of the poles. Each image is an arc of a great circle of the r 6 ball, so the bound
+    /// clears the radius 3 and does not clear 12.
+    ///
+    /// The top of each range is the knot 1. A piece's range, taken from its power
+    /// coefficients alone, passed that knot by the rounding of the trim's evaluation in
+    /// intervals (1.0000000000000235 for the piece 0 to 0.25 of the trim from the top pole
+    /// at mid longitude, against the 1.0000000000000142 the knot range's slack allows), at
+    /// every halving: no
+    /// piece that touched the top of a range was enclosed, and the trims that end on the top
+    /// pole or lie on the seam's top side did not clear any radius. The range of the span's
+    /// control points, which is exact, holds the piece too.
+    #[test]
+    fn a_trim_on_the_boundary_of_a_sphere_s_domain_clears_the_radius_of_its_image() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        let (top, bottom) = (dom.max().y, dom.min().y);
+        let meridian = |u: f64, from: f64, to: f64| {
+            let at = |f: f64| [u, from + f * (to - from)];
+            uv_bezier(&[at(0.0), at(1.0 / 3.0), at(2.0 / 3.0), at(1.0)])
+        };
+        let mut trims = Vec::new();
+        for u in [dom.min().x, dom.min().x + 0.7 * w, dom.max().x] {
+            trims.push((
+                meridian(u, top, top - 0.03 * h),
+                format!("from the top pole at u {u}"),
+            ));
+            trims.push((
+                meridian(u, bottom, bottom + 0.03 * h),
+                format!("from the bottom pole at u {u}"),
+            ));
+        }
+        for u in [dom.min().x, dom.max().x] {
+            trims.push((
+                meridian(u, bottom + 0.2 * h, bottom + 0.7 * h),
+                format!("along the seam at u {u}"),
+            ));
+        }
+        for (trim, what) in &trims {
+            let clears = |tol| radius_clears_on_surface(&k, trim, &surface, 0.0, 1.0, tol);
+            assert!(clears(3.0).unwrap(), "{what}");
+            assert!(!clears(12.0).unwrap(), "{what}");
+        }
+    }
+
+    /// A trim that runs into a sphere's pole off the meridian it ends on, as the trace's
+    /// trim does where its end is moved onto a pole beside the seam: the straight trim from
+    /// the corner of the domain where the seam's top side meets the top pole, `(u, v)` =
+    /// `(u_max - a s, v_max - b s)`. With the longitude `λ` and the angle from the pole `φ`,
+    /// its image `R (sin φ cos λ, sin φ sin λ, cos φ)` arrives at the pole with
+    /// `λ = λ0 + α φ + O(φ²)`, where its curvature is `sqrt(1 + 4 α²) / R` (the normal
+    /// curvature `1 / R` and the geodesic curvature `2 α / R`: at `φ = 0` the image's first
+    /// derivative in `φ` is `R e(λ0)` and its second is `2 R α e'(λ0) - R z`). The sphere's
+    /// net is four quarter turns in u and two in v, rational quadratics with the weights
+    /// 1, `1/√2`, 1, whose angle runs at `√2` per quarter at their ends: `dλ/du = 4√2 / w`
+    /// and `dφ/dv = 2√2 / h` at that corner, so `α = 2 (a / w) / (b / h)`.
+    ///
+    /// For `α = 1` (a radius of `6/√5`, 2.68) and `α = 600` over a trim 1.7e-4 long (5.0e-3:
+    /// the shape of the trim of a ball cut 1e-6 off its pole with its seam turned 0.02 rad),
+    /// the bound clears half the radius at the pole over the whole trim and does not clear
+    /// twice it. Away from the pole the image bends less: with `x = α sin φ` the geodesic
+    /// curvature of `λ = λ0 + α φ` is `α cos φ (2 + x²) / (R (1 + x²)^(3/2))`, which falls
+    /// as `φ` grows (ARGUED for the trim here, whose `λ` and `φ` are not linear in `s`; the
+    /// test asserts the verdicts). Neither cleared any radius before the control points'
+    /// range was taken: the piece at the corner was never enclosed.
+    #[test]
+    fn a_trim_into_a_sphere_pole_beside_the_seam_clears_the_radius_of_its_image() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        for (alpha, b) in [(1.0, 0.03), (600.0, 1e-5)] {
+            let a = 0.5 * alpha * b;
+            let at = |s: f64| [dom.max().x - a * w * s, dom.max().y - b * h * s];
+            let trim = uv_bezier(&[at(0.0), at(1.0 / 3.0), at(2.0 / 3.0), at(1.0)]);
+            let radius = 6.0 / (1.0 + 4.0 * alpha * alpha).sqrt();
+            let clears = |tol| radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, tol);
+            assert!(clears(0.5 * radius).unwrap(), "α {alpha}: {radius}");
+            assert!(!clears(2.0 * radius).unwrap(), "α {alpha}: {radius}");
+        }
+    }
+
+    /// The sliver certificate on the boundary of the sphere's domain. A cubic with a
+    /// zero-speed start (`P0 = P1`) on a pole or on the seam, running 2 % of the way along
+    /// its meridian: its first 1e-7 of parameter moves 3e-16 in (u, v), a sliver within
+    /// `STRETCH_SLIVER_ULPS ε |P|_max`, and its first 1e-3 moves 3e-8, which is not one.
+    /// The verdicts are the same on the bottom pole, off the boundary, on the top pole and
+    /// on the seam's top side. The last two (v or u at the knot 1) were never certified:
+    /// the sliver's range passed that knot by the rounding of its coefficients, and no
+    /// Jacobian was enclosed.
+    #[test]
+    fn a_sliver_on_the_boundary_of_a_sphere_s_domain_is_certified() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        let (mid, top, bottom) = (dom.min().x + 0.7 * w, dom.max().y, dom.min().y);
+        for (what, u, v, dv) in [
+            ("on the bottom pole", mid, bottom, 0.01 * h),
+            ("off the boundary", mid, bottom + 0.6 * h, 0.01 * h),
+            ("on the top pole", mid, top, -0.01 * h),
+            (
+                "on the top pole beside the seam",
+                dom.max().x,
+                top,
+                -0.01 * h,
+            ),
+            (
+                "on the seam's top side",
+                dom.max().x,
+                bottom + 0.6 * h,
+                0.01 * h,
+            ),
+        ] {
+            let pts = [[u, v], [u, v], [u, v + dv], [u, v + 2.0 * dv]];
+            let trim = uv_bezier(&pts);
+            let p_max = pts.iter().fold(0.0_f64, |m, p| m.max(p[0].hypot(p[1])));
+            let length = STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
+            let sliver = |hi| sliver_within(&k, &trim, &surface, 0.0, hi, length);
+            assert!(sliver(1e-7).unwrap(), "{what}");
+            assert!(!sliver(1e-3).unwrap(), "{what}");
+        }
+    }
+
+    /// A real cusp near a pole is still reported: a quadratic trim turning sharply in
+    /// (u, v), 1.5 % of the way from the sphere's pole, where the surface is regular. Its
+    /// turn, `(-e, h) (0, -h) (e, h)` about its apex with `e = 1e-5` and `h = 2e-3` of the
+    /// domain, has radius `e^2 / 2h` in (u, v) and one about as small on the ball, far
+    /// below test 13's tolerance: the bound does not clear it and test 13 reports.
+    #[test]
+    fn a_cusp_near_a_sphere_pole_is_reported() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        let (u, v) = (dom.min().x + 0.5 * w, dom.max().y - 0.015 * h);
+        let (e, hh) = (1e-5 * w, 2e-3 * h);
+        let trim = uv_bezier(&[[u - e, v + hh], [u, v - hh], [u + e, v + hh]]);
+        let tol = 1e-4;
+        assert!(!radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, tol).unwrap());
+        let idx = failed_tests(&k, &trim, Some(&surface));
+        assert!(idx.contains(&13), "{idx:?}");
+    }
+
+    /// The zero-speed stretch certificate: over a stretch taken as the whole of a trim, a
+    /// latitude arc halfway up the r 6 ball (radius 6) clears half the growth line of the
+    /// tolerance 1e-3 (at each piece's near edge), and the V cusp near the pole of
+    /// [`a_cusp_near_a_sphere_pole_is_reported`] does not, from either end. (A unit test
+    /// of the certificate: a whole trim with a zero-speed tangent end on a tangent edge,
+    /// a corner inside its stretch and a false-alarm turn elsewhere is not built here.)
+    #[test]
+    fn a_corner_inside_a_zero_speed_stretch_is_not_cleared() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        let v = dom.min().y + 0.5 * h;
+        let arc = uv_bezier(&[[dom.min().x + 0.1 * w, v], [dom.min().x + 0.7 * w, v]]);
+        let unit = Extent1d::from_raw(0.0, 1.0);
+        for end in [0, 1] {
+            assert!(stretch_clears_on_surface(&k, &arc, &surface, &unit, end, 1.0, 1e-3).unwrap());
+        }
+        let (u, v) = (dom.min().x + 0.5 * w, dom.max().y - 0.015 * h);
+        let (e, hh) = (1e-5 * w, 2e-3 * h);
+        let cusp = uv_bezier(&[[u - e, v + hh], [u, v - hh], [u + e, v + hh]]);
+        for end in [0, 1] {
+            assert!(
+                !stretch_clears_on_surface(&k, &cusp, &surface, &unit, end, 1.0, 1e-3).unwrap()
+            );
+        }
+    }
+
+    /// The zero-speed stretch certificate on a genuine zero-speed end: the cubic with
+    /// `P0 = P1` = (0.2, 0.2), (0.6, 0.2), (0.6, 0.6) on the unit plane (isometric, so its
+    /// image's radius is its own) has, near the start, a radius on the growth line to first
+    /// order (rate `12 |a|^3 / |a x b|` = 4.8, `a = P2 - P0`, `b = P3 - 3 P2 + 2 P0`). Its
+    /// WR-668 stretch for the tolerance 1e-3 (2.1e-4) clears down to the rounding-level
+    /// sliver (about 2e-7 of the end). So does the reversed cubic's at its far end, on
+    /// the domain [0, 1] and on [1000, 1001], a domain end far from 0 (where pieces cut at
+    /// `2^-52` of the stretch would round onto the end).
+    #[test]
+    fn a_genuine_zero_speed_end_clears_its_stretch() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let pts = [[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]];
+        let mut back = pts;
+        back.reverse();
+        let tol = 1e-3;
+        for (cubic, end, lo) in [
+            (uv_cubic_on(&pts, 0.0), 0, 0.0),
+            (uv_cubic_on(&back, 0.0), 1, 0.0),
+            (uv_cubic_on(&back, 1000.0), 1, 1000.0),
+        ] {
+            let stretch = zero_speed_radius_stretch(&cubic, end, tol)
+                .unwrap()
+                .unwrap();
+            assert!((stretch - tol / 4.8).abs() <= 1e-9 * stretch, "{stretch:e}");
+            let domain = Extent1d::from_raw(lo, lo + 1.0);
+            assert!(
+                stretch_clears_on_surface(&k, &cubic, &plane, &domain, end, stretch, tol).unwrap(),
+                "end {end} on [{lo}, {}]",
+                lo + 1.0
+            );
+        }
+    }
+
+    /// The sliver at a zero-speed end is one polynomial piece. A cubic trim on the unit
+    /// plane (knots 0, 1e-4, 1e-3, 2e-3, 3e-3, 1; single interior knots, so C2) whose
+    /// first span (0 to 1e-4) has its control points within two ulps of (0.2, 0.2), so
+    /// `|c'|` is 0 and `|c''|` tiny at the start, and which then runs out to (0.6, 0.2) and
+    /// turns back there sharply but smoothly inside the span 2e-3 to 3e-3 (asserted: its
+    /// radius there does not clear 1e-6; about 8e-9 near t = 3.0e-3 by sampling). A sliver
+    /// from the end's derivatives alone would run past 3e-3 (asserted) and cover the
+    /// turn. The sliver's extent certificate keeps the turn out of the sliver: it certifies
+    /// one polynomial piece only, so the sliver ends at the knot 1e-4, the turn is in the
+    /// pieces, and the stretch (0.05, taken as given) does not clear. MEASURED by probe:
+    /// with the sliver taken uncertified, as at df391d2ef, the stretch clears and this test
+    /// fails. The turn's radius is bounded above at one point in rounded intervals.
+    #[test]
+    fn a_turn_past_a_collapsed_end_span_is_not_cleared() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let a1 = f64::from_bits(0.2_f64.to_bits() + 1);
+        let a2 = f64::from_bits(0.2_f64.to_bits() + 2);
+        let trim = curve(
+            3,
+            &[
+                [0.2, 0.2, 0.0],
+                [0.2, 0.2, 0.0],
+                [a1, 0.2, 0.0],
+                [a2, 0.2, 0.0],
+                [0.6, 0.2, 0.0],
+                [0.6, 0.201, 0.0],
+                [0.2, 0.202, 0.0],
+                [0.2, 0.6, 0.0],
+            ],
+            &[
+                0.0, 0.0, 0.0, 0.0, 1e-4, 1e-3, 2e-3, 3e-3, 1.0, 1.0, 1.0, 1.0,
+            ],
+        );
+        assert!(!radius_clears_on_surface(&k, &trim, &plane, 2e-3, 3e-3, 1e-6).unwrap());
+        // the radius at t0 = 2.9971e-3 (span 2e-3 to 3e-3), bounded above: |c'|^3 / |c' x c''|
+        {
+            use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+            use crate::blend::fillet_section::interval::Ivl;
+            let nc = NurbsCurve::of(&trim).unwrap();
+            let d = curve_derivs_over(&nc, Ivl::from(2.9971e-3), 2, Some(6)).unwrap();
+            let (d1, d2) = (d[1], d[2]);
+            let speed_sq = d1.x * d1.x + d1.y * d1.y;
+            let cross = d1.x * d2.y - d1.y * d2.x;
+            assert!(cross.lo > 0.0 || cross.hi < 0.0);
+            let cross_lo = Ivl::from(cross.lo.abs().min(cross.hi.abs()));
+            let radius_hi = (speed_sq * speed_sq.sqrt() / cross_lo).hi;
+            assert!(radius_hi <= 1e-6, "{radius_hi:e}");
+        }
+        let d = trim.evaluate(0.0, 2, true, false).unwrap();
+        let (speed, accel) = (d[1].length(), d[2].length());
+        assert!(speed == 0.0 && accel > 0.0, "{speed:e} {accel:e}");
+        let p_max = (0.6_f64 * 0.6 + 0.201 * 0.201).sqrt();
+        let quarter = 0.25 * STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
+        let uncapped = (2.0 * quarter / accel).sqrt();
+        assert!(uncapped > 3e-3, "{uncapped:e}");
+        let unit = Extent1d::from_raw(0.0, 1.0);
+        assert!(!stretch_clears_on_surface(&k, &trim, &plane, &unit, 0, 0.05, 1e-3).unwrap());
+    }
+
+    /// A C0 corner at a knot of full multiplicity is never cleared: a quadratic trim on the
+    /// r 6 ball halfway up, along the latitude circle and then down a meridian, with the
+    /// double knot 0.5 at the corner. The radius bound cuts its pieces at the knots, so it
+    /// would see two smooth arcs (MEASURED: without the knot check it clears 1e-3); the knot,
+    /// whose two tangents are not certified parallel, refuses it. Test 7 reports the trim;
+    /// test 13 finds no solution at such a knot (also on main, MEASURED), so the pass-over
+    /// had nothing to hide here, and the knot check keeps it so where test 13 does find one.
+    /// The same trim with its double knot on a straight run (a G1 join, the tangents
+    /// parallel) is not refused for the knot: the radius bound decides it.
+    #[test]
+    fn a_c0_corner_at_a_knot_is_not_cleared() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let trim = uv_quadratic(
+            &[
+                lon_lat(&dom, 1.0, 0.3),
+                lon_lat(&dom, 1.2, 0.3),
+                lon_lat(&dom, 1.4, 0.3),
+                lon_lat(&dom, 1.4, 0.1),
+                lon_lat(&dom, 1.4, -0.1),
+            ],
+            &[0.0, 0.5, 1.0],
+            &[3, 2, 3],
+        );
+        assert!(!radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, 1e-3).unwrap());
+        let idx = failed_tests(&k, &trim, Some(&surface));
+        assert!(idx.contains(&7), "{idx:?}");
+        // a G1 join: the double knot in the middle of a straight run along the circle
+        let join = uv_quadratic(
+            &[
+                lon_lat(&dom, 1.0, 0.3),
+                lon_lat(&dom, 1.1, 0.3),
+                lon_lat(&dom, 1.2, 0.3),
+                lon_lat(&dom, 1.3, 0.3),
+                lon_lat(&dom, 1.4, 0.3),
+            ],
+            &[0.0, 0.5, 1.0],
+            &[3, 2, 3],
+        );
+        assert!(radius_clears_on_surface(&k, &join, &surface, 0.0, 1.0, 1e-3).unwrap());
+        // a near-G1 corner, 1e-8 rad, at a double knot on a straight run of the unit plane:
+        // still a corner
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let bend: f64 = 1e-8;
+        let kinked = uv_quadratic(
+            &[
+                [0.2, 0.2],
+                [0.3, 0.2],
+                [0.4, 0.2],
+                [0.4 + 0.1 * bend.cos(), 0.2 + 0.1 * bend.sin()],
+                [0.4 + 0.2 * bend.cos(), 0.2 + 0.2 * bend.sin()],
+            ],
+            &[0.0, 0.5, 1.0],
+            &[3, 2, 3],
+        );
+        assert!(!radius_clears_on_surface(&k, &kinked, &plane, 0.0, 1.0, 1e-3).unwrap());
+        let straight = uv_quadratic(
+            &[[0.2, 0.2], [0.3, 0.2], [0.4, 0.2], [0.5, 0.2], [0.6, 0.2]],
+            &[0.0, 0.5, 1.0],
+            &[3, 2, 3],
+        );
+        assert!(radius_clears_on_surface(&k, &straight, &plane, 0.0, 1.0, 1e-3).unwrap());
+        // a knot of multiplicity 3 on a quadratic (the curve may jump there): refused
+        // (the raw NURB: the canonical constructor would reduce the knot)
+        let jump = curve(
+            2,
+            &[
+                [0.2, 0.2, 0.0],
+                [0.3, 0.2, 0.0],
+                [0.4, 0.2, 0.0],
+                [0.4, 0.2, 0.0],
+                [0.5, 0.2, 0.0],
+                [0.6, 0.2, 0.0],
+            ],
+            &[0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0],
+        );
+        assert!(!radius_clears_on_surface(&k, &jump, &plane, 0.0, 1.0, 1e-3).unwrap());
+    }
+
+    /// A G1 join whose control points are rounded keeps the pass-over: the straight run
+    /// `(0.7, 0.4) + i h (cos a, sin a)`, `i = 0..4`, `h = 1e-4`, on the unit plane as two
+    /// quadratic pieces joined at a double knot, each control point rounded on its own, so
+    /// that the knot's two legs are parallel only to the points' rounding (up to
+    /// `ulp(0.7) / h`, about 1e-12 rad). MEASURED by probe: the cross product's enclosure at
+    /// the knot reaches 1.3e-10 to 1.9e-10 of `|a| |b|` for the five directions, beyond
+    /// `64 ε` (1.4e-14), so a rule of `64 ε` alone would refuse every one of these
+    /// straight runs; the enclosures' widths term admits them (allowance 3.8e-10). The
+    /// near-G1 corner of 1e-8 rad in [`a_c0_corner_at_a_knot_is_not_cleared`] is still
+    /// refused.
+    #[test]
+    fn a_straight_run_with_rounded_control_points_clears() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let h = 1e-4;
+        for a in [0.3f64, 0.7, 1.1, 2.0, 2.9] {
+            let (sn, cs) = a.sin_cos();
+            let at = |i: f64| [0.7 + i * h * cs, 0.4 + i * h * sn];
+            let run = uv_quadratic(
+                &[at(0.0), at(1.0), at(2.0), at(3.0), at(4.0)],
+                &[0.0, 0.5, 1.0],
+                &[3, 2, 3],
+            );
+            assert!(
+                radius_clears_on_surface(&k, &run, &plane, 0.0, 1.0, 1e-3).unwrap(),
+                "{a}"
+            );
+        }
+    }
+
+    /// The half-line definition reports a real defect: the positive cubic of
+    /// [`a_genuine_zero_speed_end_clears_its_stretch`] read against a growth line 2.5 times
+    /// as steep as its own (the stretch taken as 0.4 times its WR-668 stretch), so that its
+    /// radius is 0.4 times the line, below the half the definition asks, does not clear;
+    /// against its own line it does.
+    #[test]
+    fn a_radius_below_half_the_growth_line_is_reported() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let cubic = uv_cubic_on(&[[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]], 0.0);
+        let tol = 1e-3;
+        let stretch = zero_speed_radius_stretch(&cubic, 0, tol).unwrap().unwrap();
+        let unit = Extent1d::from_raw(0.0, 1.0);
+        assert!(stretch_clears_on_surface(&k, &cubic, &plane, &unit, 0, stretch, tol).unwrap());
+        assert!(
+            !stretch_clears_on_surface(&k, &cubic, &plane, &unit, 0, 0.4 * stretch, tol).unwrap()
+        );
+    }
+
+    /// The cap is what lets a stretch whose first knot lies inside the uncapped sliver be
+    /// certified: the cubic of [`a_genuine_zero_speed_end_clears_its_stretch`] with the knot
+    /// `a = 0.9` times its sliver length inserted (Boehm: the same curve up to rounding).
+    /// With the cap the sliver ends at `a`, inside one span, and the stretch clears. MEASURED
+    /// by probe: without the cap the sliver crosses `a`, its extent certificate refuses it,
+    /// and the stretch is not certified. The stretch is the plain cubic's: on the knotted
+    /// curve WR-668's stretch detection (`zero_speed_radius_stretch`) reads `C'''` off the
+    /// 1.8e-7 first span, where rounding swamps it, and finds no stretch, so the production
+    /// path never reaches the certificate here (a WR-668 limitation, recorded in the PR).
+    #[test]
+    fn a_zero_speed_end_with_a_knot_inside_its_sliver_clears() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let pts = [[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]];
+        let plain = uv_cubic_on(&pts, 0.0);
+        let d = plain.evaluate(0.0, 2, true, false).unwrap();
+        let accel = d[2].length();
+        let p_max = (0.6_f64 * 0.6 + 0.6 * 0.6).sqrt();
+        let quarter = 0.25 * STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
+        let sliver = (2.0 * quarter / accel).sqrt();
+        let a = 0.9 * sliver;
+        let lerp = |x: [f64; 2], y: [f64; 2]| {
+            [
+                (1.0 - a) * x[0] + a * y[0],
+                (1.0 - a) * x[1] + a * y[1],
+                0.0,
+            ]
+        };
+        let trim = curve(
+            3,
+            &[
+                [0.2, 0.2, 0.0],
+                lerp(pts[0], pts[1]),
+                lerp(pts[1], pts[2]),
+                lerp(pts[2], pts[3]),
+                [0.6, 0.6, 0.0],
+            ],
+            &[0.0, 0.0, 0.0, 0.0, a, 1.0, 1.0, 1.0, 1.0],
+        );
+        let tol = 1e-3;
+        // the plain cubic's stretch (its third derivative, read off the short first span of
+        // the knotted one, is lost to rounding)
+        let stretch = zero_speed_radius_stretch(&plain, 0, tol).unwrap().unwrap();
+        let unit = Extent1d::from_raw(0.0, 1.0);
+        assert!(stretch_clears_on_surface(&k, &trim, &plane, &unit, 0, stretch, tol).unwrap());
+    }
+
+    /// Where `ulp(t_end)` binds the sliver, the sliver's extent is not at the trim's
+    /// rounding and the stretch is not certified: the cubic of
+    /// [`a_genuine_zero_speed_end_clears_its_stretch`] on [2^33, 2^33 + 1], where
+    /// `ulp(2^33)` = 1.9e-6 is far above the 2e-7 sliver of the domain [0, 1], moves about
+    /// `|c''| ulp² / 2` = 4.3e-12 within it, above `L` = 1.9e-13.
+    #[test]
+    fn a_stretch_whose_sliver_the_ulp_binds_is_not_cleared() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let lo = 2f64.powi(33);
+        let cubic = uv_cubic_on(&[[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]], lo);
+        let tol = 1e-3;
+        let stretch = tol / 4.8;
+        let domain = Extent1d::from_raw(lo, lo + 1.0);
+        assert!(!stretch_clears_on_surface(&k, &cubic, &plane, &domain, 0, stretch, tol).unwrap());
+    }
+
+    /// A cubic 2D trim through the control points `pts` on the domain `[lo, lo + 1]`.
+    fn uv_cubic_on(pts: &[[f64; 2]; 4], lo: f64) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let control: Vec<Vec3> = pts.iter().map(|p| Vec3::new(p[0], p[1], 0.0)).collect();
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: 3,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[4, 4],
+            knots: &[lo, lo + 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// A quadratic 2D trim through the control points `pts` with the distinct `knots` and
+    /// their multiplicities `mults` (ends 3, interior 1).
+    fn uv_quadratic(pts: &[[f64; 2]], knots: &[f64], mults: &[usize]) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let control: Vec<Vec3> = pts.iter().map(|p| Vec3::new(p[0], p[1], 0.0)).collect();
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: mults,
+            knots,
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// The (u, v) of longitude `lon` and latitude `lat` (radians) on [`sphere`]'s domain.
+    fn lon_lat(dom: &Extent2d, lon: f64, lat: f64) -> [f64; 2] {
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        [
+            dom.min().x + lon / (2.0 * PI) * w,
+            dom.min().y + (lat + 0.5 * PI) / PI * h,
+        ]
+    }
+
+    /// A trim that comes down a meridian of the r 6 sphere from the equator to 0.01 rad from
+    /// the pole and turns there onto the circle of latitude, sweeping 2 rad of longitude (the
+    /// control points (lon, lat) `(0, 0) (0, π/2 - 0.05) (0, π/2 - 0.01) (2, π/2 - 0.01)`,
+    /// knots 0, 0.9, 1), followed by the control points `extra` (with two of them, knots 0,
+    /// 0.9, 0.95, 0.97, 1). Its middle lies on the meridian at a latitude of about 70°, where
+    /// a step in u is about 33 times as long as at the turn. So the turn onto the latitude
+    /// circle, whose u leg is 2 rad but 0.12 long on the ball, mapped by the metric at the
+    /// middle (WR-560), gives test-13 solutions of 3.4e-4 to 7.4e-4 against the tolerance
+    /// 1.0e-3 (measured), while its image on the ball has a least radius of about 6.8e-3 (a
+    /// closed-form model of the curve, sampled; the test asserts only the verdicts).
+    fn turn_onto_a_latitude_circle(dom: &Extent2d, extra: &[[f64; 2]]) -> BSplineCurve {
+        let top = 0.5 * PI - 0.01;
+        let mut pts = vec![
+            lon_lat(dom, 0.0, 0.0),
+            lon_lat(dom, 0.0, top - 0.04),
+            lon_lat(dom, 0.0, top),
+            lon_lat(dom, 2.0, top),
+        ];
+        pts.extend(extra.iter().map(|&[lon, lat]| lon_lat(dom, lon, lat)));
+        if extra.is_empty() {
+            uv_quadratic(&pts, &[0.0, 0.9, 1.0], &[3, 1, 3])
+        } else {
+            uv_quadratic(&pts, &[0.0, 0.9, 0.95, 0.97, 1.0], &[3, 1, 1, 1, 3])
+        }
+    }
+
+    /// The trim of [`turn_onto_a_latitude_circle`]: the turn that is sharp only in the
+    /// mapped (u, v) is passed over, so test 13 does not report. Without the pass-over (on
+    /// main) test 13 reports this trim.
+    #[test]
+    fn a_turn_near_a_sphere_pole_that_is_smooth_on_the_ball_is_passed_over() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let trim = turn_onto_a_latitude_circle(&dom, &[]);
+        let idx = failed_tests(&k, &trim, Some(&surface));
+        assert!(!idx.contains(&13), "{idx:?}");
+    }
+
+    /// The same turn, followed along the latitude circle by a corner that is sharp on the
+    /// ball: the control points `(2.06, π/2 - 0.01) (2.06, π/2 - 0.31)` and knots 0, 0.9,
+    /// 0.95, 0.97, 1 turn back down a meridian over 0.06 rad of longitude, 0.0036 long on
+    /// the ball. On the ball the corner's radius is about 5e-6 at t = 0.97; the turn at
+    /// t = 0.9 still has a radius of about 3.1e-3 there at its own parameter, which a test
+    /// at one point passes. Over `[0.9, 0.95]` the bound clears the tolerance 1e-3; over
+    /// `[0.9, 1]`, which holds the corner off the turn's parameter, it does not.
+    ///
+    /// Test 13 reports the trim. Mapped, the corner reads about 4.2e-3, above the tolerance,
+    /// so the analysis finds no solution there; a pass-over certified only out to the
+    /// neighbouring solutions passed the turn at 0.9 and so the whole trim. The pass-over is
+    /// certified over the whole trim, which the corner fails, so the turn is reported.
+    #[test]
+    fn a_kink_on_the_ball_off_a_turns_parameter_is_not_cleared() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let top = 0.5 * PI - 0.01;
+        let trim = turn_onto_a_latitude_circle(&dom, &[[2.06, top], [2.06, top - 0.3]]);
+        let clears = |lo, hi| radius_clears_on_surface(&k, &trim, &surface, lo, hi, 1e-3);
+        assert!(clears(0.9, 0.95).unwrap());
+        assert!(!clears(0.9, 1.0).unwrap());
+        let idx = failed_tests(&k, &trim, Some(&surface));
+        assert!(idx.contains(&13), "{idx:?}");
     }
 
     /// WR-668 (fork tangency-labs/smlib ecf1963): `C(t) = (t^2, t^3, 0)` on `[0, 1]`,
@@ -2601,20 +3665,16 @@ mod tests {
     fn wr_668_zero_speed_tangent_end_is_no_kink() {
         let c = zero_speed_end_curve();
         let tangent = ends((0.0, 1.0), true);
-        let mut k = Kernel::default();
-        // main: test 3 (coincident first control points)
-        assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), vec![3]);
-        // with the minimum radius read: also test 14. Before tangency-labs/solidcore#2574
-        // the 0 it compared came from the objective failing at the zero-speed end; it is
-        // now the radius where the search stopped, still below the tolerance (#2669).
-        k.fixes.bspline_check_min_radius = true;
-        assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), vec![3, 14]);
-
-        // the fix: at a vertex where the edge's faces touch, both are the zero-speed end
-        k.fixes.curve_check_zero_speed_tangent_end = true;
+        let k = Kernel::default();
+        // at a vertex where the edge's faces touch, the coincident first control points
+        // (test 3) and, with the minimum radius read, the radius below the tolerance
+        // (test 14) are the zero-speed end (upstream reports both)
+        assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
         assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
         // on no edge, where the faces meet at an angle, or at no end of the edge, it
-        // still fails both
+        // still fails both. Before tangency-labs/solidcore#2574 the 0 test 14 compared
+        // came from the objective failing at the zero-speed end; it is now the radius
+        // where the search stopped, still below the tolerance (#2669).
         assert_eq!(edge_failed_tests(&k, &c, None), vec![3, 14]);
         let angled = ends((0.0, 1.0), false);
         assert_eq!(edge_failed_tests(&k, &c, Some(&angled)), vec![3, 14]);
@@ -2651,19 +3711,22 @@ mod tests {
         assert!(!is_zero_speed_tangent_end(&c, 1, 1e-15, Some(&tangent)).unwrap());
     }
 
-    /// With the flag off nothing about the edge is read: a regular curve and the
-    /// zero-speed one report the same with and without an edge context.
+    /// The stretch is read in the end's frame (#17744): the Bezier of
+    /// [`zero_speed_end_curve`] without its knot, moved to (40, 0, 8), at a tolerance whose
+    /// stretch (7.5e-9) leaves `C' x C''` there (3.4e-16) under the rounding `C'` carries
+    /// at those coordinates. Read there, the radius at the stretch's far end is off the
+    /// tolerance and no stretch is found.
     #[test]
-    fn wr_668_flag_off_ignores_the_edge() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
-        let tangent = ends((0.0, 1.0), true);
-        for c in [zero_speed_end_curve(), quad()] {
-            assert_eq!(
-                edge_failed_tests(&k, &c, Some(&tangent)),
-                edge_failed_tests(&k, &c, None)
-            );
-        }
+    fn wr_668_radius_stretch_is_read_in_the_end_frame() {
+        let tol = 1e-8;
+        let at = |x: f64, y: f64| [40.0 + x, y, 8.0];
+        let c = curve(
+            3,
+            &[at(0.0, 0.0), at(0.0, 0.0), at(1.0 / 3.0, 0.0), at(1.0, 1.0)],
+            &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        );
+        let s = zero_speed_radius_stretch(&c, 0, tol).unwrap().unwrap();
+        assert!((s - tol * 0.75).abs() <= 1e-6 * s, "{s}");
     }
 
     /// [`zero_speed_end_curve`] run backwards, of dimension `dim`: its zero-speed end
@@ -2682,7 +3745,7 @@ mod tests {
     /// 3D curve (test 14) and as a UV trim (test 13): the stretch is measured back from
     /// the domain's max and the radius below the tolerance there is passed over. Test 3
     /// reads only the first pair, and test 4 reports the first pair's values, so with
-    /// the minimum radius read only the radius test fails before the fix.
+    /// the minimum radius read only the radius test would fail without WR-668.
     #[test]
     fn wr_668_zero_speed_tangent_end_at_the_curve_end() {
         let tol = 1e-4;
@@ -2695,11 +3758,8 @@ mod tests {
             assert!(is_zero_speed_tangent_end(&c, 1, 1e-15, Some(&tangent)).unwrap());
             assert!(!is_zero_speed_tangent_end(&c, 0, 1e-15, Some(&tangent)).unwrap());
 
-            let mut k = Kernel::default();
+            let k = Kernel::default();
             assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
-            k.fixes.bspline_check_min_radius = true;
-            assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), vec![radius_test]);
-            k.fixes.curve_check_zero_speed_tangent_end = true;
             assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
             // on no edge, or on an edge that ends past the curve's end, it still fails
             assert_eq!(edge_failed_tests(&k, &c, None), vec![radius_test]);
@@ -2708,11 +3768,11 @@ mod tests {
         }
     }
 
-    /// Coincident end control points that are no zero-speed end stay a fault with the
-    /// fix, at a vertex where the edge's faces touch: the quartic Bezier `(0,0) (0,0)
+    /// Coincident end control points that are no zero-speed end stay a fault at a vertex
+    /// where the edge's faces touch: the quartic Bezier `(0,0) (0,0)
     /// (0,0) (1,0) (1,1)` has its second derivative vanish at `t = 0` as well
     /// (`sm_IsZeroSpeedTangentEnd` refuses `|C''| <= dScaledZero`), so tests 3 and 14
-    /// report what they report without it.
+    /// report the fault.
     #[test]
     fn wr_668_coincident_points_without_curvature_stay_a_fault() {
         let c = curve(
@@ -2728,14 +3788,10 @@ mod tests {
         );
         let tangent = ends((0.0, 1.0), true);
         assert!(!is_zero_speed_tangent_end(&c, 0, EFF_ZERO, Some(&tangent)).unwrap());
-        for min_radius in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.bspline_check_min_radius = min_radius;
-            let before = edge_failed_tests(&k, &c, Some(&tangent));
-            assert!(before.contains(&3), "{before:?}");
-            k.fixes.curve_check_zero_speed_tangent_end = true;
-            assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), before);
-        }
+        let k = Kernel::default();
+        let on_edge = edge_failed_tests(&k, &c, Some(&tangent));
+        assert!(on_edge.contains(&3), "{on_edge:?}");
+        assert_eq!(edge_failed_tests(&k, &c, None), on_edge);
     }
 
     #[test]
@@ -2743,13 +3799,10 @@ mod tests {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::AssertValid, tests 5/6, WR-663):
         // two knots 1e-30 apart on a borrowed NURB (not spread by `sm_FixupKnotVector`)
         // count as one double knot in `GetKnots` (tolerance 1e-12), while `sm_BasisDerivs`
-        // rejects a span <= 1e-24. Without `query_statuses_pass_on` the failed evaluation
-        // leaves `Vec3::UNDEF` (`length = sqrt(3) * SM_UNDEF_DOUBLE`), reporting that
-        // length as the fault value; with the flag, test 5 (2D) / 6 (3D) fails with
-        // value `SM_UNDEF_DOUBLE`.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        // rejects a span <= 1e-24. Upstream the failed evaluation leaves `Vec3::UNDEF`
+        // (`length = sqrt(3) * SM_UNDEF_DOUBLE`), reporting that length as the fault
+        // value; as the fork, test 5 (2D) / 6 (3D) fails with value `SM_UNDEF_DOUBLE`.
+        let on = Kernel::default();
 
         let borrowed = |dim: u64, p: usize, pts: &[[f64; 3]], knots: &[f64]| {
             let n = pts.len() - 1;
@@ -2778,16 +3831,6 @@ mod tests {
 
             for (dim, expected_test) in [(2_u64, 5_u64), (3, 6)] {
                 let c = borrowed(dim, 2, &pts, knots);
-                let mut list_off = AssertArray::new();
-                assert!(!c
-                    .assert_valid(&off, Some(&mut list_off), true, ObjectKey(1))
-                    .unwrap());
-                assert_eq!(list_off.len(), 1, "{list_off:?}");
-                let r_off = list_off.get(0).unwrap();
-                assert_eq!(r_off.test_index, expected_test);
-                assert_eq!(r_off.value, Vec3::UNDEF.length());
-                assert_ne!(r_off.value, UNDEF_DOUBLE);
-
                 let mut list_on = AssertArray::new();
                 assert!(!c
                     .assert_valid(&on, Some(&mut list_on), true, ObjectKey(1))
@@ -2806,13 +3849,10 @@ mod tests {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::AssertValid, tests 11-14, WR-663):
         // a single-span Bezier of degree `GW_MAX_DEGREE` (32) passes the knot, endpoint
         // and pole checks and sizes from its control polygon, then fails both
-        // `GlobalPropertyAnalysis` calls in `sm_CreateBezSegments` (`NL_DEG_ERR`). Without
-        // `query_statuses_pass_on` both failed analyses are ignored as empty solution sets
-        // and the curve passes; with the flag, tests 11 & 13 (2D) or 12 & 14 (3D) fail
-        // with value `SM_UNDEF_DOUBLE`.
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let off = Kernel::default();
+        // `GlobalPropertyAnalysis` calls in `sm_CreateBezSegments` (`NL_DEG_ERR`). Upstream
+        // both failed analyses are ignored as empty solution sets and the curve passes; as
+        // the fork, tests 11 & 13 (2D) or 12 & 14 (3D) fail with value `SM_UNDEF_DOUBLE`.
+        let on = Kernel::default();
 
         let deg = crate::nurbs::nurbs_crv::MAX_DEGREE;
         let mut knots = vec![0.0; deg + 1];
@@ -2827,12 +3867,6 @@ mod tests {
             cur.knots_mut().copy_from_slice(&knots);
             let c = BSplineCurve::from_nurb(cur, dim, true);
 
-            let mut list_off = AssertArray::new();
-            assert!(c
-                .assert_valid(&off, Some(&mut list_off), true, ObjectKey(9))
-                .unwrap());
-            assert!(list_off.is_empty(), "{list_off:?}");
-
             let mut list_on = AssertArray::new();
             assert!(!c
                 .assert_valid(&on, Some(&mut list_on), true, ObjectKey(9))
@@ -2844,5 +3878,77 @@ mod tests {
                 assert!(r.tol3d > 0.0, "{r:?}");
             }
         }
+    }
+
+    /// A UV trim's corner is a kink only where its image on the surface turns. The
+    /// surface is a plane patch that is only `C0` in u across `u = 1`: the point
+    /// `(x(u) + v / 2, v, 0)` with `x = u` up to `u = 1` and `x = 1 + 3 (u - 1)` past it.
+    /// The straight line `(1.6 + 0.05 t, 0.2 + 0.5 t, 0)` crosses that knot line at
+    /// `t = 2.5`, and its exact trim is two straight pieces from `(7/6, 0.2)` through
+    /// `(1, 1.45)` to `(0.9, 1.7)`: a corner of 14 degrees in (u, v), on a straight line.
+    /// It was refused by test 7. The same corner moved off the knot line (the trim shifted
+    /// 0.3 in u) is a corner of the image too, and is still reported.
+    #[test]
+    fn a_trims_corner_on_its_surfaces_c0_knot_line_is_a_kink_only_if_its_image_turns() {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let k = Kernel::default();
+        let net: Vec<Vec<CPoint>> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 2.0, 3.0, 4.0]
+            .iter()
+            .map(|&x| {
+                vec![
+                    CPoint::new(x, 0.0, 0.0, NOW),
+                    CPoint::new(x + 1.0, 2.0, 0.0, NOW),
+                ]
+            })
+            .collect();
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        let v = [0.0, 0.0, 2.0, 2.0];
+        let surface =
+            Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &net, &u, &v).unwrap());
+        let trim = |shift: f64| {
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 2,
+                degree: 1,
+                control_points: &[
+                    Vec3::new(7.0 / 6.0 + shift, 0.2, 0.0),
+                    Vec3::new(1.0 + shift, 1.45, 0.0),
+                    Vec3::new(0.9 + shift, 1.7, 0.0),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[2, 1, 2],
+                knots: &[0.0, 2.5, 3.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap()
+        };
+
+        // the corner on the knot line: the image is the straight line
+        let on_line = trim(0.0);
+        for t in [0.0, 1.0, 2.5, 2.75, 3.0] {
+            let uv = on_line.evaluate_point(t).unwrap();
+            let image = surface.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+            let line = Vec3::new(1.6 + 0.05 * t, 0.2 + 0.5 * t, 0.0);
+            assert!((image - line).length() < 1e-12, "{t}: {image:?}");
+        }
+        assert_eq!(
+            failed_tests(&k, &on_line, Some(&surface)),
+            Vec::<u64>::new()
+        );
+        // read without its surface it is a corner
+        assert_eq!(failed_tests(&k, &on_line, None), vec![7]);
+
+        // the same corner off the knot line: the image turns with it
+        assert_eq!(failed_tests(&k, &trim(0.3), Some(&surface)), vec![7]);
+
+        // a surface whose image of the corner is not finite decides nothing: the corner
+        // is reported as it reads in the parameters
+        let mut broken = net;
+        broken[3][0] = CPoint::new(f64::NAN, 0.0, 0.0, NOW);
+        let broken =
+            Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &broken, &u, &v).unwrap());
+        assert!(failed_tests(&k, &on_line, Some(&broken)).contains(&7));
     }
 }

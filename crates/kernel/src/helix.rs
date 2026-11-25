@@ -25,7 +25,8 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
 /// [`sweep_helix`] with the profile moved off the axis as it turns: at turn t it first moves
 /// `offset(t)` mm away from the axis (negative: towards it) in its half-plane, `offset` piecewise
 /// linear through `law`'s (turn, offset) pairs, turns ascending within [0, `turns`]. A thread's
-/// groove fading in or out over a runout: SMLib's radial screw sweep.
+/// groove fading in or out over a runout: SMLib's radial screw sweep. `continuous_flanks`
+/// joins the spline walls across cylinder seams; false retains the historical faces.
 pub fn sweep_helix_radial(
     plane: &Plane,
     region: &Region2,
@@ -34,18 +35,16 @@ pub fn sweep_helix_radial(
     pitch: f64,
     turns: f64,
     law: &[(f64, f64)],
+    continuous_flanks: bool,
 ) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "sweep_helix_radial");
-    if law.is_empty() {
-        return sweep_helix(plane, region, axis_origin, axis, pitch, turns);
-    }
     let (k, profile) = helix_profile(plane, region, axis_origin, axis, pitch, turns)?;
     if !law.windows(2).all(|w| matches!(w, [a, b] if b.0 > a.0))
         || law.iter().any(|(t, o)| !(t.is_finite() && o.is_finite() && *t >= 0.0 && *t <= turns))
     {
         return Err(KernelError::Invalid("helix: the radial law's turns must ascend within the sweep's turns".into()));
     }
-    crate::smlib_sweeps::screw_radial(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns, law)
+    crate::smlib_sweeps::screw_radial(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns, law, continuous_flanks)
 }
 
 /// A helical sweep's axis and profile (the region's outer loop), checked: finite turns and
@@ -69,11 +68,36 @@ fn helix_profile(
     let numbered = crate::numbered::number_regions(std::slice::from_ref(region)).pop().ok_or_else(|| KernelError::Invalid("profile".into()))?;
     let profile = numbered.outer.oriented(false);
     let lp = &profile.lp;
-    let along: Vec<f64> =
-        lp.segs.iter().flat_map(|s| (0..8).map(move |i| s.point_at(i as f64 / 8.0))).map(|q| (plane.to_world(q) - axis_origin).dot(k)).collect();
+    let radial = |q: Vec2| {
+        let w = plane.to_world(q) - axis_origin;
+        (w - k * w.dot(k), w.dot(k))
+    };
+    let e = lp.segs.first().and_then(|s| radial(s.point_at(0.0)).0.normalized()).unwrap_or_else(|| k.any_perp());
+    // Each point's height where the screw motion carries it into the half-plane through the first:
+    // a profile across the helix (not in a plane of the axis) reaches further along it there.
+    let along: Vec<f64> = lp
+        .segs
+        .iter()
+        .flat_map(|s| (0..8).map(move |i| s.point_at(i as f64 / 8.0)))
+        .map(|q| {
+            let (v, h) = radial(q);
+            h - pitch * v.dot(k.cross(e)).atan2(v.dot(e)) / std::f64::consts::TAU
+        })
+        .collect();
     let extent = along.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - along.iter().cloned().fold(f64::INFINITY, f64::min);
     if turns > 1.0 && pitch.abs() <= extent {
-        return Err(KernelError::Invalid(format!("the coil runs into itself: the pitch must exceed the section ({extent:.3} mm)")));
+        // A section exactly one pitch wide makes neighbouring turns share a face, which a single solid cannot hold yet.
+        if pitch.abs() > 0.0 && (pitch.abs() - extent).abs() <= 1e-6 * extent {
+            // Enough decimals that the example stays below the pitch when rounded (0.04 mm gives 0.03960, not 0.040).
+            let places = (3.0 - extent.log10().floor()).clamp(3.0, 12.0) as usize;
+            return Err(KernelError::Invalid(format!(
+                "the coil runs into itself: neighbouring turns touch because the pitch equals the section ({extent:.places$} mm); make the section slightly smaller than the pitch, for example {:.places$} mm",
+                extent * 0.99
+            )));
+        }
+        return Err(KernelError::Invalid(format!(
+            "the coil runs into itself: the pitch must exceed the section's extent along the axis ({extent:.3} mm)"
+        )));
     }
     Ok((k, profile))
 }
@@ -132,6 +156,25 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
     let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
     crate::smlib_sweeps::loft_to_point(plane, &crate::smlib_sweeps::pieces([&base]), apex)
+}
+
+/// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),
+/// `fit` saying how they reshape the section on the way (#20985). Without rails, the plain loft to
+/// a point.
+pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    if rails.is_empty() {
+        return loft_to_point(plane, lp, apex);
+    }
+    let _span = solidcraft_profile::span("kernel", "loft_to_point_with_rails");
+    if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
+        return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
+    }
+    if ((apex - plane.origin).dot(plane.normal())).abs() < 1e-9 {
+        return Err(KernelError::Invalid("the apex lies in the section's plane".into()));
+    }
+    let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
+    let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
+    crate::smlib_sweeps::loft_to_point_with_rails(plane, &crate::smlib_sweeps::pieces([&base]), apex, rails, fit)
 }
 
 #[cfg(test)]

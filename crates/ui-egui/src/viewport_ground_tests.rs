@@ -123,7 +123,8 @@ fn ground_ao_draws_contact_pixels_without_an_ellipse_and_disappears_when_disable
     let projection = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(256.0, 256.0)));
     let eye = app.cam.eye().to_f32();
     for tess in [false, true] {
-        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+        app.viewport.gpu =
+            Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false, edges: false });
         let scene = build_scene(&app);
         let mut without_ground = scene.clone();
         without_ground.ground_ao = None;

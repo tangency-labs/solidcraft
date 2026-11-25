@@ -7,7 +7,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_heading(ui, app.tr("prefs.structure.tools"), app.tr("prefs.structure.tools_note"));
         ui_kit::settings_section(ui, "create", app.tr("ui.create"), |ui| {
             create_card(ui, |ui| {
-                create_row(ui, app.tr("ui.hole"), &["hole"], true, |ui| {
+                create_row(ui, app.tr("ui.hole"), None, &["hole"], true, |ui| {
                     for (setting, help, key, legacy) in [
                         (
                             setting::hole_snaps as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
@@ -29,7 +29,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                     }
                 });
-                create_row(ui, app.tr_label("Extrude"), &["extrude"], false, |ui| {
+                create_row(ui, app.tr_label("Extrude"), None, &["extrude"], false, |ui| {
                     for (setting, help, key) in [
                         (
                             setting::extrude_auto_to_object as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
@@ -55,8 +55,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let response = setting::extrude_view_return(app, ui);
                         crate::scenario::publish_target("prefs:extrude_view_return", response.rect);
                     });
+                    extrude_start(app, ui);
                 });
-                create_row(ui, app.tr("prefs.design_tools.placement_group"), &["rest", "boss", "snap_fit"], false, |ui| {
+                // Found by the name of every feature that has the marker, as well as by the label.
+                let placed = PLACED_FEATURES.iter().map(|key| app.tr(key)).collect::<Vec<_>>().join(" ");
+                create_row(ui, app.tr("prefs.design_tools.placement_group"), Some(&placed), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         let response = setting::placement_handles(app, ui).backing_on_hover_text(app.tr("ui.placement_handles_tip"));
                         crate::scenario::publish_target("prefs:placement_handles", response.rect);
@@ -64,11 +67,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui_kit::help_icon(ui, app.tr("ui.placement_handles_tip"));
                         }
                     });
+                    ui.horizontal_wrapped(|ui| {
+                        let response = setting::snap_points(app, ui);
+                        crate::scenario::publish_target("prefs:snap_points", response.rect);
+                    });
                 });
             });
         });
         ui_kit::settings_section(ui, "command_dialog_values", app.tr("prefs.command_dialog_values"), |ui| {
             setting::remember_dialog_values(app, ui);
+            setting::fillet_legacy_radius(app, ui);
         });
         ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
             tool_group(ui, "", ui_kit::paint_assembly_move, |ui| {
@@ -214,8 +222,14 @@ fn create_card(ui: &mut egui::Ui, rows: impl FnOnce(&mut egui::Ui)) {
 
 /// One tool in the Create card: its icons in tiles and its name on the left, its settings on the
 /// right, a rule above every row but the first. Search uses the same block gate as `tool_group`.
-fn create_row(ui: &mut egui::Ui, label: &str, icons: &[&str], first: bool, add: impl FnOnce(&mut egui::Ui)) {
-    let gate = crate::ui_kit::settings_search::block_gate(ui, label, None);
+/// The features with a placement marker, by their name keys: Preferences search finds the
+/// Placed features row by any of them.
+const PLACED_FEATURES: [&str; 9] =
+    ["cmd.plastic_rest", "cmd.plastic_boss", "cmd.plastic_snap_fit", "ui.box", "ui.cylinder", "ui.cone", "ui.sphere", "ui.torus", "ui.coil"];
+
+/// A tool's row; `hint` is more text the search finds the row by (it is not shown).
+fn create_row(ui: &mut egui::Ui, label: &str, hint: Option<&str>, icons: &[&str], first: bool, add: impl FnOnce(&mut egui::Ui)) {
+    let gate = crate::ui_kit::settings_search::block_gate(ui, label, hint);
     let before = crate::ui_kit::settings_search::hits(ui);
     if gate.as_ref().is_some_and(|gate| !gate.show) {
         crate::ui_kit::settings_search::run_hidden(ui, label, add);
@@ -262,4 +276,33 @@ fn create_row(ui: &mut egui::Ui, label: &str, icons: &[&str], first: bool, add: 
     if let Some(gate) = &gate {
         crate::ui_kit::settings_search::block_finish(ui, gate, true, before);
     }
+}
+
+/// Where a new Extrude starts its distance (`extrude_start`), with the length for Custom beside it.
+fn extrude_start(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    let help = app.tr("prefs.extrude_start_note");
+    ui.horizontal_wrapped(|ui| {
+        ui_kit::text(ui, app.tr("prefs.extrude_start"), ui_kit::Text::Inline);
+        if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+            ui_kit::help_icon(ui, help);
+        }
+    });
+    ui.horizontal(|ui| {
+        ui_kit::settings_control_width(ui, t.space_24 * 6.0, |ui| {
+            let mut selected = ExtrudeStart::ALL.iter().position(|v| *v == app.preferences.extrude_start).unwrap_or(0);
+            let options = ExtrudeStart::ALL.map(|choice| app.tr(choice.label_id()));
+            let response = ui_kit::dropdown(ui, "pref_extrude_start", &mut selected, &options).backing_on_hover_text(help);
+            crate::scenario::publish_target("prefs:extrude_start", response.rect);
+            if let Some(choice) = ExtrudeStart::ALL.get(selected) {
+                app.preferences.extrude_start = *choice;
+            }
+        });
+        ui.add_enabled_ui(app.preferences.extrude_start == ExtrudeStart::Custom, |ui| {
+            ui_kit::settings_control_width(ui, t.space_24 * 5.0, |ui| {
+                let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.extrude_custom_distance, "10 mm", 0.0);
+                crate::scenario::publish_target("prefs:extrude_custom_distance", response.rect);
+            });
+        });
+    });
 }

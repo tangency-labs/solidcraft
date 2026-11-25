@@ -14,7 +14,10 @@ name = "solidcraft-web"
 path = "src/main.rs"
 
 [features]
-default = ["profile"]
+default = ["profile", "usage-stats"]
+# Anonymous usage statistics (docs/privacy.md). A build without it has no counting, no notice,
+# no network code for them and no endpoint.
+usage-stats = ["solidcraft-ui-egui/usage-stats"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 # The profiler, compiled in so any build can say where its time goes (the Profile operations
 # preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
@@ -24,6 +27,8 @@ profile = ["solidcraft-engine/profile"]
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+# SolidCraft's look (icons, glyphs, built-in themes), installed at startup.
+solidcraft-look = { workspace = true }
 solidcraft-ui-text = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
@@ -41,6 +46,7 @@ web-sys = { version = "0.3", features = [
     "FileSystemHandle", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemGetDirectoryOptions", "FileSystemWritableFileStream",
     "WritableStream", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "Storage", "StorageEvent",
     "IdbFactory", "IdbDatabase", "IdbObjectStore", "IdbOpenDbRequest", "IdbRequest", "IdbTransaction", "IdbTransactionMode",
-    "Headers", "ReadableStream", "ReadableStreamDefaultReader",
+    "Headers", "ReadableStream", "RequestCredentials", "RequestRedirect", "ReadableStreamDefaultReader",
     "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
+    "PointerEvent", "Node", "VisibilityState", "WheelEvent", "MouseEvent", "AddEventListenerOptions", "Touch", "TouchEvent", "TouchList",
 ] }

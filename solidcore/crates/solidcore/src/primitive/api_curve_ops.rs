@@ -32,6 +32,7 @@
 use crate::curve::curve::p2::evaluate_continuity as curve_continuity;
 use crate::curve::curve::p3::compute_crvs_normal;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::ZONE_TOL_3D;
@@ -202,7 +203,10 @@ pub fn order_curves(k: &Kernel, curves: &[Curve]) -> Result<Vec<usize>> {
     let loops = order_curves_into_loops(k, curves, ZONE_TOL_3D)?;
     loops.status()?;
     if loops.ordered.is_empty() {
-        return Err(SolidError::sm_err(OP_ORDER));
+        return Err(SolidError::primitive(
+            OP_ORDER,
+            PrimitiveFailure::CurvesMakeNoLoop,
+        ));
     }
     Ok(loops.ordered)
 }

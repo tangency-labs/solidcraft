@@ -11,6 +11,8 @@
  {"click": {"world": [10, 10, 20]}},
  {"call": "ui.dialogInput", "params": {"index": 1}},
  {"click": {"plane": "YZ"}},
+ {"note": "The copy touches the body at the plane, so Mirror would choose Join by itself (#17377): New Body by hand keeps the copy a body of its own."},
+ {"widget": "New Body"},
  {"key": "Enter"},
  {"expect": {"bodies": 2, "errors": 0, "dialog": null, "volume": [15690.78, 0.001]}},
  {"call": "ui.editFeature", "params": {"feature": "Mirror1"}},

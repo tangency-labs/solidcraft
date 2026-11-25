@@ -15,7 +15,7 @@ use super::features::{
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::schema::align::AlignParams;
 use crate::schema::features::FeatureResult;
-use crate::schema::features_more::{BoundaryFillParams, RemoveParams, ReplaceFaceParams, RibParams};
+use crate::schema::features_more::{BoundaryFillParams, CoilParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -24,10 +24,12 @@ const RIB_CONTRACT: TypedContract<RibParams> = TypedContract::new();
 const ALIGN_CONTRACT: TypedContract<AlignParams> = TypedContract::new();
 const REMOVE_CONTRACT: TypedContract<RemoveParams> = TypedContract::new();
 const BOUNDARY_FILL_CONTRACT: TypedContract<BoundaryFillParams> = TypedContract::new();
+const COIL_CONTRACT: TypedContract<CoilParams> = TypedContract::new();
+const EMBOSS_CONTRACT: TypedContract<EmbossParams> = TypedContract::new();
 const REPLACE_FACE_CONTRACT: TypedContract<ReplaceFaceParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("solid.boundary_fill", "Boundary Fill", crate::checked!("solid.boundary_fill", boundary_fill))
+    CommandSpec::new("solid.boundary_fill", "Boundary Fill", crate::checked!("solid.boundary_fill", boundary_fill)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("boundary_fill")
         .contract(&BOUNDARY_FILL_CONTRACT)
@@ -35,41 +37,44 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
         ),
-    CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
+    CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).begins_edit().at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
          base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         end_cut?: axial|square (the wire's ends in a plane through the axis, the default, or square to the wire); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
     ),
-    CommandSpec::new("solid.rib", "Rib", crate::checked!("solid.rib", rib))
+    CommandSpec::new("solid.rib", "Rib", crate::checked!("solid.rib", rib)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("rib")
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal)"),
-    CommandSpec::new("solid.web", "Web", crate::checked!("solid.web", web))
+        .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal); extend?: bool (run the curves' open ends on to the body; default false)"),
+    CommandSpec::new("solid.web", "Web", crate::checked!("solid.web", web)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("web")
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal"),
-    CommandSpec::new("solid.emboss", "Emboss", emboss)
+        .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal; extend?: bool (default false)"),
+    CommandSpec::new("solid.emboss", "Emboss", crate::checked!("solid.emboss", emboss)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("emboss")
-        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete exterior cylindrical wall (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
-    CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face))
+        .contract(&EMBOSS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall (on a partial outside wall, a profile running past the wall's edge carries on onto the face there when that face is a rectangle tangent to the wall; the profile must lie within the wall and those faces) or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+    CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face)).begins_edit()
         .contract(&REPLACE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .at("SOLID", "MODIFY")
         .icon("replace_face")
         .params("faces: [[x,y,z] points on planar faces, or face names from model.faces]; target: plane (XY|XZ|YZ|construction plane|{origin, normal}) | target_face: [x,y,z] on a parallel planar face; body?"),
-    CommandSpec::new("solid.align", "Align", crate::checked!("solid.align", align))
+    CommandSpec::new("solid.align", "Align", crate::checked!("solid.align", align)).begins_edit()
         .at("SOLID", "MODIFY")
         .icon("align")
         .contract(&ALIGN_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); from_frame / to_frame: a frame found again whenever the design changes, so the bodies follow it, in place of that side's point, face or plane: a joint origin as joint.create takes one ({face|circle|edge|point: [x,y,z]}, a face's name, a named joint origin) or {sketch, point|curve} (a sketch point, or a circle's, arc's or ellipse's centre, z along the sketch's normal), on the bodies' own component; faces, planes and frames also turn to meet; flip?: bool; axes?: [x, y, z] (point-to-point only: which world axes the offset moves along; default all three, at least one true); angle?: expr (a turn about the target's direction after the move)"),
-    CommandSpec::new("solid.remove", "Remove", crate::checked!("solid.remove", remove))
+    CommandSpec::new("solid.remove", "Remove", crate::checked!("solid.remove", remove)).begins_edit()
         .at("SOLID", "MODIFY")
         .icon("delete")
         .contract(&REMOVE_CONTRACT)
@@ -82,7 +87,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
     let profile_mode = given("sketch");
     if profile_mode {
-        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle"].into_iter().find(|k| given(k)) {
+        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle", "end_cut"].into_iter().find(|k| given(k)) {
             return Err(bad(cmd, format!("`{k}` does not apply with `sketch`: the section comes from the sketch")));
         }
     } else if given("profiles") {
@@ -140,6 +145,11 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "start_angle")?;
     }
     let clockwise = bool_(p, "clockwise").unwrap_or(false);
+    let end_cut = match str_(p, "end_cut").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("axial") => solidcraft_doc::CoilEndCut::Axial,
+        Some("square") => solidcraft_doc::CoilEndCut::Square,
+        Some(o) => return Err(bad(cmd, format!("unknown end cut `{o}` (axial or square)"))),
+    };
     let operation = super::features::operation(p, cmd)?;
     add_feature(
         s,
@@ -157,6 +167,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             position,
             start_angle,
             clockwise,
+            end_cut,
             operation,
             targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
         },
@@ -193,7 +204,9 @@ fn rib_like(s: &mut Session, p: &Value, cmd: &str, web: bool) -> Result<Value> {
         Some("normal") => true,
         Some(o) => return Err(bad(cmd, format!("unknown direction `{o}` (in_plane or normal)"))),
     };
-    add_feature(s, p, FeatureKind::Rib { sketch: SketchId(sketch), curves, thickness, depth, flip, web, normal })
+    // Opt-in (#13019): without `extend` a rib ends where its curves end, as before.
+    let extend = bool_(p, "extend").unwrap_or(false);
+    add_feature(s, p, FeatureKind::Rib { sketch: SketchId(sketch), curves, thickness, depth, flip, web, normal, extend })
 }
 
 fn rib(s: &mut Session, p: &Value) -> Result<Value> {
@@ -269,26 +282,16 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
         let (selected, index) = candidates.first().copied().ok_or_else(|| bad(cmd, "no target face"))?;
         let name = selected.definition_name();
         let body = &selected.body;
-        match solidcraft_kernel::face_surface(body, index) {
-            Some(solidcraft_kernel::FaceSurface::Plane { .. }) => {
-                targets = vec![name.to_owned()];
-                None
-            }
-            Some(solidcraft_kernel::FaceSurface::Cylinder { .. }) => {
-                if targets.len() > 1 {
-                    return Err(bad(cmd, "cylinder emboss needs one selected target body"));
-                }
-                // Viewport picks lie on tessellated chords. Keep their axial and
-                // angular position, and certify their distance before storing an
-                // exact surface anchor for later replay.
-                let at = solidcraft_kernel::cylinder_emboss_anchor(body, index, at).map_err(|e| bad(cmd, e.to_string()))?;
-                let face = emboss_selection(s, selected, at)?;
-                check_emboss_positions(s, sketch, selected, &face)?;
-                targets = vec![name.to_owned()];
-                Some(face)
-            }
-            _ => return Err(bad(cmd, "only planar faces and complete exterior cylindrical walls support emboss")),
+        if targets.len() > 1 {
+            return Err(bad(cmd, "an emboss on a selected face needs one target body"));
         }
+        // Viewport picks lie on tessellated chords: certify their distance and store the point
+        // on the exact surface for later replay.
+        let at = solidcraft_kernel::emboss_anchor(body, index, at).map_err(|e| bad(cmd, e.to_string()))?;
+        let face = emboss_selection(s, selected, at)?;
+        check_emboss_positions(s, sketch, selected, &face)?;
+        targets = vec![name.to_owned()];
+        Some(face)
     } else {
         let inferred = infer_emboss_selection(s, sketch, &profiles, &depth, deboss, &targets)?;
         if let Some(face) = &inferred {
@@ -316,12 +319,12 @@ fn emboss_selection(s: &Session, selected: &solidcraft_doc::ModelBody, at: Vec3)
         .map(|(_, path, _)| path)
         .collect();
     if paths.len() != 1 {
-        return Err(bad(cmd, "selected cylinder placement is ambiguous"));
+        return Err(bad(cmd, "the selected body's placement is ambiguous"));
     }
-    let path = paths.into_iter().next().ok_or_else(|| bad(cmd, "selected cylinder placement"))?;
+    let path = paths.into_iter().next().ok_or_else(|| bad(cmd, "selected placement"))?;
     let author_path = s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(s.active_component));
     if path.len() > 64 || author_path.len() > 64 {
-        return Err(bad(cmd, "cylinder placement is too deep"));
+        return Err(bad(cmd, "the selected placement is too deep"));
     }
     let inverse = solidcraft_doc::mat_inverse(&s.active_component_frame()).ok_or_else(|| bad(cmd, "invalid active frame"))?;
     Ok(solidcraft_doc::EmbossFace { body: name.into(), at: FacePick(solidcraft_doc::apply_point(&inverse, at)), path, author_path })
@@ -339,7 +342,7 @@ fn check_emboss_positions(s: &Session, sketch: u64, body: &solidcraft_doc::Model
         s.doc.first_path(sketch_owner)
     };
     if face.path.iter().chain(&face.author_path).chain(&sketch_path).any(|id| s.pending_moves.contains_key(id)) {
-        return Err(bad(cmd, "capture pending source, author and profile positions with Capture Position before cylinder emboss"));
+        return Err(bad(cmd, "capture pending source, author and profile positions with Capture Position before an emboss on a face"));
     }
     Ok(())
 }
@@ -411,8 +414,11 @@ fn face_points(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> 
 fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.replace_face";
     let faces = face_points(s, p, "faces", cmd)?;
+    let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    // The body first: a face flush with another body's is looked up on that body alone.
+    let picked = super::face::faces_body(s, p, refs, &faces);
     for f in &faces {
-        if super::face::face_normal(s, *f).is_none() {
+        if super::face::face_normal_in(s, *f, picked.lookup()).is_none() {
             return Err(bad(cmd, "not supported yet: replacing a face that is not planar"));
         }
     }
@@ -424,8 +430,8 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => plane_param(s, p.get("target"), cmd)?,
     };
-    let body = str_(p, "body").map(str::to_string);
-    add_feature(s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body: body.map(BodyName) })
+    let body = picked.body.clone().map(BodyName);
+    super::features::add_face_feature(&picked, s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body })
 }
 
 /// What `solid.align` says when `axes` is not three booleans, or when none is true.
@@ -647,7 +653,10 @@ fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<O
             (frame, s.doc.feature(sketch).map_or(0, |f| f.component))
         }
         None => {
-            let origin = super::joints::origin_param(s, Some(v), cmd)?;
+            // On its part, in the part's own coordinates: the same in every copy of a
+            // sub-assembly the part is in, wherever it was picked.
+            let picked = super::joints::origin_param(s, Some(v), cmd)?;
+            let origin = solidcraft_doc::joints::JointOrigin::new(picked.part(), picked.snap);
             let on = super::joints::component_of(s, origin.occurrence);
             (AlignFrame::Origin { origin: Box::new(origin) }, on)
         }

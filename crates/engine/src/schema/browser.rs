@@ -12,6 +12,7 @@ use solidcraft_doc::BrowserEntry;
 use super::canvas::CanvasPlane;
 use super::check::{located, whole};
 use super::types::{FeatureCommon, LengthExpr, feature_common, present};
+use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern, Search};
 
 /// Repair a part the modelling kernel refuses, or an open part that should be a solid: faces
 /// SMLib refuses on their own are rebuilt on their own surfaces (geometry unchanged), free edges
@@ -92,6 +93,14 @@ pub struct RepairDone {
     pub modelling: bool,
     /// Its volume, mm³, when it is a closed solid.
     pub volume: Option<f64>,
+    /// The tolerance-scale defects SMLib's check fails that were healed first (edges shorter
+    /// than their tolerance, sliver faces between coincident edges, curve pieces of no length),
+    /// in a line; face indices in the rest of the report are the healed part's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub healed: Option<String>,
+    /// That heal failed inside the kernel, and why: the repair went on from the part as it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heal_failed: Option<String>,
 }
 
 /// What `body.repair` returns.
@@ -114,6 +123,60 @@ pub struct RepairResult {
     /// How long the feature took to evaluate, in milliseconds.
     pub ms: Option<f64>,
     pub repair: RepairDone,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Remove a body's history (#18698): the features that built only this body go, and a base
+/// feature holds its B-rep as it is. Features that also build other bodies stay. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct RemoveHistoryParams {
+    /// The body (its name).
+    pub body: String,
+}
+
+/// A feature that worked before Remove History and fails after it, with why.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RemoveHistoryBroken {
+    /// The feature's name.
+    pub feature: String,
+    /// Why it fails now.
+    pub error: String,
+}
+
+/// What `body.remove_history` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RemoveHistoryResult {
+    /// The base feature's id.
+    pub feature: u64,
+    /// The base feature's name.
+    pub name: String,
+    /// The features that went: those that built only this body, and the sketches only they used.
+    pub removed: Vec<String>,
+    /// Features that built this body and stay, because they also build or change other bodies.
+    pub kept: Vec<String>,
+    /// The Remove feature added before the base when kept features still build the body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remove: Option<String>,
+    /// The body's faces after (the same as before).
+    pub faces: usize,
+    /// The body's edges after (the same as before).
+    pub edges: usize,
+    /// The body's vertices after (the same as before).
+    pub vertices: usize,
+    /// The body's volume before, in mm³.
+    pub volume_before: f64,
+    /// The body's volume after, in mm³ (the same as before, within the kernel's accuracy).
+    pub volume_after: f64,
+    /// Features that worked before and now fail: a reference the base feature's faces do not keep.
+    pub broken: Vec<RemoveHistoryBroken>,
+    /// References to the body's faces (sketch attachments, face appearances, print faces) that
+    /// could not move to the base feature's faces, each with why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -180,12 +243,14 @@ pub struct DocumentUnitsResult {
 
 /// The most keys, entries or paths a browser list may name, as the handlers cap them.
 const MAX_LIST: usize = 10_000;
-/// The longest item key, in bytes.
-const MAX_KEY_BYTES: usize = 256;
+/// The longest item key, in characters (as JSON Schema's `maxLength` counts), so that a body
+/// of any name the rename commands take can be named by its key.
+const MAX_KEY_CHARS: usize = 256;
 /// The deepest placement path, in occurrence ids.
 const MAX_PATH: usize = 64;
-/// The longest group or body name, in bytes.
-const MAX_NAME_BYTES: usize = 128;
+/// The longest name `browser.group`, `view.save`, `browser.rename_group`, `view.rename` and
+/// `body.rename` take, in characters.
+const MAX_NAME_CHARS: usize = 128;
 
 /// The folders the browser lists items in, which a group or a move is in.
 const FOLDERS: [&str; 3] = ["bodies", "sketches", "construction"];
@@ -211,8 +276,10 @@ fn group_and_name_required(schema: &mut Schema) {
     require(schema, &["group", "name"]);
 }
 
-fn body_and_name_required(schema: &mut Schema) {
-    require(schema, &["body", "name"]);
+/// `body.rename`: `name`, and one body or a list of them (#12341).
+fn body_or_bodies_and_name_required(schema: &mut Schema) {
+    require(schema, &["name"]);
+    schema.insert("anyOf".into(), json!([{"required": ["body"]}, {"required": ["bodies"]}]));
 }
 
 fn folder_and_items_required(schema: &mut Schema) {
@@ -307,7 +374,7 @@ pub struct GroupName(pub String);
 impl<'de> Deserialize<'de> for GroupName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(n) if n.trim().len() > MAX_NAME_BYTES => Err(D::Error::custom(whole("`name` is too long"))),
+            Value::String(n) if n.trim().chars().count() > MAX_NAME_CHARS => Err(D::Error::custom(whole("`name` is too long"))),
             Value::String(n) => Ok(GroupName(n)),
             _ => Err(D::Error::custom("must be text")),
         }
@@ -319,19 +386,19 @@ impl JsonSchema for GroupName {
         "GroupName".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "A name of at most 128 bytes once surrounding spaces are cut.", "type": "string"})
+        json_schema!({"description": "A name of at most 128 characters once surrounding spaces are cut.", "type": "string"})
     }
 }
 
-/// A name of 1 to 128 bytes once surrounding spaces are cut, as `browser.rename_group` and
-/// `body.rename` read `name`.
+/// A name of 1 to 128 characters once surrounding spaces are cut, as `browser.rename_group`,
+/// `view.rename` and `body.rename` read `name`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewName(pub String);
 
 impl<'de> Deserialize<'de> for NewName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(n) if !n.trim().is_empty() && n.trim().len() <= MAX_NAME_BYTES => Ok(NewName(n)),
+            Value::String(n) if !n.trim().is_empty() && n.trim().chars().count() <= MAX_NAME_CHARS => Ok(NewName(n)),
             _ => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
         }
     }
@@ -342,7 +409,7 @@ impl JsonSchema for NewName {
         "NewName".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "Text of 1 to 128 bytes once surrounding spaces are cut.", "type": "string"})
+        json_schema!({"description": "Text of 1 to 128 characters once surrounding spaces are cut.", "type": "string"})
     }
 }
 
@@ -377,8 +444,51 @@ fn some_body<'de, D: Deserializer<'de>>(d: D) -> Result<Option<BodyName>, D::Err
     BodyName::deserialize(d).map(Some)
 }
 
+/// The most bodies one `body.rename` call renames.
+pub const MAX_RENAMED_BODIES: usize = 1000;
+
+/// The bodies `body.rename` renames together, as it reads `bodies`: 1 to 1000 body names.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BodyNames(pub Vec<String>);
+
+impl<'de> Deserialize<'de> for BodyNames {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let bad = || D::Error::custom(whole(format!("`bodies` must be a list of 1 to {MAX_RENAMED_BODIES} body names")));
+        match Value::deserialize(d)? {
+            Value::Array(a) if !a.is_empty() && a.len() <= MAX_RENAMED_BODIES => a
+                .into_iter()
+                .map(|v| match v {
+                    Value::String(n) => Ok(n),
+                    _ => Err(bad()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(BodyNames),
+            _ => Err(bad()),
+        }
+    }
+}
+
+impl JsonSchema for BodyNames {
+    fn schema_name() -> Cow<'static, str> {
+        "BodyNames".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Body names, as `body` takes one. The first body gets `name`, the next ones `name (2)`, `name (3)` and so on; a numbered name another body already has is skipped.",
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": MAX_RENAMED_BODIES
+        })
+    }
+}
+
+fn some_bodies<'de, D: Deserializer<'de>>(d: D) -> Result<Option<BodyNames>, D::Error> {
+    BodyNames::deserialize(d).map(Some)
+}
+
 /// What `entries` in `cmd/browser.rs` reads of a list of groups (numbers) and item keys
-/// (strings): at most 10000, no key empty or over 256 bytes. `key` names the parameter in the
+/// (strings): at most 10000, no key empty or over 256 characters. `key` names the parameter in the
 /// messages.
 fn browser_entries(value: Value, key: &str) -> Result<Vec<BrowserEntry>, String> {
     let list = match value {
@@ -392,7 +502,7 @@ fn browser_entries(value: Value, key: &str) -> Result<Vec<BrowserEntry>, String>
         _ => None,
     };
     let list = list.ok_or_else(|| whole(format!("`{key}` must be a list of item keys (strings) and group ids (numbers)")))?;
-    if list.len() > MAX_LIST || list.iter().any(|e| e.as_item().is_some_and(|k| k.is_empty() || k.len() > MAX_KEY_BYTES)) {
+    if list.len() > MAX_LIST || list.iter().any(|e| e.as_item().is_some_and(|k| k.is_empty() || k.chars().count() > MAX_KEY_CHARS)) {
         return Err(whole(format!("`{key}` has bad keys")));
     }
     Ok(list)
@@ -436,7 +546,7 @@ impl<'de> Deserialize<'de> for GroupedItems {
 }
 
 fn entries_schema(description: &str, group_ids: bool, min_items: u32) -> Schema {
-    let item = json!({"type": "string", "minLength": 1, "maxLength": MAX_KEY_BYTES});
+    let item = json!({"type": "string", "minLength": 1, "maxLength": MAX_KEY_CHARS});
     let entry = if group_ids { json!({"anyOf": [item, {"type": "integer", "minimum": 0}]}) } else { item };
     json_schema!({"description": description, "type": "array", "items": entry, "minItems": min_items, "maxItems": MAX_LIST})
 }
@@ -515,7 +625,7 @@ pub struct BrowserGroupParams {
     /// levels).
     #[serde(default)]
     pub parent: Option<GroupId>,
-    /// The group's name, at most 128 bytes. Default: "Group" and the next number in the folder.
+    /// The group's name, at most 128 characters. Default: "Group" and the next number in the folder.
     #[serde(default)]
     pub name: Option<GroupName>,
     /// The items to put in it, by key; they leave the other groups they were in.
@@ -647,13 +757,13 @@ pub struct BrowserOrdered {
 }
 
 /// A list of item keys (strings, or numbers read as text), as `keys` in `cmd/browser.rs` reads
-/// one: at most 10000, no key empty or over 256 bytes.
+/// one: at most 10000, no key empty or over 256 characters.
 fn item_keys(value: Value, key: &str) -> Result<Vec<Value>, String> {
     let list = match value {
         Value::Array(a) if a.iter().all(|x| x.is_string() || x.as_u64().is_some()) => a,
         _ => return Err(whole(format!("`{key}` must be a list of item keys"))),
     };
-    let bad_key = |x: &Value| x.as_str().is_some_and(|k| k.is_empty() || k.len() > MAX_KEY_BYTES);
+    let bad_key = |x: &Value| x.as_str().is_some_and(|k| k.is_empty() || k.chars().count() > MAX_KEY_CHARS);
     if list.len() > MAX_LIST || list.iter().any(bad_key) { Err(whole(format!("`{key}` has bad keys"))) } else { Ok(list) }
 }
 
@@ -681,7 +791,7 @@ fn keys_schema(description: &str) -> Schema {
     json_schema!({
         "description": description,
         "type": "array",
-        "items": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": MAX_KEY_BYTES}, {"type": "integer", "minimum": 0}]},
+        "items": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": MAX_KEY_CHARS}, {"type": "integer", "minimum": 0}]},
         "maxItems": MAX_LIST
     })
 }
@@ -907,6 +1017,11 @@ fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::E
     Visible::deserialize(d).map(Some)
 }
 
+/// `browser.toggle_planes` and `browser.toggle_reference` take no parameters: an empty object.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserToggleParams {}
+
 /// Show or hide what is in the Browser: name one kind of target (`items`, `joints`, `features`,
 /// `folder`, `tree_folders` or `paths`). Saved with the design and undone like any other
 /// change; the camera is not. With `isolate`, everything else is hidden.
@@ -971,6 +1086,9 @@ pub struct VisibilityState {
     /// Whether the Origin folder is hidden. Present when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_hidden: Option<bool>,
+    /// Component Origin folders explicitly shown, by occurrence path. Present when there are any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shown_component_origins: Vec<Vec<u64>>,
     /// Sketches whose closed profiles are not shaded, by feature id. Present when there are any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_profiles: Vec<u64>,
@@ -995,6 +1113,7 @@ impl From<&solidcraft_doc::Visibility> for VisibilityState {
             shown_sketches: v.shown_sketches.clone(),
             hidden_joints: v.hidden_joints.clone(),
             origin_hidden: v.origin_hidden,
+            shown_component_origins: v.shown_component_origins.clone(),
             hidden_profiles: v.hidden_profiles.clone(),
             shown_dimensions: v.shown_dimensions.clone(),
             locked_bodies: v.locked_bodies.clone(),
@@ -1081,15 +1200,20 @@ pub struct BrowserFoldResult {
     pub param_warnings: Vec<String>,
 }
 
-/// Rename a body; the features that use it follow. A placed copy's name means the body it shows.
-/// One undo step.
+/// Rename a body, or several bodies with one name (numbered after the first); the features that
+/// use them follow. A placed copy's name means the body it shows. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = body_and_name_required)]
+#[schemars(deny_unknown_fields, transform = body_or_bodies_and_name_required)]
 pub struct BodyRenameParams {
-    // Required in the schema (`body_and_name_required`), optional in the type, as `group` above.
+    // `name` and one of `body` or `bodies` are required in the schema
+    // (`body_or_bodies_and_name_required`), optional in the type, as `group` above.
     #[serde(default, deserialize_with = "some_body", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "BodyName")]
     pub body: Option<BodyName>,
+    /// Several bodies renamed together, in place of `body` (#12341).
+    #[serde(default, deserialize_with = "some_bodies", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "BodyNames")]
+    pub bodies: Option<BodyNames>,
     /// The new name, 1 to 128 characters once surrounding spaces are cut; no other body may have it.
     #[serde(default, deserialize_with = "some_new_name", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "NewName")]
@@ -1099,10 +1223,13 @@ pub struct BodyRenameParams {
 /// What `body.rename` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BodyRenamed {
-    /// The body's name before (the body a placed copy's name shows).
+    /// The body's name before (the body a placed copy's name shows); with `bodies`, the first one's.
     pub body: String,
     /// Its name now, without surrounding spaces.
     pub name: String,
+    /// With `bodies`: each body's name before and after, in the order given.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub renamed: Vec<RenamedBody>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1157,7 +1284,7 @@ fn some_view<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ViewKey>, D::Erro
     ViewKey::deserialize(d).map(Some)
 }
 
-/// The name `view.save` gives a view: at most 128 bytes once surrounding spaces are cut; nothing
+/// The name `view.save` gives a view: at most 128 characters once surrounding spaces are cut; nothing
 /// left means the next free "Named View" number.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SavedViewName(pub String);
@@ -1165,7 +1292,7 @@ pub struct SavedViewName(pub String);
 impl<'de> Deserialize<'de> for SavedViewName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(n) if n.trim().len() > MAX_NAME_BYTES => Err(D::Error::custom(whole("`name` is too long"))),
+            Value::String(n) if n.trim().chars().count() > MAX_NAME_CHARS => Err(D::Error::custom(whole("`name` is too long"))),
             Value::String(n) => Ok(SavedViewName(n)),
             _ => Err(D::Error::custom("must be text")),
         }
@@ -1177,7 +1304,7 @@ impl JsonSchema for SavedViewName {
         "SavedViewName".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "A name of at most 128 bytes once surrounding spaces are cut.", "type": "string"})
+        json_schema!({"description": "A name of at most 128 characters once surrounding spaces are cut.", "type": "string"})
     }
 }
 
@@ -1216,7 +1343,9 @@ impl JsonSchema for ViewCamera {
                 "yaw": {"description": "Turn about the up axis; 0 looks along +Y, from the front.", "type": "number"},
                 "pitch": {"description": "Elevation of the eye above the ground plane.", "type": "number"},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
-                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0}
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0},
+                "roll": {"description": "Rotation about the view direction, in radians. Default: 0.", "type": "number", "default": 0.0},
+                "up": {"description": "The world axis pointing up. Default: z.", "type": "string", "enum": ["z", "y"], "default": "z"}
             },
             "required": ["target", "yaw", "pitch", "distance"]
         })
@@ -1230,12 +1359,12 @@ impl JsonSchema for ViewCamera {
 pub struct ViewSaveParams {
     // Optional in the type and required in the schema (`camera_required`): left out, the handler
     // refuses it with its own message.
-    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?}`, finite, with a
-    /// distance above 0.
+    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?, roll?, up?}`,
+    /// finite, with a distance above 0. Up is "z" or "y".
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ViewCamera")]
     pub camera: Option<ViewCamera>,
-    /// The view's name, at most 128 bytes once surrounding spaces are cut. Default: "Named View"
+    /// The view's name, at most 128 characters once surrounding spaces are cut. Default: "Named View"
     /// and the first number no view's name has. A value that is not text is reported, though the
     /// handler would read it as left out.
     #[serde(default)]
@@ -1320,6 +1449,11 @@ pub struct ViewEntry {
     pub distance: f64,
     /// Vertical field of view in radians; 0 is orthographic.
     pub fov: f64,
+    /// Rotation about the view direction in radians.
+    pub roll: f64,
+    /// World axis pointing up, serialized as "z" or "y".
+    #[schemars(with = "String")]
+    pub up: solidcraft_viewport::UpAxis,
 }
 
 /// What `view.list` returns.
@@ -1535,16 +1669,36 @@ pub struct RedefineSketchParams {
     /// component's own coordinates. Default: world. A named plane or a face takes none.
     #[serde(default)]
     pub frame: Option<PlaneFrame>,
+    /// Not on a face: `true`, `"x"` or `"y"` turns the new plane half way about that in-plane axis
+    /// (as `sketch.create`'s `flip`), `false` keeps the new plane's own side. Default: when the new
+    /// plane faces the other way, it is turned so the sketch keeps facing the way it did and stays
+    /// upright (the reply's `flip` says about which axis).
+    #[serde(default)]
+    pub flip: Option<SketchFlip>,
+}
+
+/// A sketch plane's half turn: `true` or either in-plane axis.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SketchFlip {
+    Flag(bool),
+    Axis(FlipAxis),
+}
+
+/// The in-plane axis a half turn is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlipAxis {
+    X,
+    Y,
 }
 
 /// How a redefined sketch is attached to its plane: `exact_face` (to a face of a body, which it
-/// follows), `sheet_face` (to a face of a sheet part) or `fixed` (where it is: an origin,
-/// construction or explicit plane).
+/// follows) or `fixed` (where it is: an origin, construction or explicit plane).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RedefineAttachment {
     ExactFace,
-    SheetFace,
     Fixed,
 }
 
@@ -1555,6 +1709,9 @@ pub struct RedefineSketchResult {
     pub sketch: u64,
     /// How it is attached now.
     pub attachment: Option<RedefineAttachment>,
+    /// When the new plane was turned half way: the in-plane axis it was turned about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip: Option<FlipAxis>,
     /// For an explicit plane: the coordinates it was read in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<PlaneFrame>,
@@ -1566,6 +1723,85 @@ pub struct RedefineSketchResult {
     /// The handler leaves it out; the session adds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Value>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One body `body.rename` renamed with `bodies`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenamedBody {
+    /// Its name before.
+    pub body: String,
+    /// Its name now.
+    pub name: String,
+}
+
+/// Search the Browser by name, as its search field does. Give `text`, `kinds` or both. Read-only.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FindParams {
+    /// What the names hold. Default: every name of the `kinds` given.
+    #[serde(default)]
+    pub text: Option<FindText>,
+    /// The kinds of thing to list. Default: every kind.
+    #[serde(default)]
+    pub kinds: Option<FindKinds>,
+}
+
+/// `text`, read by the handler's own reader: `None` when blank.
+#[derive(Debug)]
+pub struct FindText(pub Option<Pattern>);
+
+impl<'de> Deserialize<'de> for FindText {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::find_text(Some(&Value::deserialize(d)?)).map(FindText).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for FindText {
+    fn schema_name() -> Cow<'static, str> {
+        "FindText".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Text anywhere in the name, ignoring case. With `*` (any text) or `?` (any one character) it must match the whole name instead: `*:1` is every name that ends in `:1`. Spaces around it don't count, and blank text counts as none.",
+            "type": "string",
+            "maxLength": MAX_PATTERN_CHARS
+        })
+    }
+}
+
+/// `kinds`, read by the handler's own reader.
+#[derive(Debug)]
+pub struct FindKinds(pub Vec<Kind>);
+
+impl<'de> Deserialize<'de> for FindKinds {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::find_kinds(Some(&Value::deserialize(d)?)).map(FindKinds).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for FindKinds {
+    fn schema_name() -> Cow<'static, str> {
+        "FindKinds".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let ids: Vec<&str> = Kind::ALL.iter().map(|k| k.id()).collect();
+        json_schema!({
+            "description": "A list of kinds: a placement of a component, a body, a sketch, a construction plane, axis or point, a joint. An empty list means every kind.",
+            "type": "array",
+            "items": {"enum": ids},
+            "maxItems": Kind::ALL.len()
+        })
+    }
+}
+
+/// What `browser.find` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FindResult {
+    #[serde(flatten)]
+    pub search: Search,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

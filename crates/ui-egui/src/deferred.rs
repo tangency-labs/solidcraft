@@ -11,7 +11,8 @@
 //! the features it evaluated ([`solidcraft_engine::Session::prime`]) rather than computing them
 //! again. Commands asked for meanwhile wait their turn; a marker moved again
 //! replaces the move still waiting, so a drag computes where it ends rather than every slot it
-//! crossed.
+//! crossed. A parameter changed in the Parameters dialog and a configuration activated in the
+//! configurations table compute the same way (#6777).
 //!
 //! A delete first checks what it takes with it and what it would make fail (#2678): the
 //! timeline's Delete asks `timeline.dependents`, Delete on the selection runs `selection.delete`
@@ -30,9 +31,14 @@ pub struct Deferred {
     evaluated: Option<Option<solidcraft_engine::Evaluated>>,
     /// When it started (ms).
     pub(crate) started: f64,
-    command: (String, Value),
+    pub(crate) command: (String, Value),
     /// The design's revision it was computed for: a design changed meanwhile computes it again.
     revision: u64,
+    /// How far its evaluation is, and its Cancel ([`crate::operations`]).
+    pub(crate) progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
+    /// Which operation it is ([`crate::operations::serial`]), the same while it waits its turn,
+    /// computes and computes again.
+    pub(crate) serial: u64,
     /// Every result the evaluation ahead computed, whatever the evaluation cache dropped since,
     /// for the run here (a parameter change evaluates twice: the first evaluation is not the
     /// one `evaluated` holds).
@@ -40,6 +46,23 @@ pub struct Deferred {
 }
 
 impl Deferred {
+    /// Tests: `command` computing until the returned sender goes.
+    #[cfg(test)]
+    pub(crate) fn held(command: &str) -> (Deferred, std::sync::mpsc::Sender<Option<solidcraft_engine::Evaluated>>) {
+        let (tx, done) = std::sync::mpsc::channel();
+        let job = Deferred {
+            done,
+            evaluated: None,
+            started: crate::now_ms(),
+            command: (command.to_string(), Value::Object(Default::default())),
+            revision: 0,
+            progress: Default::default(),
+            serial: crate::operations::serial(),
+            kept: None,
+        };
+        (job, tx)
+    }
+
     pub(crate) fn finished(&mut self) -> bool {
         if self.evaluated.is_none() {
             match self.done.try_recv() {
@@ -58,7 +81,16 @@ impl Deferred {
     /// of what waits for one (the real worker would finish in a moment).
     pub(crate) fn never_done(id: &str, params: Value, revision: u64) -> (Self, std::sync::mpsc::Sender<Option<solidcraft_engine::Evaluated>>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        let job = Deferred { done: rx, evaluated: None, started: crate::now_ms(), command: (id.to_string(), params), revision, kept: None };
+        let job = Deferred {
+            done: rx,
+            evaluated: None,
+            started: crate::now_ms(),
+            command: (id.to_string(), params),
+            revision,
+            progress: Default::default(),
+            serial: crate::operations::serial(),
+            kept: None,
+        };
         (job, tx)
     }
 }
@@ -69,8 +101,8 @@ impl Deferred {
 #[derive(Default)]
 pub struct DocJobs {
     deferred: Option<Deferred>,
-    queue: Vec<(String, Value)>,
-    start_after_roll: Option<(String, u64)>,
+    queue: Vec<(String, Value, u64)>,
+    start_after_roll: Option<(String, Option<u64>)>,
     delete_check: Option<DeleteCheck>,
 }
 
@@ -94,6 +126,18 @@ pub struct DeleteCheck {
     kept: std::sync::Arc<solidcraft_engine::doc::KeptResults>,
     /// The design's revision it was computed for: a design changed meanwhile checks again.
     revision: u64,
+    /// How far its evaluation is, and its Cancel ([`crate::operations`]).
+    pub(crate) progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
+}
+
+/// A computation dropped unfinished (cancelled, or its result no longer wanted) stops at its
+/// next feature rather than running on unseen.
+impl Drop for Deferred {
+    fn drop(&mut self) {
+        if self.evaluated.is_none() {
+            self.progress.cancel();
+        }
+    }
 }
 
 /// What a delete does once its check is in.
@@ -138,6 +182,18 @@ impl AfterCheck {
     }
 }
 
+/// The reply a worker sends on `done`, when it comes within `wait`. As with the history's
+/// commands, a wait of zero always leaves the reply for a later frame, and then `done` is not
+/// read at all: a reply that is already in stays in it for that frame. (Read here and not used,
+/// it left the frame nothing to receive but the worker's end, and the delete it was for was
+/// dropped as one that could not be checked.)
+pub(crate) fn reply_within<T>(done: &std::sync::mpsc::Receiver<T>, wait: std::time::Duration) -> Option<T> {
+    if wait.is_zero() {
+        return None;
+    }
+    done.recv_timeout(wait).ok()
+}
+
 /// Commands a later one of the same kind replaces while they wait: where the marker ends is all
 /// that counts.
 fn replaced_by_a_later_one(id: &str) -> bool {
@@ -179,8 +235,8 @@ impl SolveApp {
         if pending.is_some() {
             self.deferred = None;
         }
-        let queued = self.deferred_queue.iter().find(|(id, _)| is_exit(id)).map(|(id, _)| id.clone());
-        self.deferred_queue.retain(|(id, _)| !is_exit(id));
+        let queued = self.deferred_queue.iter().find(|(id, _, _)| is_exit(id)).map(|(id, _, _)| id.clone());
+        self.deferred_queue.retain(|(id, _, _)| !is_exit(id));
         pending.or(queued)
     }
 
@@ -188,6 +244,13 @@ impl SolveApp {
     /// a while (see the module notes). `Ok(Null)` when it is left computing or waiting its turn:
     /// its outcome then shows as any command's does (an error in the status line).
     pub fn run_heavy(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        self.run_heavy_as(id, params, crate::operations::serial())
+    }
+
+    /// [`Self::run_heavy`], as the operation `serial` (the operations panel's row).
+    fn run_heavy_as(&mut self, id: &str, params: Value, serial: u64) -> Result<Value, String> {
+        crate::sketch_view::sync(self)?;
+        crate::workspace::command_receiver(self, id, &params)?;
         if id == "timeline.play" {
             return self.run(id, params);
         }
@@ -198,18 +261,27 @@ impl SolveApp {
         // while submitting its own next step, then puts it back to wait for that step.
         crate::timeline::stop_playback(self);
         if self.deferred.is_some() {
-            if replaced_by_a_later_one(id) && self.deferred_queue.last().is_some_and(|(q, _)| q == id) {
+            if replaced_by_a_later_one(id) && self.deferred_queue.last().is_some_and(|(q, _, _)| q == id) {
                 self.deferred_queue.pop();
             }
-            self.deferred_queue.push((id.to_string(), params));
+            self.deferred_queue.push((id.to_string(), params, serial));
             return Ok(Value::Null);
         }
-        match self.begin_deferred(id, &params) {
+        match self.begin_deferred(id, &params, serial) {
             Start::Later(job) => {
                 self.deferred = Some(job);
                 Ok(Value::Null)
             }
-            Start::Now(evaluated, kept) => self.run_evaluated(id, params, evaluated.as_ref(), kept),
+            Start::Now(evaluated, kept) => {
+                let r = self.run_evaluated(id, params, evaluated.as_ref(), kept);
+                // One that waited its turn (a row) and then ran at once ends here.
+                let outcome = match &r {
+                    Ok(_) => crate::operations::Outcome::Done,
+                    Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(id, e)),
+                };
+                crate::operations::ended(self, &format!("history:{serial}"), outcome);
+                r
+            }
         }
     }
 
@@ -237,6 +309,8 @@ impl SolveApp {
             self.deferred.as_ref().map(|d| d.started),
             self.delete_check.as_ref().map(|c| c.started),
             self.pending_feature_edit.as_ref().map(|edit| edit.started),
+            self.sketch_refreshes.get(&self.session.uid).map(|job| job.started),
+            self.start_after_roll.as_ref().and_then(|_| self.sketch_refreshes.values().map(|job| job.started).reduce(f64::min)),
         ];
         started.into_iter().flatten().reduce(f64::min)
     }
@@ -245,7 +319,10 @@ impl SolveApp {
     /// delete's check computing off the window thread. A feature edit applying has its own
     /// dialog, with its own Cancel.
     pub fn can_cancel_computing(&self) -> bool {
-        self.deferred.is_some() || self.delete_check.is_some()
+        self.deferred.is_some()
+            || self.delete_check.is_some()
+            || self.start_after_roll.is_some()
+            || self.sketch_refreshes.get(&self.session.uid).is_some_and(|job| !job.progress.is_cancelled())
     }
 
     /// Stop waiting for the history command, and the delete check, computing off the window thread
@@ -254,10 +331,10 @@ impl SolveApp {
     /// to the end of what they evaluate and their results are dropped (the same as Cancel while a
     /// feature is applying).
     pub fn cancel_computing(&mut self) {
+        crate::sketch_view::cancel_refresh(self);
         self.deferred = None;
         self.deferred_queue.clear();
         self.delete_check = None;
-        self.start_after_roll = None;
     }
 
     /// Run a delete's check `commands` and carry on with `then` once their replies are in: off
@@ -269,23 +346,24 @@ impl SolveApp {
         }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(wait) = self.apply_off_thread
-            && !self.file_load.busy()
+            && !self.file_load_holds()
             && self.file_picker.is_none()
         {
             let ahead = self.session.ahead();
             let kept = ahead.kept();
             let (tx, rx) = std::sync::mpsc::channel();
             let checks = commands.clone();
+            let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+            let watching = progress.clone();
             let spawned = std::thread::Builder::new().name("delete check".into()).spawn(move || {
-                let replies = ahead.replies(&checks).into_iter().map(|r| r.map_err(|e| e.to_string())).collect();
-                let _ = tx.send(replies);
+                let replies = solidcraft_engine::doc::progress::watch(watching, || ahead.replies(&checks));
+                let _ = tx.send(replies.into_iter().map(|r| r.map_err(|e| e.to_string())).collect());
             });
             if spawned.is_ok() {
-                let check = DeleteCheck { done: rx, started: crate::now_ms(), then, revision: self.session.revision, kept };
-                // As with the history's commands, zero always leaves it for a later frame.
-                match (wait.is_zero(), check.done.recv_timeout(wait)) {
-                    (false, Ok(replies)) => check.then.finish(self, replies, Some(check.kept.clone())),
-                    _ => self.delete_check = Some(check),
+                let check = DeleteCheck { done: rx, started: crate::now_ms(), then, revision: self.session.revision, kept, progress };
+                match reply_within(&check.done, wait) {
+                    Some(replies) => check.then.finish(self, replies, Some(check.kept.clone())),
+                    None => self.delete_check = Some(check),
                 }
                 return;
             }
@@ -307,45 +385,69 @@ impl SolveApp {
             Ok(replies) => Some(replies),
         };
         let Some(check) = self.delete_check.take() else { return };
+        use crate::operations::{Outcome, ended};
         match replies {
-            None => self.set_status("the delete could not be checked", true),
+            None => {
+                ended(self, "delete_check", Outcome::Failed("the delete could not be checked".into()));
+                self.set_status("the delete could not be checked", true);
+            }
             Some(_) if check.revision != self.session.revision => check.then.restart(self),
-            Some(replies) => check.then.finish(self, replies, Some(check.kept)),
+            Some(replies) => {
+                ended(self, "delete_check", Outcome::Done);
+                check.then.finish(self, replies, Some(check.kept));
+            }
         }
     }
 
     /// Each frame: a command whose evaluation is in runs, then the next one waiting starts.
     pub(crate) fn poll_deferred(&mut self, ctx: &egui::Context) {
+        crate::sketch_view::poll_refreshes(self, ctx);
         if let Some(job) = &mut self.deferred {
             if !job.finished() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
                 return;
             }
-            if let Some(job) = self.deferred.take() {
-                let (id, params) = job.command;
-                let superseded = replaced_by_a_later_one(&id) && self.deferred_queue.first().is_some_and(|(q, _)| *q == id);
+            if let Some(mut job) = self.deferred.take() {
+                let (id, params) = std::mem::take(&mut job.command);
+                let superseded = replaced_by_a_later_one(&id) && self.deferred_queue.first().is_some_and(|(q, _, _)| *q == id);
+                let key = format!("history:{}", job.serial);
                 if job.revision != self.session.revision {
                     // The design changed meanwhile: computed again for the design as it is now.
-                    let _ = self.run_heavy(&id, params);
+                    let _ = self.run_heavy_as(&id, params, job.serial);
                 } else if !superseded {
                     // This is playback's own completed step, not a manual history edit.
                     let playback = self.timeline_playback.take();
-                    let _ = self.run_evaluated(&id, params, job.evaluated.flatten().as_ref(), job.kept);
+                    let r = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
                     self.timeline_playback = playback;
+                    if let Ok(out) = &r
+                        && id == "body.remove_history"
+                    {
+                        crate::context_menu::remove_history_report(self, out);
+                    }
+                    let outcome = match r {
+                        Ok(_) => crate::operations::Outcome::Done,
+                        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(&id, &e)),
+                    };
+                    crate::operations::ended(self, &key, outcome);
+                } else {
+                    // A later one of the same kind does it (where the marker ends is all that counts).
+                    crate::operations::ended(self, &key, crate::operations::Outcome::Done);
                 }
             }
         }
         if self.deferred.is_none() && !self.deferred_queue.is_empty() {
-            let (id, params) = self.deferred_queue.remove(0);
-            let _ = self.run_heavy(&id, params);
+            let (id, params, serial) = self.deferred_queue.remove(0);
+            let _ = self.run_heavy_as(&id, params, serial);
         }
         if self.deferred.is_none()
+            && !self.session.needs_sketch_finish_evaluation()
             && self.deferred_queue.is_empty()
             && let Some((id, sketch)) = self.start_after_roll.take()
             && self.dialog.is_none()
             && self.tool.is_none()
+            && self.prepared_edit_starts.get(&self.session.uid).is_some_and(|prepared| prepared == &id)
         {
-            self.start_interactive(&id, Some(sketch));
+            self.start_interactive(&id, sketch);
         }
     }
 
@@ -353,9 +455,9 @@ impl SolveApp {
     /// ([`SolveApp::apply_off_thread`]), a file operation in progress, no threads (the web), or
     /// done within the wait.
     #[cfg(not(target_arch = "wasm32"))]
-    fn begin_deferred(&self, id: &str, params: &Value) -> Start {
+    fn begin_deferred(&self, id: &str, params: &Value, serial: u64) -> Start {
         let Some(wait) = self.apply_off_thread else { return Start::Now(None, None) };
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             return Start::Now(None, None);
         }
         let ahead = self.session.ahead();
@@ -363,8 +465,23 @@ impl SolveApp {
         let command = (id.to_string(), params.clone());
         let commands = vec![command.clone()];
         let (tx, rx) = std::sync::mpsc::channel();
+        let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        let watching = progress.clone();
+        // Tests hold the result until let go (`apply_gate`), so a window thread held up under load
+        // cannot find the work already in where the command should still be computing.
+        #[cfg(test)]
+        let gate = self.apply_gate.clone();
         let spawned = std::thread::Builder::new().name("history".into()).spawn(move || {
-            let _ = tx.send(ahead.evaluate(&commands).ok());
+            let cancelled = watching.clone();
+            let evaluated = solidcraft_engine::doc::progress::watch(watching, || ahead.evaluate(&commands).ok());
+            #[cfg(test)]
+            if let Some(gate) = gate
+                && let Ok(gate) = gate.lock()
+            {
+                let _ = gate.recv();
+            }
+            // A cancelled evaluation skipped features: what it holds is not the design's.
+            let _ = tx.send(evaluated.filter(|_| !cancelled.is_cancelled()));
         });
         if spawned.is_err() {
             return Start::Now(None, None);
@@ -378,11 +495,20 @@ impl SolveApp {
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
-        Start::Later(Deferred { done: rx, evaluated: None, started: crate::now_ms(), command, revision: self.session.revision, kept: Some(kept) })
+        Start::Later(Deferred {
+            done: rx,
+            evaluated: None,
+            started: crate::now_ms(),
+            command,
+            revision: self.session.revision,
+            progress,
+            serial,
+            kept: Some(kept),
+        })
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn begin_deferred(&self, _id: &str, _params: &Value) -> Start {
+    fn begin_deferred(&self, _id: &str, _params: &Value, _serial: u64) -> Start {
         Start::Now(None, None)
     }
 }

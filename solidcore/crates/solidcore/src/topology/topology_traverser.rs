@@ -11,6 +11,7 @@
 //! | [`closure_traversal_from_both_sides`] | `ClosureTraversalFromBothSides` (fork tangency-labs/smlib@69c5198, WR-584) |
 //! | [`remove_shell`], [`faceuse_shell_replacement`] | `RemoveShell`, `FaceuseShellReplacement` |
 //! | [`shell_traversal`], `shell_connectivity` (private) | `ShellTraversal`, `sm_ShellConnectivity` |
+//! | `shell_traversal_to_vertices` (crate) | not upstream: `ShellTraversal` ended when the vertices it is asked about are marked |
 //! | [`is_inner_shell`] | `IsInnerShell`, `IsOdd` |
 //! | [`has_lamina_edge`] | `SmFace::HasLaminaEdge` (CO-PORTED, `topology.face_p3`; re-exported there) |
 //! | [`face_edges`] | `SmFace::GetEdges` (CO-PORTED, `topology.face_p4`, default arguments) |
@@ -33,14 +34,14 @@
 //! ray (the build is deterministic, so a retry fails the same way).
 //! Existing co-ported accessors are reused.
 //! `ClosureTraversalFromBothSides` is not in the pinned upstream: it is the fork's
-//! (tangency-labs/smlib@69c5198), used only under
-//! [`UpstreamFixes::boolean_new_face_closure_both_sides`](crate::kernel::UpstreamFixes::boolean_new_face_closure_both_sides)
-//! (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
+//! (tangency-labs/smlib@69c5198), used by `SmBrep::TestClosureSplitRegion` in place of
+//! `ClosureTraversal` (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
 //! arena slot (lookups only, as the fork; no iteration).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -153,8 +154,41 @@ impl Marks {
     }
 }
 
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+// Why each link the traversals follow is the kernel's to keep: a missing one is a defect of
+// the B-rep's own bookkeeping, not a fact of the geometry.
+const NO_PRIMARY: &str = "the edge has no primary edge use; the kernel gives an edge its edge \
+    uses when it makes the edge and keeps one of them as the primary while any remain";
+const NO_START: &str = "the edge use has no vertex use; the kernel makes every edge use with the \
+    vertex use at its start";
+const NO_EDGEUSE_MATE: &str =
+    "the edge use has no mate; the kernel makes edge uses in mated pairs and deletes them in pairs";
+const NO_VERTEX: &str = "the vertex use names no vertex; the kernel makes a vertex use on its \
+    vertex and deletes it when it leaves the vertex";
+const NO_RADIAL: &str = "an edge use of a face's loop has no radial neighbour; the kernel links \
+    the edge uses round an edge into a closed radial ring";
+const NO_RADIAL_FACEUSE: &str = "the radial neighbour of an edge use in a face's loop lies on no \
+    face use; the radial ring the kernel builds round an edge of faces holds only edge uses of \
+    faces' loops";
+const NO_FACE: &str = "the face use names no face; the kernel makes a face's two face uses with \
+    the face and never unlinks one from it";
+const NO_FACEUSE_MATE: &str =
+    "the face use has no mate; the kernel makes a face's two face uses as a mated pair";
+const NO_EDGEUSE: &str = "the vertex use is of the edge kind but names no edge use; the kernel \
+    sets the kind and the edge use together when it puts a vertex use at an edge use's start";
+const NO_LOOP_VERTEXUSE: &str = "a loop use of the face lists a missing vertex use; the kernel \
+    makes every edge use of a loop with the vertex use at its start, and a vertex loop with its \
+    one vertex use";
+
+/// The link `value` that the traversal follows, or the reviewed defect `why` (one of the
+/// reasons above) with upstream's `SM_ERR_NULL_POINTER` (`NER`) when the B-rep lacks it.
+#[track_caller]
+fn link<T>(value: Option<T>, why: &'static str) -> Result<T> {
+    match value {
+        Some(value) => Ok(value),
+        None => Err(Failure::new(OP, TopologyFailure::Defect { why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()),
+    }
 }
 
 fn check_mark(mark: MarkType) -> Result<()> {
@@ -178,13 +212,13 @@ pub fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
 }
 
 fn edge_vertices(b: &Brep, e: EdgeId) -> Result<(VertexId, VertexId)> {
-    let primary = required(eu::primary_edgeuse(b, e)?)?;
-    let first = required(b.edgeuse(primary)?.vertexuse)?;
-    let mate = required(eu::mate(b, primary)?)?;
-    let second = required(b.edgeuse(mate)?.vertexuse)?;
+    let primary = link(eu::primary_edgeuse(b, e)?, NO_PRIMARY)?;
+    let first = link(b.edgeuse(primary)?.vertexuse, NO_START)?;
+    let mate = link(eu::mate(b, primary)?, NO_EDGEUSE_MATE)?;
+    let second = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
     Ok((
-        required(b.vertexuse(first)?.vertex)?,
-        required(b.vertexuse(second)?.vertex)?,
+        link(b.vertexuse(first)?.vertex, NO_VERTEX)?,
+        link(b.vertexuse(second)?.vertex, NO_VERTEX)?,
     ))
 }
 
@@ -336,8 +370,8 @@ pub fn faceuse_traversal(
         marks.mark(k, Entity::Faceuse(fu), mark);
         for &lu in &b.faceuse(fu)?.loopuses {
             for edgeuse in eu::loopuse_edgeuses(b, lu)? {
-                let radial = required(eu::radial(b, edgeuse)?)?;
-                let neighbor = required(eu::faceuse(b, radial)?)?;
+                let radial = link(eu::radial(b, edgeuse)?, NO_RADIAL)?;
+                let neighbor = link(eu::faceuse(b, radial)?, NO_RADIAL_FACEUSE)?;
                 if !marks.is_marked(k, Entity::Faceuse(neighbor), mark) {
                     stack.push(neighbor);
                 }
@@ -376,7 +410,7 @@ pub fn closure_traversal(
     if let Some(out) = &mut faceuses {
         out.clear();
     }
-    let f = required(b.faceuse(start)?.face)?;
+    let f = link(b.faceuse(start)?.face, NO_FACE)?;
     if has_lamina_edge(b, f)? {
         return Ok(false);
     }
@@ -389,19 +423,22 @@ pub fn closure_traversal(
 /// radials, one from `start` and one from its mate, expanding one face use of each in
 /// turn. The searches meet (the mate is reachable: not closed) or one side runs out
 /// first (closed). Visits at most twice the face uses on the smaller side; marks
-/// nothing and claims no mark. A face with a lamina edge is not closed. A missing
-/// radial or radial face use is skipped, as the fork does.
+/// nothing and claims no mark. A face with a lamina edge is not closed. Not the fork:
+/// a missing radial or radial face use on an edge use the search expands fails, as in
+/// [`closure_traversal`]'s walk, where the fork skips it and could report a broken
+/// shell closed. In `TestClosureSplitRegion` the search runs before anything is added.
 ///
 /// # Errors
 ///
-/// A missing face or mate (`NER` upstream), dangling ids, or those of the lamina test.
+/// A missing face or mate (`NER` upstream), a missing radial or radial face use on an
+/// expanded edge use, dangling ids, or those of the lamina test.
 pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<bool> {
     // A face with any lamina edges is not closed (as ClosureTraversal).
-    let f = required(b.faceuse(start)?.face)?;
+    let f = link(b.faceuse(start)?.face, NO_FACE)?;
     if has_lamina_edge(b, f)? {
         return Ok(false);
     }
-    let mate = required(b.faceuse(start)?.mate)?;
+    let mate = link(b.faceuse(start)?.mate, NO_FACEUSE_MATE)?;
 
     // the side (0 = from the face use, 1 = from its mate) each visited face use was
     // reached from, by arena slot
@@ -437,12 +474,9 @@ pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<b
             let mut found = Vec::new();
             for &lu in &b.faceuse(fu)?.loopuses {
                 for edgeuse in eu::loopuse_edgeuses(b, lu)? {
-                    let Some(radial) = eu::radial(b, edgeuse)? else {
-                        continue;
-                    };
-                    let Some(neighbor) = eu::faceuse(b, radial)? else {
-                        continue;
-                    };
+                    // a missing link fails, as in faceuse_traversal (the fork skips it)
+                    let radial = link(eu::radial(b, edgeuse)?, NO_RADIAL)?;
+                    let neighbor = link(eu::faceuse(b, radial)?, NO_RADIAL_FACEUSE)?;
                     match side.get(neighbor.index() as usize).copied().flatten() {
                         None => {
                             set_side(&mut side, neighbor, k);
@@ -491,6 +525,10 @@ pub fn faceuse_shell_replacement(
     Ok(())
 }
 
+/// `sm_ShellConnectivity`: marks, depth first, every vertex use, vertex, face use and
+/// face that `shell` joins to `start`. Not upstream: each vertex of `asked` is taken
+/// out as it is marked, and the walk ends when that takes out the last of them. With
+/// none asked it covers everything joined to `start`.
 fn shell_connectivity(
     k: &Kernel,
     b: &Brep,
@@ -500,19 +538,20 @@ fn shell_connectivity(
     mark: MarkType,
     edgeuses: &mut Option<&mut Vec<EdgeuseId>>,
     faceuses: &mut Option<&mut Vec<FaceuseId>>,
+    asked: &mut BTreeSet<VertexId>,
 ) -> Result<()> {
     marks.mark(k, Entity::Vertexuse(start), mark);
     let mut stack = vec![start];
     while let Some(vu) = stack.pop() {
         let mut propagate = Vec::new();
         let fu = if vertexuse::is_edge_vertexuse(b, vu)? {
-            let e = required(vertexuse::edgeuse(b, vu)?)?;
+            let e = link(vertexuse::edgeuse(b, vu)?, NO_EDGEUSE)?;
             if let Some(out) = edgeuses {
                 out.push(e);
             }
-            let mate = required(eu::mate(b, e)?)?;
+            let mate = link(eu::mate(b, e)?, NO_EDGEUSE_MATE)?;
             if eu::shell(b, mate)? == Some(shell) {
-                let mate_vu = required(b.edgeuse(mate)?.vertexuse)?;
+                let mate_vu = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
                 if !marks.is_marked(k, Entity::Vertexuse(mate_vu), mark) {
                     marks.mark(k, Entity::Vertexuse(mate_vu), mark);
                     stack.push(mate_vu);
@@ -535,15 +574,19 @@ fn shell_connectivity(
                     out.push(fu);
                 }
             }
-            let f = required(b.faceuse(fu)?.face)?;
+            let f = link(b.faceuse(fu)?.face, NO_FACE)?;
             if !marks.is_marked(k, Entity::Face(f), mark) {
                 marks.mark(k, Entity::Face(f), mark);
+                k.work_counters.add_shell_traversal_face();
                 propagate.push(fu);
             }
         }
-        let v = required(b.vertexuse(vu)?.vertex)?;
+        let v = link(b.vertexuse(vu)?.vertex, NO_VERTEX)?;
         if !marks.is_marked(k, Entity::Vertex(v), mark) {
             marks.mark(k, Entity::Vertex(v), mark);
+            if asked.remove(&v) && asked.is_empty() {
+                return Ok(());
+            }
             for next in vertex::vertexuses(b, v)? {
                 if !marks.is_marked(k, Entity::Vertexuse(next), mark)
                     && vertexuse::shell(b, next)? == Some(shell)
@@ -556,7 +599,7 @@ fn shell_connectivity(
         for fu in propagate {
             for &lu in &b.faceuse(fu)?.loopuses {
                 for next in face::loopuse_vertexuses(b, lu)? {
-                    let next = required(next)?;
+                    let next = link(next, NO_LOOP_VERTEXUSE)?;
                     if !marks.is_marked(k, Entity::Vertexuse(next), mark)
                         && vertexuse::shell(b, next)? == Some(shell)
                     {
@@ -597,9 +640,48 @@ pub fn shell_traversal_with_marks(
     marks: &mut (impl FaceTraversalMarks + ?Sized),
     start: VertexId,
     shell: ShellId,
+    edgeuses: Option<&mut Vec<EdgeuseId>>,
+    faceuses: Option<&mut Vec<FaceuseId>>,
+    lock: &MarkLock,
+) -> Result<()> {
+    let mut all = BTreeSet::new();
+    shell_walk(
+        k, b, marks, start, shell, edgeuses, faceuses, lock, &mut all,
+    )
+}
+
+/// [`shell_traversal_with_marks`] for a caller that asks only which of the vertices
+/// `asked` the shell still joins to `start` (not upstream). The mark advances once and
+/// the walk marks in the same order, but it ends as it marks the last vertex of `asked`.
+/// Each of them is taken out of `asked` as it is marked: those left were not reached,
+/// and the walk then covered everything joined to `start`, as it does with none asked.
+/// The marks of a walk cut short answer for `asked` and nothing else.
+///
+/// # Errors
+/// Those of [`shell_traversal`], as far as the walk goes.
+pub(crate) fn shell_traversal_to_vertices(
+    k: &mut Kernel,
+    b: &Brep,
+    marks: &mut (impl FaceTraversalMarks + ?Sized),
+    start: VertexId,
+    shell: ShellId,
+    asked: &mut BTreeSet<VertexId>,
+    lock: &MarkLock,
+) -> Result<()> {
+    shell_walk(k, b, marks, start, shell, None, None, lock, asked)
+}
+
+/// `ShellTraversal`, ending early for `asked` as [`shell_connectivity`] does.
+fn shell_walk(
+    k: &mut Kernel,
+    b: &Brep,
+    marks: &mut (impl FaceTraversalMarks + ?Sized),
+    start: VertexId,
+    shell: ShellId,
     mut edgeuses: Option<&mut Vec<EdgeuseId>>,
     mut faceuses: Option<&mut Vec<FaceuseId>>,
     lock: &MarkLock,
+    asked: &mut BTreeSet<VertexId>,
 ) -> Result<()> {
     if let Some(out) = &mut edgeuses {
         out.clear();
@@ -620,6 +702,7 @@ pub fn shell_traversal_with_marks(
                 lock.mark_type(),
                 &mut edgeuses,
                 &mut faceuses,
+                asked,
             )?;
             break;
         }
@@ -677,9 +760,12 @@ fn line_parameters(
 ///
 /// The rays and face samples run on `b` itself, so the UV trim curves their face
 /// classifications create stay on the B-rep, as upstream's `const` queries leave them.
+/// The samples' dithers come from one generator the call makes from the kernel's seed
+/// ([`Kernel::seeded_rng`]), drawn in the order of `faceuses`, so the answer is a function
+/// of the B-rep, the face uses and the seed.
 pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> Result<bool> {
     if faceuses.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology(OP, TopologyFailure::NoFaceUses));
     }
     let mut samples = 3;
     if faceuses.len() < 6 {
@@ -693,10 +779,13 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
     // each target face surface's cache, built on its first ray (upstream's
     // smsurf_GetSurfaceCache keeps one per surface; the rays do not change surfaces)
     let mut caches: BTreeMap<FaceId, HeldSolveCache<RaySurface>> = BTreeMap::new();
+    // this call's own draws, from the start of the seed's sequence: each face use's sample
+    // dithers take the next draws, in the order of `faceuses`
+    let mut rng = k.seeded_rng();
     for &source in faceuses {
         let source = b.faceuse(source)?;
-        let (f, orientation) = (required(source.face)?, source.orientation);
-        let mut points = face::points_in_face(k, b, f, samples)?.pv;
+        let (f, orientation) = (link(source.face, NO_FACE)?, source.orientation);
+        let mut points = face::points_in_face_drawing(k, b, f, samples, &mut rng)?.pv;
         if orientation == OrientType::Opposite {
             for pair in points.chunks_exact_mut(2) {
                 if let Some(normal) = pair.get_mut(1) {
@@ -711,7 +800,7 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
             forward = 0;
             backward = 0;
             for &target in faceuses {
-                let f = required(b.faceuse(target)?.face)?;
+                let f = link(b.faceuse(target)?.face, NO_FACE)?;
                 let tol = b.face(f)?.tolerance;
                 let held = caches.entry(f).or_default();
                 match line_parameters(k, b, f, held, origin, direction) {
@@ -748,7 +837,10 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
     if backward > forward && forward == 0 && backward % 2 != 0 {
         return Ok(false);
     }
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::topology(
+        OP,
+        TopologyFailure::ShellSideUndecided { forward, backward },
+    ))
 }
 
 #[cfg(test)]
@@ -864,6 +956,49 @@ mod tests {
             .iter()
             .enumerate()
             .all(|(i, v)| v.index() as usize == i));
+    }
+
+    #[test]
+    fn a_shell_walk_asked_about_vertices_ends_at_the_last_of_them() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0)
+            .unwrap();
+        let vertices = b.vertex_list().to_vec();
+        assert_eq!(vertices.len(), 8);
+        let start = vertices[0];
+        let shell = vertexuse::shell(&b, vertex::vertexuses(&b, start).unwrap()[0])
+            .unwrap()
+            .unwrap();
+        let lock = MarkLock::new(
+            std::slice::from_mut(&mut k.context),
+            0,
+            crate::geom::context::ALL_MARKS,
+        )
+        .unwrap();
+        // the faces a walk asked about `asked` marks, the vertices it marks, those it leaves
+        let mut walk = |asked: &[VertexId]| {
+            let mut marks = Marks::default();
+            let mut left: BTreeSet<VertexId> = asked.iter().copied().collect();
+            let before = k.work_counters.shell_traversal_faces();
+            shell_traversal_to_vertices(&mut k, &b, &mut marks, start, shell, &mut left, &lock)
+                .unwrap();
+            let faces = k.work_counters.shell_traversal_faces() - before;
+            let marked = vertices
+                .iter()
+                .filter(|&&v| marks.is_marked(&k, Entity::Vertex(v), lock.mark_type()))
+                .count();
+            (faces, marked, left)
+        };
+        // nothing asked: everything the shell joins to the start, as `shell_traversal`
+        assert_eq!(walk(&[]), (6, 8, BTreeSet::new()));
+        // the start alone: the face of its first use, and no further
+        assert_eq!(walk(&[start]), (1, 1, BTreeSet::new()));
+        // every vertex: each one marked, as the whole walk marks them
+        let (_, marked, left) = walk(&vertices);
+        assert_eq!((marked, left), (8, BTreeSet::new()));
+        // a vertex the shell does not join is left, after the whole walk
+        let stray = VertexId::from_index(u32::MAX);
+        assert_eq!(walk(&[start, stray]), (6, 8, BTreeSet::from([stray])));
     }
 
     #[test]

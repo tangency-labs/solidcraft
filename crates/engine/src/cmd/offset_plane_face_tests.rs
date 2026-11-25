@@ -23,6 +23,40 @@ fn volume(s: &Session) -> f64 {
 }
 
 #[test]
+fn offset_plane_follows_a_3d_spline_node_after_moving_and_reopening() {
+    let mut s = Session::default();
+    let sketch = run(&mut s, "sketch.create", json!({"plane":{"origin":[100,200,300],"x_dir":[0,1,0],"y_dir":[0,0,1]}}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let wire =
+        run(&mut s, "sketch.spline3d", json!({"points":[[110,210,310],[120,230,330],[140,260,360]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    for (name, index, z) in [("Middle", 1, 330.0), ("Tip", 2, 360.0)] {
+        run(&mut s, "construct.plane.offset", json!({"base":"XY","through":{"sketch":sketch,"point":format!("{wire}:{index}")},"name":name}));
+        assert!((plane(&s, name).origin.z - z).abs() < 1e-9);
+    }
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
+    run(&mut s, "sketch.move3d", json!({"wire":wire,"index":2,"by":[0,0,7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!((plane(&s, "Tip").origin.z - 367.0).abs() < 1e-9);
+    let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((plane(&reopened, "Tip").origin.z - 367.0).abs() < 1e-9);
+    assert!((plane(&reopened, "Middle").origin.z - 330.0).abs() < 1e-9);
+    for index in ["9999", "-1", "not-an-index"] {
+        let before = s.doc.to_json();
+        assert!(
+            s.execute(
+                "construct.plane.offset",
+                &json!({
+                    "base":"XY", "through":{"sketch":sketch,"point":format!("{wire}:{index}")}
+                })
+            )
+            .is_err()
+        );
+        assert_eq!(s.doc.to_json(), before, "an invalid node must not change the design");
+    }
+}
+
+#[test]
 fn offset_plane_from_a_planar_face_follows_the_face() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));
@@ -101,8 +135,9 @@ fn offset_plane_redefined_on_itself_is_refused() {
     assert!((plane(&s, "Side").origin.y + 7.0).abs() < 1e-9, "{:?}", plane(&s, "Side"));
 }
 
-/// A flat face of a sheet is kept by its sheet face name, as a sketch on it is: the plane follows
-/// the flange when the sheet changes (it stayed where the face was picked).
+/// A flat face of a sheet is kept by its name, as a sketch on it is (the model's name, after what
+/// made it, #7990): the plane follows the flange when the sheet changes (it stayed where the face
+/// was picked).
 #[test]
 fn offset_plane_from_a_sheet_flange_face_follows_the_flange() {
     let mut s = Session::default();
@@ -113,12 +148,13 @@ fn offset_plane_from_a_sheet_flange_face_follows_the_flange() {
     let width = d["param"].as_str().or_else(|| d["name"].as_str()).unwrap_or("d1").to_string();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let base = s.doc.features.last().map_or(0, |f| f.id);
     run(&mut s, "sheet.flange", json!({"edges": [[320, 100, 1]], "height": 30}));
     let flange = s.doc.features.last().map_or(0, |f| f.id);
     // The flange's inner face, picked as model.faces lists it (body and index), 5 mm out along its normal.
-    let name = format!("sheet:Body1:F{flange}.0:top");
+    let name = format!("F{flange}:top:F{base}:side:l2");
     let faces = run(&mut s, "model.faces", json!({"body": "Body1"}));
-    let face = faces["faces"].as_array().unwrap().iter().find(|f| f["sheet_face"].as_str() == Some(name.as_str())).unwrap().clone();
+    let face = faces["faces"].as_array().unwrap().iter().find(|f| f["name"].as_str() == Some(name.as_str())).unwrap().clone();
     run(
         &mut s,
         "construct.plane.offset",

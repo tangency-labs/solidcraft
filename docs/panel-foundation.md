@@ -1,16 +1,12 @@
 # Universal panel foundation
 
 The public contracts are `solidcraft_engine::panels` and
-`solidcraft_ui_egui::panel_runtime`. The #11305 host is explicitly enabled and
-uses synthetic controllers to exercise shared behaviour. Preferences → Layout →
-Use shared panel layout mounts the existing Browser, History, Assistant and Render
-Scene Browser content in that host. Apply enables the setting; clearing it returns
-to the existing Classic placement. Classic remains the shipping default.
-Sketch, feature forms, BOM and the other Render panels remain separate work.
-A specimen is not production migration or visual evidence.
-Draggable tool windows and the existing native Assistant retain their legacy hosts.
+`solidcraft_ui_egui::panel_runtime`. The shared host presents Browser, History,
+Assistant, Sketch Options, Bill of Materials and the Render Scene Browser, Library,
+Inspector and Shots. Feature editors remain draggable cards and Assistant retains
+its own native window. Synthetic controllers exercise the host contract in tests.
 
-## Initial real-content integration
+## Production content integration
 
 The shared runtime owns placement and small presentation descriptors. Existing
 `SolveApp` document state, Browser semantic rows, History playback and `AgentChat`
@@ -23,16 +19,16 @@ Hidden bodies do not render. History playback and Assistant polling stay in thei
 existing application paths. Closing an Assistant panel does not stop its backend
 or clear its draft. Popped Assistant windows keep the legacy path. Combined
 Browser/History uses the existing content preference and suppresses the separate
-History body. Render Inspector, Shots and appearances keep their existing hosts
-and contribute their actual footprints to navigation and camera fitting.
+History body. Render panels contribute their actual footprints to navigation and
+camera fitting.
 
 Assistant uses the shared flow and actual content width. Tall content keeps the
 conversation above its pinned composer. A viable Wide presentation puts the
 conversation beside the existing provider controls and composer; smaller widths
 retain the stacked presentation. Both use the same content identities, draft,
 scroll state and backend. Shared header status on hover and its attention indication
-come from the existing Assistant state and pending approvals. Classic and native
-Assistant composition is unchanged.
+come from the existing Assistant state and pending approvals. The standalone
+native window retains its own composition.
 
 Visible bodies report their natural scroll content and fixed control bands.
 A sole production panel hugs that content until column capacity requires scrolling;
@@ -43,10 +39,9 @@ No hidden body is rendered to obtain a measurement.
 Bottom History declares a fixed, symmetrically padded icon row. It has no collapse
 or height-resize control; commands enforce the same bounds. A new side column
 inherits the current source column's width, or the registered standard width when
-the source has no column. The standard width matches Classic Browser's default.
+the source has no column. The standard width is 250 points.
 Existing columns and explicit resizing keep their width.
-The full responsive/native acceptance matrix remains roadmap work. This initial
-integration does not close the parent rollout issue.
+The full responsive and native acceptance matrix remains roadmap work.
 
 ## Ownership
 
@@ -57,9 +52,9 @@ ordered outer to inner; each contains a contiguous vertical stack of sections.
 Each section contains ordered tabs. Inactive tabs still constrain composite size
 limits. Registrations declare allowed zones, PinOuter, Content/Fill height policy,
 text-heavy content, surface preference, header actions and independent
-`closable`/`hot_closable` flags. No generic host branches on product panel names.
-Only the History product registration allows Bottom; synthetic kinds can allow
-all zones. Quick close is an affordance, not the close capability itself.
+`closable`/`hot_closable` flags, and `collapse_keeps_bottom` (a collapsed floating panel shows its
+header at its expanded bottom edge). No generic host branches on product panel names.
+History and Shots allow Bottom. Synthetic kinds can allow all zones. Quick close is an affordance, not the close capability itself.
 
 Layout is application/workspace preference data. It never enters CAD files,
 document undo, evaluation or tessellation. `PanelRuntime` retains controllers by
@@ -82,12 +77,11 @@ content migrations.
 
 ## Application preferences
 
-The opt-in preference adapter connects the existing envelope and catalogue to
+The preference adapter connects the shared envelope and catalogue to
 `SolveApp::prefs` and `load_prefs`, under the application-level `panel_layout` key.
 Desktop and web store this same Rust value through their existing preference
 writers. The adapter adds no design-file field, filesystem backend or browser
-storage path. A runtime must explicitly enable this integration; Classic remains
-the production default and ordinary specimens remain ephemeral.
+storage path. Ordinary specimens remain ephemeral.
 
 `PanelLayoutPreferences` retains deferred input until a registered runtime is
 available. The runtime's layout and injected catalogue remain authoritative once
@@ -104,10 +98,9 @@ return memory. They exclude measured content height, usable-space geometry,
 camera state and live controllers. Restored Content/Fill geometry is measured at
 the current width through the same host admission path.
 
-The existing Layout page exposes registered workspaces and named layouts only
-when this integration is enabled. Its controls use `layout.workspace.select`,
-`layout.apply`, `layout.save` and `layout.reset`. Built-ins remain immutable;
-replacing a user layout is explicit. Reset affects the current workspace and
+The Layout page exposes registered workspaces and named layouts. Its controls use `layout.workspace.select`,
+`layout.apply`, `layout.save`, `layout.delete` and `layout.reset`. Built-ins remain immutable;
+replacing or deleting a user layout is explicit and asks first. Reset affects the current workspace and
 preserves the named layout library. Preferences Apply/Cancel and held writes
 cover layout changes too. A refused restore keeps the Preferences dialog and its
 snapshot available rather than discarding the restore obligation.
@@ -323,33 +316,52 @@ Panel operations never change camera, zoom, projection, focus or model screen
 position. Explicit Fit uses actual usable space and may zoom. Centre/Look At
 preserves zoom/distance and requested orientation, centring only focus if the
 current model footprint cannot fit. Navbar/compass use their measured footprints.
-Current persistent legacy forms, redefine controls, sketch palette and confirmation
-paint remain obstacles after all producer passes. Sizing, closed, stale and Noop-only
+Floating editors, redefine controls and confirmation paint remain obstacles after all producer passes. Sizing, closed, stale and Noop-only
 hosts must not create obstacles. Transient menus shield input but do not become
 framing targets. The existing semantic-content finalization and Browser editors
 remain in the application shell.
-The opt-in shell calls `browser::editors` once before sketch palette and
-confirmation producers, retaining Move/Copy, Capture Position, Canvas, Point Cloud
-and Sketch Attachment windows, drafts and command guards. Their existing shared
+The shell calls `browser::editors` once for Move/Copy, Capture Position, Canvas,
+Point Cloud and Sketch Attachment. The editors retain their windows, drafts and
+command guards. Their existing shared
 Window wrappers publish actual per-pass footprints; invisible sizing and closed
 windows do not reserve usable space. Sketch Attachment has no second host call.
 
-Suppressing the root Assistant clears only its cached panel, drop and dock-space
-geometry, so an undrawn floating card cannot narrow legacy tool bounds. Desired
-open state, conversation, backend and layout preferences remain owned by the
-existing Assistant. A popped Assistant still uses `agent_chat::show` and its
-existing native-window path, which performs the service poll itself; other host
-composition passes call `agent_chat::poll` instead. This does not migrate or
-reparent the window.
+The standalone Assistant window keeps its native host and polls the existing
+Assistant service. The shared host keeps the same conversation and backend while
+the Assistant panel is shown, hidden or moved.
 
-The default adapter truthfully advertises no native windows. Actual Window
-placement needs the native sibling's monitor/DPI, focus and close/redock services.
-The renderer resolves surface intent through the shared Container, raising its
-fill alpha when canonical text needs more contrast. Captured `paint_alpha` and
-`contrast` report the effective paint and any readable fallback separately from
-declarative intent. Input and occlusion remain reserved regardless of alpha.
-Remaining panel migrations, native window services and full workspace rollout
-stay with their named peers.
+On desktop, **Pop out to window** moves a shared panel into a separate OS window.
+Closing the OS window returns the panel through its saved dock placement. The
+controller and document stay with the panel. The desktop adapter remembers the
+panel's window size and monitor for the current app session and checks that the
+OS created the window before presenting content. On the web, the same action
+places the panel in the shared Floating zone.
+
+On the desktop, the area outside the app window is one more drop target,
+`Window`, for a title or tab drag. It is not a fallback for a missed target: it
+follows the same prepare, preview and commit path as the dock targets, and uses
+the same destination as **Pop out to window**. While it is selected, the window
+the panel will open in is shown at that screen place, with the panel's body as
+painted in that frame. Its content has the panel's size in the app. A panel in
+the bottom strip has no body there to show: with live drag paint, which hides it
+in the app, its body is laid out once as the side card the app's left edge would
+dock it as (a new column of the dock's full height), and its window takes that
+card's shape and paint, kept taller than wide so the panel keeps that vertical
+layout. Before its content is measured, that card has the dock's height, and the
+window fits its content once measured, as a side card does. Like live drag
+paint, it runs no second body and changes no layout. Release opens the panel
+there, only after that window was shown, and the panel keeps that same window.
+Release over the app, Escape, focus loss or a changed app window cancels and
+closes it. The window is the one **Pop out to window** opens, and closing it
+docks the panel where it was. Where the platform does not report the app
+window's screen position, or on the web, a drag past the app's edge keeps the
+panel in the app.
+
+Panels in the workspace use the ribbon's theme fill and backdrop blur. The
+system's Reduce Transparency setting keeps the panels opaque. Explicit opacity
+overrides use the panel contrast check. Captured `paint_alpha` and `contrast`
+report the effective paint and any readable fallback separately from declarative
+intent. Input and occlusion remain reserved regardless of alpha.
 
 ### Keyboard, accessibility and motion
 
@@ -438,12 +450,8 @@ Actual clipped surface footprints continue to own input even when translucent.
 Uncovered short-panel gaps remain navigable, while content scrolling and actual
 controls shield the model. Temporary popup shielding is not a Fit/Centre obstacle.
 
-This is shared surface policy and an opt-in review seam, not a production content
-migration or a new appearance preset. Classic and shipping defaults remain.
-The initial approved docked adapters are Browser, History, Assistant and their allowed
-RenderSceneBrowser counterpart; other content conversions require a separate
-scope decision. Persistent legacy forms retain their existing hosts and continue
-to contribute their actual footprints until their own migrations.
+The shared panel host applies this surface policy to production panels. Floating
+feature editors retain their own cards and contribute their actual footprints.
 The original synthetic controllers expose draft, transaction, action, lifecycle,
 render and service counters plus process-local equality tokens. They do not expose
 fake production actions or pretend to perform CAD work.

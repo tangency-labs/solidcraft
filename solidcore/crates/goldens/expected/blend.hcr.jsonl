@@ -425,7 +425,7 @@
 {"case":"gen0389","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[37.25,37.25,1272.0]],"n":68},"status":[0.0]}}
 {"case":"gen0390","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[0.0]}}
 {"case":"gen0391","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[1e+20,1e+20,1.2e+21]],"n":18},"status":[0.0]}}
-{"case":"gen0392","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[3e+20,3e+20,4.8e+21]],"n":35},"status":[0.0]}}
+{"case":"gen0392","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[2e+20,2e+20,4.1e+21]],"n":35},"status":[0.0]}}
 {"case":"gen0393","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[1e+20,1e+20,1.2e+21]],"n":18},"status":[0.0]}}
 {"case":"gen0394","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[2.5591573468391324,53.103275897288135,130.71608079606]],"n":38},"status":[0.0]}}
 {"case":"gen0395","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[2.0017437499999997,2.00215625,6.02523125]],"n":24},"status":[0.0]}}

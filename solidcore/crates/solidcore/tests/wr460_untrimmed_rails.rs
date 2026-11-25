@@ -3,7 +3,8 @@
 //! `Extent1d::new()`. Its samples then lay ~1e21 away, so the check either compared garbage
 //! or failed in the closest-point query on a curved edge (status 1001), refusing rounds
 //! that fit. SolidCraft oracle designs 36 and 34 are the repros: a box with rounded
-//! (or chamfered) vertical edges, then its whole top loop rounded.
+//! (or chamfered) vertical edges, then its whole top loop rounded. That check is retired;
+//! the band test that replaces it (WR-542, no longer a flag) keeps these rounds too.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -48,9 +49,8 @@ fn edges_where(k: &Kernel, b: &Brep, keep: impl Fn(Point3) -> bool) -> Vec<EdgeI
 /// A `w` x `d` x `h` box whose vertical edges get a section of size `s` (`xsect` 1 round,
 /// 0 chamfer), then every edge of its top face a round of `r`: the body, its volume and
 /// the second blend's result.
-fn two_blends(fixed: bool, (w, d, h): (f64, f64, f64), xsect: u32, s: f64, r: f64) -> (Brep, f64) {
+fn two_blends((w, d, h): (f64, f64, f64), xsect: u32, s: f64, r: f64) -> (Brep, f64) {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_crossing_rails = fixed;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), w, d, h).unwrap();
     let vertical = edges_where(&k, &b, |m| (m.z - 0.5 * h).abs() < 1e-6);
     fillet_edges(&mut k, &mut b, &vertical, s, xsect, 1, 1.0).unwrap();
@@ -65,9 +65,7 @@ fn two_blends(fixed: bool, (w, d, h): (f64, f64, f64), xsect: u32, s: f64, r: f6
 /// SolidCraft oracle design 36: 50 x 40 x 30, verticals R8, top loop R4.
 #[test]
 fn wr460_rounded_box_top_loop_is_kept() {
-    let (_, v) = two_blends(true, (50.0, 40.0, 30.0), 1, 8.0, 4.0);
-    let (_, upstream) = two_blends(false, (50.0, 40.0, 30.0), 1, 8.0, 4.0);
-    assert_eq!(v.to_bits(), upstream.to_bits());
+    let (_, v) = two_blends((50.0, 40.0, 30.0), 1, 8.0, 4.0);
     // Pappus: the R4 section's centroid sits 0.2234 R4 inside both walls, so it runs
     // 34 + 24 twice on the flats and 4 quarter turns at 8 - 0.2234 * 4 on the corners.
     let section = 16.0 * (1.0 - 0.25 * PI);
@@ -81,7 +79,14 @@ fn wr460_rounded_box_top_loop_is_kept() {
 /// SolidCraft oracle design 34: 40 x 30 x 20, verticals chamfered 5, top loop R2.
 #[test]
 fn wr460_chamfered_box_top_loop_is_kept() {
-    let (_, v) = two_blends(true, (40.0, 30.0, 20.0), 0, 5.0, 2.0);
-    let (_, upstream) = two_blends(false, (40.0, 30.0, 20.0), 0, 5.0, 2.0);
-    assert_eq!(v.to_bits(), upstream.to_bits());
+    let (_, v) = two_blends((40.0, 30.0, 20.0), 0, 5.0, 2.0);
+    // Pappus on a mitred path: the chamfered base is 40 x 30 less four 5 x 5 / 2 corners,
+    // 1150 x 20. The R2 section, 4 - pi, has its centroid c inside both walls, so it runs
+    // round the top loop (perimeter 100 + 20 sqrt 2, eight 45 degree turns) inset by c,
+    // which shortens the path by 2 c tan 22.5 degrees at each turn.
+    let section = 4.0 - PI;
+    let c = 2.0 * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    let path = 100.0 + 20.0 * 2.0_f64.sqrt() - 2.0 * c * 8.0 * (PI / 8.0).tan();
+    let want = 1150.0 * 20.0 - section * path;
+    assert!((v - want).abs() < 1e-5 * want, "{v} vs {want}");
 }

@@ -65,6 +65,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
             scenario::publish_rect("prefs:navbar:header", header.response.rect);
+            idle_option(&mut app.preferences.navigation_bar, ui);
             if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 preview(app, ui, &mut state, width);
                 if state.selected.is_some() {
@@ -108,8 +109,6 @@ fn segment_control(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: 
         .iter()
         .map(|key| {
             solidcraft_ui_text::tr(match *key {
-                "navbar.custom.always" => "prefs.layout_page.always",
-                "navbar.custom.hide_idle" => "prefs.layout_page.hover",
                 "navbar.custom.labels" => "prefs.layout_page.icons_labels",
                 _ => key,
             })
@@ -181,7 +180,7 @@ fn preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, width: f32)
     let stage = ui_kit::navigation_stage(ui, width);
     scenario::publish_target("prefs:navbar:stage", stage);
     scenario::publish_target("prefs:navbar:preview", stage);
-    let bar = navigation_bar_view::editor_layout(stage, &app.preferences.navigation_bar, |slot| {
+    let bar = ui_kit::nav_bar_layout::editor_layout(stage, &app.preferences.navigation_bar, |slot| {
         ui.painter()
             .layout_no_wrap(navigation_bar_view::slot_text(app, slot).to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink)
             .size()
@@ -284,7 +283,7 @@ fn drop_on_preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, tar
                 ui_kit::NavigationButton {
                     id: slot.id,
                     label: app.tr(slot.label),
-                    icon: slot.current_icon(app.ui.visual_style),
+                    icon: slot.current_icon(crate::navigation_slots::value(&app.ui, slot)),
                     selected: false,
                     kind: slot.kind,
                     labels: false,
@@ -323,7 +322,7 @@ fn inspector(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
         return;
     };
     inspector_header(app, ui, state, index, slot);
-    if slot.id == "visual_style" {
+    if !slot.value_icons.is_empty() {
         let mut selected = usize::from(app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconOnly);
         segments(ui, "shows", &mut selected, &["navbar.custom.icon_value", "navbar.custom.icon_only"], |index| {
             app.preferences
@@ -365,7 +364,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
     ui.scope_builder(egui::UiBuilder::new().max_rect(name).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         if !slot.icon.is_empty() && name.width() >= t.form_icon_size {
             let (icon, _) = ui.allocate_exact_size(vec2(t.form_icon_size, t.form_icon_size), Sense::hover());
-            crate::icons::paint_ink(ui.painter(), icon, slot.current_icon(app.ui.visual_style), t.form_dim);
+            crate::icons::paint_ink(ui.painter(), icon, slot.current_icon(crate::navigation_slots::value(&app.ui, slot)), t.form_dim);
         }
         ui_kit::text(ui, app.tr(slot.label), ui_kit::Text::NameCell(true));
     });
@@ -446,7 +445,13 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                     continue;
                 }
                 let dragging = egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.from_menu && payload.id.slot == slot.id);
-                let (tile, add) = ui_kit::navigation_tile(ui, slot.id, app.tr(slot.label), slot.current_icon(app.ui.visual_style), dragging);
+                let (tile, add) = ui_kit::navigation_tile(
+                    ui,
+                    slot.id,
+                    app.tr(slot.label),
+                    slot.current_icon(crate::navigation_slots::value(&app.ui, slot)),
+                    dragging,
+                );
                 let tile = tile.backing_on_hover_text(&caption);
                 scenario::publish_target(&format!("prefs:navbar:tile:{}", slot.id), tile.rect);
                 scenario::publish_target(&format!("prefs:navbar:add:{}", slot.id), add.rect);
@@ -468,6 +473,26 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
     });
 }
 
+fn idle_option(bar: &mut NavigationBar, ui: &mut egui::Ui) {
+    option(
+        ui,
+        "idle",
+        &mut match bar.idle {
+            NavigationIdle::Always => 0,
+            NavigationIdle::Fade => 1,
+            NavigationIdle::Hide => 2,
+        },
+        &["navbar.custom.always", "navbar.custom.fade", "navbar.custom.hide_idle"],
+        |i| {
+            bar.idle = match i {
+                0 => NavigationIdle::Always,
+                2 => NavigationIdle::Hide,
+                _ => NavigationIdle::Fade,
+            }
+        },
+    );
+}
+
 fn option_grid(bar: &mut NavigationBar, ui: &mut egui::Ui, first: usize) {
     let t = Tokens::get();
     let columns = if ui.available_width() >= t.space_24 * 24.0 {
@@ -478,10 +503,10 @@ fn option_grid(bar: &mut NavigationBar, ui: &mut egui::Ui, first: usize) {
         1
     };
     let width = (ui.available_width() - t.space_16 * (columns - 1) as f32) / columns as f32;
-    for row in (first..4).step_by(columns) {
+    for row in (first..3).step_by(columns) {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = t.space_16;
-            for index in row..(row + columns).min(4) {
+            for index in row..(row + columns).min(3) {
                 ui.allocate_ui_with_layout(vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| match index {
                     0 => anchor_option(bar, ui),
                     1 => {
@@ -500,25 +525,6 @@ fn option_grid(bar: &mut NavigationBar, ui: &mut egui::Ui, first: usize) {
                             &mut usize::from(bar.labels == Labels::Labels),
                             &["navbar.custom.icons", "navbar.custom.labels"],
                             |i| bar.labels = if i == 1 { Labels::Labels } else { Labels::Icons },
-                        );
-                    }
-                    3 => {
-                        option(
-                            ui,
-                            "idle",
-                            &mut match bar.idle {
-                                NavigationIdle::Always => 0,
-                                NavigationIdle::Fade => 1,
-                                NavigationIdle::Hide => 2,
-                            },
-                            &["navbar.custom.always", "navbar.custom.fade", "navbar.custom.hide_idle"],
-                            |i| {
-                                bar.idle = match i {
-                                    0 => NavigationIdle::Always,
-                                    2 => NavigationIdle::Hide,
-                                    _ => NavigationIdle::Fade,
-                                }
-                            },
                         );
                     }
                     _ => {}

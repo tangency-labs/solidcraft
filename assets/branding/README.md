@@ -70,4 +70,10 @@ meetup. If you publish a fork or a modified build, give it its own name and logo
 don't mistake it for SolidCraft.
 
 The wordmark is set in IBM Plex Sans Bold (SIL Open Font License 1.1, the interface font in
-`assets/fonts/ibm-plex-sans/`) and outlined, so you don't need the font to print it.
+`crates/look/fonts/ibm-plex-sans/`) and outlined, so you don't need the font to print it.
+
+## Licence
+
+The SolidCraft name, logo and brand kit are under the SolidCraft Brand and Interface Licence
+([LICENSE-BRAND](../../LICENSE-BRAND)). Using them for anything other than SolidCraft needs the
+maintainers' written permission first.

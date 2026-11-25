@@ -2,7 +2,7 @@
 //! box minus a through cylinder left the hole's rims open. The issue expects a closed solid
 //! whose chamfer faces join the top and bottom faces to the hole's wall. With
 //! `Kernel::fixes.fillet_chamfer_cone_on_arc` the rims' linear sections are revolved into
-//! cones, as the fork's tangency-labs/smlib@f9299b7 does.
+//! cones, as the fork's tangency-labs/smlib@f9299b7 does, and stored as cones (WR-572).
 //!
 //! The case is the issue's: every edge of a 10 cube with a radius 2 through hole, chamfered
 //! by a chord of 1/sqrt(2) (legs 0.5).
@@ -20,6 +20,7 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::surface::surface::p2::SURF_OF_REVOLUTION_TYPE;
+use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, Kernel, Result};
@@ -61,6 +62,21 @@ fn revolved_faces(b: &Brep) -> usize {
         .count()
 }
 
+/// The apex and the semi-angle (degrees, unsigned) of each of the body's faces on a cone
+/// that is no cylinder.
+fn cones(k: &Kernel, b: &Brep) -> Vec<(Point3, f64)> {
+    p1::faces(b, None)
+        .unwrap()
+        .into_iter()
+        .filter_map(|f| match b.face(f).unwrap().surface.as_ref()?.kind() {
+            SurfaceKind::Cone(c) if !c.is_cylinder() => {
+                Some((c.apex(k).unwrap().point, c.semi_angle_deg().abs()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// The volume the cube's own chamfers remove: its 12 edges lose a triangle of legs `a`
 /// along 10 - 2a, and each of its 8 corners three quarters of an `a` cube.
 fn cube_chamfers(a: f64) -> f64 {
@@ -78,8 +94,22 @@ fn issue_379_the_rims_are_chamfered_into_a_closed_solid_with_the_fix() {
     r.unwrap();
     solidcore::topology::integrity::check(&body).unwrap();
     assert!(is_manifold_solid(&body).unwrap(), "not a closed solid");
-    // one revolved chamfer joining each of the top and bottom faces to the hole's wall
-    assert_eq!(revolved_faces(&body), 2);
+    // one chamfer joining each of the top and bottom faces to the hole's wall, stored as
+    // the cone it is (WR-572), no surface of revolution left
+    assert_eq!(revolved_faces(&body), 0);
+    // closed form: legs a = 0.5 at the radius 2 rims make 45 degree cones through the
+    // circles of radius 2 + a on the faces and 2 at depth a, so their apexes are on the
+    // hole's axis (5, 5) at depth 2 + a in from each face: z = 2.5 and z = 7.5
+    let mut got = cones(&k, &body);
+    got.sort_by(|a, b| a.0.z.total_cmp(&b.0.z));
+    assert_eq!(got.len(), 2, "{got:?}");
+    for ((apex, semi_angle), z) in got.iter().zip([2.5, 7.5]) {
+        assert!(
+            apex.distance(Point3::new(5.0, 5.0, z)) <= 1e-9,
+            "apex {apex:?} vs z {z}"
+        );
+        assert!((semi_angle - 45.0).abs() <= 1e-9, "semi-angle {semi_angle}");
+    }
     // each rim (radius 2) loses the triangle of legs a (centroid at 2 + a / 3) turned once
     // about the axis
     let a = 0.5;

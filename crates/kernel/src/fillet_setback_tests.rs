@@ -74,3 +74,50 @@ fn a_setback_not_past_the_radius_is_refused_naming_the_least() {
     assert!(least.is_some_and(|l| (l - 5.0).abs() < 1e-9), "{least:?}");
     assert_eq!(crate::fillet_least_setback(&b, Vec3::new(30.0, 20.0, 10.0), 5.0).unwrap(), None);
 }
+
+/// For the 3.5 mm request, certified_scale returns s = 3.5 * k / 1000 = 35*k/10000,
+/// with integer k in 1001..=2000 after refusing the original request. Match that exact
+/// decimal grid, not one platform's measured result. Each grid value has at most four
+/// decimal places; division and multiplication round by less than 7*gamma_2 mm,
+/// far below half a unit of trimmed_mm's six-decimal display (0.5e-6 mm).
+/// This checks the search/message contract, not a continuous geometric minimum.
+#[cfg(target_os = "windows")]
+pub(super) fn named_fill_setback_on_search_grid(why: &str, prefix: &str) -> f64 {
+    let named = why
+        .split_once(prefix)
+        .and_then(|(_, rest)| rest.split_once(" mm"))
+        .map(|(number, _)| number)
+        .unwrap_or_else(|| panic!("no fill setback named: {why}"));
+    let on_grid = (1001..=2000).any(|k| {
+        let units = 35 * k;
+        let decimal = format!("{}.{:04}", units / 10000, units % 10000);
+        named == decimal.trim_end_matches('0').trim_end_matches('.')
+    });
+    assert!(on_grid, "named setback is not on the certified search grid: {why}");
+    named.parse().unwrap_or_else(|e| panic!("named setback is not a number: {why}: {e}"))
+}
+
+/// tangency-labs/solidcraft#13913: the 40 x 30 x 20 box's corner (40, 30, 20), its three edges
+/// rounded r3, set back 3.5. The refusal names the setback at which solidcore's fill builds;
+/// that named setback builds a valid body. Keep the existing non-Windows 3.5595 regression pin.
+/// Windows checks the search's discrete grid and the message's build promise instead (#14813).
+/// This is a refusal-message contract, not a continuous geometric minimum.
+#[test]
+fn a_setback_too_short_for_the_fill_is_refused_naming_the_one_that_builds() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let edges = [Vec3::new(20.0, 30.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(40.0, 30.0, 10.0)];
+    let corner = Vec3::new(40.0, 30.0, 20.0);
+    let why = match fillet_setback(&b, &edges, 3.0, &[(corner, 3.5)]) {
+        Err(KernelError::Invalid(why)) => why,
+        other => panic!("setback 3.5: {:?}", other.map(|b| b.face_count())),
+    };
+    #[cfg(not(target_os = "windows"))]
+    let least = {
+        assert!(why.contains(&format!("{SETBACK_AT_LEAST}3.5595 mm")), "{why}");
+        3.5595
+    };
+    #[cfg(target_os = "windows")]
+    let least = named_fill_setback_on_search_grid(&why, SETBACK_AT_LEAST);
+    let out = fillet_setback(&b, &edges, 3.0, &[(corner, least)]).unwrap();
+    assert!(out.validity().is_empty(), "{:?}", out.validity());
+}

@@ -11,38 +11,72 @@ use crate::SolveApp;
 /// A save being written on a worker thread.
 pub struct Saving {
     command: &'static str,
-    done: std::sync::mpsc::Receiver<(Session, Result<Value, String>)>,
+    done: std::sync::mpsc::Receiver<(Session, Result<Value, String>, bool)>,
+    /// How far the file is written, and its Cancel: until the file is replaced, a cancelled save
+    /// leaves the file and its backup as they were, and the design unsaved.
+    pub(crate) progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
+}
+
+impl Saving {
+    /// The command writing: `file.save` or `file.save_as`.
+    pub(crate) fn command(&self) -> &'static str {
+        self.command
+    }
 }
 
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
-pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
+pub fn start(app: &mut SolveApp, command: &'static str, mut params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
         app.set_status(solidcraft_ui_text::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
         return false;
     }
+    // A save keeps print faces only when the user keeps them (#11512).
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    // The window's saves keep the bodies' display meshes, so a file browser can show the model
+    // in 3D (Quick Look on macOS, #19328). An explicit `preview` wins.
+    if let Some(given) = params.as_object_mut() {
+        given.entry("preview").or_insert(Value::Bool(true));
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
+    if app.saving.is_none() && app.file_picker.is_none() && !app.file_load_holds() {
         let mut copy = app.session.scratch();
         // The copy has no file: the command saves to this session's (and names the design after it).
         copy.path.clone_from(&app.session.path);
+        // This is the user's own Save: only this path may sign with the keyring.
+        copy.signing_allowed = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let given = params.clone();
+        let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        let watching = progress.clone();
         let job = std::thread::Builder::new().name("save".into()).spawn(move || {
-            let r = copy.execute(command, &given).map_err(|e| e.to_string());
-            let _ = tx.send((copy, r));
+            let r = solidcraft_engine::doc::progress::watch(watching, || copy.execute(command, &given));
+            // A cancelled save is the engine's cancellation, not an error: carry it as such
+            // rather than reading the message again (the panel's outcome depends on it).
+            let cancelled = matches!(&r, Err(solidcraft_engine::EngineError::Cancelled(_)));
+            let r = r.map_err(|e| e.to_string());
+            let _ = tx.send((copy, r, cancelled));
         });
         if job.is_ok() {
-            app.saving = Some(Saving { command, done: rx });
+            app.saving = Some(Saving { command, done: rx, progress });
             return true;
         }
         // No thread to write on: save here, as before.
     }
-    let _ = app.run(command, params);
+    let r = app.run(command, params);
+    offer_container(app, &r);
     false
+}
+
+/// A JSON save refused because the design holds binary data (images, plugin files): its toast
+/// offers Save as .sc, so that data is saved rather than left out.
+fn offer_container<T>(app: &mut SolveApp, r: &Result<T, String>) {
+    if r.as_ref().err().is_some_and(|e| e.contains(solidcraft_engine::io::JSON_CANT_CARRY)) && app.status.as_ref().is_some_and(|s| s.2) {
+        app.status_save_sc = true;
+    }
 }
 
 /// Take up a finished save (`wait`: wait for a running one).
@@ -58,26 +92,41 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         }
     };
     let Some(Saving { command, .. }) = app.saving.take() else { return };
-    let r = match outcome {
-        Some((copy, Ok(v))) => {
+    let (r, cancelled) = match outcome {
+        Some((copy, Ok(v), _)) => {
+            let previous = app.session.path.clone();
             app.session.adopt_save(&copy);
-            Ok(v)
+            crate::control::post_design_saved(app, &copy.document_id, previous);
+            (Ok(v), false)
         }
-        Some((_, Err(e))) => Err(e),
-        None => Err(format!("{command}: the save stopped")),
+        Some((_, Err(e), cancelled)) => (Err(e), cancelled),
+        None => (Err(format!("{command}: the save stopped")), false),
     };
-    app.finish_command(command, &r);
-    // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
-    // around: then the save says what went.
-    if let Some(first) = r.as_ref().ok().and_then(|v| v["warnings"].as_array()).and_then(|w| w.first()).and_then(serde_json::Value::as_str) {
-        app.set_status(first, true);
+    let outcome = match &r {
+        Ok(_) => crate::operations::Outcome::Done,
+        Err(_) if cancelled => crate::operations::Outcome::Cancelled,
+        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(command, e)),
+    };
+    crate::operations::ended(app, &format!("save:{command}"), outcome);
+    if cancelled {
+        // Not an error: the file is as it was, and the design still has its changes to save.
+        let name = solidcraft_ui_text::tr_command(command, crate::command_label(command)).to_string();
+        app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &name)]), false);
+    } else {
+        app.finish_command(command, &r);
+        offer_container(app, &r);
+        // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
+        // around: then the save says what went.
+        if let Some(first) = r.as_ref().ok().and_then(|v| v["warnings"].as_array()).and_then(|w| w.first()).and_then(serde_json::Value::as_str) {
+            app.set_status(first, true);
+        }
     }
     crate::documents::saved_for_close(app);
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn a_pending_save_blocks_feature_computation_and_completed_transaction_adoption() {
@@ -94,7 +143,7 @@ mod tests {
         let document = h.app.session.doc.clone();
         let history = h.app.session.undo.len();
         let (_save_finish, save_done) = std::sync::mpsc::channel();
-        h.app.saving = Some(super::Saving { command: "file.save", done: save_done });
+        h.app.saving = Some(super::Saving { command: "file.save", done: save_done, progress: Default::default() });
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
         assert!(crate::dialogs::begin_applying(&h.app, &dialog).is_none());
         assert!(crate::dialogs::run_dialog(&mut h.app, &dialog).unwrap_err().contains("file operation"));
@@ -118,6 +167,29 @@ mod tests {
         assert!(h.app.dialog.as_ref().unwrap().error.as_ref().unwrap().contains("file operation"));
     }
 
+    /// #19328: the window's saves keep the bodies' display meshes for file browsers (Quick
+    /// Look's 3D view), deflated; a save that asks for no preview still leaves them out.
+    #[test]
+    fn saves_keep_display_meshes_for_file_browsers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let saved = |h: &mut crate::scenario::Harness, name: &str, extra: Value| {
+            let path = h.dir.join(name);
+            let mut params = json!({"path": path.to_string_lossy()});
+            if let (Some(params), Some(extra)) = (params.as_object_mut(), extra.as_object()) {
+                params.extend(extra.clone());
+            }
+            super::start(&mut h.app, "file.save_as", params);
+            super::tick(&mut h.app, true);
+            let bytes = std::fs::read(&path).unwrap();
+            bytes.windows(b"cache/preview.bin".len()).any(|entry| entry == b"cache/preview.bin")
+        };
+        assert!(saved(&mut h, "With meshes.sc", json!({})));
+        assert!(!saved(&mut h, "Plain.sc", json!({"preview": false})));
+    }
+
     /// #6003: an agent's `engine.script` that arrives while the window's Save is being written
     /// waits for the save, as the other design-changing requests do, and runs after it: the
     /// file has the design as it was when Save was pressed, and the script's change is left
@@ -132,7 +204,7 @@ mod tests {
         let mut copy = h.app.session.scratch();
         copy.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
         let (finish, done) = std::sync::mpsc::channel();
-        h.app.saving = Some(super::Saving { command: "file.save_as", done });
+        h.app.saving = Some(super::Saving { command: "file.save_as", done, progress: Default::default() });
         let (tx, rx) = std::sync::mpsc::channel();
         h.app.control_rx = Some(rx);
         let (req, reply) = crate::control::ControlRequest::new("engine.script", json!([{"command": "solid.sphere", "params": {"diameter": 4}}]));
@@ -140,7 +212,7 @@ mod tests {
         h.app.drain_control(&h.ctx);
         assert!(reply.try_recv().is_err(), "held while the save is written");
         assert_eq!(h.app.session.doc.features.len(), 1);
-        finish.send((copy, Ok(json!({})))).unwrap();
+        finish.send((copy, Ok(json!({})), false)).unwrap();
         super::tick(&mut h.app, false);
         assert!(h.app.saving.is_none() && !h.app.session.is_dirty());
         h.app.drain_control(&h.ctx);
@@ -160,10 +232,10 @@ mod tests {
         let mut copy = h.app.session.scratch();
         copy.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
         let (finish, done) = std::sync::mpsc::channel();
-        h.app.saving = Some(super::Saving { command: "file.save_as", done });
+        h.app.saving = Some(super::Saving { command: "file.save_as", done, progress: Default::default() });
         // A change that reaches the session past the window's guards.
         h.app.session.execute("solid.sphere", &json!({"diameter": 4})).unwrap();
-        finish.send((copy, Ok(json!({})))).unwrap();
+        finish.send((copy, Ok(json!({})), false)).unwrap();
         super::tick(&mut h.app, false);
         assert_eq!(h.app.session.path.as_deref(), path.to_str());
         assert_eq!(h.app.session.doc.name, "Plate");
@@ -193,5 +265,101 @@ mod tests {
         super::start(&mut h.app, "file.save_as", json!({"path": bad.to_string_lossy()}));
         super::tick(&mut h.app, true);
         assert!(h.app.session.is_dirty() && h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+    }
+
+    /// A save written on a worker posts exactly one `design.saved` when it is taken up.
+    #[test]
+    fn a_worker_save_posts_one_design_saved() {
+        static WATCH: crate::control::DocumentWatch = crate::control::DocumentWatch::new();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let sub = WATCH.join();
+        let cursor = sub.from();
+        let path = h.dir.join("Worker.solidcraft");
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()})), "under way on a worker");
+        h.frame();
+        h.settle();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let next = WATCH.next(&(String::new(), 0), cursor, &stop, std::time::Duration::ZERO);
+        let saved: Vec<_> = next.events.iter().filter(|e| e["event"] == "design.saved").collect();
+        assert_eq!(saved.len(), 1, "{:?}", next.events);
+        assert_eq!(saved[0]["params"]["path"].as_str(), path.to_str(), "{}", saved[0]);
+        assert!(saved[0]["params"]["previous_path"].is_null(), "{}", saved[0]);
+        drop(sub);
+    }
+
+    #[test]
+    fn an_unsigned_save_of_a_signed_design_says_the_earlier_signature_does_not_cover_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session.path = Some("/work/Signed.sc".into());
+        h.app.session.provenance_chain = Some(solidcraft_engine::io::ProvenanceChain { records: vec![vec![1, 2, 3]], truncated: false });
+        h.app.finish_command("file.save", &Ok(json!({"path": "/work/Signed.sc"})));
+        let (text, _, error) = h.app.status.as_ref().expect("the save says where it went");
+        assert!(text.contains("earlier signature") && text.contains("does not cover"), "{text}");
+        assert!(!error);
+    }
+
+    /// A save can be cancelled until its file is replaced: a cancelled save writes nothing, and
+    /// the design keeps its changes to save. From the operations panel (here `ui.operations`) its
+    /// row's X stops it, and it ends cancelled, not as an error.
+    #[test]
+    fn a_save_cancelled_before_its_file_is_replaced_writes_nothing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let path = h.dir.join("Cancelled.solidcraft");
+        // The engine: a watched save asked to stop writes nothing.
+        let stop = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        stop.cancel();
+        let r = solidcraft_engine::doc::progress::watch(stop, || h.app.session.execute("file.save_as", &json!({"path": path.to_string_lossy()})));
+        assert!(matches!(r, Err(solidcraft_engine::EngineError::Cancelled(_))), "{r:?}");
+        assert!(!path.exists() && h.app.session.is_dirty() && h.app.session.path.is_none());
+        // The window: a save under way is a row with a working X.
+        let (finish, done) = std::sync::mpsc::channel();
+        let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        h.app.saving = Some(super::Saving { command: "file.save_as", done, progress: progress.clone() });
+        let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(listed["operations"][0]["key"], "save:file.save_as", "{listed}");
+        assert_eq!(listed["operations"][0]["cancellable"], true, "{listed}");
+        crate::operations::control(&mut h.app, &json!({"cancel": "save:file.save_as"})).unwrap();
+        assert!(progress.is_cancelled(), "the worker is asked to stop");
+        let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(listed["operations"][0]["cancelling"], true, "{listed}");
+        h.frame();
+        let shown = |h: &crate::scenario::Harness| {
+            h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
+        };
+        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.cancelling").to_string()), "drawn while it stops");
+        // The worker stops before replacing the file: cancelled, not an error, still unsaved.
+        finish.send((h.app.session.scratch(), Err(format!("{}: save cancelled", path.display())), true)).unwrap();
+        super::tick(&mut h.app, false);
+        assert!(h.app.saving.is_none() && h.app.session.is_dirty() && !path.exists());
+        assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| !error), "{:?}", h.app.status);
+        let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(listed["finished"][0]["outcome"], "cancelled", "{listed}");
+        // Its row fades out saying it was cancelled, not still cancelling.
+        h.frame();
+        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.stopped").to_string()));
+    }
+
+    /// A design holding binary data (here a plugin's file) can't be a plain JSON design: Save As
+    /// .json is refused, writes nothing, keeps the design unsaved, and its toast offers Save as .sc.
+    #[test]
+    fn a_json_save_of_binary_data_is_refused_and_offers_a_container() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.session.doc_mut().plugin_data.insert("gears/blobs/table.bin".into(), vec![0, 1, 2, 255].into());
+        let path = h.dir.join("Gears.json");
+        super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()}));
+        super::tick(&mut h.app, true);
+        assert!(!path.exists() && h.app.session.is_dirty(), "nothing written, nothing lost");
+        let (text, _, error) = h.app.status.clone().unwrap();
+        assert!(error && text.contains("plugin files"), "{text}");
+        assert!(h.app.status_save_sc, "the toast offers Save as .sc");
+        h.frame();
+        // Any other message takes the offer away.
+        h.app.set_status("Saved", false);
+        assert!(!h.app.status_save_sc);
     }
 }

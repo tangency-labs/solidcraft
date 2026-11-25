@@ -9,6 +9,7 @@
 //! | `assert_test_edge14` | `sm_AssertTestEdge14` |
 //! | `edgeuse` | `SmEdgeuse::AssertValid` |
 //! | `edge_ends`, `faces_tangent_at` (fork, WR-668) | the edge lookups of `sm_IsZeroSpeedTangentEnd` |
+//! | `tangent_sections::tangent_directions` (not upstream, #18639) | none: test 9's directions past the contact band of tangent planes and cylinders |
 //! | `curve`, `curve_in_walk` | the virtual `SmCurve::AssertValid` (`m_pCurve->AssertValid`, `m_pUVTrimCurve->AssertValid`; the compound and Hermite overrides are in `curves`) |
 //!
 //! Deviations: the radial edge-use walks are bounded by the edge's use count (upstream
@@ -18,15 +19,17 @@
 //! evaluation propagates its error. Loop membership of an edge use (test 14) and wire
 //! membership (test 13) read sets built once per loop use / shell. `SmHyperbola` and
 //! `SmParabola` use the inherited `SmBSplineCurve` check with their own `MakeNurb`,
-//! `IsAnalytic` and `IsBounded`. Opt-in (WR-540,
-//! `Kernel::fixes.edge_check_orders_tangent_faces`, #383): where two faces round an edge
-//! leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
+//! `IsAnalytic` and `IsBounded`. Not upstream (WR-540, #383): where two faces round an
+//! edge leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
 //! direction to its point 20 edge tolerances into the face, square to the edge (the
-//! fork's tangency-labs/smlib@5533bbb). Opt-in (WR-668,
-//! `Kernel::fixes.curve_check_zero_speed_tangent_end`, tangency-labs/smlib ecf1963):
-//! the edge check and edge-use check build the edge's [`EdgeEnds`] (its interval and
-//! whether its faces are tangent at each end) before checking its curve or a UV trim,
-//! since a Rust curve does not point back to its edge as the fork's check reads it.
+//! fork's tangency-labs/smlib@5533bbb). Not upstream (#18639): round a line edge whose
+//! faces are all planes and cylinders along it, test 9 reads them instead at the step
+//! `tangent_sections` certifies in closed form, past the band in which the tangent faces
+//! are within the contact tolerance of each other, wherever one is certified. Not upstream (WR-668, tangency-labs/smlib
+//! ecf1963, the default since its flag was retired): the edge check and edge-use
+//! check build the edge's [`EdgeEnds`] (its interval and whether its faces are tangent
+//! at each end) before checking its curve or a UV trim, since a Rust curve does not
+//! point back to its edge as the fork's check reads it.
 //! Only `SmBSplineCurve`, parabola and hyperbola checks take it; a line has too few
 //! control points for a zero-speed end and an ellipse's conic segments have no
 //! coincident end control points.
@@ -55,10 +58,9 @@ use crate::topology::{
 /// `m_pCurve->AssertValid(pAList, eTestLevel, SM_NO_WALK)` dispatched on the curve's
 /// class: the curve object reports as `key`, an ellipse's polar converter as
 /// `polar_key`. `trim_surface` is the face's surface of a UV trim (WR-560, read by the
-/// `SmBSplineCurve` checks with `Kernel::fixes.uv_trim_checks_on_surface`).
+/// `SmBSplineCurve` checks).
 /// `edge_ends` is the edge the curve is the 3D curve or a UV trim of (WR-668, read by
-/// the `SmBSplineCurve` checks with `Kernel::fixes.curve_check_zero_speed_tangent_end`;
-/// see [`edge_ends`]).
+/// the `SmBSplineCurve` checks; see [`edge_ends`]).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn curve(
     k: &Kernel,
@@ -175,26 +177,22 @@ pub(super) struct EdgeSets {
     wire_edges: BTreeMap<ShellId, BTreeSet<EdgeId>>,
 }
 
-/// Not upstream (fork tangency-labs/smlib ecf1963, WR-668, opt-in): what the fork's
+/// Not upstream (fork tangency-labs/smlib ecf1963, WR-668): what the fork's
 /// `sm_IsZeroSpeedTangentEnd` reads from the edge `e` of a curve it checks, built
-/// before the check since a Rust curve does not point back to its edge. `None` with
-/// `Kernel::fixes.curve_check_zero_speed_tangent_end` off (nothing is evaluated).
+/// before the check since a Rust curve does not point back to its edge.
 ///
 /// # Errors
 ///
 /// The arena lookups'.
-pub(super) fn edge_ends(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Option<EdgeEnds>> {
-    if !k.fixes.curve_check_zero_speed_tangent_end {
-        return Ok(None);
-    }
+pub(super) fn edge_ends(k: &Kernel, b: &Brep, e: EdgeId) -> Result<EdgeEnds> {
     let interval = b.edge(e)?.interval;
-    Ok(Some(EdgeEnds {
+    Ok(EdgeEnds {
         interval,
         faces_tangent: [
             faces_tangent_at(k, b, e, interval.min()),
             faces_tangent_at(k, b, e, interval.max()),
         ],
-    }))
+    })
 }
 
 /// Whether the faces of the edge `e`'s uses are tangent at its parameter `edge_end`:
@@ -260,7 +258,7 @@ fn edge_curve_check(k: &Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> Res
         geometry_key(20001, e.index()),
         geometry_key(20004, e.index()),
         None,
-        ends.as_ref(),
+        Some(&ends),
     )
 }
 
@@ -382,7 +380,8 @@ fn edge_point(k: &Kernel, b: &Brep, e: EdgeId, t: f64) -> Result<Point3> {
 /// The direction edge use `eu`'s face leaves the edge in at `t` (with its point,
 /// tangent and face normal): its binormal, or with `step_off` (WR-540) the direction to
 /// its point `step_off_dist` into the face, square to the edge (kept as the binormal when
-/// the step or a unitisation fails).
+/// the step or a unitisation fails); with `certified` (#18639) the direction it holds for
+/// `eu`.
 fn sector_direction(
     k: &Kernel,
     b: &mut Brep,
@@ -391,9 +390,14 @@ fn sector_direction(
     options: BinormalOptions,
     step_off: bool,
     step_off_dist: f64,
+    certified: Option<&[(EdgeuseId, crate::math::Vec3)]>,
 ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
     use crate::topology::edgeuse::p2::{evaluate_binormal_step_off, StepOffOptions};
     let mut eval = evaluate_binormal(k, b, eu, t, true, &options)?;
+    if let Some(&(_, dir)) = certified.and_then(|c| c.iter().find(|(u, _)| *u == eu)) {
+        eval.binormal = dir;
+        return Ok(eval);
+    }
     if !step_off {
         return Ok(eval);
     }
@@ -447,43 +451,48 @@ fn radial_order(
     // Must watch out for zero sectors: coincident faces.
     let mut have_nonzero_angle = false;
 
-    // Not upstream (WR-540), opt-in `Kernel::fixes.edge_check_orders_tangent_faces` (the
-    // fork's tangency-labs/smlib@5533bbb, #383): a sector between faces tangent along the
-    // edge (a cylinder touching a plane it rests on, left by a boolean as a non-manifold
-    // edge) has binormals that agree to first order, so the binormal angles tie (or differ
-    // by rounding, either way round) and cannot show the order. Where any sector is that
-    // narrow, every face is measured by the direction from the edge to its point a short
-    // step into the face (20 edge tolerances, as IsConvexRadialSector steps).
+    // Not upstream (WR-540; the fork's tangency-labs/smlib@5533bbb, #383): a sector
+    // between faces tangent along the edge (a cylinder touching a plane it rests on, left
+    // by a boolean as a non-manifold edge) has binormals that agree to first order, so the
+    // binormal angles tie (or differ by rounding, either way round) and cannot show the
+    // order. Where any sector is that narrow, every face is measured by the direction from
+    // the edge to its point a short step into the face (20 edge tolerances, as
+    // IsConvexRadialSector steps). Not upstream (#18639): round a line edge whose faces
+    // are planes and cylinders along it, every face is read instead at the step that
+    // `tangent_sections` certifies past the tangent faces' contact band, where one is.
     let seq_param = extent.evaluate(0.456);
-    let mut step_off = false;
-    let mut step_off_dist = 0.0;
-    if k.fixes.edge_check_orders_tangent_faces {
-        step_off_dist = 20.0 * tedge::tolerance(b, e)?;
-        let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
-        let num_eus = b.edge(e)?.edgeuses.len();
-        let mut eu = target;
-        let mut sectors = 0usize;
-        while let Some(rad) = eu1::radial(b, eu)? {
-            if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
-                break;
-            }
-            let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
-            let b1 =
-                crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
-            if let (Some(b0), Some(b1)) = (b0, b1) {
-                if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
-                    if u0.dot(u1) > tie_dot {
-                        step_off = true;
-                    }
-                }
-            }
-            sectors += 1;
-            match eu1::mate(b, rad)? {
-                Some(next) if !step_off && next != target && sectors < num_eus => eu = next,
-                _ => break,
+    let edge_tol = tedge::tolerance(b, e)?;
+    let step_off_dist = 20.0 * edge_tol;
+    let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
+    let num_eus = b.edge(e)?.edgeuses.len();
+    let mut walked: Vec<(EdgeuseId, EdgeuseId, bool)> = Vec::new();
+    let mut eu = target;
+    let mut sectors = 0usize;
+    while let Some(rad) = eu1::radial(b, eu)? {
+        if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
+            break;
+        }
+        let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
+        let b1 = crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
+        let mut tie = false;
+        if let (Some(b0), Some(b1)) = (b0, b1) {
+            if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
+                tie = u0.dot(u1) > tie_dot;
             }
         }
+        walked.push((eu, rad, tie));
+        sectors += 1;
+        match eu1::mate(b, rad)? {
+            Some(next) if next != target && sectors < num_eus => eu = next,
+            _ => break,
+        }
     }
+    let step_off = walked.iter().any(|s| s.2);
+    let certified = if step_off {
+        super::tangent_sections::tangent_directions(k, b, e, seq_param, edge_tol, &walked)?
+    } else {
+        None
+    };
 
     let mut steps = 0;
     while Some(target) != primary {
@@ -503,8 +512,11 @@ fn radial_order(
             ));
         }
         let t = extent.evaluate(0.456);
-        let target_eval = sector_direction(k, b, target, t, options, step_off, step_off_dist)?;
-        let radial_eval = sector_direction(k, b, radial, t, options, step_off, step_off_dist)?;
+        let certified = certified.as_deref();
+        let target_eval =
+            sector_direction(k, b, target, t, options, step_off, step_off_dist, certified)?;
+        let radial_eval =
+            sector_direction(k, b, radial, t, options, step_off, step_off_dist, certified)?;
 
         // 1st iteration save variables
         if primary.is_none() {
@@ -912,24 +924,20 @@ pub(super) fn edgeuse(
     // when Edgeuse has a UVTrimCurve - Check that it's valid
     if has_trim {
         let level = cx.rep.level;
-        // not upstream (WR-560, opt-in): the trim is measured on its face's surface
+        // not upstream (WR-560): the trim is measured on its face's surface
         // (`GetEdgeuse()->GetFace()->GetSurface()`)
-        let trim_surface = if k.fixes.uv_trim_checks_on_surface {
-            match eu1::face(b, eu)? {
-                Some(f) => b
-                    .face(f)?
-                    .surface
-                    .as_ref()
-                    .map(Surface::clone_for_evaluation)
-                    .transpose()?,
-                None => None,
-            }
-        } else {
-            None
+        let trim_surface = match eu1::face(b, eu)? {
+            Some(f) => b
+                .face(f)?
+                .surface
+                .as_ref()
+                .map(Surface::clone_for_evaluation)
+                .transpose()?,
+            None => None,
         };
-        // not upstream (WR-668, opt-in): the trim's edge (`GetEdgeuse()->GetEdge()`)
+        // not upstream (WR-668): the trim's edge (`GetEdgeuse()->GetEdge()`)
         let ends = match eu1::edge(b, eu)? {
-            Some(e) => edge_ends(k, b, e)?,
+            Some(e) => Some(edge_ends(k, b, e)?),
             None => None,
         };
         let list = cx.rep.array.as_deref_mut();
@@ -1001,7 +1009,7 @@ mod tests {
         let ids: Vec<EdgeId> = b.edges().ids().collect();
         let mut tangent = 0;
         for &e in &ids {
-            let ends = edge_ends(k, b, e).unwrap().unwrap();
+            let ends = edge_ends(k, b, e).unwrap();
             let [s, t] = &ends.faces_tangent;
             if *s.as_ref().unwrap() && *t.as_ref().unwrap() {
                 tangent += 1;
@@ -1013,15 +1021,11 @@ mod tests {
     /// WR-668's edge context: a box's faces meet at right angles at every edge end;
     /// a box minus a cylinder resting on its face x = 20 (WR-540's shape) keeps the
     /// tangency as an edge whose faces (the plane's and the cylinder's) are tangent
-    /// at both ends. With the flag off nothing is built.
+    /// at both ends.
     #[test]
     fn wr_668_edge_ends_read_the_faces_tangency() {
         let mut k = Kernel::default();
         let block = create_box(&mut k, Point3::new(20.0, 5.0, 5.0), 15.0, 15.0, 27.5).unwrap();
-        let ids: Vec<EdgeId> = block.edges().ids().collect();
-        assert!(edge_ends(&k, &block, ids[0]).unwrap().is_none());
-
-        k.fixes.curve_check_zero_speed_tangent_end = true;
         assert_eq!(tangent_edges(&k, &block), (0, 12));
         let block = create_box(&mut k, Point3::new(20.0, 5.0, 5.0), 15.0, 15.0, 27.5).unwrap();
         let pin = create_cylinder(&mut k, Point3::new(25.0, 12.5, 22.5), 5.0, 25.0).unwrap();

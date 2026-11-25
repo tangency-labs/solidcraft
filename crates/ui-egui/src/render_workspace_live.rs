@@ -16,6 +16,7 @@ use solidcraft_engine::{
 };
 
 use super::{ImageMethod, ribbon};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 
 const LONGEST_EDGE: u32 = 512;
@@ -479,6 +480,12 @@ pub(crate) fn set_paused(app: &mut SolveApp, paused: bool) {
         app.render_workspace.live.attempted = false;
     }
 }
+/// Show the fast model preview while keeping explicit render jobs and results.
+pub(super) fn show_model_preview(app: &mut SolveApp) {
+    app.render_workspace.view.live_paused = true;
+    app.render_workspace.live.reset();
+    app.render_workspace.live.suspended = true;
+}
 /// Preparation owns the same live-release priority as an explicit final. The
 /// original pending/running owners stay here until their release acknowledgements.
 pub(super) fn suspend_for_preparation(app: &mut SolveApp) {
@@ -651,7 +658,7 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         help.push_str("\n\n");
         help.push_str(app.tr("render.adaptive.preview_help"));
     }
-    let note = ui_kit::StageBar::note_bounded(ui, &status, max_width).on_hover_text(help);
+    let note = ui_kit::StageBar::note_bounded(ui, &status, max_width).backing_on_hover_text(help);
     crate::scenario::publish_target("render:live:status", note.rect);
     ui_kit::StageBar::separator(ui);
 }

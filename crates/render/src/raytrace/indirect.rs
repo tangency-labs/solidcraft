@@ -93,8 +93,9 @@ pub(super) struct Sample {
     pub weight: Vec3,
 }
 
-/// The base mixes cosine and visible GGX normals equally. The coat selects its
-/// own visible normals with probability weight/2. Null mass is never retried.
+/// One variate picks the coat, diffuse or base specular lobe with the probabilities of
+/// `lobe_probabilities`, the ones `surface_pdf` weights its lobes by: the coat takes weight/2,
+/// and the diffuse lobe takes 0.5 × (1 − metallic) of the rest. Null mass is never retried.
 pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, u: [f64; 3]) -> Result<Option<Sample>> {
     if u.into_iter().any(|x| !x.is_finite() || !(0.0..1.0).contains(&x)) {
         return Err(invalid("CPU path variates must be in [0,1)"));
@@ -105,9 +106,8 @@ pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, 
     if n.dot(v) <= 0.0 || geometric.dot(v) <= 0.0 {
         return Ok(None);
     }
-    let coat_probability = surface.clear_coat().map_or(0.0, |coat| coat.weight() * 0.5);
-    let base_component = (u[0] - coat_probability) / (1.0 - coat_probability);
-    let direction = if u[0] >= coat_probability && base_component < 0.5 {
+    let [diffuse_probability, _, coat_probability] = solidcraft_viewport::clear_coat::lobe_probabilities(surface);
+    let direction = if u[0] >= coat_probability && u[0] - coat_probability < diffuse_probability {
         cosine_direction(n, [u[1], u[2]])?
     } else {
         let roughness = if u[0] < coat_probability {

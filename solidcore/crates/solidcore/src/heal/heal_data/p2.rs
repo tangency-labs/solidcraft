@@ -78,8 +78,27 @@
 //!   `topology.brep_p1`) are wired; [`SolidError::Unported`] from their own unported
 //!   callees propagates. `Cache_DegenFaces` defers where `IsDegenerate` does
 //!   (`SmCurveClassification`).
+//! - **`Fix_TolSizes` edge tolerances** (not upstream): an edge's new tolerance is at
+//!   least the gap gain times its edge/face gap. Upstream's `gain * gap - def` is under
+//!   gaps below ten times the default, leaving a fixed edge the check's edge/face test
+//!   (`SmBrep` Test #4) fails.
+//! - **`Fix_TolSizes` edge tolerances at the check's limit** (not upstream): where that cover
+//!   of the sampled gap reaches the limit the pointer check refuses an edge past
+//!   (`LARGE_SMALL_SIZE_RATIO` times the body's tolerance, `SmBrep` Test #59), the edge takes
+//!   the certified bound of its edge/face gap instead ([`certified_edge_face_gap`]), when that
+//!   bound is under the limit. The gap gain is a margin over 20 samples; an enclosure needs
+//!   none. Upstream gave an imported edge whose gap is under the limit a tolerance the check
+//!   refuses.
+//! - **`Fix_TolSizes` vertex tolerances** (not upstream, #17739): a vertex's new tolerance is
+//!   at least the gap gain times twice its largest gap. The check holds a vertex's gaps to half
+//!   its tolerance (WR-679, `SmBrep` Tests #0-#3), and upstream's `gain * gap / 2` and
+//!   `gain * gap - def` are under twice the gap. As the check's own tolerance update, it grows
+//!   no further than the limit past which Test #82 refuses a vertex (a misplaced vertex, not a
+//!   gap to absorb). From that limit up it grows only where the check's clearance proof of
+//!   Test #82 shows the ball reaching no topology the vertex does not bound.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
+use crate::error::heal::HealFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -88,16 +107,16 @@ use crate::geom::hash_table::{
 };
 use crate::geom::tol::{
     approx_tol_3d, brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d,
-    brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, calc_edge_zone_tol_3d,
-    calc_vertex_zone_tol_3d, context_model_size_estimate, context_zone_tol_3d,
-    set_brep_model_size_estimate, size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType,
-    USE_DEFAULT,
+    brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, brep_size_calc_gap_zone_tol_3d,
+    brep_size_zone_tol_3d, context_model_size_estimate, gap_gain, set_brep_model_size_estimate,
+    size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType, LARGE_SMALL_SIZE_RATIO, USE_DEFAULT,
 };
 use crate::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, PropStage, Tri, TriedLinkType,
 };
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
+use crate::topology::brep::validation::{vertex_ball_reaches, GROWTH_PAST_RATIO};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{
@@ -485,16 +504,18 @@ impl EdgeProps {
         }
 
         // locals - Edge Tols and gaps
-        let def_zone_tol_3d = context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+        // (upstream asks the B-rep's context, there this model's: the zone tolerance
+        // of this B-rep's own model size estimate)
+        let def_zone_tol_3d = brep_size_zone_tol_3d(k, b);
         let edge_edge_max_gap_length_3d = self.max_edge_edge_gap_length(b)?;
         let edge_face_max_gap_length_3d = self.max_edge_face_gap_length(b)?;
         // Don't send MaxFaceZoneTol, as those Tols haven't been set yet.
-        let calc_zone_tol_3d = calc_edge_zone_tol_3d(
+        let calc_zone_tol_3d = brep_size_calc_gap_zone_tol_3d(
             k,
             edge_edge_max_gap_length_3d,
             edge_face_max_gap_length_3d,
+            b,
             None,
-            Some(&k.context),
         );
 
         // check - CalcZoneTol3d should = OrigZoneTol3d
@@ -729,16 +750,17 @@ impl VertexProps {
         }
 
         // locals for Problem gap checks
-        let def_zone_tol_3d = context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+        // (the zone tolerance of this B-rep's own model size estimate, as for edges)
+        let def_zone_tol_3d = brep_size_zone_tol_3d(k, b);
         let vertex_edge_max_gap_length_3d = self.max_vtx_edge_gap_length(b)?;
         let vertex_face_max_gap_length_3d = self.max_vtx_face_gap_length(b)?;
         // EdgeTol not yet set, so unreliable for this test
-        let calc_zone_tol_3d = calc_vertex_zone_tol_3d(
+        let calc_zone_tol_3d = brep_size_calc_gap_zone_tol_3d(
             k,
             vertex_edge_max_gap_length_3d,
             vertex_face_max_gap_length_3d,
+            b,
             None,
-            Some(&k.context),
         );
 
         // ZoneTol3d for current Gap3d sizes
@@ -2005,7 +2027,7 @@ fn gap_histogram() -> Vec<u64> {
 fn ignore_status(r: Result<()>) -> Result<()> {
     match r {
         Ok(()) => Ok(()),
-        Err(e) if matches!(e, SolidError::Upstream { .. }) || e.is_nurbs_failure() => Ok(()),
+        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
         Err(e) => Err(e),
     }
 }
@@ -3042,10 +3064,12 @@ impl<O: LoopObject> HealData<O> {
 
         // When The BrepTolerance needs to be set - set it based on ModelSizeEstimate
         if this_est_zone_tol_3d != brep_est_zone_tol_3d {
+            // (the context's is the kernel's configured default, which no B-rep
+            // writes: the B-rep stores the default where that already fits it)
             if this_est_zone_tol_3d == context_est_zone_tol_3d {
-                set_brep_model_size_estimate(k, b, USE_DEFAULT);
+                set_brep_model_size_estimate(b, USE_DEFAULT);
             } else {
-                set_brep_model_size_estimate(k, b, this_model_size);
+                set_brep_model_size_estimate(b, this_model_size);
             }
         }
         set_brep_tolerance(k, b, this_est_zone_tol_3d)?;
@@ -3111,6 +3135,43 @@ impl<O: LoopObject> HealData<O> {
                 b,
                 Some(max_face_tol),
             );
+            // not upstream: `gain * gap - def` is under an edge/face gap below ten times the
+            // default, so a fixed edge failed the check's edge/face test (gap over the edge
+            // tolerance, SmBrep Test #4). The tolerance covers the gap with the gap gain.
+            let zone_tol_3d = if max_edge_face_gap_3d_length > zone_tol_3d {
+                zone_tol3d(k, gap_gain(k) * max_edge_face_gap_3d_length)
+            } else {
+                zone_tol_3d
+            };
+            // not upstream: the gain is a margin over a sampled gap. Where it takes the edge to
+            // the limit the pointer check refuses (Test #59), the certified bound of the gap
+            // needs no margin; the edge keeps the formula's other terms and takes that bound
+            // when the result is under the limit (validity-and-tolerances.md §8: a tolerance
+            // grows to a bound, not a sample). A gap whose bound is past the limit is left to
+            // the check, as before.
+            let limit = LARGE_SMALL_SIZE_RATIO * b.tolerance();
+            let zone_tol_3d = if zone_tol_3d >= limit {
+                match certified_edge_face_gap(k, b, bad_tol_edge, limit / 100.0)? {
+                    Some(bound) => {
+                        let covered = zone_tol3d(
+                            k,
+                            bound
+                                .max(max_edge_face_gap_3d_length)
+                                .max(gap_gain(k) * max_edge_edge_gap_3d_length / 2.0)
+                                .max(max_face_tol)
+                                .max(b.tolerance()),
+                        );
+                        if covered < limit {
+                            covered
+                        } else {
+                            zone_tol_3d
+                        }
+                    }
+                    None => zone_tol_3d,
+                }
+            } else {
+                zone_tol_3d
+            };
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = edge::tolerance(b, bad_tol_edge)?;
                 self.edge_props.props_mut(id)?.orig_zone_tol_3d = t;
@@ -3157,6 +3218,25 @@ impl<O: LoopObject> HealData<O> {
                 b,
                 Some(max_edge_tol_3d),
             );
+            // not upstream (#17739): `gain * gap / 2` and `gain * gap - def` are under twice the
+            // gap, and the check holds a vertex's gaps to half its tolerance (WR-679), so a fixed
+            // vertex failed a gap its tolerance had covered. The tolerance covers twice the gap
+            // with the gap gain, as the edge branch above covers the edge/face gap, unless that
+            // passes the limit past which Test #82 refuses the vertex (as `validate_and_update`).
+            // From the limit up, Test #82 also refuses a ball that reaches topology the vertex
+            // does not bound (validity-and-tolerances.md §8: a tolerance grows only while it
+            // stays clear), so the cover is taken there only where the check proves it clear.
+            let twice_gap = 2.0 * max_vertex_edge_gap_3d_length.max(max_vertex_face_gap_3d_length);
+            let covered = zone_tol3d(k, gap_gain(k) * twice_gap);
+            let limit = LARGE_SMALL_SIZE_RATIO * b.tolerance();
+            let zone_tol_3d = if twice_gap > zone_tol_3d
+                && covered < GROWTH_PAST_RATIO * limit
+                && (covered < limit || ball_clears(k, b, bad_tol_vertex, covered)?)
+            {
+                covered
+            } else {
+                zone_tol_3d
+            };
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = vertex::tolerance(b, bad_tol_vertex)?;
                 self.vertex_props.props_mut(id)?.orig_zone_tol_3d = t;
@@ -3375,12 +3455,14 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when coincident edges are listed.
+    /// [`HealFailure::CoincidentEdgesUnfixed`] (`SM_ERR`) when coincident edges are
+    /// listed.
     pub fn fix_coin_edges(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_coin_edges.base.is_empty() {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::heal(
                 "heal::heal_data::p2::HealData::fix_coin_edges",
+                HealFailure::CoincidentEdgesUnfixed,
             ));
         }
         Ok(())
@@ -3397,12 +3479,14 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when missed intersections are listed.
+    /// [`HealFailure::MissedEdgeIntersectionsUnfixed`] (`SM_ERR`) when missed
+    /// intersections are listed.
     pub fn fix_missed_edge_xsects(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_missed_edge_xsects.base.is_empty() {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::heal(
                 "heal::heal_data::p2::HealData::fix_missed_edge_xsects",
+                HealFailure::MissedEdgeIntersectionsUnfixed,
             ));
         }
         Ok(())
@@ -3444,9 +3528,92 @@ impl<O: LoopObject> HealData<O> {
     }
 }
 
+/// Whether vertex `v` at tolerance `radius` passes the clearance half of Test #82
+/// ([`vertex_ball_reaches`]): its ball provably reaches no face or edge it does not bound. The
+/// vertex keeps its tolerance; a query that cannot be had proves nothing, so the ball counts as
+/// reaching, as in the check.
+///
+/// # Errors
+///
+/// A cancelled pass and a dangling vertex.
+fn ball_clears(k: &Kernel, b: &mut Brep, v: VertexId, radius: f64) -> Result<bool> {
+    let kept = vertex::tolerance(b, v)?;
+    vertex::set_tolerance(b, v, radius, false, false)?;
+    let reaches = vertex_ball_reaches(k, b, v);
+    vertex::set_tolerance(b, v, kept, false, false)?;
+    match reaches {
+        Ok(reaches) => Ok(!reaches),
+        Err(error) if error.is_cancelled() => Err(error),
+        Err(_) => Ok(false),
+    }
+}
+
 /// An unsized voxel model (`SetSize(0, 0, 0, NULL, 0)`).
 fn empty_voxels() -> ObjsInVoxels<VertexPropsId> {
     ObjsInVoxels::default()
+}
+
+/// The certified bound of edge `e`'s edge/face gap: the largest, over the faces `e` bounds, of
+/// [`curve_face_gap_bound`] on the edge's trimmed B-spline form (a line's B-spline part), with
+/// `floor` the bound's scale. `None` when the edge has no such form or a face's gap is not
+/// enclosed.
+///
+/// The bound is to the face surface's net. A procedural blend evaluates as its definition S,
+/// so the healer and the check measure the gap to S, and its net is only within its certified
+/// bound ε of S: the bound to S is the net's plus ε (`|C - S(W)| <= |C - B(W)| + ε`). Every
+/// other surface evaluates as its net (a kept definition is not evaluated), so nothing is added.
+///
+/// # Errors
+///
+/// Those of [`edge::create_trimmed_nurbs_curve`] and [`curve_face_gap_bound`] (a dangling face,
+/// the kernel's unported and cancelled statuses).
+fn certified_edge_face_gap(k: &Kernel, b: &Brep, e: EdgeId, floor: f64) -> Result<Option<f64>> {
+    use crate::curve::curve::CurveKind;
+    use crate::query::curve_surface_gap::curve_face_gap_bound;
+    use crate::surface::surface::{Surface, SurfaceKind};
+
+    let Some(trimmed) = edge::create_trimmed_nurbs_curve(k, b, e)? else {
+        return Ok(None);
+    };
+    let spline = match trimmed.kind() {
+        CurveKind::BSpline(s) => s,
+        CurveKind::Line(l) => &l.base,
+        _ => return Ok(None),
+    };
+    let range = trimmed.natural_interval();
+    let mut most: Option<f64> = None;
+    for f in edge::faces(b, e, None)? {
+        let Some(g) = curve_face_gap_bound(k, b, f, spline, [range.min(), range.max()], floor)?
+        else {
+            return Ok(None);
+        };
+        let net_off = match b.face(f)?.surface.as_ref().map(Surface::kind) {
+            Some(SurfaceKind::ProceduralBlend(pb)) => pb.bound(),
+            _ => 0.0,
+        };
+        let Some(g) = plus_net_bound(g, net_off) else {
+            return Ok(None);
+        };
+        most = Some(most.map_or(g, |m| m.max(g)));
+    }
+    Ok(most)
+}
+
+/// The bound `g` to a face's net plus the net's bound `net_off` from its definition, rounded
+/// up (a sum of two bounds is a bound only with its rounding: definitions-and-certificates.md
+/// §7, 5). A `net_off` of 0 leaves `g` as it is. `None` for a `net_off` that is not a finite
+/// non-negative number, or a sum that is not finite.
+fn plus_net_bound(g: f64, net_off: f64) -> Option<f64> {
+    use crate::blend::fillet_section::interval::Ivl;
+
+    if !(net_off.is_finite() && net_off >= 0.0) {
+        return None;
+    }
+    if net_off == 0.0 {
+        return Some(g);
+    }
+    let sum = (Ivl::from(g) + Ivl::from(net_off)).hi;
+    sum.is_finite().then_some(sum)
 }
 
 #[cfg(test)]
@@ -3512,5 +3679,208 @@ mod tests {
         assert_eq!(h.non_degen_min_edge_length, BIG_DOUBLE);
         assert_eq!(h.edge_len_3d_histogram.len(), EDGELEN_BUCKET_CNT);
         assert_eq!(h.bad_face_props_missing_pole.prob_label, " - Bad ");
+    }
+
+    /// The certified edge/face gap on a procedural blend is to its definition S, not only to
+    /// its net. S is the ball of radius 2 rolled between the planes y = 0 and z = 0 along x
+    /// (a quarter cylinder about the line y = z = 2), its side t = 0 the line (x, 0, 2). The
+    /// face is the strip t in [0, 0.01] on a net B that is S along v = 0 but for a cubic bump
+    /// of height `h` towards -y over u in [0.3912, 0.3944], between two of the points the bound
+    /// probes the net at (the edge's 257 equally spaced parameters, 100/256 and 101/256). Its
+    /// stated bound is `h`. The edge on v = 0 is the net's own row, so it lies on B (bound to B
+    /// about 0) and is off S by the bump, whose peak is `2h/3` (a uniform cubic B-spline's).
+    /// The sum with a blend's bound is rounded up: `1 + 2^-53` rounds to 1 to nearest, under
+    /// the two bounds' sum. Without a bound to add the gap's bound is kept bit for bit.
+    #[test]
+    fn a_blend_s_bound_is_added_rounded_up() {
+        let tiny = f64::EPSILON / 2.0;
+        assert_eq!(1.0 + tiny, 1.0);
+        let sum = plus_net_bound(1.0, tiny).unwrap();
+        assert!(sum > 1.0, "{sum}");
+        assert!(sum <= 1.0 + 4.0 * f64::EPSILON, "{sum}");
+        let g = 0.1 + 0.2;
+        assert_eq!(plus_net_bound(g, 0.0).map(f64::to_bits), Some(g.to_bits()));
+        assert_eq!(plus_net_bound(f64::MAX, f64::MAX), None);
+        assert_eq!(plus_net_bound(1.0, -1e-9), None);
+        assert_eq!(plus_net_bound(1.0, f64::NAN), None);
+    }
+
+    #[test]
+    fn a_procedural_blend_s_gap_bound_is_to_its_definition() {
+        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::curve::curve::Curve;
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::{Point2, Point3};
+        use crate::nurbs::b_spline_curve::{
+            BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+        };
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
+        use crate::surface::surface::Surface;
+
+        const L: f64 = 10.0;
+        const R: f64 = 2.0;
+        const DV: f64 = 0.01;
+        let h = 1.5e-3;
+        let mut k = Kernel::default();
+        let plane = |p: [Point3; 4]| {
+            Surface::from(BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap())
+        };
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let side = plane([
+            o,
+            Point3::new(L, 0.0, 0.0),
+            Point3::new(0.0, 0.0, L),
+            Point3::new(L, 0.0, L),
+        ]);
+        let floor_plane = plane([
+            o,
+            Point3::new(L, 0.0, 0.0),
+            Point3::new(0.0, L, 0.0),
+            Point3::new(L, L, 0.0),
+        ]);
+        let line = |a: Point3, b: Point3| BSplineCurve::create_line_segment(3, a, b).unwrap();
+        let leader = line(Point3::new(0.0, R, R), Point3::new(L, R, R));
+        let seed = line(Point3::new(0.0, R / L, 0.0), Point3::new(1.0, R / L, 0.0));
+        let blend = |net: &BSplineSurface| {
+            let input = BlendDefinitionInput {
+                supports: [&side, &floor_plane],
+                sides: [-1.0, 1.0],
+                offsets: [R, R],
+                law: None,
+                order: 1,
+                thumbweight: 0.0,
+                leader: &leader,
+                seeds: [&seed, &seed],
+                bound: h,
+                chamfer: None,
+            };
+            ProceduralBlend::create(&k, net, &input, |n, w| {
+                GnSectionFsg::is_valid(n as usize, w)
+            })
+            .unwrap()
+        };
+        // S's section at t = 0 and t = DV, with its t-derivative (the same at every s)
+        let any = BSplineSurface::create_bilinear_surface(
+            o,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+        )
+        .unwrap();
+        let probe = blend(&any);
+        let at = |t: f64| {
+            let d = probe.evaluate_definition(&k, 0.5, t, 0, 1).unwrap();
+            (d[0][0], d[0][1])
+        };
+        let ((p0, d0), (p1, d1)) = (at(0.0), at(DV));
+        assert!(
+            (p0 - Point3::new(L / 2.0, 0.0, R)).length() < 1e-12,
+            "{p0:?}"
+        );
+        // the cubic Hermite in v through the section's ends: within 1e-9 of S on the strip
+        let section = [p0, p0 + d0 * (DV / 3.0), p1 - d1 * (DV / 3.0), p1];
+        let u_knots = [
+            0.0, 0.1, 0.2, 0.3, 0.3912, 0.392, 0.3928, 0.3936, 0.3944, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+        ];
+        let mut u_mults = vec![1; u_knots.len()];
+        u_mults[0] = 4;
+        u_mults[u_knots.len() - 1] = 4;
+        let full: Vec<f64> = u_knots
+            .iter()
+            .zip(&u_mults)
+            .flat_map(|(&t, &m)| std::iter::repeat_n(t, m))
+            .collect();
+        // Greville abscissae: x = L u exactly along the net; the control point whose basis
+        // spans the five knots from 0.3912 to 0.3944 carries the bump
+        let greville: Vec<f64> = full
+            .windows(4)
+            .skip(1)
+            .map(|w| w[..3].iter().sum::<f64>() / 3.0)
+            .collect();
+        let bumped = 7;
+        assert_eq!(full[bumped], 0.3912);
+        assert_eq!(full[bumped + 4], 0.3944);
+        let mut cps = Vec::new();
+        for (i, &g) in greville.iter().enumerate() {
+            for (j, q) in section.iter().enumerate() {
+                let dy = if i == bumped && j == 0 { -h } else { 0.0 };
+                cps.push(Point3::new(L * g, q.y + dy, q.z));
+            }
+        }
+        let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 3,
+            control_points: &cps,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &u_mults,
+            v_multiplicities: &[4, 4],
+            u_knots: &u_knots,
+            v_knots: &[0.0, DV],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let surface = Surface::from(blend(&net));
+        // premise: the net is within its stated bound of S, and S is the quarter cylinder
+        let mut most_off = 0.0_f64;
+        for i in 0..=400 {
+            for j in 0..=4 {
+                let uv = Point2::new(f64::from(i) / 400.0, DV * f64::from(j) / 4.0);
+                let s = surface.evaluate_point(&k, uv).unwrap();
+                let r = (s.y - R).hypot(s.z - R);
+                assert!(
+                    (r - R).abs() < 1e-12 && (s.x - L * uv.x).abs() < 1e-12,
+                    "{s:?}"
+                );
+                most_off = most_off.max((net.evaluate_point(uv).unwrap() - s).length());
+            }
+        }
+        assert!(most_off <= h, "{most_off}");
+        // the edge on v = 0: the net's row, and its distance to S (|r - R| off the cylinder)
+        let row: Vec<Point3> = cps.iter().step_by(section.len()).copied().collect();
+        let curve = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 3,
+            control_points: &row,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &u_mults,
+            knots: &u_knots,
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        let mut gap = 0.0_f64;
+        for i in 0..=20_000 {
+            let p = curve.evaluate_point(f64::from(i) / 20_000.0).unwrap();
+            gap = gap.max(((p.y - R).hypot(p.z - R) - R).abs());
+        }
+        assert!(gap > 0.66 * h && gap <= 2.0 * h / 3.0 + 1e-12, "{gap}");
+        let (mut b, _) = crate::topology::brep::sheet::sheet_on(&mut k, surface, 1e-5).unwrap();
+        let on_v0 = crate::topology::brep::p1::edges(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                let [a, z] = b.edge(e).unwrap().vertices;
+                let (pa, pz) = (b.vertex(a).unwrap().point, b.vertex(z).unwrap().point);
+                pa.y.abs() < 1e-9 && pz.y.abs() < 1e-9 && (pa.x - pz.x).abs() > L / 2.0
+            })
+            .unwrap();
+        let edge = b.edge_mut(on_v0).unwrap();
+        edge.curve = Some(Curve::from(curve));
+        edge.interval = Extent1d::from_min_max(0.0, 1.0);
+        let bound = certified_edge_face_gap(&k, &b, on_v0, 1e-4)
+            .unwrap()
+            .unwrap();
+        // the net's bound alone is about 0: the bound to S holds the edge's gap
+        assert!(
+            bound >= gap,
+            "bound {bound} under the edge's gap to S {gap}"
+        );
+        assert!(bound <= h + 1e-4, "{bound}");
     }
 }

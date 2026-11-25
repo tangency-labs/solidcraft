@@ -1,6 +1,8 @@
 //! The Edit Canvas / Calibrate card the Browser opens for a reference image: position, size,
 //! angle, opacity and flip (live, one undo step per opening), or two points on the image and
-//! their true distance. Calibrate accepts clicks in the viewport on the image (#9108).
+//! their true distance. Calibrate accepts clicks in the viewport on the image (#9108). Straighten
+//! takes two points along an edge of the image the same way and turns the image so that edge is
+//! horizontal, vertical or at a typed angle (#11989).
 
 use egui::{Pos2, Stroke, vec2};
 use serde_json::{Value, json};
@@ -9,7 +11,6 @@ use solidcraft_engine::doc::canvas::Canvas;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::browser::panel_pos;
 use crate::ui_kit;
 use crate::viewport::Proj;
 use solidcraft_theme::Tokens;
@@ -21,26 +22,34 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     let mut edit: Option<Value> = None;
+    // "Follow a frame in the sketch" clicked: Some(true) ties the image to a construction
+    // rectangle in a sketch (Frame Sketch), Some(false) sets it free again (#18405).
+    let mut follow: Option<bool> = None;
     let (units, decimals) = (app.session.doc.units.clone(), app.preferences.length_decimals);
-    let title = solidcraft_ui_text::format(if m.calibrate { "browser.calibrate_title" } else { "browser.edit_canvas_title" }, &[("name", &c.name)]);
-    let at = panel_pos(app);
-    let (calibrate, name) = (m.calibrate, c.id);
-    let (ok, cancel) = if calibrate {
+    let title_id = if m.straighten {
+        "browser.straighten_title"
+    } else if m.calibrate {
+        "browser.calibrate_title"
+    } else {
+        "browser.edit_canvas_title"
+    };
+    let title = solidcraft_ui_text::format(title_id, &[("name", &c.name)]);
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
+    let (picks, straighten, name) = (m.picks_points(), m.straighten, c.id);
+    let (ok, cancel) = if straighten {
+        (solidcraft_ui_text::tr("ui.straighten"), solidcraft_ui_text::tr("ui.cancel"))
+    } else if picks {
         (solidcraft_ui_text::tr_label("Calibrate"), solidcraft_ui_text::tr("ui.cancel"))
     } else {
         ("", solidcraft_ui_text::tr("ui.close"))
     };
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
-        .placed(egui::Align2::LEFT_TOP, at)
+        .placed(pivot, at)
         .fields()
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
-            if calibrate {
-                ui_kit::text(
-                    ui,
-                    solidcraft_ui_text::tr(if m.next == 0 { "browser.calibrate_click_a" } else { "browser.calibrate_click_b" }),
-                    ui_kit::Text::Note("calibrate_hint"),
-                );
+            if picks {
+                ui_kit::text(ui, solidcraft_ui_text::tr(hint(&m)), ui_kit::Text::Note("calibrate_hint"));
                 for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
                     ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| {
                         let [x, y] = p;
@@ -50,9 +59,48 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                         });
                     });
                 }
-                ui_kit::row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| ui_kit::length_field(ui, &mut m.distance, &units, decimals));
-                m.distance = m.distance.clamp(0.001, 1e6);
+                if straighten {
+                    let options = [
+                        solidcraft_ui_text::tr("browser.straighten_horizontal"),
+                        solidcraft_ui_text::tr("browser.straighten_vertical"),
+                        solidcraft_ui_text::tr("ui.angle"),
+                    ];
+                    let targets = ["straighten:horizontal", "straighten:vertical", "straighten:angle"];
+                    ui_kit::row(ui, solidcraft_ui_text::tr("browser.straighten_angle"), |ui| {
+                        ui_kit::segmented(ui, &mut m.direction, &options, ui_kit::Segments { targets: &targets, ..Default::default() })
+                    });
+                    if m.direction == 2 {
+                        ui_kit::row(ui, solidcraft_ui_text::tr("ui.angle"), |ui| ui_kit::angle_field(ui, &mut m.angle));
+                        if !m.angle.is_finite() {
+                            m.angle = 0.0;
+                        }
+                        m.angle = m.angle.clamp(-360.0, 360.0);
+                    }
+                } else {
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| ui_kit::length_field(ui, &mut m.distance, &units, decimals));
+                    m.distance = m.distance.clamp(0.001, 1e6);
+                }
+            } else if c.anchor.is_some() {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), true) {
+                    follow = Some(false);
+                }
+                // Its sketch's points place, turn and size it: only its look is edited here.
+                ui_kit::text(ui, solidcraft_ui_text::tr("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
+                let (mut op, mut flip) = (c.opacity, c.flip);
+                let mut changed =
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
+                        .changed();
+                if ui_kit::checkbox_row(ui, "flip", solidcraft_ui_text::tr_label("Flip"), flip) {
+                    flip = !flip;
+                    changed = true;
+                }
+                if changed {
+                    edit = Some(json!({ "canvas": name, "opacity": op, "flip": flip }));
+                }
             } else {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), false) {
+                    follow = Some(true);
+                }
                 let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
                 let mut changed = false;
                 changed |=
@@ -82,8 +130,26 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             app.session.undo.extend(keep);
         }
     }
+    match follow {
+        Some(true) => {
+            if let Err(e) = app.run("canvas.frame_sketch", json!({ "canvas": c.id })) {
+                app.set_status(e, true);
+            }
+        }
+        Some(false) => {
+            if let Err(e) = app.run("canvas.edit", json!({ "canvas": c.id, "anchor": null })) {
+                app.set_status(e, true);
+            }
+        }
+        None => {}
+    }
     if action == ui_kit::Action::Ok {
-        if app.run("canvas.calibrate", json!({ "canvas": c.id, "a": m.a, "b": m.b, "distance": m.distance })).is_ok() {
+        let (id, p) = if m.straighten {
+            ("canvas.straighten", json!({ "canvas": c.id, "a": m.a, "b": m.b, "angle": m.target_angle() }))
+        } else {
+            ("canvas.calibrate", json!({ "canvas": c.id, "a": m.a, "b": m.b, "distance": m.distance }))
+        };
+        if app.run(id, p).is_ok() {
             app.tree.canvas_panel = None;
         }
         return;
@@ -91,12 +157,23 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     app.tree.canvas_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
 }
 
+/// The message id of the card's hint (and the status line) for what the user does next.
+pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
+    match (panel.straighten, panel.next, panel.picked_both) {
+        (true, 0, true) => "browser.straighten_choose",
+        (true, 0, false) => "browser.straighten_click_a",
+        (true, _, _) => "browser.straighten_click_b",
+        (false, 0, _) => "browser.calibrate_click_a",
+        (false, _, _) => "browser.calibrate_click_b",
+    }
+}
+
 /// A viewport click while Calibrate is open: set Point A or B on the image (#9108).
 pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
     let Some(mut panel) = app.tree.canvas_panel.clone() else {
         return false;
     };
-    if !panel.calibrate {
+    if !panel.picks_points() {
         return false;
     }
     let doc = &app.session.doc;
@@ -104,7 +181,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         return false;
     };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, &c) else {
+    let Ok(plane) = doc.canvas_plane(&vals, &c, &app.session.model.state()) else {
         return false;
     };
     let (origin, direction) = proj.ray(screen);
@@ -119,19 +196,21 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
     if panel.next == 0 {
         panel.a = point;
         panel.next = 1;
-        app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_b"), false);
+        panel.picked_both = false;
     } else {
         panel.b = point;
         panel.next = 0;
-        app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
+        panel.picked_both = true;
     }
+    app.set_status(solidcraft_ui_text::tr(hint(&panel)), false);
     app.tree.canvas_panel = Some(panel);
     true
 }
 
-/// Markers for the two calibration points on the image.
+/// Markers for the two calibration or straightening points on the image. Straighten also draws
+/// the line A–B; while it waits for Point B, the line follows the pointer from Point A (#11989).
 pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    let Some(panel) = app.tree.canvas_panel.as_ref().filter(|p| p.calibrate) else {
+    let Some(panel) = app.tree.canvas_panel.as_ref().filter(|p| p.picks_points()) else {
         return;
     };
     let doc = &app.session.doc;
@@ -139,10 +218,22 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
         return;
     };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, c) else {
+    let Ok(plane) = doc.canvas_plane(&vals, c, &app.session.model.state()) else {
         return;
     };
     let t = Tokens::get();
+    if panel.straighten {
+        let a = proj.to_screen(plane.to_world(Vec2::new(panel.a[0], panel.a[1])));
+        let b = if panel.next == 1 {
+            // The pointer, when it is over the view.
+            painter.ctx().pointer_hover_pos().filter(|p| painter.clip_rect().contains(*p))
+        } else {
+            proj.to_screen(plane.to_world(Vec2::new(panel.b[0], panel.b[1])))
+        };
+        if let (Some(a), Some(b)) = (a, b) {
+            painter.line_segment([a, b], Stroke::new(1.5, t.accent));
+        }
+    }
     for (i, point) in [panel.a, panel.b].into_iter().enumerate() {
         let Some(screen) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
             continue;
@@ -184,8 +275,8 @@ mod tests {
         png.extend(400u32.to_be_bytes());
         png.extend(200u32.to_be_bytes());
         png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-        let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-        h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap()
+        let data = crate::scenario::image_file(&png);
+        h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap()
     }
 
     #[test]
@@ -229,6 +320,62 @@ mod tests {
         assert!((width(&h) - 40.0).abs() < 1e-6, "calibrating to half the distance halves the image: {}", width(&h));
     }
 
+    /// Straighten takes two clicks along an edge and turns the image so the edge is
+    /// horizontal, vertical or at the typed angle (#11989).
+    #[test]
+    fn straighten_picks_two_points_and_turns_the_canvas() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::straighten(&h.app, id));
+        h.frames(6);
+        assert!(h.widget("Straighten").is_some() && h.widget("Calibrate").is_none());
+        for target in ["straighten:horizontal", "straighten:vertical", "straighten:angle"] {
+            assert!(crate::scenario::handle_at(target).is_some(), "{target}");
+        }
+        // Two clicks along a line that rises 10 units over 30.
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
+        let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
+        let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
+        assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_click_b");
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_click_b")));
+        assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0)));
+        // With both points picked, the card and the status line ask for the direction, not Point A.
+        assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_choose");
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_choose")));
+        let picked = h.app.tree.canvas_panel.clone().unwrap();
+        let rise = (picked.b[1] - picked.a[1]).atan2(picked.b[0] - picked.a[0]).to_degrees();
+        assert!((rise - 18.43).abs() < 1.0, "{picked:?}");
+        // Vertical: the image turns by 90 - rise about Point A, in one undo step.
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"click": {"handle": "straighten:vertical"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.tree.canvas_panel.as_ref().map(|p| p.direction), Some(1));
+        h.step(&json!({"widget": "Straighten"})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.canvas_panel.is_none());
+        let first = h.app.session.doc.canvases[0].angle.to_degrees();
+        assert!((first - (90.0 - rise)).abs() < 1e-6, "{first}");
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        // The typed angle is what the command gets.
+        let mut panel = crate::browser::CanvasPanel::straighten(&h.app, id);
+        (panel.a, panel.b, panel.direction, panel.angle) = ([0.0, 0.0], [10.0, 0.0], 2, 30.0);
+        assert_eq!(panel.target_angle(), 30.0);
+        h.app.tree.canvas_panel = Some(panel);
+        h.frames(4);
+        assert!(crate::scenario::handle_at("dialog:angle:Angle").is_some());
+        h.step(&json!({"widget": "Straighten"})).unwrap();
+        h.frames(2);
+        let turned = h.app.session.doc.canvases[0].angle.to_degrees() - first;
+        assert!((turned - 30.0).abs() < 1e-6, "{turned}");
+    }
+
     /// Viewport clicks on the image fill Point A then Point B (#9108).
     #[test]
     fn calibrate_picks_two_points_from_viewport_clicks() {
@@ -241,7 +388,7 @@ mod tests {
         let proj = crate::viewport::projection(&h.app, rect);
         let c = h.app.session.doc.canvases[0].clone();
         let (vals, _) = h.app.session.doc.param_values();
-        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let ax = c.center.x - 20.0;
         let bx = c.center.x + 20.0;
         let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");

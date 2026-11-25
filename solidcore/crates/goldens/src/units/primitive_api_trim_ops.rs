@@ -177,7 +177,9 @@ fn v3(p: &P3) -> Vec3 {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -303,7 +305,10 @@ fn brep_out(k: &Kernel, b: &Brep) -> Result<Output, HarnessError> {
 
 fn finish(k: &Kernel, r: solidcore::Result<Brep>) -> Result<Output, HarnessError> {
     match r {
-        Ok(b) => brep_out(k, &b),
+        Ok(mut b) => {
+            crate::trim_hook::observe(&mut b);
+            brep_out(k, &b)
+        }
         Err(e) => Ok(failed(&e)),
     }
 }
@@ -327,7 +332,7 @@ macro_rules! input {
 }
 
 fn rust(i: &In) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     match i {
         In::Trim3d {
             surface,

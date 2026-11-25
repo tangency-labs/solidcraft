@@ -1,6 +1,7 @@
 //! Contracts and result types for the commands in `cmd/joints.rs`.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
@@ -8,10 +9,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::cam::MAX_PROFILE_EDGES;
-use solidcraft_doc::joints::{Coupling, JointExprs, JointKind, Snap};
+use solidcraft_doc::joints::{Constraint, Coupling, JointExprs, JointKind, Snap};
 use solidcraft_geom::Vec3Geom;
 
 use super::check::whole;
+use super::component::OccurrencePath;
 use super::motion::require;
 use super::types::{AngleExpr, IdOrName, LengthExpr, present};
 use crate::cmd::joints::{MAX_FACE_NAME, MAX_REACH_JOINTS};
@@ -26,7 +28,10 @@ pub struct JointOriginParam(pub Value);
 impl<'de> Deserialize<'de> for JointOriginParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            v @ (Value::String(_) | Value::Object(_)) => Ok(JointOriginParam(v)),
+            v @ (Value::String(_) | Value::Object(_)) => {
+                check_secondary_axis_request(&v).map_err(D::Error::custom)?;
+                Ok(JointOriginParam(v))
+            }
             _ => Err(D::Error::custom("must be a joint origin's name or an object")),
         }
     }
@@ -38,12 +43,83 @@ impl JsonSchema for JointOriginParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with z?, x?, end?, on?, corner?, or with a frame {origin, z, x?}.",
+            "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with path?, z?, x?, end?, on?, corner?, or with a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "minLength": 1},
-                {"type": "object"}
+                {"type": "object", "allOf": [secondary_axis_origin_schema()]}
             ]
         })
+    }
+}
+
+fn alignment_reference_schema() -> Value {
+    let name = json!({"type":"string","minLength":1,"maxLength":512});
+    let id = json!({"type":"integer","minimum":1});
+    json!({"anyOf":[
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["edge"]},"name":name},"required":["type","name"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["cylinder"]},"name":name},"required":["type","name"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["circle_center"]},"name":name,"end":name},"required":["type","name","end"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["construction"]},"feature":id},"required":["type","feature"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["construction_plane"]},"feature":id},"required":["type","feature"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["sketch_line"]},"sketch":id,"curve":name},"required":["type","sketch","curve"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["origin_axis"]},"axis":{"enum":["X","Y","Z"]}},"required":["type","axis"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["origin_plane"]},"plane":{"enum":["XY","XZ","YZ"]}},"required":["type","plane"]}
+    ]})
+}
+
+/// Optional secondary alignment: null clears, omission retains it during editing.
+#[derive(Clone, Debug, Serialize)]
+#[serde(transparent)]
+pub struct AlignmentArg(pub Value);
+
+impl AlignmentArg {
+    pub(crate) fn read(v: &Value) -> Result<Self, String> {
+        if v.is_null() {
+            return Ok(Self(Value::Null));
+        }
+        let m = v.as_object().ok_or("alignment must be an object or null")?;
+        if m.keys().any(|k| !matches!(k.as_str(), "face" | "reference" | "reverse" | "occurrence")) {
+            return Err("unknown alignment field".into());
+        }
+        if let Some(o) = m.get("occurrence") {
+            serde_json::from_value::<IdOrName>(o.clone()).map_err(|e| e.to_string())?;
+        }
+        let reverse = match m.get("reverse") {
+            None => false,
+            Some(Value::Bool(v)) => *v,
+            _ => return Err("alignment reverse must be a boolean".into()),
+        };
+        let x = match (m.get("face"), m.get("reference")) {
+            (Some(Value::String(face)), None) => solidcraft_doc::joints::XRef::Planar { planar_face: face.clone(), reverse },
+            (None, Some(r)) => {
+                solidcraft_doc::joints::XRef::Reference { reference: serde_json::from_value(r.clone()).map_err(|e| e.to_string())?, reverse }
+            }
+            _ => return Err("select one named face or typed alignment reference".into()),
+        };
+        if !x.is_finite() {
+            return Err("alignment identity is empty, invalid or out of range".into());
+        }
+        Ok(Self(v.clone()))
+    }
+}
+
+impl<'de> Deserialize<'de> for AlignmentArg {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Self::read(&Value::deserialize(d)?).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for AlignmentArg {
+    fn schema_name() -> Cow<'static, str> {
+        "SecondaryAlignment".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let occurrence = json!({"anyOf":[{"type":"integer","minimum":0},{"type":"string","minLength":1}]});
+        let name = json!({"type":"string","minLength":1,"maxLength":512});
+        json_schema!({"anyOf":[{"type":"null"},
+            {"type":"object","additionalProperties":false,"properties":{"face":name,"reverse":{"type":"boolean"},"occurrence":occurrence},"required":["face"]},
+            {"type":"object","additionalProperties":false,"properties":{"reference":alignment_reference_schema(),"reverse":{"type":"boolean"},"occurrence":occurrence},"required":["reference"]}
+        ]})
     }
 }
 
@@ -62,6 +138,12 @@ pub struct EditJointParams {
     /// Side b: a joint origin, as joint.create takes it. Default: b keeps its place.
     #[serde(default, deserialize_with = "present")]
     pub b: Option<JointOriginParam>,
+    /// Secondary reference on side a; null clears it, omission keeps it.
+    #[serde(default, deserialize_with = "present")]
+    pub a_alignment: Option<AlignmentArg>,
+    /// Secondary reference on side b; null clears it, omission keeps it.
+    #[serde(default, deserialize_with = "present")]
+    pub b_alignment: Option<AlignmentArg>,
     /// The joint's type, as joint.create takes it (rigid, revolute, slider, ...).
     #[serde(default, rename = "type", deserialize_with = "present")]
     pub kind: Option<String>,
@@ -71,13 +153,20 @@ pub struct EditJointParams {
     /// The distance from a's frame to b's along z: a length, or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset: Option<LengthExpr>,
+    /// The lateral offset along a's frame x, in mm or an expression the joint follows.
+    #[serde(default, deserialize_with = "present")]
+    pub offset_x: Option<LengthExpr>,
+    /// The lateral offset along a's frame y, in mm or an expression the joint follows.
+    #[serde(default, deserialize_with = "present")]
+    pub offset_y: Option<LengthExpr>,
     /// The turn about that distance: an angle, or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub angle: Option<AngleExpr>,
     /// Suppress the joint (true) or bring it back (false).
     #[serde(default, deserialize_with = "present")]
     pub suppressed: Option<bool>,
-    /// The joint's new name.
+    /// The joint's new name, at most 128 characters once surrounding spaces are cut (the joint's
+    /// own name is taken whatever its length). Blank text changes nothing.
     #[serde(default, deserialize_with = "present")]
     pub name: Option<String>,
     /// Leave out the degrees of freedom and the fixed occurrences in the reply.
@@ -334,7 +423,8 @@ impl JsonSchema for JointLimits {
 
 /// A joint origin as `joint.create` reads a side: a joint origin's name, or an object that says
 /// where (`face`, `circle`, `edge` or `point`: a point in world coordinates, or for the first two
-/// a face's name; or a `frame`). Kept as given, for the handler.
+/// a face's name; a `plane` or an `axis`: a name or key, or a definition object; or a `frame`).
+/// Kept as given, for the handler.
 #[derive(Clone, Debug, PartialEq)]
 pub struct JointOriginArg(pub Value);
 
@@ -343,15 +433,19 @@ impl JointOriginArg {
         if v.is_string() {
             return Ok(JointOriginArg(v.clone()));
         }
+        check_secondary_axis_request(v)?;
         let named = ["face", "circle"].iter().any(|k| v.get(*k).and_then(Value::as_str).is_some());
         let picked = ["face", "circle", "edge", "point"].iter().any(|k| v.get(*k).and_then(params::vec3).is_some());
-        if named || picked {
+        // A plane or axis side, as the handler's plane_origin and axis_origin read them: a name
+        // or key, or a plane/axis definition object. Read further by the handler.
+        let datum = ["plane", "axis"].iter().any(|k| matches!(v.get(*k), Some(Value::String(_)) | Some(Value::Object(_))));
+        if named || picked || datum {
             return Ok(JointOriginArg(v.clone()));
         }
         match v.get("frame") {
             Some(f) if f.get("origin").and_then(params::vec3).is_some() => Ok(JointOriginArg(v.clone())),
             Some(_) => Err("`frame` needs origin and z".into()),
-            None => Err("a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name".into()),
+            None => Err("a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name".into()),
         }
     }
 }
@@ -360,7 +454,8 @@ impl JsonSchema for JointOriginArg {
     fn schema_name() -> Cow<'static, str> {
         "JointOriginArg".into()
     }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let path = generator.subschema_for::<OccurrencePath>();
         // `params::vec3` reads [x, y, z] and {x, y, z}.
         let forms = [
             json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}),
@@ -369,17 +464,21 @@ impl JsonSchema for JointOriginArg {
         let point = json!({"anyOf": forms});
         let at = |description: &str| json!({"description": description, "anyOf": forms});
         json_schema!({
-            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge or point (a point [x, y, z]; for face and circle also a face's name, as model.faces lists it), or a frame {origin, z, x?}.",
+            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge, point, plane or axis (a point [x, y, z]; for face and circle also a face's name; a plane or axis by name or definition object), or a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "description": "The name of a joint origin."},
                 {
                     "type": "object",
+                    "allOf": [secondary_axis_origin_schema()],
                     "properties": {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's component.", "type": ["number", "string"]},
+                        "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "anyOf": [path, {"type": "null"}]},
                         "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
                         "point": at("A point [x, y, z]."),
+                        "plane": {"description": "The plane to sit on: \"XY\", \"XZ\" or \"YZ\" (the design's own), \"o:<ids>/origin/<item>\" (a placement's origin plane), a construction plane's name, or a plane definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
+                        "axis": {"description": "The axis to sit on: \"X\", \"Y\" or \"Z\", \"o:<ids>/origin/<item>\" (a placement's origin axis), a construction axis's name, or an axis definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "frame": {"description": "An explicit frame {origin: [x, y, z], z: [x, y, z], x?: [x, y, z]}.", "type": "object"},
                         "z": at("The frame's z axis, a direction [x, y, z], where it is not the face's normal."),
                         "x": {"description": "The frame's turn about z: a direction [x, y, z], a face's name or {face: [x, y, z]}.", "anyOf": [point, {"type": "string"}, {"type": "object"}]},
@@ -404,7 +503,7 @@ macro_rules! read_with {
     )*};
 }
 
-read_with!(JointKey, OccurrenceKey, JointTypeParam, JointValue, JointValues, JointLimits, JointOriginArg);
+read_with!(JointKey, OccurrenceKey, JointTypeParam, ConstraintTypeParam, JointValue, JointValues, JointLimits, JointOriginArg);
 
 /// The call's keys as an object. (`TypedContract::check` has refused anything else already.)
 fn keys<'de, D: Deserializer<'de>>(d: D) -> Result<Map<String, Value>, D::Error> {
@@ -476,6 +575,12 @@ pub struct CreateJointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointOriginArg")]
     pub b: Option<JointOriginArg>,
+    /// Optional persistent secondary reference on side a.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a_alignment: Option<AlignmentArg>,
+    /// Optional persistent secondary reference on side b.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub b_alignment: Option<AlignmentArg>,
     /// The joint's values to start at: one per coordinate (angles in degrees, distances in mm, or
     /// expressions the joint then follows). Default: 0 for each, or for a relation or a joint that
     /// closes a loop, where the parts are. Wins over `value`.
@@ -500,6 +605,14 @@ pub struct CreateJointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset: Option<JointValue>,
+    /// The lateral offset along a's frame x, in mm or an expression the joint follows. Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub offset_x: Option<JointValue>,
+    /// The lateral offset along a's frame y, in mm or an expression the joint follows. Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub offset_y: Option<JointValue>,
     /// The turn about that distance, in degrees or an expression; for an angle relation, its tilt
     /// from mated. Default: none, or a half turn where that turns b less, so faces that already
     /// meet stay as they are.
@@ -528,7 +641,11 @@ impl<'de> Deserialize<'de> for CreateJointParams {
         let kind = given(&m, "type", JointTypeParam::read)?;
         let a = given(&m, "a", JointOriginArg::read)?;
         let b = given(&m, "b", JointOriginArg::read)?;
+        let a_alignment = given(&m, "a_alignment", AlignmentArg::read)?;
+        let b_alignment = given(&m, "b_alignment", AlignmentArg::read)?;
         let offset = given(&m, "offset", JointValue::read)?;
+        let offset_x = given(&m, "offset_x", JointValue::read)?;
+        let offset_y = given(&m, "offset_y", JointValue::read)?;
         let angle = given(&m, "angle", JointValue::read)?;
         let values = listed(&m, "values", JointValues::read)?;
         // `value` is read only when `values` is not a list.
@@ -538,16 +655,134 @@ impl<'de> Deserialize<'de> for CreateJointParams {
             kind,
             a,
             b,
+            a_alignment,
+            b_alignment,
             values,
             value,
             limits,
             flip: flag(&m, "flip")?,
             offset,
+            offset_x,
+            offset_y,
             angle,
             name: text(&m, "name")?,
             quiet: flag(&m, "quiet")?,
         })
     }
+}
+
+/// An assembly constraint's type, as `assembly.constraint.create` takes it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConstraintTypeParam(pub Constraint);
+
+const CONSTRAINT_MESSAGE: &str = "`type` must be mate, flush, distance, concentric, insert, parallel, perpendicular, angle, tangent or point_on_axis";
+
+impl ConstraintTypeParam {
+    fn read(v: &Value) -> Result<Self, String> {
+        v.as_str().and_then(Constraint::parse).map(ConstraintTypeParam).ok_or_else(|| CONSTRAINT_MESSAGE.to_string())
+    }
+}
+
+impl JsonSchema for ConstraintTypeParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ConstraintType".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The rule: mate (two planes against each other), flush (two planes facing the same way), distance (a plane or a point `offset` from a plane), concentric (two round faces on one axis), insert (two round edges at one centre: only a turn is left), parallel, perpendicular, angle (two planes or axes), tangent (a cylinder resting on a plane) or point_on_axis. Case, spaces, `_` and `-` are ignored; coincident and axis are also taken.",
+            "type": "string",
+            "minLength": 1
+        })
+    }
+}
+
+/// Constrain two parts by a geometric rule between a reference on each: the rule is kept as a
+/// joint of the kind it needs (a mate is planar), made where the parts are, so b moves no further
+/// than the rule needs and keeps every motion it leaves free. Several constraints between one pair
+/// add up. One undo step.
+#[derive(Debug, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = create_required)]
+pub struct CreateConstraintParams {
+    /// The rule.
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ConstraintTypeParam")]
+    pub kind: Option<ConstraintTypeParam>,
+    /// Side a's reference: a joint origin, as joint.create takes it (a face for a plane, a circle
+    /// for an axis, a point). A round face given as a face is its axis where the rule needs one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointOriginArg")]
+    pub a: Option<JointOriginArg>,
+    /// Side b's reference, as `a`; b is the part that moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointOriginArg")]
+    pub b: Option<JointOriginArg>,
+    /// The gap from a's reference to b's, in mm or an expression (a mate's or flush's gap, a
+    /// distance; needed for distance). Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub offset: Option<JointValue>,
+    /// An angle constraint's angle, in degrees or an expression (needed for angle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub angle: Option<JointValue>,
+    /// Turn b over: its reference along a's instead of the way the rule puts it. Default: a mate
+    /// is against, a flush along, the others as the parts face now.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The constraint's name. Default: the rule and the first free number (Mate1).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Leave out `dof` and `fixed` in the reply. Default: false.
+    #[serde(default)]
+    pub quiet: Option<bool>,
+}
+
+impl<'de> Deserialize<'de> for CreateConstraintParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let m = keys(d)?;
+        Ok(CreateConstraintParams {
+            kind: given(&m, "type", ConstraintTypeParam::read)?,
+            a: given(&m, "a", JointOriginArg::read)?,
+            b: given(&m, "b", JointOriginArg::read)?,
+            offset: given(&m, "offset", JointValue::read)?,
+            angle: given(&m, "angle", JointValue::read)?,
+            flip: flag(&m, "flip")?,
+            name: text(&m, "name")?,
+            quiet: flag(&m, "quiet")?,
+        })
+    }
+}
+
+/// Change a constraint (a joint made with `assembly.constraint.create`) in place: its rule, gap,
+/// angle, facing, name or suppression. A new rule must fit the references the constraint has; the gap
+/// carries over. The change goes through joint.edit: the values start again where the parts are.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct EditConstraintParams {
+    /// The constraint, by id or name.
+    pub constraint: IdOrName,
+    /// The new rule, as assembly.constraint.create takes it. Default: the rule it has.
+    #[serde(default, rename = "type", deserialize_with = "present")]
+    pub kind: Option<ConstraintTypeParam>,
+    /// The gap: a length, or an expression the constraint follows. Default: the gap it has.
+    #[serde(default, deserialize_with = "present")]
+    pub offset: Option<LengthExpr>,
+    /// An angle rule's angle: an angle, or an expression. Needed to change to angle.
+    #[serde(default, deserialize_with = "present")]
+    pub angle: Option<AngleExpr>,
+    /// True turns b over: from the new rule's way after a type change, else from how it faces now.
+    #[serde(default, deserialize_with = "present")]
+    pub flip: Option<bool>,
+    /// The constraint's new name, at most 128 characters once surrounding spaces are cut (the
+    /// constraint's own name is taken whatever its length). Blank text changes nothing.
+    #[serde(default, deserialize_with = "present")]
+    pub name: Option<String>,
+    /// Suppress the constraint (true) or bring it back (false).
+    #[serde(default, deserialize_with = "present")]
+    pub suppressed: Option<bool>,
+    /// Leave out the degrees of freedom and the fixed occurrences in the reply.
+    #[serde(default, deserialize_with = "present")]
+    pub quiet: Option<bool>,
 }
 
 /// Add a joint between two occurrences that stay where they are: its frame is a joint origin
@@ -819,6 +1054,9 @@ pub struct SolveReport {
 pub struct SolveResult {
     #[serde(flatten)]
     pub solved: SolveReport,
+    /// With `dof_free_only`: how many occurrences were left out of `dof`. Left out when none were.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<Omitted>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -853,7 +1091,7 @@ pub enum ValueUnit {
 }
 
 /// One of a joint's values, as `joint.list` gives it (rounded for reading).
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct NamedValue {
     /// The coordinate's name (angle, distance, slide, …).
     pub name: String,
@@ -863,6 +1101,21 @@ pub struct NamedValue {
     pub unit: ValueUnit,
     /// Its limits [min, max] in `unit`, or `null` for none.
     pub limits: Option<[f64; 2]>,
+    /// What a simulator reads for it (`joint.dynamics`), or `null` for none saved.
+    pub dynamics: Option<ValueDynamics>,
+}
+
+/// A joint value's saved dynamics, in SI (`joint.dynamics`); each `null` when not set.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct ValueDynamics {
+    /// The most force or torque, in N or N m.
+    pub effort: Option<f64>,
+    /// The highest speed, in m/s or rad/s.
+    pub velocity: Option<f64>,
+    /// Damping, in N s/m or N m s/rad.
+    pub damping: Option<f64>,
+    /// Friction, in N or N m.
+    pub friction: Option<f64>,
 }
 
 /// A joint's type as the replies name it.
@@ -887,6 +1140,12 @@ pub enum JointKindName {
 /// The expressions a joint's numbers follow, over the design's parameters.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct JointExpressions {
+    /// The lateral x offset's expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_x: Option<String>,
+    /// The lateral y offset's expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_y: Option<String>,
     /// The offset's expression.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<String>,
@@ -896,6 +1155,10 @@ pub struct JointExpressions {
     /// The expression of each value by index, `null` for a value that is a number.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Option<String>>,
+    /// The expressions of each value's limits by index, as `[minimum, maximum]`, `null` for an
+    /// end that is a number.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits: Vec<[Option<String>; 2]>,
 }
 
 /// A joint origin's snap as saved, in the component's coordinates.
@@ -1013,6 +1276,8 @@ pub struct ListedJoint {
     pub flip: bool,
     /// The distance from a's frame to b's along z, in mm.
     pub offset: f64,
+    /// The offsets along a's frame x and y, in mm, before the joint's motion.
+    pub offset_xy: [f64; 2],
     /// Whether the joint is suppressed (it places nothing).
     pub suppressed: bool,
     /// Whether the joint is shown in the viewport.
@@ -1025,6 +1290,11 @@ pub struct ListedJoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointExpressions")]
     pub expressions: Option<JointExprs>,
+    /// The assembly constraint the joint was made as (mate, flush…). Left out for a joint made
+    /// as a joint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub constraint: Option<Constraint>,
 }
 
 /// A named joint origin.
@@ -1056,20 +1326,144 @@ pub struct ListJointsResult {
     pub links: Vec<LinkInfo>,
     /// Every named joint origin.
     pub origins: Vec<ListedOrigin>,
-    /// Joint chains joined to nothing grounded.
+    /// Joint chains joined to nothing grounded (with a joint filter, only the chains holding a
+    /// joint it keeps).
     pub floating: Vec<FloatingChain>,
+    /// Every rigid group: the parts an import placed, held where they are in their parents, one
+    /// row however many parts it holds. Absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rigid_groups: Vec<ListedRigidGroup>,
+    /// What the filters left out. Left out when nothing was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<Omitted>,
+    /// Every joint in a few numbers, with `summary`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<JointSummary>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// List the joints, motion links and joint origins, with the solve.
+/// A rigid group as `joint.list` gives it.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ListedRigidGroup {
+    /// Its id.
+    pub id: u64,
+    /// Its name: the component's when it was made.
+    pub name: String,
+    /// The import's component; `component.unlock` on it releases the parts.
+    pub component: u64,
+    /// How many occurrences it holds.
+    pub members: usize,
+}
+
+/// The rows a filter left out of a reply, counted so that a caller knows they are there.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct Omitted {
+    /// How many joints were left out.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub joints: usize,
+    /// Those joints by type (as `type` names them).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_type: BTreeMap<String, usize>,
+    /// How many floating chains were left out.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub floating: usize,
+    /// How many occurrences were left out of `dof`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub dof: usize,
+}
+
+impl Omitted {
+    /// `Some` when something was left out.
+    pub fn some(self) -> Option<Self> {
+        (self.joints > 0 || self.floating > 0 || self.dof > 0).then_some(self)
+    }
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// Every joint in a few numbers, for an assembly too large to read row by row.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct JointSummary {
+    /// How many joints there are.
+    pub joints: usize,
+    /// How many of each type (as `type` names them).
+    pub by_type: BTreeMap<String, usize>,
+    /// How many are suppressed.
+    pub suppressed: usize,
+    /// The rigid joints that hold components' contents together (an imported assembly's
+    /// placements), one row per component: the innermost component holding both ends of each.
+    /// The largest first, at most 20.
+    pub rigid_groups: Vec<RigidGroupSummary>,
+    /// The components past the first 20 in `rigid_groups`, counted. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub more_rigid_groups: Option<MoreRigidGroups>,
+}
+
+/// The smaller rigid groups a summary counts instead of listing.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MoreRigidGroups {
+    /// How many components.
+    pub groups: usize,
+    /// How many rigid joints they hold between them.
+    pub joints: usize,
+}
+
+/// The rigid joints holding one component's contents together.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RigidGroupSummary {
+    /// The component, by id.
+    pub component: u64,
+    /// Its name.
+    pub name: String,
+    /// How many rigid joints hold its contents.
+    pub joints: usize,
+    /// How many occurrences they tie together.
+    pub members: usize,
+}
+
+/// List the joints, motion links and joint origins, with the solve. With no filter every joint is
+/// listed, as always; the filters keep a joint only when it passes all of them, and `omitted` then
+/// counts what they left out.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ListJointsParams {
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
+    /// Keep only joints of these types (as the reply's `type` names them). Default: every type.
+    #[serde(default)]
+    pub kinds: Option<Vec<JointTypeParam>>,
+    /// Leave out every rigid joint. Default: false.
+    #[serde(default)]
+    pub exclude_rigid: Option<bool>,
+    /// Leave out the rigid joints that hold a component's contents together (an imported
+    /// assembly's placements: both ends inside the same component other than the root, as
+    /// `component.unlock` removes them). Rigid joints between top-level parts stay. Default: false.
+    #[serde(default)]
+    pub exclude_rigid_groups: Option<bool>,
+    /// Keep only joints that let something move: leave out rigid joints and suppressed joints (a
+    /// suppressed joint places nothing). Default: false.
+    #[serde(default)]
+    pub moving_only: Option<bool>,
+    /// Keep only joints with an end at one of these occurrences (by id or name) or at an
+    /// occurrence placed inside one, at any depth (a component placed twice shares its contents,
+    /// so they count for both); `dof` then lists only those occurrences. The root (0) matches
+    /// only joints on the root itself. Default: every joint.
+    #[serde(default)]
+    pub occurrences: Option<Vec<OccurrenceKey>>,
+    /// In `dof`, list only the occurrences that can still move (dof above 0); `omitted.dof`
+    /// counts the others. Default: false.
+    #[serde(default)]
+    pub dof_free_only: Option<bool>,
+    /// Add `summary`: every joint counted by type, the suppressed ones, and the rigid joints that
+    /// hold components' contents, one row per component. Default: false.
+    #[serde(default)]
+    pub summary: Option<bool>,
 }
 
 /// Re-place the occurrences from the joints, and report conflicts, errors and degrees of freedom.
@@ -1079,6 +1473,10 @@ pub struct SolveJointsParams {
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
+    /// In `dof`, list only the occurrences that can still move (dof above 0); `omitted.dof`
+    /// counts the others. Default: false.
+    #[serde(default)]
+    pub dof_free_only: Option<bool>,
 }
 
 /// Say what a joint is defined by and attached to: its two origins (the snap as saved, and the
@@ -1088,9 +1486,26 @@ pub struct SolveJointsParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct InspectJointParams {
-    /// The joint, by id or name. Default: every joint.
+    /// The joint, by id or name. Default: every joint the filters keep.
     #[serde(default)]
     pub joint: Option<JointKey>,
+    /// As `joint.list`'s: only joints of these types. Not used with `joint`.
+    #[serde(default)]
+    pub kinds: Option<Vec<JointTypeParam>>,
+    /// As `joint.list`'s: leave out every rigid joint. Not used with `joint`.
+    #[serde(default)]
+    pub exclude_rigid: Option<bool>,
+    /// As `joint.list`'s: leave out the rigid joints that hold a component's contents together.
+    /// Not used with `joint`.
+    #[serde(default)]
+    pub exclude_rigid_groups: Option<bool>,
+    /// As `joint.list`'s: leave out rigid and suppressed joints. Not used with `joint`.
+    #[serde(default)]
+    pub moving_only: Option<bool>,
+    /// As `joint.list`'s: only joints with an end at (or inside) one of these occurrences. Not
+    /// used with `joint`.
+    #[serde(default)]
+    pub occurrences: Option<Vec<OccurrenceKey>>,
 }
 
 /// What a face reference says about the feature that made the face.
@@ -1230,6 +1645,10 @@ pub struct JointSide {
     pub component_name: String,
     /// The occurrence names from the top of the assembly down, with `/` between.
     pub path: String,
+    /// The occurrences inside it down to the part the snap is on, by id: set for an origin on a
+    /// part in a later copy of a sub-assembly. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inside: Vec<u64>,
     /// The snap as saved, in the component's coordinates.
     #[schemars(with = "SnapShape")]
     pub snap: Snap,
@@ -1285,6 +1704,8 @@ pub struct InspectedJoint {
     pub flip: bool,
     /// The distance from a's frame to b's along z, in mm.
     pub offset: f64,
+    /// The offsets along a's frame x and y, in mm, before the joint's motion.
+    pub offset_xy: [f64; 2],
     /// The turn about that distance, in degrees.
     pub angle: f64,
     /// Its values as the solver places them, as joint.list gives them.
@@ -1305,13 +1726,20 @@ pub struct InspectedJoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointExpressions")]
     pub expressions: Option<JointExprs>,
+    /// The assembly constraint it was made as (mate, flush…). Left out for a joint made as a joint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub constraint: Option<Constraint>,
 }
 
 /// What `joint.inspect` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InspectJointResult {
-    /// The joint asked for, or every joint.
+    /// The joint asked for, or every joint the filters keep.
     pub joints: Vec<InspectedJoint>,
+    /// What the filters left out. Left out when nothing was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<Omitted>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1603,6 +2031,43 @@ impl JsonSchema for JointKeyList {
     }
 }
 
+/// The values joints start from, as `joint.reach` reads `from`: `{joint, values}` items. The
+/// handler checks each item (its joint, and one finite value for each of the joint's coordinates).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReachStarts(pub Vec<Value>);
+
+impl ReachStarts {
+    /// `from` as the handler takes it: a list of at most [`MAX_REACH_JOINTS`] items.
+    fn read(v: &Value) -> Result<Self, String> {
+        match v {
+            Value::Array(items) if items.len() <= MAX_REACH_JOINTS => Ok(ReachStarts(items.clone())),
+            _ => Err(format!("`from` must be a list of {{joint, values}}, at most {MAX_REACH_JOINTS}")),
+        }
+    }
+}
+
+impl JsonSchema for ReachStarts {
+    fn schema_name() -> Cow<'static, str> {
+        "ReachStarts".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let joint = generator.subschema_for::<JointKey>();
+        json_schema!({
+            "description": "Joints and the values each starts from, as joint.list gives them (degrees and mm), one value for each of the joint's coordinates.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "joint": joint,
+                    "values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9}}
+                },
+                "required": ["joint", "values"]
+            },
+            "maxItems": MAX_REACH_JOINTS
+        })
+    }
+}
+
 /// Two or more occurrences, by id or name, as `joint.rigid_group` reads them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OccurrenceList(pub Vec<OccurrenceKey>);
@@ -1719,6 +2184,42 @@ read_with!(CamProfileParam);
 /// A joint origin's turn about z: `x` of `joint.origin`.
 pub struct OriginX;
 
+fn secondary_axis_x_schema() -> Value {
+    json!({"anyOf":[
+        {"type":"object","additionalProperties":false,"properties":{"reference":alignment_reference_schema(),"reverse":{"type":"boolean"}},"required":["reference"]},
+        {"type":"object","additionalProperties":false,"properties":{"planar_face":{"type":"string","minLength":1,"maxLength":512},"reverse":{"type":"boolean"}},"required":["planar_face"]}
+    ]})
+}
+
+/// Only the reserved new X form adds restrictions; ignored legacy keys keep their meaning.
+fn secondary_axis_origin_schema() -> Value {
+    let point = json!({"anyOf": [
+        {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+        {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}, "required": ["x", "y", "z"]},
+        {"type": "string"}
+    ]});
+    json!({"anyOf": [
+        {"not": {"type": "object", "required": ["x"], "properties": {"x": {"type": "object", "anyOf":[{"required":["reference"]},{"required":["planar_face"]}]}}}},
+        {"allOf": [
+            {"properties": {"x": secondary_axis_x_schema()}},
+            {"anyOf": [
+                {"required": ["plane"]},
+                {"required": ["axis"], "not": {"anyOf": [{"required": ["edge"]}, {"required": ["point"]}]}},
+                {"required": ["face"], "properties": {"face": point}},
+                {"required": ["circle"], "properties": {"circle": point}}
+            ]}
+        ]}
+    ]})
+}
+
+fn check_secondary_axis_request(v: &Value) -> Result<(), String> {
+    if v.get("x").is_some_and(|x| x.get("reference").is_some() || x.get("planar_face").is_some()) {
+        let m = v.as_object().ok_or("a secondary axis needs an origin object")?;
+        MakeJointOriginParams::check(m)?;
+    }
+    Ok(())
+}
+
 impl JsonSchema for OriginX {
     fn schema_name() -> Cow<'static, str> {
         "OriginX".into()
@@ -1727,11 +2228,12 @@ impl JsonSchema for OriginX {
         let direction = generator.subschema_for::<WorldDirection>();
         let point = generator.subschema_for::<WorldPoint>();
         json_schema!({
-            "description": "A direction [x, y, z] in world coordinates (for a point origin also {x, y, z}), a face's name, or {face: a point on a face of the origin's component, or its name}: a direction, the way to another hole's axis or a plane's normal.",
+            "description": "A world direction, a face's name or {face}, or {reference: {type: construction, feature: id}} for a secondary construction axis on the origin's component. A two-point axis keeps the direction from its first point to its second. Point origins take only a direction.",
             "anyOf": [
                 direction,
                 {"type": "string", "minLength": 1},
-                {"type": "object", "properties": {"face": {"anyOf": [point, {"type": "string", "minLength": 1}]}}, "required": ["face"]}
+                {"type": "object", "not": {"anyOf":[{"required":["reference"]},{"required":["planar_face"]}]}, "properties": {"face": {"anyOf": [point, {"type": "string", "minLength": 1}]}}, "required": ["face"]},
+                secondary_axis_x_schema()
             ]
         })
     }
@@ -1776,6 +2278,36 @@ impl JsonSchema for OriginFrame {
     }
 }
 
+/// A joint origin's plane: a name or key, or a plane definition object. Only its schema.
+pub struct OriginPlane;
+
+impl JsonSchema for OriginPlane {
+    fn schema_name() -> Cow<'static, str> {
+        "OriginPlane".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A plane to sit on: \"XY\", \"XZ\" or \"YZ\" (the design's own), \"o:<ids>/origin/<item>\" (a placement's origin plane), a construction plane's name, or a plane definition object.",
+            "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]
+        })
+    }
+}
+
+/// A joint origin's axis: a name or key, or an axis definition object. Only its schema.
+pub struct OriginAxis;
+
+impl JsonSchema for OriginAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "OriginAxis".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "An axis to sit on: \"X\", \"Y\" or \"Z\", \"o:<ids>/origin/<item>\" (a placement's origin axis), a construction axis's name, or an axis definition object.",
+            "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]
+        })
+    }
+}
+
 /// Make a named joint origin: a frame on a face, a round edge, an edge, a point, or given
 /// outright, that joints can then take for a side by its name. Give one of `face`, `circle`,
 /// `edge`, `point` or `frame`; a face or circle given by its name is found again by name, so the
@@ -1788,11 +2320,21 @@ pub struct MakeJointOriginParams {
     /// Blank text gives the default. A name already taken is refused.
     #[serde(default)]
     pub name: Option<String>,
+    /// Robot exports write the origin as a frame of its own: an empty link on a fixed joint.
+    /// Default false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_frame: Option<bool>,
     /// The occurrence the origin is on, by id or name. Default: found from the point, or the
     /// named face's component.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OccurrenceKey")]
     pub occurrence: Option<OccurrenceKey>,
+    /// The placement picked on: occurrence ids from the top of the assembly down, ending at
+    /// `occurrence`, so a part in a sub-assembly placed more than once is on that copy. Default:
+    /// the occurrence's first placement, or with no occurrence the placement nearest the pick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<OccurrencePath>")]
+    pub path: Option<Value>,
     /// The centre of a planar face: a point on it, or its name. The first of `face` and `circle`
     /// given by name wins; then the first given as a point of `face`, `circle`, `edge` and `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1811,6 +2353,18 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WorldPoint")]
     pub point: Option<Value>,
+    /// The plane to sit on: `XY`, `XZ` or `YZ` (the design's own), `o:<ids>/origin/<item>` (a
+    /// placement's origin plane), a construction plane's name, or a plane definition object. Read
+    /// before the other keys: an origin with `plane` sits on the plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OriginPlane")]
+    pub plane: Option<Value>,
+    /// The axis to sit on: `X`, `Y` or `Z`, `o:<ids>/origin/<item>` (a placement's origin axis),
+    /// a construction axis's name, or an axis definition object. Read when no `edge` or `point`
+    /// is given, after `plane`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OriginAxis")]
+    pub axis: Option<Value>,
     /// An explicit frame, read only when no point is given in `face`, `circle`, `edge` or `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OriginFrame")]
@@ -1848,10 +2402,11 @@ pub struct MakeJointOriginParams {
 }
 
 fn origin_required(schema: &mut Schema) {
+    schema.insert("allOf".into(), json!([secondary_axis_origin_schema()]));
     // The handler refuses a call with none of them.
     schema.insert(
         "anyOf".into(),
-        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["frame"]}]),
+        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["plane"]}, {"required": ["axis"]}, {"required": ["frame"]}]),
     );
 }
 
@@ -1859,6 +2414,11 @@ fn origin_required(schema: &mut Schema) {
 const ORIGIN_X: &str = "`x` is a direction [x, y, z], a face's name, or {face: [x, y, z]}";
 const END_NAME: &str = "`end` is the name of a face a round end lies on";
 const END_ROUND: &str = "`end` is for a round origin (`circle`)";
+
+/// The wording of the handler's refusals of a plane or axis origin's value: a name or key, or a
+/// definition object.
+const PLANE_FORM: &str = "`plane` must be a plane name (e.g. \"XY\", \"o:2/origin/XY\", \"Plane1\") or a plane definition object";
+const AXIS_FORM: &str = "`axis` must be an axis name (e.g. \"Z\", \"o:2/origin/X\", \"Axis1\") or an axis definition object";
 
 /// A face or end name the handlers take: 1…16384 characters.
 fn face_name(v: &Value) -> bool {
@@ -1871,6 +2431,10 @@ fn origin_x(m: &Map<String, Value>) -> Result<(), String> {
     match m.get("x") {
         None | Some(Value::Null) => Ok(()),
         Some(v) if face_name(v) => Ok(()),
+        Some(Value::Object(o)) if o.contains_key("reference") || o.contains_key("planar_face") => {
+            let r: solidcraft_doc::joints::XRef = serde_json::from_value(Value::Object(o.clone())).map_err(|e| format!("`x`: {e}"))?;
+            if r.is_finite() { Ok(()) } else { Err("invalid secondary reference".into()) }
+        }
         Some(Value::Object(o)) => match o.get("face") {
             Some(f) if face_name(f) => Ok(()),
             Some(p) => params::vec3(p).map(|_| ()).ok_or_else(|| ORIGIN_X.to_string()),
@@ -1915,6 +2479,33 @@ fn origin_point(v: Option<&Value>, message: &str) -> Result<(), String> {
 impl MakeJointOriginParams {
     /// The keys `origin_param` reads, in the cases it reads them, in the order it reads them.
     fn check(m: &Map<String, Value>) -> Result<(), String> {
+        if !matches!(m.get("export_frame"), None | Some(Value::Null | Value::Bool(_))) {
+            return Err("`export_frame` must be true or false".into());
+        }
+        // Then the path, by the same rule `occurrence.move` uses; `null` is left out.
+        if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
+            OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
+        }
+        // A plane or axis origin, as plane_origin and axis_origin read them: a name or key, or
+        // a definition object. `plane` wins; `axis` is read when no `edge` or `point` is given.
+        let datum = if m.get("plane").is_some() {
+            Some("plane")
+        } else if m.get("axis").is_some() && m.get("edge").is_none() && m.get("point").is_none() {
+            Some("axis")
+        } else {
+            None
+        };
+        if let Some(what) = datum {
+            m.get("occurrence").map(OccurrenceKey::read).transpose()?;
+            match m.get(what) {
+                Some(Value::String(_)) | Some(Value::Object(_)) => {}
+                // The handler's own wording, so strict and off fail the same bad origin alike.
+                _ => return Err(if what == "plane" { PLANE_FORM.to_string() } else { AXIS_FORM.to_string() }),
+            }
+            origin_x(m)?;
+            origin_end(m, false)?;
+            return Ok(());
+        }
         // A face or circle given by its name: the first of the two that is text.
         let named = ["face", "circle"].into_iter().find_map(|k| m.get(k).and_then(Value::as_str).map(|n| (k, n)));
         if let Some((what, name)) = named {
@@ -1936,8 +2527,11 @@ impl MakeJointOriginParams {
                 f.get("origin").and_then(params::vec3).ok_or("`frame` needs origin and z")?;
                 "frame"
             }
-            _ => return Err("a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name".into()),
+            _ => return Err("a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name".into()),
         };
+        if matches!(what, "edge" | "frame" | "point") && m.get("x").is_some_and(|x| x.get("reference").is_some() || x.get("planar_face").is_some()) {
+            return Err("secondary axis alignment requires a face, circle, plane or axis origin".into());
+        }
         m.get("occurrence").map(OccurrenceKey::read).transpose()?;
         match what {
             "face" => {
@@ -1983,11 +2577,16 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
         // The name is read last, once the origin is made.
         Ok(MakeJointOriginParams {
             name: text(&m, "name")?,
+            export_frame: m.get("export_frame").and_then(Value::as_bool),
             occurrence: m.get("occurrence").and_then(|v| OccurrenceKey::read(v).ok()),
+            // Read by the handler's path parser, which `occurrence.move` shares.
+            path: raw("path"),
             face: raw("face"),
             circle: raw("circle"),
             edge: raw("edge"),
             point: raw("point"),
+            plane: raw("plane"),
+            axis: raw("axis"),
             frame: raw("frame"),
             on: raw("on"),
             corner: raw("corner"),
@@ -2046,7 +2645,8 @@ pub struct RigidGroupResult {
 
 /// Move an occurrence's point to a place in the world by changing the values of the joints on its
 /// chain, from where they are to the nearest pose within their limits, through motion links and
-/// keeping closed loops closed as joint.drive does (contact sets are not checked). With `z` the
+/// keeping closed loops closed as joint.drive does. With contact sets on, the joints stop where
+/// two parts of a set would pass into each other (`stopped_by_contact`). With `z` the
 /// occurrence's axis is turned to point that way too. Reaches as far as it can: the reply says how
 /// close it got and what stopped it.
 #[derive(Debug, JsonSchema)]
@@ -2082,6 +2682,13 @@ pub struct ReachParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointKeyList")]
     pub joints: Option<JointKeyList>,
+    /// The values some joints start from instead of the design's (at most 1000): the pose the last
+    /// frame of a drag showed, so the one reach that applies the drag ends where the view showed
+    /// it. With contact sets on, refused unless every value is already the design's, as the move
+    /// to it would not be checked for contact. Default: every joint starts where the design has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ReachStarts")]
+    pub from: Option<ReachStarts>,
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
@@ -2108,7 +2715,8 @@ impl<'de> Deserialize<'de> for ReachParams {
         let z = reach_vector(&m, "z", true)?;
         let axis = reach_vector(&m, "axis", true)?;
         let joints = given(&m, "joints", JointKeyList::read)?;
-        Ok(ReachParams { occurrence, point, at, z, axis, joints, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
+        let from = given(&m, "from", ReachStarts::read)?;
+        Ok(ReachParams { occurrence, point, at, z, axis, joints, from, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
     }
 }
 
@@ -2141,7 +2749,7 @@ pub struct ReachLoopStop {
 }
 
 /// A joint a reach moved.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct ReachedJoint {
     /// The joint, by id.
     pub joint: u64,
@@ -2175,6 +2783,9 @@ pub struct ReachResult {
     pub stopped_by_limit: Option<Vec<LimitStop>>,
     /// The closed loop that stopped it (its chain alone gets closer); `null` when none.
     pub stopped_by_loop: Option<ReachLoopStop>,
+    /// With contact sets on: the pair of a set that stopped it where they touch, as `joint.drive`
+    /// says; `null` when none.
+    pub stopped_by_contact: Option<ContactStop>,
     /// Why nothing can move. Left out when the reach worked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -2218,6 +2829,10 @@ pub struct MotionLinkParams {
     /// Which of b's values follows, counted from zero (a negative number is 0). Default: 0.
     #[serde(default)]
     pub ib: Option<f64>,
+    /// Replace that motion link (its index in `joint.list`'s `links`) instead of adding one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u64")]
+    pub link: Option<u64>,
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
@@ -2252,7 +2867,7 @@ impl<'de> Deserialize<'de> for MotionLinkParams {
         })?;
         let (ia, ib) = (number(&m, "ia")?, number(&m, "ib")?);
         let offset = given(&m, "offset", JointValue::read)?;
-        Ok(MotionLinkParams { a, b, ratio, offset, ia, ib, quiet: flag(&m, "quiet")? })
+        Ok(MotionLinkParams { a, b, ratio, offset, ia, ib, link: link_index(&m, "link")?, quiet: flag(&m, "quiet")? })
     }
 }
 
@@ -2265,6 +2880,18 @@ pub struct CouplingResult {
     pub link: usize,
     /// The ratio worked out: b's units per a's, per degree (mm per degree, or degrees per mm).
     pub ratio: f64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `joint.motion_link` returns: the solve, then the motion link made or replaced.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MotionLinkResult {
+    #[serde(flatten)]
+    pub solved: SolveReport,
+    /// The motion link made (or replaced), by its index in `joint.list`'s `links`.
+    pub link: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -2533,3 +3160,70 @@ pub struct CamResult {
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;
+
+/// Set or clear what a simulator reads for one value of a joint. URDF export writes these; the
+/// joint solver does not use them. Give none of the four to clear the value's dynamics.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct JointDynamicsParams {
+    /// The joint, by id or name.
+    pub joint: IdOrName,
+    /// Which of the joint's values. Default: 0.
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// The most force or torque, in N or N m. Above 0.
+    #[serde(default)]
+    pub effort: Option<f64>,
+    /// The highest speed, in m/s or rad/s. Above 0.
+    #[serde(default)]
+    pub velocity: Option<f64>,
+    /// Damping, in N s/m or N m s/rad. 0 or more.
+    #[serde(default)]
+    pub damping: Option<f64>,
+    /// Friction, in N or N m. 0 or more.
+    #[serde(default)]
+    pub friction: Option<f64>,
+}
+
+/// What `joint.dynamics` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct JointDynamicsResult {
+    /// The joint, by id.
+    pub joint: u64,
+    /// The value set.
+    pub index: usize,
+    /// The effort now saved.
+    pub effort: Option<f64>,
+    /// The velocity now saved.
+    pub velocity: Option<f64>,
+    /// The damping now saved.
+    pub damping: Option<f64>,
+    /// The friction now saved.
+    pub friction: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Mark a named joint origin as a frame of its own in robot exports (a tool tip, a sensor mount),
+/// or stop marking it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OriginFrameParams {
+    /// The named joint origin.
+    pub origin: String,
+    /// Whether robot exports write it.
+    pub frame: bool,
+}
+
+/// What `joint.origin_frame` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OriginFrameResult {
+    /// The joint origin.
+    pub origin: String,
+    /// Whether robot exports now write it.
+    pub frame: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

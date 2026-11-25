@@ -38,6 +38,12 @@ pub struct Messages {
 impl Messages {
     /// Keep a message: the same one again in a row counts up instead.
     pub fn push(&mut self, text: &str, error: bool, at: f64) {
+        // The log on disk keeps what the person was told (`log_file`).
+        if error {
+            log::warn!("{text}");
+        } else {
+            log::info!("{text}");
+        }
         if let Some(last) = self.list.back_mut()
             && last.text == text
             && last.error == error
@@ -77,7 +83,7 @@ fn line(m: &Message) -> String {
 }
 
 /// How long ago `at` was, at `now` (both ms): seconds, minutes or hours.
-fn ago(now: f64, at: f64) -> String {
+pub(crate) fn ago(now: f64, at: f64) -> String {
     let s = ((now - at) / 1000.0).max(0.0).floor();
     let (id, n) = if s < 60.0 {
         ("messages.ago_s", s)

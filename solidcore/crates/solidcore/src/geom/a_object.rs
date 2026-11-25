@@ -75,6 +75,7 @@
 //! - **Inline helpers.** The `NLI_Math.h` functions return their result instead of
 //!   writing an out-parameter.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::context::Context;
@@ -987,7 +988,7 @@ pub const fn cache_make_or_validate(
 ///
 /// # Errors
 ///
-/// `SM_ERR` ([`SolidError::Upstream`]) when the target is neither a B-rep nor a poly
+/// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) when the target is neither a B-rep nor a poly
 /// B-rep; [`SolidError::InvalidInput`] when a new cache needs source geometry.
 pub fn sag_cache_make_or_validate(
     _cache_type: ObjectCacheType,
@@ -996,8 +997,9 @@ pub fn sag_cache_make_or_validate(
 ) -> Result<Option<CacheId>> {
     // check that object is an SmBrep or SmPolyBrep object
     if target_type != BREP_TYPE && target_type != POLY_BREP_TYPE {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::geom(
             "geom::a_object::sag_cache_make_or_validate",
+            GeomFailure::UnsupportedTargetType { target_type },
         ));
     }
     // low work - use OldCache when its given
@@ -1072,7 +1074,11 @@ pub fn get_or_create_object_cache(
     };
     match made {
         Ok(cache) => Ok(cache),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         // a failing CacheMakeOrValidate: no cache
         Err(_) => Ok(None),
     }
@@ -1469,7 +1475,7 @@ mod tests {
         );
         assert!(matches!(
             sag_cache_make_or_validate(ObjectCacheType::Brep, REGION_TYPE, Some(id)),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(e) if e.upstream_status() == Some(SM_ERR)
         ));
         assert!(matches!(
             get(

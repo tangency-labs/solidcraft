@@ -59,7 +59,8 @@ use std::f64::consts::TAU;
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::sweep::{ProfileCurveStep, SweepFailure};
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -209,6 +210,10 @@ impl Screw {
 /// span strays at most `|d| * offset_error(h)` more.
 struct Stations {
     t: Vec<f64>,
+    /// The first station (`t` is never empty: it holds `n + 1` stations).
+    start: f64,
+    /// The last station.
+    end: f64,
     /// `h / 2`.
     half: f64,
 }
@@ -223,8 +228,12 @@ impl Stations {
                 from + (to - from) * i as f64 / n as f64
             });
         }
+        let start = t.first().copied().unwrap_or(to);
+        let end = t.last().copied().unwrap_or(to);
         Self {
             t,
+            start,
+            end,
             half: 0.5 * (to - from) / n as f64,
         }
     }
@@ -331,16 +340,29 @@ fn bspline_of(curve: &Curve) -> Result<BSplineCurve> {
         CurveKind::Ellipse(e) => Ok(e.base().clone()),
         CurveKind::Hyperbola(h) => Ok(h.base().clone()),
         CurveKind::Parabola(p) => Ok(p.base().clone()),
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::sweep(
+            OP,
+            SweepFailure::CurveWithoutBSplineForm { entity: None },
+        )),
     }
+}
+
+/// [`SweepFailure::ProfileCurveStepFailed`] for `step`, chaining the error it gave.
+fn profile_step_failed(step: ProfileCurveStep, cause: SolidError) -> SolidError {
+    Failure::new(OP, SweepFailure::ProfileCurveStepFailed { step })
+        .caused_by(cause)
+        .into_error()
 }
 
 fn nurbs_of(curve: &Curve) -> Result<Nurbs> {
     let c = bspline_of(curve)?
         .canonical()
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|cause| profile_step_failed(ProfileCurveStep::Nurbs, cause))?;
     if c.dim != 3 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep(
+            OP,
+            SweepFailure::ProfileCurveNotThreeDimensional { dim: c.dim },
+        ));
     }
     if c.control_points
         .iter()
@@ -441,9 +463,7 @@ fn cylinder_piece(
     radius: f64,
     st: &Stations,
 ) -> Result<()> {
-    let (Some(&a0), Some(&a1)) = (st.t.first(), st.t.last()) else {
-        return Err(SolidError::sm_err(OP));
-    };
+    let (a0, a1) = (st.start, st.end);
     let w = a - m.o;
     let radial = w - m.k * w.dot(m.k);
     let e = radial * (1.0 / radial.length());
@@ -499,7 +519,12 @@ fn cylinder_piece(
         )
     })?;
     if made.faces.len() != 1 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep(
+            OP,
+            SweepFailure::CylinderPieceNotOneFace {
+                faces: made.faces.len(),
+            },
+        ));
     }
     Ok(())
 }
@@ -512,7 +537,8 @@ fn cylinder_piece(
 fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
     let count = c.points.len();
     let across = 2 * st.spans() + 1;
-    let size = count
+    // `path` gives each control point `2 * spans + 1` points: the net has `count * across`
+    count
         .checked_mul(across)
         .filter(|&n| n <= MAX_NET_POINTS)
         .ok_or_else(|| bad("a wall's control net is too large"))?;
@@ -524,9 +550,6 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
             net.push(q);
             weights.push(w * st.weight(j));
         }
-    }
-    if net.len() != size {
-        return Err(SolidError::sm_err(OP));
     }
     let (vknots, vmult) = st.knots();
     BSplineSurface::create_canonical(&CanonicalSurfaceData {
@@ -839,9 +862,7 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         crate::geom::tol::USE_DEFAULT,
     )?;
     for st in &pieces {
-        let (Some(&t0), Some(&t1)) = (st.t.first(), st.t.last()) else {
-            return Err(SolidError::sm_err(OP));
-        };
+        let (t0, t1) = (st.start, st.end);
         for (((wall, curve), nurbs), &r) in walls.iter().zip(profile).zip(&curves).zip(&radius) {
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
                 let ends = curve.ends(k)?;
@@ -867,9 +888,11 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         let placement = m.placement(a);
         let mut cap = Vec::new();
         for src in profile {
-            let mut copy = src.copy(k).map_err(|_| SolidError::sm_err(OP))?;
+            let mut copy = src
+                .copy(k)
+                .map_err(|cause| profile_step_failed(ProfileCurveStep::Copy, cause))?;
             copy.transform(k, &placement, None)
-                .map_err(|_| SolidError::sm_err(OP))?;
+                .map_err(|cause| profile_step_failed(ProfileCurveStep::Place, cause))?;
             cap.push(copy);
         }
         with_face_env(k, &mut brep, |k, brep, fenv| {
@@ -889,7 +912,10 @@ fn solid(brep: Brep) -> Result<Brep> {
     if crate::topology::brep::p1::faces(&brep, None)?.is_empty()
         || !crate::topology::brep::p2::is_manifold_solid(&brep)?
     {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep(
+            OP,
+            SweepFailure::SweptBodyNotManifoldSolid,
+        ));
     }
     Ok(brep)
 }

@@ -35,12 +35,13 @@ use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
+use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_DEFAULT_THUMBWEIGHT};
 use solidcore::blend::fillet_solver::p1::{FilletSurfaceGenerator, OffsetSurfaceSlot};
 use solidcore::blend::fillet_standard_solver::p1::{
-    constant_radius_from_edgeuse, constant_radius_is_kind_of, BlendCurveCrossSectionFsg,
+    constant_radius_from_edgeuse, constant_radius_is_kind_of,
     BoundaryTrimmingType, CircularCrossSectionFsg, ConstantDistanceFs, ConstantRadiusFs,
     CurveBasedFs, FilletLaw, FilletLawKind, FilletSolver, InitialSurface, LinearCrossSectionFsg,
-    RailSurface, SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_FS_TYPE,
+    SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_FS_TYPE,
     CONSTANT_RADIUS_FS_TYPE_STRING,
 };
 use solidcore::curve::curve::{Curve, CurveKind};
@@ -408,7 +409,9 @@ pub(crate) fn put_default_geom(
         match s.surface.evaluate_point(k, uv) {
             Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
             Err(e) if e.is_unported() => return Err(e),
-            Err(SolidError::Upstream { code, .. }) => v.extend([f64::from(code), 0.0, 0.0, 0.0]),
+            Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
+                v.extend([f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            }
             Err(e) => return Err(e),
         }
     }
@@ -494,7 +497,9 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -558,7 +563,7 @@ fn fail(e: &SolidError) -> Result<f64, Box<Output>> {
 }
 
 fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     let (res, curves) = match i {
         Inputs::Circ {
@@ -588,58 +593,9 @@ fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
             };
             (res, [c, r1, r2])
         }
-        Inputs::Blend {
-            cont,
-            scale,
-            tol,
-            g1,
-            center,
-            rail1,
-            rail2,
-            sides,
-        } => {
-            let fsg = BlendCurveCrossSectionFsg {
-                continuity: *cont as u32,
-                blend_scale: *scale,
-                at_thirds: false,
-            };
-            let mut c = bcurve_of(center)?;
-            let mut r1 = bcurve_of(rail1)?;
-            let mut r2 = bcurve_of(rail2)?;
-            let built = match sides {
-                Some(s) => Some((
-                    surface_of(&s.s1)?,
-                    bcurve_of(&s.uv1)?,
-                    surface_of(&s.s2)?,
-                    bcurve_of(&s.uv2)?,
-                )),
-                None => None,
-            };
-            let (side1, side2) = match &built {
-                Some((s1, uv1, s2, uv2)) => (
-                    RailSurface {
-                        surface: Some(s1),
-                        uv_curve: Some(uv1),
-                    },
-                    RailSurface {
-                        surface: Some(s2),
-                        uv_curve: Some(uv2),
-                    },
-                ),
-                None => (
-                    RailSurface {
-                        surface: None,
-                        uv_curve: None,
-                    },
-                    RailSurface {
-                        surface: None,
-                        uv_curve: None,
-                    },
-                ),
-            };
-            let res = fsg
-                .create_surface_from_curves(&k, &mut c, &mut r1, &mut r2, *tol, *g1, side1, side2);
-            (res, [c, r1, r2])
+        Inputs::Blend { .. } => {
+            // the blend-curve generator is retired (WR-685): `cases` drops these
+            return Err(harness("the blend-curve generator is retired (WR-685)"));
         }
         _ => return Err(harness("not a generator op")),
     };
@@ -761,7 +717,8 @@ fn vr_of(k: &Kernel, s: &VrIn) -> Result<VariableRadiusFs, HarnessError> {
         .set_fillet_surface_generator(Some(match s.fsg {
             1 => FilletSurfaceGenerator::Linear,
             2 => FilletSurfaceGenerator::circular_default(),
-            _ => FilletSurfaceGenerator::blend_curve_default(),
+            // a blend curve is the G^n section (the old generator is retired, WR-685)
+            _ => FilletSurfaceGenerator::GnSection(GnSectionFsg::new(2, GN_DEFAULT_THUMBWEIGHT)),
         }));
     curve_based.original = Some(center);
     let law = match &s.law {
@@ -826,7 +783,7 @@ fn slot_offsets(s: &[Option<OffsetSurfaceSlot>; 2]) -> [f64; 2] {
 
 #[allow(clippy::too_many_lines)]
 fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     match i {
         Inputs::Circ { .. } | Inputs::Blend { .. } => return rust_generator(i),
@@ -1309,7 +1266,7 @@ fn rust_edgeuse_body(
     fu: f64,
     fv: f64,
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {
@@ -1346,9 +1303,9 @@ fn rust_edgeuse_body(
                     Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
                     Err(e) => {
-                        let st = match e {
-                            SolidError::Upstream { code, .. } => f64::from(code),
-                            _ => return Err(e),
+                        let st = match solidcore::error::nurbs::upstream_status(&e) {
+                            Some(code) => f64::from(code),
+                            None => return Err(e),
                         };
                         v.extend([st, 0.0, 0.0, 0.0]);
                     }
@@ -1362,12 +1319,71 @@ fn rust_edgeuse_body(
             }
             put_default_geom(&k, &mut v, &fs.solver, id, &pseudo, faces, fu, fv)?;
         }
-        Err(SolidError::Upstream { code, .. }) => v.push(f64::from(code)),
+        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => v.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))),
         Err(e) => return Err(e),
     }
     put_eu_state(&k, &mut v, b, Some(eu))?;
     put_eu_state(&k, &mut v, b, radial)?;
     Ok(v)
+}
+
+/// The edge-use op's B-rep and the selected edge use, before its body (`body` false) or
+/// after it, what the case's row reports (`None` where the op refuses before its body or
+/// its body reports `null_deref`, as the row does, so only states the row has are seen). For
+/// the WR-493 trim certificate (`refit::replay`).
+#[cfg(test)]
+pub(crate) fn eu_case(case: &Case, body: bool) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    let Inputs::CrEu {
+        brep,
+        eu,
+        tol,
+        ang,
+        tan,
+        r,
+        r2,
+        fu,
+        fv,
+    } = case.parse::<Inputs>()?
+    else {
+        return Ok(None);
+    };
+    let Ok(mut s) = eu_setup(&brep, eu)? else {
+        return Ok(None);
+    };
+    // the op's own order: its refusals before the body, then the body's own status
+    if edgeuse_refusal(&s)?.is_some() {
+        return Ok(None);
+    }
+    if body {
+        let out = rust_edgeuse_body(&mut s.brep, s.eu, tol, ang, tan, r, r2, fu, fv)
+            .map_err(|e| he(&e))?;
+        if out.first() == Some(&-2.0) {
+            return Ok(None);
+        }
+    }
+    Ok(Some((s.brep, s.eu)))
+}
+
+/// The refusal the edge-use op reports before its body: inexact geometry at the selected
+/// edge use, or at its radial's face and edge.
+fn edgeuse_refusal(s: &Setup) -> Result<Option<Output>, HarnessError> {
+    if let Some(o) = inexact_geometry(s) {
+        return Ok(Some(o));
+    }
+    // the radial's face and edge too
+    if has_prim(&s.brep, s.eu).map_err(|e| he(&e))? {
+        if let Some(radial) = eu1::radial(&s.brep, s.eu).map_err(|e| he(&e))? {
+            let probe = Setup {
+                brep: s.brep.clone_standing_for_self().map_err(|e| he(&e))?,
+                eu: radial,
+                types: s.types.clone(),
+            };
+            if let Some(o) = inexact_geometry(&probe) {
+                return Ok(Some(o));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
@@ -1389,21 +1405,8 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
-    if let Some(o) = inexact_geometry(&s) {
+    if let Some(o) = edgeuse_refusal(&s)? {
         return Ok(o);
-    }
-    // the radial's face and edge too
-    if has_prim(&s.brep, s.eu).map_err(|e| he(&e))? {
-        if let Some(radial) = eu1::radial(&s.brep, s.eu).map_err(|e| he(&e))? {
-            let probe = Setup {
-                brep: s.brep.clone_standing_for_self().map_err(|e| he(&e))?,
-                eu: radial,
-                types: s.types.clone(),
-            };
-            if let Some(o) = inexact_geometry(&probe) {
-                return Ok(o);
-            }
-        }
     }
     match rust_edgeuse_body(&mut s.brep, s.eu, *tol, *ang, *tan, *r, *r2, *fu, *fv) {
         Ok(body) => Ok(eu_output(&body)),
@@ -2168,7 +2171,11 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        // The blend-curve generator is retired (WR-685, #2273): its cases are still drawn,
+        // so the generated cases after them stay as they were, and dropped here.
+        cases.retain(|c| !matches!(c.parse::<Inputs>(), Ok(Inputs::Blend { .. })));
+        Ok(cases)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -2188,6 +2195,10 @@ mod tests {
         for seed in 0..400u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);
             let i = gen_case(&mut rng);
+            // (the retired blend-curve generator's cases are dropped, WR-685)
+            if matches!(i, Inputs::Blend { .. }) {
+                continue;
+            }
             let op = i.label();
             let out = rust(&i).expect("harness");
             let kind = if let Some(d) = &out.deferred {
@@ -2220,7 +2231,6 @@ mod tests {
                 .unwrap_or(0)
         };
         assert!(ok("Circ") > 40, "too few successful Circ cases");
-        assert!(ok("Blend") > 20, "too few successful Blend cases");
         assert!(ok("CrEu") > 10, "too few successful CrEu cases");
     }
 

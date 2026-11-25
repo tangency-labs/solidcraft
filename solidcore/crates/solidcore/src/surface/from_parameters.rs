@@ -22,9 +22,10 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::eval::{Frame, Surface as Record};
-use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -315,7 +316,16 @@ fn evaluates_as_record(
     let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
     let eval =
         crate::eval::SurfaceEval::new(record).map_err(|_| bad("the record does not evaluate"))?;
-    let net = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let net = form
+        .gw_nurb()
+        .ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the B-spline form has no NURB, though `lies_on` read the same form's NURB before this check and returned an error without it",
+                },
+            )
+        })?;
     let (p, q) = net.degrees();
     let size = net.rows().flatten().fold(0.0_f64, |m, c| {
         let w = if c.w == crate::nurbs::math::NOW {
@@ -370,11 +380,9 @@ fn given(u: [f64; 2], v: [f64; 2]) -> Extent2d {
 
 /// A frame's origin, x, y and z axes, its x and y checked unit and square to rounding.
 fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3, Vec3)> {
-    let ulps = 8.0 * f64::EPSILON;
     let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
     let (x, y) = (v(f.x_axis), v(f.y_axis));
-    let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    if !(unit(x) && unit(y) && x.dot(y).abs() <= ulps) {
+    if !axes_are_orthonormal(x, y) {
         return Err(SolidError::invalid_input(
             OP,
             "the frame's axes are not unit and square",
@@ -396,8 +404,7 @@ fn plane(
     if !(a.is_finite() && b.is_finite() && a > 0.0 && b > 0.0) {
         return Err(SolidError::invalid_input(OP, "a plane axis has no length"));
     }
-    // square to the rounding of the dot product
-    if du.dot(dv).abs() > gamma(3) * a * b {
+    if !plane_axes_square(du, dv) {
         return Err(SolidError::invalid_input(
             OP,
             "the plane's axes are not square: the kernel's plane cannot hold a skew parametrisation",
@@ -410,6 +417,13 @@ fn plane(
     let n = du.cross(dv);
     let normal = n / n.length();
     Ok((Surface::from(p), Implicit::Plane { origin, normal }, [a, b]))
+}
+
+/// Whether a record plane's axes are square to the rounding of their dot product, as
+/// [`plane`] requires: the kernel's plane cannot hold a skew parametrisation.
+#[must_use]
+pub(crate) fn plane_axes_square(du: Vec3, dv: Vec3) -> bool {
+    du.dot(dv).abs() <= gamma(3) * du.length() * dv.length()
 }
 
 /// How far a plane's parameter runs along its unit axis for a unit of the record's along
@@ -849,5 +863,41 @@ mod tests {
         let want: Vec<[f64; 3]> = corners(&grown).iter().map(|p| [p.x, p.y, p.z]).collect();
         same_set(&corners(&back), &want);
         AnalyticSupport::check(&k, &back).unwrap();
+    }
+
+    /// The conversion failures keep the operation, status and entity of the bare
+    /// `Upstream` statuses they replace (a sample); the reviewed defect is class
+    /// `stage_failed`.
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 1] = [(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the B-spline form has no NURB, though `lies_on` read it",
+            },
+            crate::error::SM_ERR,
+        )];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(
+                typed.kind(),
+                crate::error::ErrorKind::StageFailed,
+                "{typed:?}"
+            );
+            assert!(typed.is_defect(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

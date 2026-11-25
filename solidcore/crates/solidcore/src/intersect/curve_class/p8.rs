@@ -39,10 +39,12 @@
 //! Curve-on-surface construction preserves concrete surface dispatch.
 //! No input-driven recursion: dimension forwarding dispatches once through shared helpers.
 
+use super::p1::EVAL_1ST;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -253,21 +255,54 @@ fn plane_intersections(
 
 fn pv(k: &Kernel, curve: &Curve, t: f64) -> Result<[Vec3; 2]> {
     let v = curve.evaluate(k, t, 1, true, true)?;
-    Ok([
-        *v.first().ok_or_else(|| SolidError::sm_err(OP))?,
-        *v.get(1).ok_or_else(|| SolidError::sm_err(OP))?,
-    ])
+    match v.as_slice() {
+        [p, d, ..] => Ok([*p, *d]),
+        _ => Err(defect(EVAL_1ST)),
+    }
 }
+
+/// A defect ([`IntersectFailure::Defect`]) with the status `SM_ERR` of the `SER` it replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    SolidError::intersect(OP, IntersectFailure::Defect { why })
+}
+
+/// Why a boundary index is past the end of the boundaries.
+const BOUNDARY_INDEX: &str = "the boundary index is past the end of the boundaries, though \
+     the indices are the first and last boundary of each direction, made one for each knot line \
+     or discontinuity";
+/// Why a solution slot is past the end of the slots.
+const SOLUTION_SLOT: &str = "the boundary's solution slot is past the end of the slots, \
+     though each slot number is one of them";
 
 fn iso_curve(k: &Kernel, surface: &Surface, line: Line) -> Result<Curve> {
     Ok(CrvOnSurf::new(k, line.into(), surface.clone_for_evaluation()?, None, 0)?.into())
 }
 
-fn ends(knots: &[f64]) -> Result<(f64, f64)> {
-    Ok((
-        *knots.first().ok_or_else(|| SolidError::sm_err(OP))?,
-        *knots.last().ok_or_else(|| SolidError::sm_err(OP))?,
-    ))
+/// The first and last knot; an empty vector is [`IntersectFailure::NoKnots`], with the knot
+/// query's error as its cause where the query failed (rule 6).
+fn ends(knots: &[f64], query: Option<&SolidError>) -> Result<(f64, f64)> {
+    if let (Some(&first), Some(&last)) = (knots.first(), knots.last()) {
+        return Ok((first, last));
+    }
+    let failure = crate::error::Failure::new(OP, IntersectFailure::NoKnots);
+    Err(match query {
+        Some(e) => failure.caused_by(e.clone()),
+        None => failure,
+    }
+    .into_error())
+}
+
+/// The knots of a knot query whose status is ignored as upstream (none on failure), and its
+/// error; an unported or cancelled step passes on, as [`ignored`] does.
+fn knots_or_error(r: Result<(Vec<f64>, Vec<usize>)>) -> Result<(Vec<f64>, Option<SolidError>)> {
+    match r {
+        Ok((knots, _)) => Ok((knots, None)),
+        Err(e) => {
+            ignored(Err::<(), _>(e.clone()))?;
+            Ok((Vec::new(), Some(e)))
+        }
+    }
 }
 
 fn intersections(
@@ -380,9 +415,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 domain.min(),
             ];
             let mut b = Vec::new();
-            for pair in corners.windows(2) {
-                let a = pair.first().ok_or_else(|| SolidError::sm_err(OP))?;
-                let z = pair.get(1).ok_or_else(|| SolidError::sm_err(OP))?;
+            for (a, z) in corners.iter().zip(corners.iter().skip(1)) {
                 b.push(Curve::from(Line::create_line_segment(
                     2,
                     Point3::new(a.x, a.y, 0.0),
@@ -394,7 +427,10 @@ impl<O: ClassObject> CurveClassification<O> {
         } else {
             let b = surface.create_natural_uv_trim_curves(k, &domain, SurfParamType::V, false)?;
             if b.curves_3d.len() != b.orients.len() {
-                return Err(SolidError::sm_err(OP));
+                return Err(defect(
+                    "the natural trim curves and their orientations differ in number, though \
+                     they are made in pairs",
+                ));
             }
             (b.curves_3d, b.orients)
         };
@@ -595,14 +631,10 @@ impl<O: ClassObject> CurveClassification<O> {
             xsect_tol_3d_from_zones(k, surf_tol, self.src_zone_tol_3d())
         };
         // Native ignores the status; absent output leads to invalid indexing below.
-        let u = ignored(surface.knots_with_nurb(k, SurfParamType::U, None))?
-            .map(|r| r.0)
-            .unwrap_or_default();
-        let v = ignored(surface.knots_with_nurb(k, SurfParamType::V, None))?
-            .map(|r| r.0)
-            .unwrap_or_default();
-        let (umin, umax) = ends(&u)?;
-        let (vmin, vmax) = ends(&v)?;
+        let (u, u_error) = knots_or_error(surface.knots_with_nurb(k, SurfParamType::U, None))?;
+        let (v, v_error) = knots_or_error(surface.knots_with_nurb(k, SurfParamType::V, None))?;
+        let (umin, umax) = ends(&u, u_error.as_ref())?;
+        let (vmin, vmax) = ends(&v, v_error.as_ref())?;
         let mut boundaries = Vec::new();
         let mut uv_lines = Vec::new();
         for &x in &u {
@@ -656,7 +688,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 )?;
             }
             if let Some(s) = slot {
-                *solutions.get_mut(s).ok_or_else(|| SolidError::sm_err(OP))? = sols;
+                *solutions.get_mut(s).ok_or_else(|| defect(SOLUTION_SLOT))? = sols;
             }
         }
         let indices = [0, u.len() - 1, u.len(), u.len() + v.len() - 1];
@@ -664,7 +696,7 @@ impl<O: ClassObject> CurveClassification<O> {
         for (ii, (index, sols)) in indices.into_iter().zip(&solutions).enumerate() {
             let boundary = boundaries
                 .get(index)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| defect(BOUNDARY_INDEX))?;
             for sol in sols {
                 if sol.solution_type != SolutionType::SingleValue {
                     continue;
@@ -677,7 +709,10 @@ impl<O: ClassObject> CurveClassification<O> {
                     Vec3::Z
                 } else {
                     let CurveKind::CrvOnSurf(iso) = boundary.kind() else {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(defect(
+                            "the boundary is not a curve on the surface, though off the uv \
+                             space each boundary is made as the surface's iso curve",
+                        ));
                     };
                     iso.evaluate_surface_normal(k, bt, true)?.normal
                 };
@@ -754,7 +789,10 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         let curve = self.curve_geometry(geometry)?;
         if curve.dim() == 2 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect(
+                OP,
+                IntersectFailure::UvCurveAgainstVolume,
+            ));
         }
         let mut d = Discontinuities3d::new();
         if !volume.has_discontinuities(k, Some(&mut d), false)? {
@@ -787,11 +825,14 @@ impl<O: ClassObject> CurveClassification<O> {
         let domain = volume.natural_param_domain()?;
         // WR-156: native tests m_bUnalignedU three times instead of U/V/W.
         if d.u.unaligned || d.v.unaligned || d.w.unaligned {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect(
+                OP,
+                IntersectFailure::UnalignedDiscontinuities,
+            ));
         }
-        let (umin, umax) = ends(&d.u.params)?;
-        let (vmin, vmax) = ends(&d.v.params)?;
-        let (wmin, wmax) = ends(&d.w.params)?;
+        let (umin, umax) = ends(&d.u.params, None)?;
+        let (vmin, vmax) = ends(&d.v.params, None)?;
+        let (wmin, wmax) = ends(&d.w.params, None)?;
         let tol = xsect_tol_3d_from_zones(
             k,
             zone_tol_3d(k, SmallTopoType::NormalSize),
@@ -804,7 +845,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 1 => &d.v.params,
                 _ => &d.w.params,
             };
-            for (j, &value) in params.iter().enumerate() {
+            for &value in params {
                 let (mut origin, mut x, mut y, scale) = match axis {
                     0 => (
                         Point3::new(value, vmin, wmin),
@@ -819,11 +860,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         Vec2::new(wmax - wmin, umax - umin),
                     ),
                     _ => (
-                        Point3::new(
-                            umin,
-                            vmin,
-                            *d.w.params.get(j).ok_or_else(|| SolidError::sm_err(OP))?,
-                        ),
+                        Point3::new(umin, vmin, value),
                         Vec3::X,
                         Vec3::Y,
                         Vec2::new(umax - umin, vmax - vmin),
@@ -882,7 +919,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 if s == 5 {
                     // WR-155: slot 4 still borrows the shared buffer when it fits, so
                     // slot 5's (inserted) solutions overwrite its leading entries.
-                    let shared = solutions.get_mut(4).ok_or_else(|| SolidError::sm_err(OP))?;
+                    let shared = solutions.get_mut(4).ok_or_else(|| defect(SOLUTION_SLOT))?;
                     if !shared.is_empty() && shared.len() <= BORROWED_SOLUTIONS {
                         if sols.len() > BORROWED_SOLUTIONS {
                             return Err(SolidError::invalid_input(
@@ -895,7 +932,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         }
                     }
                 }
-                *solutions.get_mut(s).ok_or_else(|| SolidError::sm_err(OP))? = sols;
+                *solutions.get_mut(s).ok_or_else(|| defect(SOLUTION_SLOT))? = sols;
             }
         }
         let mut classified = false;
@@ -907,10 +944,13 @@ impl<O: ClassObject> CurveClassification<O> {
             {
                 let SurfaceKind::Plane(plane) = planes
                     .get(index)
-                    .ok_or_else(|| SolidError::sm_err(OP))?
+                    .ok_or_else(|| defect(BOUNDARY_INDEX))?
                     .kind()
                 else {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(defect(
+                        "the volume's boundary is not a plane, though each is made as a plane \
+                         through a discontinuity",
+                    ));
                 };
                 for sol in sols {
                     if sol.solution_type != SolutionType::SingleValue {

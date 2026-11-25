@@ -37,7 +37,11 @@ pub fn geometry(b: &Brep) -> Result<()> {
         }
     }
     for f in &b.faces {
-        surface(&f.surface)?;
+        // (a blend's label is its definition, which its structural validation checks and the
+        // kernel certifies its net against when the face is built; its geometry is its form)
+        if !matches!(f.surface, Surface::Blend { .. }) {
+            surface(&f.surface)?;
+        }
         if let Some(n) = &f.nurbs {
             surface(n)?;
         }
@@ -72,6 +76,50 @@ pub fn surface(s: &Surface) -> Result<()> {
 }
 
 pub use solidcore::eval::agreement::{Mismatch, Problem, Record, AREA_SAMPLES};
+
+/// Two faces of a sheet that face different ways: the first edge (in record order) between two
+/// faces of open shells that both run along it the same way in their sides' walks, ascending.
+/// Neighbours facing one way run along the edge they share in opposite directions; a face's walk
+/// is its loops' order about the side its shell uses it by (`forward`), so a use runs along its
+/// edge when it does in the loop (`!upper`) and the face is used forward, or neither. `None`
+/// where every pair of open-shell neighbours faces one way. An edge with other than two uses, or
+/// both on one face (a seam), says nothing.
+#[must_use]
+pub fn faces_facing_apart(b: &Brep) -> Option<[u32; 2]> {
+    use solidcore_record::brep::Shell;
+    let mut side: Vec<Option<bool>> = vec![None; b.faces.len()];
+    for (i, shell) in b.shells.iter().enumerate() {
+        let Shell::Faces { faces, .. } = shell else {
+            continue;
+        };
+        let listed = b
+            .regions
+            .iter()
+            .filter(|g| g.shells.iter().any(|&x| x as usize == i))
+            .count();
+        if listed != 1 {
+            continue;
+        }
+        for f in faces {
+            if let Some(slot) = side.get_mut(f.face as usize) {
+                slot.get_or_insert(f.forward);
+            }
+        }
+    }
+    let along = |u: &solidcore_record::brep::EdgeUseRef| {
+        side.get(u.face as usize)
+            .copied()
+            .flatten()
+            .map(|forward| u.upper != forward)
+    };
+    b.edges.iter().find_map(|e| match e.uses.as_slice() {
+        [x, y] if x.face != y.face => {
+            let (a, z) = (along(x)?, along(y)?);
+            (a == z).then(|| [x.face.min(y.face), x.face.max(y.face)])
+        }
+        _ => None,
+    })
+}
 
 /// That the record's geometry agrees with its topology, within its tolerances
 /// ([`solidcore::eval::agreement::check`]): each edge's curve meets its vertices, each pcurve lifts

@@ -65,7 +65,7 @@ fn a_failed_feature_is_marked_in_the_bottom_timeline() {
     assert!(want.iter().any(|(n, failed)| *failed && n == "Fillet1"), "the sample's Fillet1 fails: {want:?}");
     assert!(want.iter().filter(|(_, failed)| !failed).count() >= 3, "and others don't");
     // The mark sits in the item's top-right corner: 10 points square, inside the 28-point item.
-    let got = marked(&mut app, crate::timeline::timeline, |item, d| (d.x - (item.x + 9.0)).abs() < 1.5 && (d.y - (item.y - 9.0)).abs() < 1.5);
+    let got = marked(&mut app, crate::timeline::panel_inline, |item, d| (d.x - (item.x + 9.0)).abs() < 1.5 && (d.y - (item.y - 9.0)).abs() < 1.5);
     assert_eq!(got, want, "an error mark on each failed feature and on no other");
 }
 
@@ -74,7 +74,7 @@ fn a_failed_feature_is_marked_in_the_feature_history() {
     let mut app = failing_sample();
     let want = features(&app);
     // The mark sits at the row's right end, on its centre line.
-    let got = marked(&mut app, crate::timeline_left::left_timeline, |item, d| (d.y - item.y).abs() < 1.5 && d.x > item.x);
+    let got = marked(&mut app, crate::timeline_left::panel_contents, |item, d| (d.y - item.y).abs() < 1.5 && d.x > item.x);
     assert_eq!(got, want, "an error mark on each failed feature and on no other");
 }
 
@@ -251,4 +251,133 @@ fn a_sketch_rows_tooltip_names_its_state() {
         let texts = painted_texts(&mut h);
         assert!(!texts.iter().any(|t| t.contains(gone)), "{handle}: `{gone}` in {texts:?}");
     }
+}
+
+/// How the text holding `text` is painted this frame: its colour, whether it is cut short (an
+/// ellipsis in place of the rest) and its number of lines. `None` when nothing holds it.
+fn painted_as(h: &mut crate::scenario::Harness, text: &str) -> Option<(egui::Color32, bool, usize)> {
+    h.frame();
+    let mut found = None;
+    for clipped in &h.shapes {
+        each(&clipped.shape, &mut |s| {
+            if let Shape::Text(t) = s
+                && t.galley.text().contains(text)
+            {
+                let section = t.galley.job.sections.first().map(|s| s.format.color).filter(|c| *c != egui::Color32::PLACEHOLDER);
+                let colour = t.override_text_color.or(section).unwrap_or(t.fallback_color);
+                let cut = t.galley.rows.iter().any(|row| row.glyphs.iter().any(|g| g.chr == '…'));
+                found = Some((colour, cut, t.galley.rows.len()));
+            }
+        });
+    }
+    found
+}
+
+/// A failed feature's tooltip has its whole error, in the error colour, on lines that wrap,
+/// wherever its mark shows (#8834): the left History cut it off after the summary line, and the
+/// bottom History and the browser painted it like any other line, so it read like a warning.
+#[test]
+fn a_failed_features_tooltip_shows_its_whole_error_in_the_error_colour_wherever_its_mark_shows() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.session.run_script(&solidcraft_engine::sample::script()).unwrap();
+    h.app.run("parameters.change", json!({"name": "width", "expression": "5 mm"})).unwrap();
+    h.settle();
+    let fillet = h.app.session.doc.find_feature("Fillet1").unwrap().id;
+    let tip = crate::timeline::feature_tip(&h.app, fillet).unwrap();
+    let error = tip.error.clone().unwrap();
+    // Copy Error Message still copies it as plain text.
+    assert_eq!(crate::timeline::feature_message(&h.app, fillet).unwrap(), format!("{}\n{error}", tip.head));
+    let red = solidcraft_theme::Tokens::get().error;
+    let hover = |h: &mut crate::scenario::Harness, handle: &str| {
+        h.step(&json!({"move": {"handle": handle}})).unwrap();
+        h.frames(60);
+        painted_as(h, &error).unwrap_or_else(|| panic!("{handle}: `{error}` not painted"))
+    };
+    h.app.tree.expanded.insert("c0/features".into());
+    for (place, handle) in [("bottom History", "timeline:Fillet1"), ("browser row", "row:Fillet1")] {
+        let (colour, cut, _) = hover(&mut h, handle);
+        assert_eq!((colour, cut), (red, false), "{place}");
+    }
+    // Folded, the browser's folder says the same of the feature it holds.
+    h.app.tree.expanded.remove("c0/features");
+    h.frame();
+    let folder =
+        ["row:Features", "row:History"].into_iter().find(|handle| crate::scenario::handle_at(handle).is_some()).expect("the features folder row");
+    let (colour, cut, _) = hover(&mut h, folder);
+    assert_eq!((colour, cut), (red, false), "folded browser folder");
+    h.app.preferences.timeline_left = true;
+    for width in [56.0, 260.0] {
+        h.app.preferences.timeline_left_width = width;
+        let (colour, cut, _) = hover(&mut h, "timeline:Fillet1");
+        assert_eq!((colour, cut), (red, false), "left History {width} wide");
+    }
+}
+
+/// #17697: SMLib's check of an inserted STEP part runs on after the design shows. When it ends
+/// with a part to repair, the import's History chip warns and the status line says so, once.
+#[test]
+fn a_part_the_check_fails_after_the_import_shows_raises_the_chip_and_the_status_once() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-17697-ui-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("block.step");
+    std::fs::write(&path, include_str!("../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.insert_path_with(&path.to_string_lossy(), &Default::default(), false).unwrap();
+    let id = app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).expect("the import").id;
+    let report = app.session.model.result(id).and_then(|r| r.import_report.clone()).expect("the import's check");
+    report.settled().expect("the check ends");
+    app.status = None;
+    let ctx = crate::fonts::test_context();
+    crate::timeline::tick_import_checks(&mut app, &ctx);
+    let result = app.session.model.result(id).unwrap();
+    assert!(crate::timeline::has_warning(result), "the chip warns");
+    assert!(matches!(crate::timeline::feature_status(&app, id), Some(crate::ui_kit::Status::Warning)));
+    let summary = crate::timeline::import_summary(result.import_report.as_deref().unwrap());
+    let (text, _, error) = app.status.clone().expect("the status line says so");
+    assert_eq!((text, error), (crate::i18n::tr_diagnostic(&summary), false));
+    let details = crate::timeline::feature_message(&app, id).unwrap();
+    assert!(details.contains("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: "), "{details}");
+    app.status = None;
+    crate::timeline::tick_import_checks(&mut app, &ctx);
+    assert!(app.status.is_none(), "once");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #20633: an import's check of its parts runs for minutes after the design shows, and the window
+/// is asked for no frames while it does. Its end asks for exactly one frame, the one whose tick
+/// settles the result; nothing is asked for after that.
+#[test]
+fn a_running_imports_check_asks_for_no_frames_and_its_end_wakes_the_window_once() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-20633-ui-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("block.step");
+    std::fs::write(&path, include_str!("../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.insert_path_with(&path.to_string_lossy(), &Default::default(), false).unwrap();
+    let id = app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).expect("the import").id;
+    // The check of a file this small ends at once: hold one running to ask of the tick what it
+    // asks of the window while a large one runs.
+    let end = app.session.model.running_import_check_for_tests(id);
+    assert!(app.session.model.checking_imports(), "a check is in flight");
+    let ctx = crate::fonts::test_context();
+    fn frame(app: &mut SolveApp, ctx: &egui::Context, time: f64) -> Option<std::time::Duration> {
+        let raw = egui::RawInput { time: Some(time), ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            crate::timeline::tick_import_checks(app, ui.ctx());
+        });
+        out.textures_delta.clear();
+        out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay)
+    }
+    frame(&mut app, &ctx, 0.0);
+    frame(&mut app, &ctx, 0.01);
+    let running = frame(&mut app, &ctx, 0.02);
+    assert!(running.is_some_and(|d| d.as_secs_f64() > 1.0), "a running check asked for a frame after {running:?}: it must ask for none");
+    end(vec![]);
+    let woke = frame(&mut app, &ctx, 0.04);
+    assert!(woke.is_some_and(|d| d.is_zero()), "the end of the check asks for the next frame at once, got {woke:?}");
+    assert!(!app.session.model.checking_imports(), "the frame it asked for settles the result");
+    let after = frame(&mut app, &ctx, 0.06);
+    assert!(after.is_some_and(|d| d.as_secs_f64() > 1.0), "and asks for no more after that, got {after:?}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

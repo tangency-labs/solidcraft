@@ -51,34 +51,97 @@ pub mod textures;
 pub mod volume;
 
 pub use caustics::CausticOptions;
-pub use cpu_budget::{CpuBudget, CpuBudgetLimits, MAX_CPU_BODIES, MAX_CPU_SAMPLES_PER_PIXEL, MAX_CPU_TRIANGLES, MAX_CPU_WORK, NATIVE_CPU_POOL_BYTES};
+pub use cpu_budget::CpuBudget;
+pub use cpu_budget::CpuBudgetLimits;
+pub use cpu_budget::MAX_CPU_BODIES;
+pub use cpu_budget::MAX_CPU_SAMPLES_PER_PIXEL;
+pub use cpu_budget::MAX_CPU_TRIANGLES;
+pub use cpu_budget::MAX_CPU_WORK;
+pub use cpu_budget::NATIVE_CPU_POOL_BYTES;
 pub use cpu_path::CpuPathOptions;
 pub use cpu_sky::CpuSky;
-pub use denoise_diagnostics::{DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
+pub use denoise_diagnostics::DenoiseDiagnostics;
+pub use denoise_diagnostics::DenoiseGuideClass;
+pub use denoise_diagnostics::resolve_denoise_class;
+pub use host::CaptureLease;
+pub use host::CaptureProfile;
+pub use host::CpuHost;
+pub use host::DenoiseMaskInfo;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) use host::FRAME_METADATA_BYTES;
+pub use host::HostKind;
+pub use host::ImageHost;
+pub use host::JobEnvironmentInfo;
+pub use host::JobHandle;
+pub use host::JobStatus;
+pub use host::LinearAlphaConvention;
+pub use host::LinearColourEncoding;
+pub use host::LinearMasterInfo;
+pub use host::PreparedSubmission;
+pub use host::PreviewInfo;
+pub use host::RenderFrame;
+pub use host::RenderPreview;
 pub(crate) use host::Reservation;
-pub use host::{
-    CaptureLease, CaptureProfile, CpuHost, DenoiseMaskInfo, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention,
-    LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
-};
-pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
-pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry, admit_geometry_with_limits};
+pub use host::RetainedMetadata;
+pub use host_memory::HostMemoryAdmission;
+pub use host_memory::HostMemorySource;
+pub use host_memory::NativeMemoryPolicy;
+pub use image::Admission;
+pub use image::BodyRole;
+pub use image::ImageTask;
+pub use image::MAX_PICTURE_PIXEL_TESTS;
+pub use image::MAX_TILES;
+pub use image::OrthoFrame;
+pub use image::PicturePoll;
+pub use image::PictureRequest;
+pub use image::PictureTask;
+pub use image::PixelWindow;
+pub use image::Projection;
+pub use image::Supersample;
+pub use image::TaskPoll;
+pub use image::admit;
+pub use image::admit_geometry;
+pub use image::admit_geometry_with_limits;
+pub use image::admit_picture;
 pub use lens::ThinLens;
-pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MAX_DIRECTIONAL_LIGHTS, StudioLighting, Sun, ToneMap};
+pub use lighting::AreaLight;
+pub use lighting::AreaLights;
+pub use lighting::DirectionalLights;
+pub use lighting::MAX_AREA_LIGHTS;
+pub use lighting::MAX_DIRECTIONAL_LIGHTS;
+pub use lighting::StudioLighting;
+pub use lighting::Sun;
+pub use lighting::ToneMap;
 pub use png::PngTask;
 pub use presentation::OutputOptions;
-pub use punctual::{MAX_PUNCTUAL_LIGHTS, MIN_GPU_SPOT_COSINE_GAP, PunctualDiagnostics, PunctualLightOptions, PunctualLights, SpotConeOptions};
-pub use quality::{
-    DenoiseSettings, MAX_CPU_THREADS, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS, MAX_UI_SAMPLES,
-    resolve_supersampling, single_supersample, supersampled_dimensions,
-};
+pub use punctual::MAX_PUNCTUAL_LIGHTS;
+pub use punctual::MIN_GPU_SPOT_COSINE_GAP;
+pub use punctual::PunctualDiagnostics;
+pub use punctual::PunctualLightOptions;
+pub use punctual::PunctualLights;
+pub use punctual::SpotConeOptions;
+pub use quality::DenoiseSettings;
+pub use quality::MAX_CPU_THREADS;
+pub use quality::MAX_OUTPUT_DIMENSION;
+pub use quality::MAX_OUTPUT_PIXELS;
+pub use quality::MAX_TRACE_DIMENSION;
+pub use quality::MAX_TRACE_PIXELS;
+pub use quality::MAX_UI_SAMPLES;
+pub use quality::resolve_supersampling;
+pub use quality::single_supersample;
+pub use quality::supersampled_dimensions;
 
 /// Native path-tracing ceilings, further restricted by the actual device.
 /// Kept in the device-independent layer so saved intent and UI agree with execution.
 pub const GPU_PATH_LIMITS: crate::RenderLimits =
     crate::RenderLimits { max_dimension: 8192, max_pixels: 33_554_432, max_scratch_bytes: 128 * 1024 * 1024 * 1024 };
 pub const MAX_GPU_PATH_TRIANGLES: u64 = 8_000_000;
+/// The longest body name a render target takes, in bytes of UTF-8. A rename gives a body at most
+/// 128 characters, which is at most 512 bytes, so every such name is taken. The check counts
+/// bytes, not characters: a longer name made another way (a ` (n)` added to a long name, a long
+/// `body_name` given to a command) is taken while it is at most 512 bytes (a 132-character ASCII
+/// name is) and refused as a target above that.
+pub const MAX_BODY_NAME_BYTES: usize = 128 * 4;
 pub const MAX_GPU_PATH_BODIES: usize = 65_536;
 /// Optical target count is independent of simultaneous containment and ray depth.
 pub const MAX_OPTICAL_TARGETS: usize = 128;
@@ -125,6 +188,11 @@ pub struct JobOptions {
     pub tone_map: ToneMap,
     /// Optional final spatial filter. Raw progressive accumulation remains unchanged.
     pub denoise: bool,
+    /// Optional, biased firefly control for GPU path tracing. From the first bounce on, each
+    /// contribution is scaled so its largest channel is at most this linear radiance, keeping
+    /// its hue. Absent keeps every contribution, so the image is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clamp_indirect: Option<f64>,
     #[serde(skip_serializing_if = "DenoiseSettings::is_default")]
     pub denoise_settings: DenoiseSettings,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -133,6 +201,10 @@ pub struct JobOptions {
     #[serde(skip_serializing_if = "single_supersample")]
     pub supersampling: u32,
 }
+
+/// Bounds of [`JobOptions::clamp_indirect`]. Both ends are normal `f32` values, so the shader
+/// never sees a limit that rounds to zero (off) or to infinity.
+pub const CLAMP_INDIRECT_RANGE: std::ops::RangeInclusive<f64> = 0.000_001..=1_000_000.0;
 
 impl Default for JobOptions {
     fn default() -> Self {
@@ -156,6 +228,7 @@ impl Default for JobOptions {
             lighting: None,
             tone_map: ToneMap::default(),
             denoise: false,
+            clamp_indirect: None,
             denoise_settings: DenoiseSettings::default(),
             denoise_diagnostics: false,
             supersampling: 1,
@@ -243,6 +316,12 @@ impl JobOptions {
         }
         if let Some(lens) = self.lens {
             lens.validate()?;
+        }
+        if self.clamp_indirect.is_some_and(|limit| !limit.is_finite() || !CLAMP_INDIRECT_RANGE.contains(&limit)) {
+            return Err(JobError::new(
+                ErrorCode::InvalidRequest,
+                "clamp_indirect must be a finite radiance from 0.000001 to 1000000; omit it to keep every contribution",
+            ));
         }
         if !(1..=MAX_SAMPLES_PER_PIXEL).contains(&self.samples)
             || !(1..=u32::from(MAX_PATH_DEPTH)).contains(&self.max_depth)
@@ -526,11 +605,11 @@ impl ReflectionOptions {
         }
         for (index, body) in self.bodies.iter().enumerate() {
             if body.body.is_empty()
-                || body.body.len() > 128
-                || body.body.capacity() > 128
+                || body.body.len() > MAX_BODY_NAME_BYTES
+                || body.body.capacity() > MAX_BODY_NAME_BYTES
                 || self.bodies.iter().take(index).any(|other| other.body == body.body)
             {
-                return Err(JobError::new(ErrorCode::InvalidRequest, "reflection body names must be unique, nonempty and bounded to128 bytes"));
+                return Err(JobError::new(ErrorCode::InvalidRequest, "reflection body names must be unique, nonempty and bounded to 512 bytes"));
             }
         }
         Ok(())
@@ -666,10 +745,10 @@ fn bounded_emission_body<'de, D: serde::Deserializer<'de>>(d: D) -> std::result:
     impl<'de> serde::de::Visitor<'de> for Name {
         type Value = String;
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("a nonempty captured body name of at most 256 bytes")
+            f.write_str("a nonempty captured body name of at most 512 bytes")
         }
         fn visit_str<E: serde::de::Error>(self, value: &str) -> std::result::Result<String, E> {
-            if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+            if value.is_empty() || value.len() > MAX_BODY_NAME_BYTES || value.chars().any(char::is_control) {
                 return Err(E::custom("invalid surface emission body name"));
             }
             let mut name = String::new();
@@ -684,8 +763,8 @@ fn bounded_emission_body<'de, D: serde::Deserializer<'de>>(d: D) -> std::result:
 impl SurfaceEmission {
     pub fn validate(&self) -> Result<()> {
         if self.body.is_empty()
-            || self.body.len() > 256
-            || self.body.capacity() > 256
+            || self.body.len() > MAX_BODY_NAME_BYTES
+            || self.body.capacity() > MAX_BODY_NAME_BYTES
             || self.body.chars().any(char::is_control)
             || !self.color.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
             || !self.strength.is_finite()
@@ -1596,6 +1675,32 @@ mod runtime_request_roundtrip_tests {
             assert!(decoded.validate().is_ok());
         }
         assert_eq!(serde_json::from_value::<RaytraceOptions>(serde_json::json!({})).unwrap(), RaytraceOptions::default());
+    }
+
+    #[test]
+    fn gpu_indirect_clamp_is_off_by_default_bounded_and_roundtrips() {
+        use serde_json::json;
+        // Off unless asked for, and an absent value is not written, so older requests match.
+        assert_eq!(JobOptions::default().clamp_indirect, None);
+        assert!(serde_json::to_value(JobOptions::default()).unwrap().get("clamp_indirect").is_none());
+        for absent in [json!({}), json!({"clamp_indirect":null})] {
+            assert_eq!(serde_json::from_value::<JobOptions>(absent).unwrap(), JobOptions::default());
+        }
+        for limit in [0.000_001, 0.5, 8.0, 1_000_000.0] {
+            let options: JobOptions = serde_json::from_value(json!({"clamp_indirect":limit})).unwrap();
+            options.validate().unwrap();
+            assert_eq!(options.clamp_indirect, Some(limit));
+            let value = serde_json::to_value(options).unwrap();
+            assert_eq!(value["clamp_indirect"], json!(limit));
+            assert_eq!(serde_json::from_value::<JobOptions>(value).unwrap(), options);
+        }
+        for limit in [0.0, -0.0, -1.0, 0.000_000_9, 1_000_000.5, f64::MIN_POSITIVE, f64::MAX, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            let options = JobOptions { clamp_indirect: Some(limit), ..Default::default() };
+            let error = options.validate().unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidRequest, "{limit}");
+            assert!(error.message.contains("clamp_indirect"), "{limit}: {}", error.message);
+        }
+        assert!(serde_json::from_value::<JobOptions>(json!({"clamp_indirect":"8"})).is_err());
     }
 
     #[test]

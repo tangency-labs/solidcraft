@@ -20,7 +20,7 @@ pub const MIN_SAMPLES: usize = 8;
 /// The most stations a boundary may carry (the kernel's own cap).
 pub const MAX_SAMPLES: usize = 512;
 /// The most curves one direction of a network may list (the kernel's own cap).
-pub const MAX_NETWORK_CURVES: usize = solidcraft_geom::network::MAX_NETWORK_CURVES;
+pub const MAX_NETWORK_CURVES: usize = solidcraft_kernel::network::MAX_NETWORK_CURVES;
 
 const CMD: &str = "surface.boundary";
 
@@ -65,7 +65,7 @@ pub struct BoundaryParams {
 }
 
 /// The message of a handler's parameter error, for a reader the contract shares.
-fn message(e: crate::EngineError) -> String {
+pub(super) fn message(e: crate::EngineError) -> String {
     match e {
         crate::EngineError::BadParams { msg, .. } => msg,
         other => other.to_string(),

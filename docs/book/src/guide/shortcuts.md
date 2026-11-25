@@ -40,14 +40,16 @@ if that happens; recording is cancelled if the app loses focus.
 | O | Offset | J | Joint |
 | T | Trim | I | Measure |
 | P | Project | A | Appearance |
-| Ctrl+Z | Undo | Ctrl+Y | Redo |
+| Ctrl+Z | Undo | Ctrl+Y, Ctrl+Shift+Z | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
-| Ctrl+Shift+S | Save As | | |
+| Ctrl+Shift+S | Save As | Ctrl+A | Select All |
 | Ctrl+1 | Front View | Ctrl+2 | Back View |
 | Ctrl+3 | Left View | Ctrl+4 | Right View |
 | Ctrl+5 | Top View | Ctrl+6 | Bottom View |
-| Ctrl+7 | Isometric View | | |
+| Ctrl+7 | Isometric View | Home | Home View |
+| End | Fit: frame the selection, or everything shown; with a drawing open, the sheet | | |
+| Ctrl+Alt+O | Open View in New Window | Ctrl+Alt+W | Move View to Window (next window) |
 
 L, R and C start their tool family (lines, rectangles, circles) in the variant you used last, as
 the family's toolbar button does: after a Midpoint Line, L starts a Midpoint Line again. Pick
@@ -71,19 +73,25 @@ Keys handled by the window itself:
 |---|---|
 | S | command search under the ribbon search field |
 | V | show or hide the selected bodies, sketches and planes; with a right-click menu open, its Show/Hide (a folder, the Origin folder, an origin plane) |
-| F2 | rename the selected browser or timeline item |
-| F6 | fit the view to the model |
-| ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn) |
+| F2 | rename the selected browser or timeline item; with several bodies selected, all of them: the first takes the name, the others `name (2)`, `name (3)`…, as **Rename Selected Bodies** does in a selected body's menu |
+| F6 | fit the view to the selection, or to everything shown when nothing is selected; with a drawing open, fit the sheet (as End does) |
+| ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn); while the Browser has the keyboard (after a click on one of its rows, until a click elsewhere), ↑ ↓ move the selection through its rows and ← → fold or unfold a row, and the view stays still (Preferences › Navigation › *Arrow keys move through the Browser while it has focus*) |
 | Ctrl+← → ↑ ↓ | pan the view |
+| PageUp / PageDown | zoom in / out |
+| + / − | zoom in / out |
 | Ctrl+8 | look straight at the selected face, plane or sketch |
 | Esc | cancel the running command, or clear the selection |
 
 While a value box has the keyboard (a dimension being added, a dialog field), keys type into
-it and single-letter shortcuts don't fire. With Sketch Dimension (D), the box opens as soon as
+it and single-letter shortcuts don't fire; Home and End move the caret. A focused list (a panel menu)
+keeps Home and End for its first and last row. With Sketch Dimension (D), the box opens as soon as
 you click a line, circle or arc (or the second point or line), so D, click, type the value,
 Enter. With Preferences › Design › Step values with the arrow keys and the wheel on, ↑ ↓ in a
 value box, or the wheel over it, step a plain number by 1 (with Shift by 10, with Alt by 0.1);
 see [Parameters and expressions](parameters.md).
+
+In an Extrude that is being made, Shift+Enter applies it as a new body, whatever it would have joined
+or cut; Enter alone applies it as the dialog shows.
 
 Mouse and touch:
 
@@ -93,6 +101,7 @@ Mouse and touch:
 | Click again on the same spot | select the next thing under the cursor (click cycling) |
 | Hold the left button still (long-press on touch), or right-click › Select Other… | list everything under the cursor to pick from |
 | Double-click a sketch curve or edge | select its chain or tangent loop |
+| Right-click in the view with a dialog open | go on to the dialog's next empty selection box; once every box has something, OK. An empty box the feature needs stays, and the status line says what to pick (off by default; turn it on in Preferences › General › Dialogs › Right-click confirms dialog inputs) |
 | Double-click the middle button | go Home: the home view, framing everything shown (Preferences › Navigation › Middle double-click: Home, Fit or Off) |
 
 To zoom by dragging, assign a key to **Drag to Zoom** in File › Keyboard Shortcuts.
@@ -115,6 +124,7 @@ While drawing or dragging a sketch point:
 |---|---|
 | Ctrl/Cmd or Alt/Option (default) | suppress auto-snap for that gesture |
 | Shift | prefer a line midpoint when targeting (skips a curve-curve crossing) |
+| Shift, while drawing a Two-Point or Center Rectangle | make the rectangle a square: the second corner moves to the larger of the two distances, and the sketch gets an Equal constraint between two sides, so one dimension defines it; off by default, turn it on in Preferences › Sketch |
 
 Change the snap-suppress chord in Preferences › Sketch. Selection still uses Shift and
 Ctrl/Cmd to add or toggle (Preferences › Selection can make Shift add-only).

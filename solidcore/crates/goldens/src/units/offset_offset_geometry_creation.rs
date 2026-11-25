@@ -833,6 +833,10 @@ impl Two {
     /// trim curves.
     fn put_edge_state(&self, o: &mut Vec<f64>, e: H) -> Result<(), HarnessError> {
         let b = self.brep_r(e).map_err(|e| harness(format!("{e}")))?;
+        // the edge's B-rep as this state shows it, for the tolerance certificate
+        // (`certify::trim_tolerance`)
+        #[cfg(test)]
+        crate::certify::written(b);
         let edge = b.edge(eid(e)).map_err(|e| harness(format!("{e}")))?;
         put_curve(o, edge.curve.as_ref())?;
         o.extend([edge.interval.min(), edge.interval.max(), edge.tolerance]);
@@ -909,6 +913,13 @@ impl solidcore::surface::surface_cache::face_context::FaceQueries<H> for Two {
             return Err(invalid("cache classifier expected a face handle"));
         }
         fp2::tolerance(self.brep_r(face)?, fid(face))
+    }
+
+    fn face_has_loopuses(&self, face: H) -> solidcore::Result<bool> {
+        if face.kind != K_FACE {
+            return Err(invalid("cache classifier expected a face handle"));
+        }
+        solidcore::topology::face::p4::has_loopuses(self.brep_r(face)?, fid(face))
     }
 
     fn face_point_classify(
@@ -1252,7 +1263,7 @@ impl OffsetBrep<H> for Two {
         e2: H,
         ang_tol_deg: f64,
     ) -> solidcore::Result<bool> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         if e1.b != vertex.b || e2.b != vertex.b {
             return Err(invalid("edges of another B-rep"));
         }
@@ -1339,6 +1350,13 @@ impl OffsetBrep<H> for Two {
     }
     fn edgeuse_is_marked(&self, _k: &Kernel, eu: H, _mark: MarkType) -> solidcore::Result<bool> {
         Ok(self.marked.contains(&eu))
+    }
+    fn edgeuse_middle_binormal(&mut self, k: &Kernel, eu: H) -> solidcore::Result<Vec3> {
+        let b = self.brep_m(eu)?;
+        let e = eu1::edge(b, euid(eu))?.ok_or_else(|| invalid("edge use without edge"))?;
+        let middle = ed::interval(b, e)?.evaluate(0.5);
+        let options = eu3::BinormalOptions::default();
+        Ok(eu3::evaluate_binormal(k, b, euid(eu), middle, false, &options)?.binormal)
     }
     fn edgeuse_normalized_evaluate(
         &mut self,
@@ -1572,7 +1590,9 @@ fn put_curve(out: &mut Vec<f64>, c: Option<&SmCurve>) -> Result<(), HarnessError
 /// The upstream status code of an error the surface samples report.
 fn status_code(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -2077,7 +2097,7 @@ fn own_failure(which: &str, e: &SolidError) -> Output {
 /// Builds the B-reps ([`side`]) and resolves the script; `Err(Ok(output))` is the output
 /// reported when the B-reps cannot be built or something cannot be resolved.
 fn prepare(i: &Inputs) -> Result<Prepared, Early> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let side_a = side(&mut k, &i.brep_a).map_err(|e| Box::new(Err(e)))?;
     let side_b = match &i.brep_b {
         Some(b) => Some(side(&mut k, b).map_err(|e| Box::new(Err(e)))?),
@@ -2151,8 +2171,22 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(0.0);
             Ok(Some(v))
         }
-        Err(SolidError::Upstream { code, .. }) => {
-            o.push(f64::from(code));
+        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
+            o.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)));
+            Ok(None)
+        }
+        Err(e)
+            if matches!(
+                e.failure().map(|f| &f.reason),
+                Some(solidcore::error::Reason::Offset(
+                    solidcore::error::offset::OffsetFailure::ExtendedCurveOffDomain { .. }
+                ))
+            ) =>
+        {
+            // the port's refusal of a UV curve off the extended domain (#21743, not
+            // upstream): its status (`SM_ERR`), as the offset executive's runners record
+            // a typed failure
+            o.push(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)));
             Ok(None)
         }
         Err(SolidError::InvalidInput {
@@ -2312,9 +2346,40 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
     run_script(i, p).map(|(o, _)| o)
 }
 
+/// The script's offset executive: its geometry parameters, the case's inset and
+/// extend flags, shell faces and related edge uses, and an empty extension cache.
+fn new_exec(i: &Inputs, hdr: &RHeader, geom: &OffsetGeometryCreation) -> Result<Exec, Fail> {
+    let mut exec = Exec {
+        inner: OffsetExecutivePort::with_geometry_parameters(
+            OffsetOperation::SolidOffset,
+            geom.offset_distance(),
+            geom.this_approx_tol_3d(),
+            geom.tangency_tol_radians(),
+        ),
+        seeded: BTreeSet::new(),
+        made: BTreeMap::new(),
+    };
+    exec.inner.set_inset(i.inset);
+    exec.inner.set_extend_convex_edges(i.extend);
+    let mut shell = Vec::new();
+    for f in hdr.shell.iter().filter_map(|h| triple_to_h(*h)) {
+        shell.push(FaceId::from_index(exec_index(f)?));
+    }
+    exec.inner.set_shell_faces(&shell);
+    for [a, b] in &hdr.pairs {
+        if let (Some(a), Some(b)) = (triple_to_h(*a), triple_to_h(*b)) {
+            exec.inner.relate_edgeuses(
+                EdgeuseId::from_index(exec_index(a)?),
+                EdgeuseId::from_index(exec_index(b)?),
+            );
+        }
+    }
+    Ok(exec)
+}
+
 /// [`run_rust_script`] with the two B-reps as the script leaves them.
 fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let Prepared {
         mut two, hdr, ops, ..
     } = p;
@@ -2346,31 +2411,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
     let (lf0, ls0) = local_lists(&two);
     let local = LocalOperationGeometryCreation::new(i.dist, i.approx, &lf0, &ls0);
     let shell_count = hdr.shell.len();
-    let mut exec = Exec {
-        inner: OffsetExecutivePort::with_geometry_parameters(
-            OffsetOperation::SolidOffset,
-            geom.offset_distance(),
-            geom.this_approx_tol_3d(),
-            geom.tangency_tol_radians(),
-        ),
-        seeded: BTreeSet::new(),
-        made: BTreeMap::new(),
-    };
-    exec.inner.set_inset(i.inset);
-    exec.inner.set_extend_convex_edges(i.extend);
-    let mut shell = Vec::new();
-    for f in hdr.shell.iter().filter_map(|h| triple_to_h(*h)) {
-        shell.push(FaceId::from_index(exec_index(f)?));
-    }
-    exec.inner.set_shell_faces(&shell);
-    for [a, b] in &hdr.pairs {
-        if let (Some(a), Some(b)) = (triple_to_h(*a), triple_to_h(*b)) {
-            exec.inner.relate_edgeuses(
-                EdgeuseId::from_index(exec_index(a)?),
-                EdgeuseId::from_index(exec_index(b)?),
-            );
-        }
-    }
+    let mut exec = new_exec(i, &hdr, &geom)?;
     let all_ok = two.all_ok();
     let mark = MarkType::Mark;
 
@@ -2976,7 +3017,7 @@ pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, Har
     let mut drawn = Vec::new();
     drawn.extend(a.map(|a| ("a", a)));
     drawn.extend(b.map(|b| ("b", b)));
-    Ok((Kernel::default(), drawn))
+    Ok((crate::runner_kernel(), drawn))
 }
 
 // ---- generation -----------------------------------------------------------------------------
@@ -4587,7 +4628,7 @@ mod tests {
         input.brep_a = fixture.clone();
         input.brep_b = Some(fixture);
         let mut prepared = prepare(&input).unwrap();
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         for (arena, tolerance) in [(0, 0.003), (1, 0.007)] {
             let handle = hd(arena, K_FACE_SURFACE, 0);
             let brep = prepared.two.brep_m(handle).unwrap();
@@ -4615,6 +4656,256 @@ mod tests {
                     .unwrap(),
                 tolerance
             );
+        }
+    }
+
+    /// The goldens case `name` of this unit, as the goldens run generates it.
+    fn golden_case(name: &str) -> Inputs {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let case = Runner
+            .cases(&ctx)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == name)
+            .unwrap();
+        case.parse().unwrap()
+    }
+
+    /// Runs the case's script, its last `skip` ops left out: the record and the store.
+    fn run_but_last(i: &Inputs, skip: usize) -> (Vec<f64>, Two, Vec<ROp>) {
+        let mut p = prepare(i).unwrap_or_else(|_| panic!("prepare"));
+        let rest = p.ops.split_off(p.ops.len() - skip);
+        let (o, two) = run_script(i, p).unwrap_or_else(|_| panic!("script"));
+        (o, two, rest)
+    }
+
+    /// WR-673, the two rows that move (`gen0448` on `vase_rev.smb`, its second
+    /// `TrimExtendedEdge`; `gen0723` on `cone.smb`, its first). That op trims an open
+    /// edge whose 3D curve is a closed curve, and
+    /// before the fix the trim was the whole curve: from its natural start (0) to its
+    /// natural end (`main_max`, the value the row recorded). That interval runs from the
+    /// first trim point round the curve back to it ([`is_first_point_again`] holds for
+    /// it), while the base edge's two vertices are apart, more than the 10 x approx tol
+    /// that decides "the same point": the edge's two ends went to one point, the defect.
+    /// Now that second point is passed over and the trim finds none (a bad edge).
+    #[test]
+    fn wr_673_moved_rows_trimmed_an_open_edge_round_to_its_start() {
+        use solidcore::offset::offset_geometry_creation::is_first_point_again;
+        for (name, nth, main_max) in [
+            ("gen0448", 1, 91.52648008973824),
+            ("gen0723", 0, 15.30733729460359),
+        ] {
+            let mut i = golden_case(name);
+            let at = i
+                .ops
+                .iter()
+                .enumerate()
+                .filter(|(_, op)| matches!(op, OpIn::TrimExtendedEdge { .. }))
+                .nth(nth)
+                .unwrap()
+                .0;
+            i.ops.truncate(at + 1);
+            let (_, two, rest) = run_but_last(&i, 1);
+            let [ROp {
+                op: OpIn::TrimExtendedEdge { base, c3, .. },
+            }] = rest.as_slice()
+            else {
+                panic!("{name}: not a TrimExtendedEdge");
+            };
+            let k = crate::runner_kernel();
+            let same_tol = 10.0 * OffsetGeometryCreation::new(i.dist, i.approx).this_approx_tol_3d();
+            let base = triple_to_h(*base).unwrap();
+            let edge = two.edgeuse_edge(base).unwrap().unwrap();
+            assert!(!two.edge_is_closed(edge).unwrap(), "{name}");
+            let v0 = two.edge_vertex(edge).unwrap().unwrap();
+            let v1 = two.edge_other_vertex(edge, v0).unwrap().unwrap();
+            let apart = (two.vertex_point(v0).unwrap() - two.vertex_point(v1).unwrap()).length();
+            assert!(apart > same_tol, "{name}: vertices {apart} apart");
+            let c3 = triple_to_h(*c3).unwrap();
+            assert_eq!(c3.kind, K_EDGE_CURVE, "{name}");
+            let c3 = two.edge_curve_h(c3).unwrap().unwrap();
+            let curve = ClassGeometry::curve(&two, c3).unwrap();
+            let nat = curve.natural_interval();
+            assert_eq!((nat.min(), nat.max()), (0.0, main_max), "{name}");
+            assert!(curve.is_closed(&k, &nat, same_tol).unwrap(), "{name}");
+            assert!(
+                is_first_point_again(&k, curve, nat.min(), nat.max(), same_tol, true).unwrap(),
+                "{name}"
+            );
+            assert!(
+                is_first_point_again(&k, curve, nat.max(), nat.min(), same_tol, true).unwrap(),
+                "{name}"
+            );
+            // the script through that op now: the trim finds no second point (status 0, no
+            // interval)
+            let (o, _, _) = run_but_last(&i, 0);
+            assert_eq!(o[o.len() - 3..], [11.0, 0.0, 0.0], "{name}");
+        }
+    }
+
+    /// WR-673 at the call site in `trim_extended_edge_ends`: three goldens rows whose first
+    /// `ExtendTrimEdges` (`gen0051` on `Mouse.smb`, `gen0186` on `box_with_large_fillet.smb`,
+    /// `gen0681` on `Mouse.smb`) succeeds, as before the fix. A guard that passes over every
+    /// point within 10 x approx tol of the first trim point (the fork's) drops their real
+    /// second point and refuses them (`SM_ERR`, measured): only the first point again round
+    /// a closed curve is passed over.
+    #[test]
+    fn wr_673_extend_keeps_a_second_point_near_the_first() {
+        for name in ["gen0051", "gen0186", "gen0681"] {
+            let mut i = golden_case(name);
+            let at = i
+                .ops
+                .iter()
+                .position(|op| matches!(op, OpIn::ExtendTrimEdges { .. }))
+                .unwrap();
+            i.ops.truncate(at + 1);
+            let (before, _, _) = run_but_last(&i, 1);
+            let (o, _, _) = run_but_last(&i, 0);
+            assert_eq!(o[before.len()..before.len() + 2], [12.0, 0.0], "{name}");
+        }
+    }
+
+    /// #21743: `ExtendTrimEdges` lifts only a piece of the extended UV trim curve that lies
+    /// inside the extended surface's domain. Each case below has one op where the UV curve's
+    /// midpoint is outside that domain (the edge use's curve is on another surface), so the
+    /// piece holding it is outside too and no piece of the curve is on the surface. Before
+    /// the fix that piece was lifted through the surface clamped at its boundary: a 3D curve
+    /// along the boundary, not over the edge. gen0274, gen0329, gen0473, gen0484 and gen0577
+    /// recorded that as a success (status 0); gen0163, gen0306, gen0666 and gen0705 failed
+    /// later in the lift with the edges already changed; inside `EdgeuseOffset`, which only
+    /// reports the failure, gen0248, gen0308 and gen0642 kept the boundary curves; gen0152,
+    /// gen0258 and gen0266 failed in the lift with their rows as now.
+    ///
+    /// gen0039, gen0155 and gen0545 are the whole-piece cases: the midpoint of the kept
+    /// piece is within the tolerance, but the piece runs outside the domain (an end 1.47,
+    /// 1.47 and 5.30 outside). Before, the lift moved the offset edge's curve up to 4.84,
+    /// 4.84 and 6.75 off the edge (gen0039 and gen0545 through `EdgeuseOffset`, recorded
+    /// as status 0) and `check_brep` Level 2 gained 4, 4 and 8 lines (bad edge, endpoints
+    /// outside the face domain, loop gaps).
+    ///
+    /// The certificate of each moved row: replayed to the op, `ExtendTrimEdges` with the
+    /// op's edge uses (`EdgeuseOffset` passes its four as they are) refuses with a point
+    /// of the kept piece (its midpoint, or for the whole-piece cases an end of a Bezier
+    /// segment, both on the curve) at least 1 outside the domain, far past the UV point tolerance that decides
+    /// "inside" (`EFF_ZERO_SQRT * (1 + |uv|)`), and leaves both offset edges as they were. The fix changes nothing but this
+    /// refusal, so the op is the first that moves in its row and every later move follows
+    /// from the edges keeping their input.
+    #[test]
+    fn extend_trim_edges_refuses_a_uv_curve_off_the_extended_domain() {
+        use solidcore::error::offset::OffsetFailure;
+        use solidcore::error::Reason;
+        let k = Kernel::default();
+        for (name, at) in [
+            ("gen0039", 1),
+            ("gen0152", 3),
+            ("gen0155", 4),
+            ("gen0163", 0),
+            ("gen0248", 1),
+            ("gen0258", 1),
+            ("gen0266", 5),
+            ("gen0274", 5),
+            ("gen0306", 3),
+            ("gen0308", 1),
+            ("gen0329", 2),
+            ("gen0473", 1),
+            ("gen0484", 4),
+            ("gen0545", 3),
+            ("gen0577", 2),
+            ("gen0642", 2),
+            ("gen0666", 0),
+            ("gen0705", 1),
+        ] {
+            let mut i = golden_case(name);
+            i.ops.truncate(at + 1);
+            let hdr = prepare(&i).unwrap_or_else(|_| panic!("prepare")).hdr;
+            let (_, mut two, rest) = run_but_last(&i, 1);
+            let (eu, other, off, other_off) = match rest.as_slice() {
+                [ROp {
+                    op:
+                        OpIn::ExtendTrimEdges {
+                            eu,
+                            other,
+                            off,
+                            other_off,
+                        }
+                        | OpIn::EdgeuseOffset {
+                            orig: eu,
+                            other_orig: other,
+                            off,
+                            other_off,
+                        },
+                }] => (*eu, *other, *off, *other_off),
+                _ => panic!("{name} op {at}: neither ExtendTrimEdges nor EdgeuseOffset"),
+            };
+            let eu = triple_to_h(eu).expect("edge use");
+            let off = triple_to_h(off).expect("offset edge use");
+            let other_off = triple_to_h(other_off);
+            let state = |two: &Two| {
+                let mut o = Vec::new();
+                for x in [Some(off), other_off].into_iter().flatten() {
+                    let e = two.edgeuse_edge(x).unwrap().expect("edge");
+                    two.put_edge_state(&mut o, e).unwrap();
+                }
+                o
+            };
+            let before = state(&two);
+            let mut geom = OffsetGeometryCreation::new(i.dist, i.approx);
+            geom.set_make_analytics(i.analytics);
+            let mut exec = new_exec(&i, &hdr, &geom).unwrap_or_else(|_| panic!("exec"));
+            exec.seed(&two);
+            let e = geom
+                .extend_trim_edges(
+                    &k,
+                    &mut two,
+                    &mut exec,
+                    eu,
+                    triple_to_h(other),
+                    Some(off),
+                    other_off,
+                    MarkType::Mark,
+                )
+                .expect_err(&format!("{name} op {at}: the off-domain curve was lifted"));
+            let Some(Reason::Offset(OffsetFailure::ExtendedCurveOffDomain { outside, .. })) =
+                e.failure().map(|f| &f.reason)
+            else {
+                panic!("{name} op {at}: not the off-domain refusal: {e}");
+            };
+            // a domain miss, not noise at the boundary (the UV point tolerance that decides
+            // "inside" is 1e-6 times one plus the point's largest coordinate)
+            assert!(*outside >= 1.0, "{name} op {at}: outside {outside:e}");
+            let after = state(&two);
+            assert!(
+                before.len() == after.len()
+                    && before
+                        .iter()
+                        .zip(&after)
+                        .all(|(a, b)| a.to_bits() == b.to_bits()),
+                "{name} op {at}: the refusal changed an offset edge"
+            );
+            // through `EdgeuseOffset` (gen0039, gen0248, gen0308, gen0545, gen0642), as the script runs it: the
+            // wrapper only reports the refusal, so its recorded status is 0, and both offset
+            // edges keep their input
+            if matches!(rest.as_slice(), [ROp { op: OpIn::EdgeuseOffset { .. } }]) {
+                let (o, full, _) = run_but_last(&i, 0);
+                let (pre, _, _) = run_but_last(&i, 1);
+                assert_eq!(
+                    o[pre.len()..pre.len() + 2],
+                    [15.0, 0.0],
+                    "{name} op {at}: EdgeuseOffset's recorded status"
+                );
+                let through = state(&full);
+                assert!(
+                    before.len() == through.len()
+                        && before
+                            .iter()
+                            .zip(&through)
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "{name} op {at}: EdgeuseOffset changed an offset edge"
+                );
+            }
         }
     }
 

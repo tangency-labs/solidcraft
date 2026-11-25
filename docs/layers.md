@@ -20,7 +20,7 @@ SolidCraft is a Cargo workspace in layers. A crate depends only on crates below 
 | Downward only | A layered crate (L0 to L5) depends only on lower layers. Within a layer, only the orderings in `INTRA_LAYER_ORDER` (`xtask/src/layers.rs`) are allowed, for example `gpu` before `ui-egui`. | `cargo xtask layers` |
 | Shared crates stand alone | A shared crate depends only on other shared crates, solidcore's public crates and external crates, UI toolkits included. Any crate may depend on a shared crate. | `cargo xtask layers`; `cargo xtask shared` builds and tests each shared crate in a workspace of its own, which fails on any other dependency |
 | UI toolkits stay at the top | egui, eframe, egui-wgpu, wgpu, winit and the other UI crates appear only in L5, the apps and the shared crates. The check follows workspace dependencies, so a crate below L5 cannot reach a toolkit through a shared crate either. | `cargo xtask layers` |
-| One seam to solidcore | SolidCraft uses `solidcore-ops` (modelling), `solidcore-tess` (display meshes and plans) and `solidcore-record` (geometry as data). `solidcore` and `solidcore-convert` are solidcore's own; what a client needs from them is re-exported by a public crate (for example `solidcore_tess::{EvalSurface, vec3}`). | `cargo xtask layers` against `xtask/solidcore-public.txt`; `xtask/solidcore-seam.txt` lists the old direct uses and only shrinks |
+| One seam to solidcore | SolidCraft uses `solidcore-ops` (modelling), `solidcore-tess` (display meshes and plans) and `solidcore-record` (geometry as data). `solidcore` and `solidcore-convert` are solidcore's own; what a client needs from them is re-exported by a public crate (for example `solidcore_tess::{EvalSurface, vec3}`). | `cargo xtask layers` against `xtask/solidcore-public.txt`; `xtask/solidcore-seam.txt` lists the old direct uses and only shrinks; `xtask/solidcore-paths.txt` caps each crate's count of paths into solidcore internals and only shrinks |
 | Test tooling | `testkit` may use anything up to L5; other crates use it only as a dev-dependency. | `cargo xtask layers` |
 | The browser | Every crate below the apps, and the web app, builds for wasm32. | `cargo xtask wasm` |
 
@@ -34,7 +34,7 @@ The interface is built from components that another front end could use as they 
 - **publishes its handles** into `solidcraft_ui_registry` under the host's prefix, so the control channel, the scenarios and the tests find it. SolidCraft's names stay byte-identical when a piece becomes a component;
 - **is tested on plain data**, without the app. The host's own tests still pass unchanged.
 
-A piece moves into a shared crate once it depends only on what a shared crate may: the viewport crates, the theme, the text catalogs and the control channel have. The rest of the kit lives in `ui-egui` until it does. When a piece becomes a component, before/after screenshots of SolidCraft show no differing pixels.
+A piece moves into a shared crate once it depends only on what a shared crate may: the viewport crates, the theme, the text catalogs, the control channel and the UI kit (`ui-kit`, with its components) have. What a component draws from SolidCraft is SolidCraft's: its look (icon set, glyphs, interface faces and built-in themes) is the shared `look` crate, which SolidCraft and any other host install from; its tab table and messages stay in `ui-egui`, which installs them or passes them in. When a piece becomes a component, before/after screenshots of SolidCraft show no differing pixels.
 
 ## 3. Adding or moving a crate
 

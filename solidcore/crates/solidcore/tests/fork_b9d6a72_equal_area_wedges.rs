@@ -73,22 +73,12 @@ use solidcore::topology::face::p2 as face;
 use solidcore::topology::{EdgeId, FaceId};
 use solidcore::{Brep, Kernel};
 
-/// The G^n section's flag and the one its plane rails need, nothing else.
-fn gn_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
-    k.fixes.fillet_surface_plane_curve_on_plane_equation = true;
-    k
-}
-
-/// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`.
+/// The kernel SolidCraft runs: every fix on.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -159,7 +149,10 @@ fn sharp_wedge(k: &mut Kernel) -> (f64, bool) {
 #[test]
 fn the_sharp_wedge_takes_off_the_circle_s_area() {
     let want = 10.0 * 9.0 * (3f64.sqrt() - PI / 3.0);
-    for (name, mut k) in [("gn", gn_kernel()), ("solidcraft", solidcraft_kernel())] {
+    for (name, mut k) in [
+        ("gn", Kernel::default()),
+        ("solidcraft", solidcraft_kernel()),
+    ] {
         let (removed, sound) = sharp_wedge(&mut k);
         println!("{name}: sharp wedge: removed {removed:.9}, want {want:.9}");
         assert!(

@@ -1,5 +1,5 @@
 {
-  "coverage": "BooleanLists (family 2) with surface operands (shim kinds 2 plane and 3 sphere). Upstream copies a surface list with the base copy constructor, which slices every surface to a geometry-less SmSurface (WR-196): CreateFaceFromSurface on that copy fails at the base Evaluate / EvaluatePoint, so any list that has surfaces and no B-rep ends the call with SM_ERR (1001), whichever surfaces, operation or options; the cases cover each list position, both kinds, a shell vertex and a box as the other operand, an empty other list, an invalid operation, options and extreme scales. A list that has B-reps ignores its surfaces (upstream reads the surface list only when the B-rep list is empty), so the three mixed cases compare real results. expected_status is what both engines return.",
+  "coverage": "BooleanLists (family 2) with surface operands (shim kinds 2 plane and 3 sphere). solidcore copies each surface with the virtual Copy (WR-196), so a list of surfaces makes one face per surface over its natural domain, and two lists of planes take the planar 2D path; upstream's base copy constructor slices every surface to a geometry-less SmSurface, so there any list that has surfaces and no B-rep ends the call with SM_ERR (1001). The cases cover each list position, both kinds, a shell vertex and a box as the other operand, an empty other list, an invalid operation, options and extreme scales. A list that has B-reps ignores its surfaces (upstream reads the surface list only when the B-rep list is empty), so the three mixed cases compare real results. expected_status is solidcore's.",
   "cases": [
     {
       "name": "plane_list_vs_plane_list",
@@ -45,8 +45,8 @@
         ],
         "tree": []
       },
-      "expected_status": 1001,
-      "note": "Both lists are surfaces: list 1's first copy is base-sliced (WR-196) and CreateFaceFromSurface fails on it, SM_ERR."
+      "expected_status": 1007,
+      "note": "Two planes that are not coincident take the planar 2D path, which refuses them (invalid input)."
     },
     {
       "name": "sphere_list_vs_sphere_list",
@@ -84,7 +84,8 @@
         ],
         "tree": []
       },
-      "expected_status": 1001
+      "expected_status": 0,
+      "note": "The lens of two r 2 spheres 1 apart: three faces, its three vertices on the circle x = 0.5, r = sqrt(3.75)."
     },
     {
       "name": "two_planes_vs_box",
@@ -142,8 +143,8 @@
         ],
         "tree": []
       },
-      "expected_status": 1001,
-      "note": "The surface list fails before the B-rep list is copied."
+      "expected_status": 0,
+      "note": "Each infinite plane is a square sheet; neither reaches into the box (z = 0 is its bottom face's plane), so both are kept whole."
     },
     {
       "name": "box_vs_plane",
@@ -185,8 +186,8 @@
         ],
         "tree": []
       },
-      "expected_status": 1001,
-      "note": "List 1 is copied and stitched; list 2's surface copy fails: SM_ERR."
+      "expected_status": 0,
+      "note": "The box (volume 24) and the plane x + y + z = 3 through it, as a non-manifold xor."
     },
     {
       "name": "box_vs_sphere",
@@ -224,7 +225,8 @@
         ],
         "tree": []
       },
-      "expected_status": 1001
+      "expected_status": 0,
+      "note": "B minus A: the r 1.5 sphere's parts outside the box, one solid."
     },
     {
       "name": "shell_vertex_vs_plane",
@@ -261,7 +263,8 @@
         ],
         "tree": []
       },
-      "expected_status": 1001
+      "expected_status": 0,
+      "note": "The plane's square sheet and the shell vertex off it."
     },
     {
       "name": "plane_vs_nothing",
@@ -291,7 +294,7 @@
         "tree": []
       },
       "expected_status": 1001,
-      "note": "List 1's surface copy fails first; the empty list 2 is never looked at (the same SM_ERR either way)."
+      "note": "List 2 has no B-rep and no surface: SM_ERR."
     },
     {
       "name": "nothing_vs_plane",
@@ -367,8 +370,8 @@
         ],
         "tree": []
       },
-      "expected_status": 1001,
-      "note": "Both lists are built before the operation is checked, so the sliced copy's SM_ERR comes first."
+      "expected_status": 1007,
+      "note": "Both lists are built before the operation is checked, then the operation is refused (invalid input)."
     },
     {
       "name": "planes_with_options",
@@ -414,7 +417,7 @@
         ],
         "tree": []
       },
-      "expected_status": 1001
+      "expected_status": 1007
     },
     {
       "name": "planes_scale_1e-9",
@@ -460,7 +463,7 @@
         ],
         "tree": []
       },
-      "expected_status": 1001
+      "expected_status": 1007
     },
     {
       "name": "spheres_scale_1e12",
@@ -498,7 +501,8 @@
         ],
         "tree": []
       },
-      "expected_status": 1001
+      "expected_status": 1001,
+      "note": "The face of a sphere of radius 1e12 is not made (its rectangular trim, topology::brep::p8): SM_ERR."
     },
     {
       "name": "box_and_plane_in_one_list_vs_box",

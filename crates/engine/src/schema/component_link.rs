@@ -19,8 +19,12 @@ use solidcore_record::Vec3;
 use solidcraft_geom::Vec3Geom as _;
 
 use super::check::{located, whole};
+use super::config::RowRef;
 use super::types::{not_blank_pattern, present};
+use crate::cmd::LinkState;
 use crate::params;
+use crate::schema::component::{ExprMatrixParam, MatrixTolerance, MoveAngle};
+use crate::schema::types::Point3;
 
 /// The most components `component.update_links` and `component.replace_with_link` read from a
 /// list, as the handlers do.
@@ -64,6 +68,11 @@ fn component<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ComponentRef>, D:
     component_key(d, "component")
 }
 
+/// `occurrence`, a placement by its id, with the handler's message for anything else.
+fn placement<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    Value::deserialize(d)?.as_u64().map(Some).ok_or_else(|| D::Error::custom(whole("`occurrence` must be a placement id")))
+}
+
 fn parent<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ComponentRef>, D::Error> {
     component_key(d, "parent")
 }
@@ -85,12 +94,26 @@ fn path_required<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::E
     design_path(d, "`path` is required")
 }
 
+/// A design the caller holds in memory, as its JSON text: a design open in the session that has
+/// no file yet (#16829). The handler's message for anything else.
+fn design_document<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(s) if !s.trim().is_empty() => Ok(Some(s)),
+        _ => Err(D::Error::custom(whole("`document` must be the design's JSON"))),
+    }
+}
+
 fn with_or_path<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     design_path(d, "`with` or `path` is required")
 }
 
 fn path_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "pattern": not_blank_pattern(), "maxLength": 4095})
+}
+
+/// The design the caller holds in memory, as its JSON text.
+fn document_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "pattern": not_blank_pattern(), "minLength": 1})
 }
 
 /// Adds `key` to the schema's `required` list: for a key the type has optional so that the
@@ -117,8 +140,22 @@ fn component_and_path_required(schema: &mut Schema) {
     require(schema, "path");
 }
 
-fn path_only_required(schema: &mut Schema) {
-    require(schema, "path");
+/// The schema asks for `path` or `document` (`path_or_document_required`): the design to link is
+/// a file or one the caller holds in memory.
+fn path_or_document_required(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["path"]}, {"required": ["document"]}]));
+}
+
+/// Select a source configuration row, or follow the saved source state with `null`.
+fn configuration<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(name) => Ok(Some(RowRef::Name(name))),
+        Value::Number(n) => {
+            n.as_u64().map(|id| Some(RowRef::Id(id))).ok_or_else(|| D::Error::custom(whole("`configuration` must be a row name, id, or null")))
+        }
+        _ => Err(D::Error::custom(whole("`configuration` must be a row name, id, or null"))),
+    }
 }
 
 /// A component's `translate` as `component.insert_design` reads it: `[x, y, z]` or `{x, y, z}`
@@ -156,13 +193,22 @@ impl JsonSchema for Translation {
 /// `component.update_links` can read it again. One undo step. With `reuse`, a design already
 /// linked gets another placement instead of another link.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = path_only_required)]
-pub struct InsertDesignParams {
-    // Optional in the type and required in the schema (`path_only_required`).
+#[schemars(deny_unknown_fields, transform = path_or_document_required)]
+pub struct InsertDesignKeys {
+    // Optional in the type and required in the schema (`path_or_document_required`).
     /// The design (`.sc`) to link, by file path.
     #[serde(default, deserialize_with = "path_required", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub path: Option<String>,
+    /// The design itself, as its JSON: a design open in the session that has no file yet. Its
+    /// bodies come in as they are, and the link names no file.
+    #[serde(default, deserialize_with = "design_document", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "document_schema")]
+    pub document: Option<String>,
+    /// Source configuration row, by name or stable id. Omitted or null follows the source's
+    /// saved state. The link stores the resolved id, so renaming the row keeps the selection.
+    #[serde(default, deserialize_with = "configuration")]
+    pub configuration: Option<RowRef>,
     /// The component's name. Default: the design's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -171,12 +217,74 @@ pub struct InsertDesignParams {
     #[schemars(with = "ComponentRef")]
     pub parent: Option<ComponentRef>,
     /// Where to place it, in mm from the parent's origin. Default: [0, 0, 0], also with `reuse`.
+    /// Not with `matrix` or `to_matrix`.
     #[serde(default)]
     pub translate: Option<Translation>,
-    /// Reuse an existing link to the same file when there is one, placing another occurrence of
-    /// it. Default: false.
+    /// The axis to turn about. Default: [0, 0, 1]. Not with `matrix` or `to_matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub axis: Option<Point3>,
+    /// The turn about `axis`: radians (a number) or an angle expression such as "90 deg". Default: 0.
+    /// Not with `matrix` or `to_matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "MoveAngle")]
+    pub angle: Option<MoveAngle>,
+    /// The point the turn is about, in mm. Default: [0, 0, 0]. Not with `matrix` or `to_matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub origin: Option<Point3>,
+    /// A rigid placement as a row-major 3x4 or 4x4 matrix, flat or as rows, its translation column
+    /// numbers or length expressions. Not with `translate`, `axis`, `angle`, `origin` or `to_matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ExprMatrixParam")]
+    pub matrix: Option<ExprMatrixParam>,
+    /// Absolute rigid placement as a row-major 3x4 or 4x4 matrix, flat or as rows, its translation column
+    /// numbers or length expressions. Not with `translate`, `axis`, `angle`, `origin` or `matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ExprMatrixParam")]
+    pub to_matrix: Option<ExprMatrixParam>,
+    /// With `matrix` or `to_matrix`: largest accepted |RᵀR − I| per entry (default 1e-9, at most 1e-3).
+    #[serde(default)]
+    pub tolerance: Option<MatrixTolerance>,
+    /// Reuse an existing link to the same file and configuration when there is one, placing
+    /// another occurrence of it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
+}
+
+/// `component.insert_design` parameters: [`InsertDesignKeys`].
+#[derive(Debug)]
+pub struct InsertDesignParams(pub InsertDesignKeys);
+
+impl<'de> Deserialize<'de> for InsertDesignParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        if value.get("matrix").is_some() && value.get("to_matrix").is_some() {
+            return Err(D::Error::custom(whole("give either to_matrix or matrix, not both")));
+        }
+        if let Some(key) = ["to_matrix", "matrix"].into_iter().find(|k| value.get(*k).is_some())
+            && let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| value.get(*k).is_some())
+        {
+            return Err(D::Error::custom(whole(format!("give either {key} or {k}, not both"))));
+        }
+        serde_path_to_error::deserialize(&value).map(InsertDesignParams).map_err(|e| D::Error::custom(located(&e)))
+    }
+}
+
+impl std::ops::Deref for InsertDesignParams {
+    type Target = InsertDesignKeys;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl JsonSchema for InsertDesignParams {
+    fn schema_name() -> Cow<'static, str> {
+        "InsertDesignParams".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        InsertDesignKeys::json_schema(generator)
+    }
 }
 
 /// What `component.insert_design` returns.
@@ -211,6 +319,7 @@ pub enum DesignInserted {
         /// The Import feature that holds the bodies, by id.
         feature: u64,
         /// The file as the link stores it (relative to this design's folder when it is saved).
+        /// Empty when the design came from the session and has no file yet.
         path: String,
         /// The bodies the link brought in.
         bodies: Vec<String>,
@@ -258,7 +367,7 @@ impl JsonSchema for ComponentList {
     }
 }
 
-/// Read the linked designs again and replace the bodies of the components whose file changed,
+/// Read the linked designs and STEP files again and replace the bodies of the components whose file changed,
 /// as one undo step. Without `component` or `components`, every linked component is read. A
 /// component that is not linked is refused.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -268,12 +377,23 @@ pub struct UpdateLinksKeys {
     #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentRef")]
     pub component: Option<ComponentRef>,
-    /// Linked components, by id or name. Not with `component`. With a list, an update goes on
-    /// past a design it cannot read: that component keeps its bodies, is named in `failed` and
+    /// Linked components, by id or name. Not with `component`. With a list, or with neither key,
+    /// an update goes on past a design or STEP file it cannot read: that component keeps its bodies, is named in `failed` and
     /// gets a warning.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentList")]
     pub components: Option<ComponentList>,
+    /// For a linked design that was itself saved without the bodies of its linked designs: which
+    /// of those files are read for them. `all` (the default): every file the caller may read.
+    /// `folder`: only files in this design's folder or the linked design's own; a linked design
+    /// reaching further is not read, and is named in `failed` or refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
+}
+
+fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    schemars::json_schema!({"type": "string", "enum": ["all", "folder"]})
 }
 
 /// `component.update_links`' parameters: [`UpdateLinksKeys`], with `component` and `components`
@@ -329,8 +449,8 @@ pub struct LinkFailure {
 }
 
 /// Replace the source of a linked component with another saved design, for all its occurrences,
-/// keeping their identities and placements. The design is read and checked before anything
-/// changes; one undo step.
+/// keeping their identities and placements, or with `occurrence` for that one only. The design is
+/// read and checked before anything changes; one undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = component_and_path_required)]
 pub struct RelinkParams {
@@ -343,13 +463,29 @@ pub struct RelinkParams {
     #[serde(default, deserialize_with = "path_required", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub path: Option<String>,
+    /// Source configuration row, by name or stable id. Omitted preserves the selection for
+    /// the same source file; a different file follows its saved state. Null clears the selection.
+    #[serde(default, deserialize_with = "configuration")]
+    pub configuration: Option<RowRef>,
+    /// One of its placements, by id. When the component has other placements, only this one
+    /// comes to show the design, as a placement of the component already linked to it or of a
+    /// new one under the same parent, keeping its position, grounding and joints.
+    #[serde(default, deserialize_with = "placement", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u64")]
+    pub occurrence: Option<u64>,
 }
 
 /// What `component.relink` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RelinkResult {
-    /// The component, by id.
+    /// The component, by id: with `occurrence`, the one that placement shows now.
     pub component: u64,
+    /// With `occurrence`: the component the placement showed before, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_component: Option<u64>,
+    /// With `occurrence`: the placement, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<u64>,
     /// The Import feature that holds the linked bodies, by id.
     pub feature: u64,
     /// The new file, as the link stores it.
@@ -415,8 +551,9 @@ pub struct LinksResult {
     pub param_warnings: Vec<String>,
 }
 
-/// One linked component. A file that is looked for has `found` and `changed`; a refused one is
-/// not looked for and has `found` null and a `reason`.
+/// One linked component. A file that is looked for has `found` and `changed`, and a `state` and
+/// a `reason` when it can't be reached; a refused one is not looked for and has `found` null, a
+/// `state` and a `reason`.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum LinkInfo {
@@ -427,24 +564,41 @@ pub enum LinkInfo {
         name: Option<String>,
         /// The link as stored.
         path: String,
+        /// Selected source configuration row id; absent when following the saved source state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        configuration: Option<u64>,
         /// The file it resolves to.
         file: String,
         /// Whether the file is there; null when that can't be told.
         found: Option<bool>,
         /// Whether the file is no longer what this design last read (`component.update_links`
         /// reads it again); null when it is not found or the link is older than this record.
+        /// True also for a link that has no bodies yet: the design was saved without them and
+        /// has not read the file since it opened.
         changed: Option<bool>,
+        /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
+        /// when it can be read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state: Option<LinkState>,
+        /// What to show about it. Left out with `state`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     /// The file is on a network location that is not allowed.
     Network {
         component: u64,
         name: Option<String>,
         path: String,
+        /// Selected source configuration row id; absent when following the saved source state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        configuration: Option<u64>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
         /// The network location.
         host: String,
+        /// Always `not_allowed`.
+        state: LinkState,
         reason: String,
     },
     /// The path names a device.
@@ -452,9 +606,14 @@ pub enum LinkInfo {
         component: u64,
         name: Option<String>,
         path: String,
+        /// Selected source configuration row id; absent when following the saved source state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        configuration: Option<u64>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
+        /// Always `unreadable`.
+        state: LinkState,
         reason: String,
     },
 }

@@ -68,6 +68,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{self as curve_base, at, HYPERBOLA_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::curve::CurveFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::assert_array::labels::{SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -280,6 +281,18 @@ impl Hyperbola {
 
     // ---- comparison and copies --------------------------------------------------------
 
+    /// Not upstream: the same hyperbola by definition, exactly (IEEE `==`; a NaN
+    /// refuses): the same B-spline part ([`BSplineCurve::same_definition`]), and
+    /// placement, domain and axes equal.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.base.same_definition(&other.base)
+            && self.position == other.position
+            && self.anal_domain == other.anal_domain
+            && self.semi_axis == other.semi_axis
+            && self.semi_image_axis == other.semi_image_axis
+    }
+
     /// `operator==`: equal B-spline bases (same dimension, NURBs equal within
     /// `SM_EFF_ZERO`), placements equal within the scaled zero, equal domains and axis
     /// lengths equal within `SM_EFF_ZERO`.
@@ -319,7 +332,13 @@ impl Hyperbola {
     /// `SM_ERR` for more than 3 derivatives.
     pub fn evaluate_step(&self, step_param: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
         if num_derivs > 3 {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::curve(
+                OP_EVAL_STEP,
+                CurveFailure::TooManyDerivatives {
+                    asked: num_derivs,
+                    most: 3,
+                },
+            ));
         }
         let mut t = step_param;
         if !self.anal_domain.contains_value(t, 0.0) {
@@ -542,7 +561,10 @@ impl Hyperbola {
         let (x1, _) = line_line_closest_point(s0, start_to_end_v, mid_pnt, v1)?;
         // Error: midPoint line fails to intersect hyperpola's base chord
         if x1 < EFF_ZERO || x1 > 1.0 - EFF_ZERO {
-            return Err(SolidError::sm_err(OP_MAKE_NURB));
+            return Err(SolidError::curve(
+                OP_MAKE_NURB,
+                CurveFailure::MidTangentOffChord { at: x1 },
+            ));
         }
 
         // mid ControlPoint weight =
@@ -655,7 +677,10 @@ impl Hyperbola {
             let unit_scale = s.x == 1.0 && s.y == 1.0 && s.z == 1.0;
             if !unit_scale && (!are_same(s.x, s.y) || !are_same(s.x, s.z)) {
                 // Unable to scale analytical curves non-uniformly
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::curve(
+                    OP_TRANSFORM,
+                    CurveFailure::NonUniformScale { scale: s },
+                ));
             }
         }
 
@@ -746,7 +771,11 @@ impl Hyperbola {
         // read the base type (status ignored upstream)
         match BSplineCurve::read_from_db(db, dim, version) {
             Ok(base) => h.base = base,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => {}
         }
 
@@ -849,7 +878,15 @@ mod tests {
         assert!(!Hyperbola::is_kind_of(14023));
         assert_eq!(h.type_string(), "SmHyperbola_TYPE");
         assert_eq!(h.class_string(), "SmHyperbola");
-        assert!(h.evaluate_step(0.0, 4).is_err());
+        let err = h.evaluate_step(0.0, 4).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::TooManyDerivatives { asked: 4, most: 3 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
         let d = h.evaluate_step(0.25, 3).unwrap();
         assert_eq!(d.len(), 4);
         assert_eq!(d[1], d[3]);
@@ -882,7 +919,19 @@ mod tests {
         );
         h.transform(&mv, Some(Vec3::new(2.0, 2.0, 2.0))).unwrap();
         assert_eq!(h.semi_axis(), 2.0);
-        assert!(h.transform(&mv, Some(Vec3::new(1.0, 2.0, 2.0))).is_err());
+        let err = h
+            .transform(&mv, Some(Vec3::new(1.0, 2.0, 2.0)))
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::NonUniformScale {
+                scale: Vec3::new(1.0, 2.0, 2.0)
+            })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
         // a degenerate domain has parallel end tangents: no NURB
         let d = Hyperbola::new(
             Point3::new(0.0, 0.0, 0.0),

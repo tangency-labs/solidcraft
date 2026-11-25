@@ -51,7 +51,6 @@ use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::spiral::allocate_nurb_volume;
 use solidcore::surface::b_spline_volume::BSplineVolume;
 use solidcore::surface::volume::{Volume, VolumeKind};
-use solidcore::SolidError;
 
 use super::intersect_surface_drop_lib_p2::{
     add3, gen_knots, gen_scale, pick, rust_curve, scale3, unit_dir, CurveIn,
@@ -339,16 +338,16 @@ fn rust_brep(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let mut b = m.brep;
-    let mut k = kernel(i.model, i.ratio);
+    let k = kernel(i.model, i.ratio);
     let small = SmallTopoType::from_code(i.small)
         .ok_or_else(|| HarnessError::new(format!("small {}", i.small)))?;
     let a = brep_args(i);
     let z = match a.set_estimate {
-        Some(est) => tol::set_brep_model_size_estimate(&mut k, &mut b, est),
+        Some(est) => tol::set_brep_model_size_estimate(&mut b, est),
         None => 0.0,
     };
     if let Some(ratio) = a.set_ratio {
-        tol::set_brep_large_small_size_ratio(&mut k, &mut b, ratio);
+        tol::set_brep_large_small_size_ratio(&mut b, ratio);
     }
     let mut r = vec![
         z,
@@ -600,7 +599,7 @@ const SM_SUCCESS: i64 = 1000;
 fn status(r: &solidcore::Result<()>) -> i64 {
     match r {
         Ok(()) => SM_SUCCESS,
-        Err(SolidError::Upstream { code, .. }) => i64::from(*code),
+        Err(err) if solidcore::error::upstream_status(err).is_some() => i64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         Err(_) => -1,
     }
 }

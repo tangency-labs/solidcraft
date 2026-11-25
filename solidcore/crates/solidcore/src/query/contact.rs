@@ -36,6 +36,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+use crate::error::query::QueryFailure;
 use crate::geom::certified::{gamma, Verdict};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
@@ -347,12 +348,7 @@ fn pair_lower(a: &Piece, b: &Piece, axis: Option<[f64; 3]>) -> Result<f64> {
 fn box_lower(a: &Piece, b: &Piece) -> Result<f64> {
     let ((al, ah), (bl, bh)) = (a.widened_box()?, b.widened_box()?);
     let mut sum = 0.0_f64;
-    for i in 0..3 {
-        let (Some(&x0), Some(&x1), Some(&y0), Some(&y1)) =
-            (al.get(i), ah.get(i), bl.get(i), bh.get(i))
-        else {
-            return Err(SolidError::sm_err(OP));
-        };
+    for (((&x0, &x1), &y0), &y1) in al.iter().zip(&ah).zip(&bl).zip(&bh) {
         let gap = (y0 - x1).max(x0 - y1).max(0.0);
         // (the difference rounded up by at most gamma_1 of its terms)
         let gap = (gap - gamma(1) * (x0.abs() + x1.abs() + y0.abs() + y1.abs())).max(0.0);
@@ -484,7 +480,7 @@ fn bracket(
     first.sort_by(|x, y| x.lower.total_cmp(&y.lower));
     for pair in first {
         let (Some(fa), Some(fb)) = (pa.faces.get(pair.a.0), pb.faces.get(pair.b.0)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query(OP, QueryFailure::Defect { why: "a pair's face indices are those of the prepared faces it was made from, enumerated, so each is among them" }));
         };
         if pair.lower < upper {
             witness_from(
@@ -515,7 +511,7 @@ fn bracket(
         let (ia, x) = &pair.a;
         let (ib, y) = &pair.b;
         let (Some(fa), Some(fb)) = (pa.faces.get(*ia), pb.faces.get(*ib)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query(OP, QueryFailure::Defect { why: "a pair's face indices are those of the prepared faces it was made from, enumerated, so each is among them" }));
         };
         // a witness from the pair's centres (none can be nearer than the pair's bound, so a
         // pair past the witness so far is skipped)

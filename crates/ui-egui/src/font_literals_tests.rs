@@ -8,7 +8,6 @@ use syn::{Expr, Item, Lit};
 /// These `.size()` calls size spinner geometry, not text. No text sizes are exempt.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs.rs", 2, "preview spinners: graphic diameter, not typography"),
-    ("viewport.rs", 1, "viewport status spinner: graphic diameter, not typography"),
     ("ui_kit/settings_search.rs", 2, "hidden off-screen areas that measure search matches: never drawn"),
 ];
 
@@ -135,16 +134,24 @@ fn scan(dir: &Path, prefix: &str, failures: &mut Vec<String>) {
         let relative = format!("{prefix}{name}");
         if path.is_dir() {
             scan(&path, &format!("{relative}/"), failures);
-        } else if name.ends_with(".rs") && !name.ends_with("_tests.rs") && name != "tests.rs" {
-            let src = std::fs::read_to_string(&path).unwrap();
-            let ast = syn::parse_file(&src).unwrap_or_else(|e| panic!("{relative}: {e}"));
-            let mut guard = Guard { file: &relative, found: Vec::new() };
-            guard.visit_file(&ast);
-            let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
-            if guard.found.len() > allowed {
-                failures.push(format!("{relative}: {} literal(s), at most {allowed} allowed: {:?}", guard.found.len(), guard.found));
-            }
+        } else {
+            check(&path, &relative, failures);
         }
+    }
+}
+
+fn check(path: &Path, relative: &str, failures: &mut Vec<String>) {
+    let name = relative.rsplit('/').next().unwrap_or(relative);
+    if !name.ends_with(".rs") || name.ends_with("_tests.rs") || name == "tests.rs" {
+        return;
+    }
+    let src = std::fs::read_to_string(path).unwrap();
+    let ast = syn::parse_file(&src).unwrap_or_else(|e| panic!("{relative}: {e}"));
+    let mut guard = Guard { file: relative, found: Vec::new() };
+    guard.visit_file(&ast);
+    let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
+    if guard.found.len() > allowed {
+        failures.push(format!("{relative}: {} literal(s), at most {allowed} allowed: {:?}", guard.found.len(), guard.found));
     }
 }
 
@@ -153,7 +160,11 @@ fn font_sizes_and_dense_form_metrics_come_from_tokens() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut failures = Vec::new();
     scan(&root.join("src"), "", &mut failures);
-    scan(&root.join("../../assets/icons/ui/source"), "icons/", &mut failures);
+    scan(&root.join("../look/src"), "look/", &mut failures);
+    // The UI kit and its components, under the names they had here.
+    for (path, name) in crate::test_support::kit_files() {
+        check(&path, &name, &mut failures);
+    }
     failures.sort();
     assert!(
         failures.is_empty(),

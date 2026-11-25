@@ -25,9 +25,13 @@
 //! | `faces_of_pieces` (private) | `sm_PieceOfFace`, in `BuildLawCorners`' two loops |
 //! | `edge_between` (private) | `sm_EdgeBetween` |
 //!
-//! Deviations: the noted copies and their pieces are one list of pairs
+//! Deviations: the noted copies and their pieces are one list of triples
 //! (`m_vRadiusCornerSurfaces`, `m_vRadiusCornerPieces`), owned by the session and emptied
-//! by the split. The split's loop passes over a face the rebuild of an earlier one removed
+//! by the split. Not the fork's (#16651): a chamfer by its definition whose chord creases
+//! where a foot crosses a face's G1-only knot line
+//! ([`crate::surface::procedural_blend::ProceduralBlend::chord_creases`]) is noted too,
+//! with those knots, and split at them alone; each side keeps the definition, its net
+//! trimmed to the side. The split's loop passes over a face the rebuild of an earlier one removed
 //! (the fork's list would hold a deleted face there). With `Kernel::blend_face_log` on, a
 //! dip's zone is marked as a corner ball's patch (#2489; not the fork's). No recursion.
 
@@ -39,7 +43,8 @@ use crate::blend::law_corners::{
     curve_between, find_law_corner_pieces, sphere_zone, LawCornerKind, LawCornerPieces,
 };
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, LawCornerSearch};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -51,7 +56,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::procedural_blend::corner::CornerDefinition;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::faces as brep_faces;
 use crate::topology::brep::p2::OldSurface;
 use crate::topology::brep::p3::{self, orient_trimmed_surfaces};
@@ -65,9 +70,33 @@ use crate::topology::{Brep, EdgeId, FaceId};
 
 const OP: &str = "blend::fillet_executive::session::law_corners";
 
+/// A reviewed defect of the law corners' split or exact round, `why` saying why, with the
+/// status the fork returns there (`SM_ERR`, or `SM_ERR_NULL_POINTER` for its `NER`).
+fn defect(why: &'static str, status: i32) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(status)
+        .into_error()
+}
+
+/// The exact round's search for `what` at law corner `corner` found nothing
+/// ([`BlendFailure::LawCornerNotFound`], the fork's `NER`).
+fn not_found(corner: usize, what: LawCornerSearch) -> SolidError {
+    SolidError::blend(OP, BlendFailure::LawCornerNotFound { corner, what })
+}
+
+/// Why a face split from a law round has a surface: the split gives each face a piece of
+/// the round's surface, which the face had (a face without one is not split).
+const SPLIT_FACE_SURFACE: &str = "a face split from a round at its law corners has no surface: \
+     the split gives each face a piece of the round's surface";
+
 /// A fillet surface noted before the merge (a copy), with its kept pieces where a law
-/// corner dips or peaks.
-pub(super) type RadiusCornerSurface = (Surface, Option<LawCornerPieces>);
+/// corner dips or peaks, and (not the fork's, #16651) the knots `(u, v)` to split it at
+/// where they are a chamfer's creases rather than the surface's C0 knots.
+pub(super) type RadiusCornerSurface = (
+    Surface,
+    Option<LawCornerPieces>,
+    Option<(Vec<f64>, Vec<f64>)>,
+);
 
 impl FilletSession<'_> {
     /// `NoteRadiusCornerSurfaces` (the fork's 6eecf04, 58d03ef): copies of the fillet
@@ -85,7 +114,7 @@ impl FilletSession<'_> {
             // `GetRadiusCornerParameters` (virtual): the variable radius solver's
             let geoms = match self.objects.solvers.get(index).and_then(Option::as_ref) {
                 Some(SolverObject::VariableRadius(vr)) => {
-                    if vr.radius_corner_parameters(k)?.is_empty() {
+                    if vr.radius_corner_parameters()?.is_empty() {
                         continue;
                     }
                     vr.curve_based.solver.fillet_geoms()
@@ -109,13 +138,42 @@ impl FilletSession<'_> {
                     .solvers
                     .get_mut(index)
                     .and_then(Option::as_mut)
-                    .ok_or_else(|| SolidError::null_pointer(OP))?
+                    .ok_or_else(|| {
+                        defect(
+                            "a solver whose fillet surfaces are noted at their law corners is \
+                             gone: it was read at the same index just before",
+                            SM_ERR_NULL_POINTER,
+                        )
+                    })?
                     .base_mut();
                 let pieces = find_law_corner_pieces(k, &mut base.law_corner_pieces, &copy)?
                     .and_then(|i| base.law_corner_pieces.get(i))
                     .filter(|kept| kept.has_dip_or_peak())
                     .cloned();
-                noted.push((copy, pieces));
+                noted.push((copy, pieces, None));
+            }
+        }
+        // (not the fork's, #16651) a chamfer by its definition whose feet's s-derivatives
+        // jump where a face is only G1 creases along the chord there
+        // ([`ProceduralBlend::chord_creases`]): its face is split there as at a radius
+        // corner, each side keeping the definition (the net trimmed to it)
+        for index in 0..self.objects.solvers.len() {
+            let geoms = match self.objects.solvers.get(index).and_then(Option::as_ref) {
+                Some(SolverObject::VariableRadius(_)) | None => continue,
+                Some(solver) => solver.base().fillet_geoms(),
+            };
+            for geom in geoms {
+                let Some(surface) = self.objects.fillet_surface(geom)? else {
+                    continue;
+                };
+                let SurfaceKind::ProceduralBlend(pb) = surface.kind() else {
+                    continue;
+                };
+                let creases = pb.chord_creases()?;
+                if creases.0.is_empty() && creases.1.is_empty() {
+                    continue;
+                }
+                noted.push((surface.clone(), None, Some(creases)));
             }
         }
         self.objects.radius_corner_surfaces.extend(noted);
@@ -158,6 +216,7 @@ impl FilletSession<'_> {
     /// The body of [`Self::split_fillet_faces_at_radius_corners`] on the noted surfaces.
     fn split_noted_faces(&mut self, k: &mut Kernel, noted: &[RadiusCornerSurface]) -> Result<()> {
         let serial = self.objects.target_serial;
+        let mut found = vec![false; noted.len()];
         let key_of = move |entity| p3::topology_ref(serial, entity);
         for face in brep_faces(self.objects.target, None)? {
             // (a face of a round rebuilt at its law's corners below is gone)
@@ -170,8 +229,12 @@ impl FilletSession<'_> {
                 continue;
             };
             let mut fillet = None;
-            for (index, (copy, _)) in noted.iter().enumerate() {
-                if copy.approx_eq(k, surface)? {
+            for (index, (copy, _, creases)) in noted.iter().enumerate() {
+                // (a chamfer noted at its creases, #16651, by its net and definition: only
+                // those, a round by its definition is matched as before)
+                if copy.approx_eq(k, surface)?
+                    || (creases.is_some() && same_procedural_blend(k, copy, surface)?)
+                {
                     fillet = Some(index);
                     break;
                 }
@@ -179,20 +242,29 @@ impl FilletSession<'_> {
             let Some(index) = fillet else {
                 continue;
             };
+            if let Some(slot) = found.get_mut(index) {
+                *slot = true;
+            }
+            let creases = noted.get(index).and_then(|(_, _, c)| c.as_ref());
             let mut pieces = with_target_env_of(&mut self.objects, k, |k, b, env, _| {
                 let key_of = env.key_of;
                 let curve_ref = |e: EdgeId, kind: i64| ObjectRef {
                     key: key_of(EntityRef::Edge(e)).key,
                     type_code: kind,
                 };
-                crate::topology::brep::p10::subdivide_face_at_discontinuities(
-                    k,
-                    b,
-                    env,
-                    &curve_ref,
-                    face,
-                    ContinuityType::C0,
-                )
+                match creases {
+                    Some((u, v)) => crate::topology::brep::p10::subdivide_face_at_knots(
+                        k, b, env, &curve_ref, face, u, v,
+                    ),
+                    None => crate::topology::brep::p10::subdivide_face_at_discontinuities(
+                        k,
+                        b,
+                        env,
+                        &curve_ref,
+                        face,
+                        ContinuityType::C0,
+                    ),
+                }
             })?;
             if !pieces.contains(&face) {
                 pieces.push(face);
@@ -207,10 +279,13 @@ impl FilletSession<'_> {
                         .domain;
                 let mid = bx.mid();
                 let surface = crate::topology::face::p2::surface(target, piece)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| defect(SPLIT_FACE_SURFACE, SM_ERR_NULL_POINTER))?;
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
                 let (mut lo, mut hi) = (domain.min(), domain.max());
-                let (u, v) = surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?;
+                let (u, v) = match creases {
+                    Some(c) => c.clone(),
+                    None => surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?,
+                };
                 for knot in u {
                     if knot <= lo.x || knot >= hi.x {
                         continue;
@@ -237,7 +312,7 @@ impl FilletSession<'_> {
                         .face_mut(piece)?
                         .surface
                         .as_mut()
-                        .ok_or_else(|| SolidError::null_pointer(OP))?
+                        .ok_or_else(|| defect(SPLIT_FACE_SURFACE, SM_ERR_NULL_POINTER))?
                         .trim_with_domain(k, &mut side)?;
                 }
                 shrink_geometry(k, target, piece, &key_of)?;
@@ -269,8 +344,21 @@ impl FilletSession<'_> {
             }
 
             // where the law dips or peaks, the exact round there (the faces are rebuilt)
-            if let Some(kept) = noted.get(index).and_then(|(_, kept)| kept.as_ref()) {
+            if let Some(kept) = noted.get(index).and_then(|(_, kept, _)| kept.as_ref()) {
                 self.build_law_corners(k, &pieces, kept)?;
+            }
+        }
+        // (#16651) a chamfer noted at its creases whose face is not found again would keep
+        // its crease inside one face: the split stage failed (a typed cause), not left for
+        // the check to find
+        for ((_, _, creases), found) in noted.iter().zip(&found) {
+            if creases.is_some() && !found {
+                return Err(defect(
+                    "a chamfer noted at its creases is not found again after the merge, so \
+                     the split would leave its crease inside one face: the merge gives the \
+                     target an exact copy of each fillet surface",
+                    SM_ERR,
+                ));
             }
         }
         Ok(())
@@ -292,12 +380,14 @@ impl FilletSession<'_> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for pieces, corners and joined ends that do not match, for a face that is
-    /// no piece's or a piece with two faces, and for lamina edges left by the stitch;
-    /// [`SolidError::null_pointer`] (the fork's `NER`) for a piece without a face, a corner
-    /// whose faces share no edge or have no edge between its rail points, or a peak whose
-    /// pieces have no crossing between them; those of the steps. After the unstitch, an
-    /// error leaves the round's faces unstitched, as the fork's does.
+    /// A [`BlendFailure::Defect`] (`SM_ERR`) for pieces, corners and joined ends that do not
+    /// match, for a face that is no piece's or a piece with two faces, and for lamina edges
+    /// left by the stitch, and (`SM_ERR_NULL_POINTER`, the fork's `NER`) for a piece without
+    /// a face or a zone face not made; [`BlendFailure::LawCornerNotFound`] for a corner whose
+    /// faces share no edge or have no edge between its rail points, a peak whose pieces have
+    /// no crossing between them, or a corner curve that does not run between its edge's
+    /// ends; those of the steps. After the unstitch, an error leaves the round's faces
+    /// unstitched, as the fork's does.
     fn build_law_corners(
         &mut self,
         k: &mut Kernel,
@@ -306,12 +396,15 @@ impl FilletSession<'_> {
     ) -> Result<()> {
         let count = kept.pieces.len();
         if count < 2 || kept.corners.len() + 1 != count || kept.joined_ends.len() != count {
-            return Err(SolidError::sm_err(OP));
+            return Err(defect(
+                "a round's law corner pieces do not match their corners: the pieces are \
+                 kept with one corner between each pair and one joined end each",
+                SM_ERR,
+            ));
         }
         if !kept.has_dip_or_peak() {
             return Ok(());
         }
-        let null = || SolidError::null_pointer(OP);
         let serial = self.objects.target_serial;
         let key_of = move |entity| p3::topology_ref(serial, entity);
 
@@ -322,12 +415,12 @@ impl FilletSession<'_> {
         // each corner's rail points: the ends of the edge its two faces share
         let mut tol = kept.tol_3d;
         let mut rails = Vec::new();
-        for (i, corner) in kept.corners.iter().enumerate() {
+        // (`of` holds a face per piece, one more than the corners: each corner lies between
+        // the faces of the pieces on either side)
+        let sides = of.iter().zip(of.iter().skip(1));
+        for (i, (corner, (&before, &after))) in kept.corners.iter().zip(sides).enumerate() {
             let mut ends = (Point3::ZERO, Point3::ZERO);
             if corner.kind != LawCornerKind::Matching {
-                let (Some(&before), Some(&after)) = (of.get(i), of.get(i + 1)) else {
-                    return Err(null());
-                };
                 let mut shared = None;
                 for e in face_edges(target, before)? {
                     if edge::faces(target, e, None)?.contains(&after) {
@@ -335,7 +428,7 @@ impl FilletSession<'_> {
                         break;
                     }
                 }
-                let shared = shared.ok_or_else(null)?;
+                let shared = shared.ok_or_else(|| not_found(i, LawCornerSearch::SharedEdge))?;
                 ends = edge_ends(target, shared)?;
                 tol = tol.max(edge::tolerance(target, shared)?);
             }
@@ -382,26 +475,33 @@ impl FilletSession<'_> {
 
         // each corner's edges, on the face before and the face after
         let mut zones = Vec::new();
-        for (i, (corner, &(start, end))) in kept.corners.iter().zip(&rails).enumerate() {
+        // (a face and a piece on either side of each corner, as above)
+        let sides = of.iter().zip(of.iter().skip(1));
+        let side_pieces = kept.pieces.iter().zip(kept.pieces.iter().skip(1));
+        for (i, (((corner, &(start, end)), (&before, &after)), (first, second))) in kept
+            .corners
+            .iter()
+            .zip(&rails)
+            .zip(sides)
+            .zip(side_pieces)
+            .enumerate()
+        {
             if corner.kind == LawCornerKind::Matching {
                 continue;
             }
             let target = &mut *self.objects.target;
-            let (Some(&before), Some(&after)) = (of.get(i), of.get(i + 1)) else {
-                return Err(null());
-            };
+            let corner_edge = || not_found(i, LawCornerSearch::CornerEdge);
             let edges = [
-                edge_between(target, before, start, end, tol)?.ok_or_else(null)?,
-                edge_between(target, after, start, end, tol)?.ok_or_else(null)?,
+                edge_between(target, before, start, end, tol)?.ok_or_else(corner_edge)?,
+                edge_between(target, after, start, end, tol)?.ok_or_else(corner_edge)?,
             ];
 
             // the curve of each side's corner edge
             let curves: [Curve; 2] = if corner.kind == LawCornerKind::Dip {
                 // each side's touch circle: its piece's end section at the corner
-                let section = |j: usize| -> Result<Curve> {
-                    let piece = kept.pieces.get(i + j).ok_or_else(null)?;
+                let section = |piece: &Surface, before: bool| -> Result<Curve> {
                     let domain = piece.natural_uv_domain_with_nurb(k)?;
-                    let u = if j == 0 {
+                    let u = if before {
                         domain.max().x
                     } else {
                         domain.min().x
@@ -410,13 +510,9 @@ impl FilletSession<'_> {
                         .create_iso_parametric_curve(k, SurfParamType::U, u, 0.0, None, false)?
                         .curve)
                 };
-                [section(0)?, section(1)?]
+                [section(first, true)?, section(second, false)?]
             } else {
                 // where the sides cross: the one curve from rail point to rail point
-                let (Some(first), Some(second)) = (kept.pieces.get(i), kept.pieces.get(i + 1))
-                else {
-                    return Err(null());
-                };
                 let found = first.global_surface_intersect(
                     k,
                     &first.natural_uv_domain_with_nurb(k)?,
@@ -433,7 +529,7 @@ impl FilletSession<'_> {
                     }
                     crossing = curve_between(k, curve, start, end, tol)?;
                 }
-                let crossing = crossing.ok_or_else(null)?;
+                let crossing = crossing.ok_or_else(|| not_found(i, LawCornerSearch::Crossing))?;
                 let copy = crossing.copy(k)?;
                 [crossing, copy]
             };
@@ -453,7 +549,8 @@ impl FilletSession<'_> {
                 };
                 for (&e, curve) in edges.iter().zip(&curves) {
                     let (from, to) = edge_ends(target, e)?;
-                    let oriented = curve_between(k, curve, from, to, tol)?.ok_or_else(null)?;
+                    let oriented = curve_between(k, curve, from, to, tol)?
+                        .ok_or_else(|| not_found(i, LawCornerSearch::CurveBetweenEnds))?;
                     crate::topology::brep::p2::replace_curve(k, target, e, oriented, &mut stores)?;
                 }
             }
@@ -505,16 +602,14 @@ impl FilletSession<'_> {
             }
             // the zone keeps its corner definition (#2357), as every corner ball's patch does:
             // the ball's sphere and the zone's own loop, certified on it
-            if k.fixes.fillet_round_as_definition {
-                let boundary = curves_3d
-                    .iter()
-                    .flatten()
-                    .map(|c| nurbs_curve(c).cloned())
-                    .collect::<Result<Vec<_>>>()?;
-                let definition = CornerDefinition::ball(corner.centre, corner.radius, boundary)?;
-                definition.recertify(k, &zone)?;
-                zone.set_corner_definition(definition);
-            }
+            let boundary = curves_3d
+                .iter()
+                .flatten()
+                .map(|c| nurbs_curve(c).cloned())
+                .collect::<Result<Vec<_>>>()?;
+            let definition = CornerDefinition::ball(corner.centre, corner.radius, boundary)?;
+            definition.recertify(k, &zone)?;
+            zone.set_corner_definition(definition);
             let input = FaceCurvesInput {
                 loops: vec![2],
                 curves_3d: Some(curves_3d),
@@ -539,7 +634,13 @@ impl FilletSession<'_> {
                     env,
                 )
             })?;
-            let zone_face = made.face.ok_or_else(null)?;
+            let zone_face = made.face.ok_or_else(|| {
+                defect(
+                    "the face made on a dip's sphere zone is not there: the zone's loop of \
+                     its two circles makes a face",
+                    SM_ERR_NULL_POINTER,
+                )
+            })?;
             // (not the fork's, #2489) with the blend face log on, the zone is marked as a
             // corner ball's patch, as the session marks the faces it made before the merge
             self.mark_target_blend_face(k, zone_face, BlendFaceKind::Corner(CornerKind::Ball))?;
@@ -570,7 +671,12 @@ impl FilletSession<'_> {
         let list: Vec<Option<FaceId>> = stitch.iter().copied().map(Some).collect();
         let stitched = stitch_faces(k, self.objects.target, tol, Some(&list), false)?;
         if stitched.lamina_edges != 0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(defect(
+                "the law corner pieces leave lamina edges when stitched back into the solid: \
+                 each side's corner edge was given the curve the next side's shares, within \
+                 the stitch tolerance",
+                SM_ERR,
+            ));
         }
         with_target_env_of(&mut self.objects, k, |k, b, env, _| {
             orient_trimmed_surfaces(k, b, env, &mut Marks::default(), true, false, None)
@@ -580,12 +686,14 @@ impl FilletSession<'_> {
         // sections are to the balls' circles (the zone itself is exact, a crossing is traced
         // within a quarter of that)
         let target = &mut *self.objects.target;
-        for (i, (corner, &(start, end))) in kept.corners.iter().zip(&rails).enumerate() {
+        for (i, ((corner, &(start, end)), &before)) in
+            kept.corners.iter().zip(&rails).zip(&of).enumerate()
+        {
             if corner.kind != LawCornerKind::Peak {
                 continue;
             }
-            let before = *of.get(i).ok_or_else(null)?;
-            let crossing = edge_between(target, before, start, end, tol)?.ok_or_else(null)?;
+            let crossing = edge_between(target, before, start, end, tol)?
+                .ok_or_else(|| not_found(i, LawCornerSearch::CornerEdge))?;
             edge::set_tolerance(target, crossing, tol, true, true)?;
         }
         for &zone in &zones {
@@ -603,8 +711,8 @@ impl FilletSession<'_> {
 ///
 /// # Errors
 ///
-/// `SM_ERR` for a face past every piece or a piece with two faces;
-/// [`SolidError::null_pointer`] for a piece without a face; those of the uv box.
+/// A [`BlendFailure::Defect`]: `SM_ERR` for a face past every piece or a piece with two
+/// faces, `SM_ERR_NULL_POINTER` for a piece without a face; those of the uv box.
 fn faces_of_pieces(
     k: &Kernel,
     b: &mut Brep,
@@ -618,12 +726,39 @@ fn faces_of_pieces(
         let piece = kept.joined_ends.iter().position(|&end| mid < end);
         match piece.and_then(|piece| of.get_mut(piece)) {
             Some(slot @ None) => *slot = Some(f),
-            _ => return Err(SolidError::sm_err(OP)),
+            _ => {
+                return Err(defect(
+                    "a face of a round split at its law corners lies on no free piece: the \
+                     round is split at the pieces' joined ends, a face per piece",
+                    SM_ERR,
+                ))
+            }
         }
     }
-    of.into_iter()
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| SolidError::null_pointer(OP))
+    of.into_iter().collect::<Option<Vec<_>>>().ok_or_else(|| {
+        defect(
+            "a law corner piece has no face: the round is split at the pieces' joined \
+                 ends, a face per piece",
+            SM_ERR_NULL_POINTER,
+        )
+    })
+}
+
+/// Not the fork's (#16651): whether `a` and `b` are both blends by their definitions with
+/// the same definition and nets equal as B-spline surfaces (the fork's
+/// `SmProceduralBlend` is an `SmBSplineSurface`, whose `operator==` compares the nets;
+/// [`Surface::approx_eq`] answers false for the pair), as a noted chamfer is found again
+/// after the merge.
+///
+/// # Errors
+///
+/// Those of [`crate::surface::procedural_blend::ProceduralBlend::same_definition`].
+fn same_procedural_blend(k: &Kernel, a: &Surface, b: &Surface) -> Result<bool> {
+    let (SurfaceKind::ProceduralBlend(a), SurfaceKind::ProceduralBlend(b)) = (a.kind(), b.kind())
+    else {
+        return Ok(false);
+    };
+    Ok(a.net().approx_eq(b.net()) && a.same_definition(k, b)?)
 }
 
 /// The edges of face `f`, in the face's order (`SmFace::GetEdges`).
@@ -635,9 +770,16 @@ fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] for an edge without both (the fork's `NER`).
+/// A [`BlendFailure::Defect`] (`SM_ERR_NULL_POINTER`, the fork's `NER`) for an edge without
+/// both.
 fn edge_ends(b: &Brep, e: EdgeId) -> Result<(Point3, Point3)> {
-    let null = || SolidError::null_pointer(OP);
+    let null = || {
+        defect(
+            "an edge of a round's law corner faces has no end vertex: the split and the \
+             stitch give every edge of the faces both its vertices",
+            SM_ERR_NULL_POINTER,
+        )
+    };
     let start = edge::start_vertex(b, e)?.ok_or_else(null)?;
     let end = edge::end_vertex(b, e)?.ok_or_else(null)?;
     Ok((vertex::point(b, start)?, vertex::point(b, end)?))

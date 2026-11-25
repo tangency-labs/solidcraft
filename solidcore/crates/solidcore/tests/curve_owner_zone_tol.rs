@@ -91,6 +91,8 @@ fn evaluation_curves_of_boolean_edges_measure_at_the_edge_tolerance() {
 /// curves name their owner, they do not point to it). Upstream reads it through the
 /// pointer; the port's route is [`edge::evaluation_curve`] (the test above). Guessing a
 /// tolerance here (the system one) would build a different cache than upstream's.
+/// A circle's length and arc-length search need no cache (its closed form,
+/// [`Curve::length`]), so they work on it.
 #[test]
 fn a_borrowed_owned_edge_curve_stays_unported() {
     let mut k = Kernel::default();
@@ -110,13 +112,19 @@ fn a_borrowed_owned_edge_curve_stays_unported() {
             let interval = edge::interval(&b, e).unwrap();
             let base = c.length_base(&k, &interval, ACCURACY);
             assert!(is_zone_tol_gap(&base), "edge {e:?}: {base:?}");
+            let circle = matches!(c.kind(), CurveKind::Ellipse(el) if el.is_circle());
             if !matches!(c.kind(), CurveKind::Line(_)) {
-                // (a line's length is closed form: the arc-length search builds no cache)
+                // (a line's length is closed form: the arc-length search builds no cache;
+                // so is a circle's, which the search then finds without the tolerance)
                 curved += 1;
                 let half = c
                     .find_parameter_at_arc_length(&k, interval.min(), 1.0)
                     .map(|p| p.end_param);
-                assert!(is_zone_tol_gap(&half), "edge {e:?}: {half:?}");
+                if circle {
+                    assert!(half.is_ok(), "edge {e:?}: {half:?}");
+                } else {
+                    assert!(is_zone_tol_gap(&half), "edge {e:?}: {half:?}");
+                }
             }
         }
     }

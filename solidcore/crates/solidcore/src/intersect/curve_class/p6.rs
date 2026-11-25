@@ -15,7 +15,10 @@
 //! to `ComputePointParameters` is explicitly unused upstream and is omitted here.
 //! Undefined indices return an error. Debug-only
 //! diagnostics are omitted. Insertion restarts after a squeeze in a loop, in upstream
-//! order, bounded by the initial interval count plus one (every restart removes one).
+//! order, bounded by the initial interval count plus three (every restart removes one,
+//! or splits an interval at one of the input's two ends). Not upstream (WR-647): an
+//! E-E-E or F-F-F input that ends inside an interval it spans splits that interval at
+//! its end before it is combined, so it labels only its own extent.
 //! Homogenization's final squeezes must reduce the count. Nonempty boundary lookups
 //! await p2, as does interval splicing/squeezing.
 //!
@@ -46,8 +49,8 @@
 //! there (`Unported(topology.vertex)`).
 
 use super::p1::{
-    compute_face_point_class, compute_face_point_class_in, src_zone_tol_3d_of, MutableParams,
-    PointParams, ReadOnlyParams,
+    compute_face_point_class, compute_face_point_class_in, missing_defect, src_zone_tol_3d_of,
+    MutableParams, PointParams, ReadOnlyParams, EDGE_NO_VERTEX, EVAL_1ST,
 };
 use super::p3::{
     are_coincident_maybe, classify_crv_loc_by_index, connect_intervals, point_class_loc_by_index,
@@ -60,7 +63,8 @@ use super::{
 };
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignore_status, ignored, EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
@@ -73,6 +77,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p9::EdgeInFaceInput;
 use crate::topology::face::p4::FindVertexSectorArgs;
@@ -167,18 +172,10 @@ impl<O: ClassObject> CurveClassification<O> {
         fix_problems_by_squeezing(k, access.geometry(), self, other)?;
         fix_problems_by_squeezing(k, access.geometry(), other, self)?;
         while self.size() > other.size() {
-            let count = self.size();
-            ignore_status(squeeze_out_smallest_interval(self))?;
-            if self.size() >= count {
-                return Err(SolidError::sm_err(OP));
-            }
+            squeeze_one(self)?;
         }
         while other.size() > self.size() {
-            let count = other.size();
-            ignore_status(squeeze_out_smallest_interval(other))?;
-            if other.size() >= count {
-                return Err(SolidError::sm_err(OP));
-            }
+            squeeze_one(other)?;
         }
         Ok(())
     }
@@ -222,22 +219,154 @@ impl<O: ClassObject> CurveClassification<O> {
         a: &mut impl Imprint<O>,
         input: &CurveInterval<O>,
     ) -> Result<()> {
-        let mut restarts = self.size().saturating_add(1);
+        // every restart removes one interval, or splits an interval the input ends inside
+        // of, which happens at most once at each of the input's two ends. Starting from n
+        // intervals, the two splits add at most two, and a removal (`connect_intervals`
+        // joins two into one) needs at least two left, so there are at most n + 1
+        // removals and two splits: n + 3 restarts, with no slack. A split that is refused
+        // (`insert_point_class_in` false) still sets its flag; that end is then never
+        // retried, which only leaves the part beyond it unlabelled (below).
+        let allowed = self.size().saturating_add(3);
+        let mut restarts = allowed;
+        let mut split = [false; 2];
         loop {
-            if !self.insert_curve_interval_step(a, input)? {
+            if !self.insert_curve_interval_step(a, input, &mut split)? {
                 return Ok(());
             }
-            restarts = restarts
-                .checked_sub(1)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            restarts = match restarts.checked_sub(1) {
+                Some(left) => left,
+                None => {
+                    return Err(SolidError::intersect(
+                        OP,
+                        IntersectFailure::RepairDidNotSettle { restarts: allowed },
+                    ))
+                }
+            };
         }
     }
 
-    // true means upstream's tail-recursive restart after removal of an interval.
+    /// Whether this classification's curve over `[lo, hi]` lies on the edge or face that
+    /// `on` is classified to (not upstream, WR-647), as far as the curve's midpoint and its
+    /// point at the far end `far` (`lo` or `hi`) show: each drops onto the edge's curve
+    /// over the edge's interval (the face's surface) within the intersection tolerance of
+    /// the two zones, as the coincident-edge branch of `MergeInterval` tests an interval's
+    /// midpoint against its edge, and, for a face, also classifies inside the face's trims
+    /// (`sm_ComputeFacePointClass`: Face, or an Edge or Vertex of its boundary).
+    ///
+    /// The test is sampled (two points), not a certificate. It is used only to narrow
+    /// upstream's label, never to widen it: upstream labels the whole part with the input
+    /// unconditionally, and a part this test finds off is split away instead. The default is
+    /// the split, because the input (a range solution) claims only its own extent; the
+    /// part beyond keeps upstream's label only when the samples agree with it. So any
+    /// other class, an edge without a curve, an object the adapter does not resolve to
+    /// topology (a stand-in adapter without B-reps), and a failed drop or classification
+    /// are "not on" (the split), except a defect (`is_defect`, `InvalidInput`,
+    /// `PortInvariant`) and an unported, cancelled or uncertified call, which propagate.
+    /// Residual risk: a drop that fails on a part that does lie on the object splits it, as
+    /// upstream never does, and a split there can still fail a later stage.
+    fn part_lies_on(
+        &self,
+        a: &mut impl Imprint<O>,
+        on: &PointClassification<O>,
+        lo: f64,
+        hi: f64,
+        far: f64,
+    ) -> Result<bool> {
+        let r: Result<bool> = (|| {
+            let part = Extent1d::from_min_max(lo, hi);
+            for t in [part.evaluate(0.5), far] {
+                if !self.point_lies_on(a, on, t)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })();
+        match r {
+            Ok(on) => Ok(on),
+            Err(e)
+                if e.is_unported_or_cancelled()
+                    || e.is_defect()
+                    || matches!(
+                        e,
+                        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+                    ) =>
+            {
+                Err(e)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
+    /// One point of [`Self::part_lies_on`]: the curve's point at parameter `t`.
+    fn point_lies_on(
+        &self,
+        a: &mut impl Imprint<O>,
+        on: &PointClassification<O>,
+        t: f64,
+    ) -> Result<bool> {
+        let (k, g) = (a.kernel(), a.geometry());
+        if on.object().and_then(|o| g.topology_entity(o)).is_none() {
+            return Ok(false);
+        }
+        let src_zone_tol_3d = src_zone_tol_3d_of(k, Some(self));
+        let point = self.curve_geometry(g)?.evaluate_point(k, t)?;
+        match on.point_class() {
+            Pc::Edge => {
+                let e = edge_object(on)?;
+                let Some(curve) = super::p3::edge_curve(g, e)? else {
+                    return Ok(false);
+                };
+                let xsect_tol_3d =
+                    xsect_tol_3d_from_zones(k, src_zone_tol_3d, object_zone_tol_3d(k, g, Some(e))?);
+                let drop = curve.drop_point(
+                    k,
+                    &super::p3::edge_interval(g, e)?,
+                    point,
+                    None,
+                    xsect_tol_3d,
+                    None,
+                    SolverOperation::Normalize,
+                )?;
+                Ok(drop.success && drop.distance < xsect_tol_3d)
+            }
+            Pc::Face => {
+                let f = face_object(on)?;
+                let surface = face_surface(g, f)?;
+                let xsect_tol_3d =
+                    xsect_tol_3d_from_zones(k, object_zone_tol_3d(k, g, Some(f))?, src_zone_tol_3d);
+                let opts = DropPointOptions {
+                    guess_uv: None,
+                    operation: SolverOperation::Minimize,
+                    tgt_seam_side: None,
+                    want_solutions: false,
+                };
+                let drop = surface.drop_point::<crate::surface::surface::p4::NoObject>(
+                    k,
+                    point,
+                    &surface.natural_uv_domain_with_nurb(k)?,
+                    &opts,
+                )?;
+                if !(drop.success && drop.gap < xsect_tol_3d) {
+                    return Ok(false);
+                }
+                // inside the face's trims, not only on its surface
+                let mut pc = PointClassification::new(src_zone_tol_3d);
+                let r = a.compute_face_point_class(point, src_zone_tol_3d, f, &mut pc);
+                Ok(face_point_classified(r)?
+                    && matches!(pc.point_class(), Pc::Face | Pc::Edge | Pc::Vertex))
+            }
+            _ => Ok(false),
+        }
+    }
+
+    // true means upstream's tail-recursive restart after removal of an interval, or (not
+    // upstream) after splitting an interval an E-E-E or F-F-F input ends inside of;
+    // `split` records the splits made at the input's start and end.
     fn insert_curve_interval_step(
         &mut self,
         a: &mut impl Imprint<O>,
         input: &CurveInterval<O>,
+        split: &mut [bool; 2],
     ) -> Result<bool> {
         let tol = input.mid.obj_zone_tol_3d(a.kernel(), a.geometry())?;
         let fa = self.find_interval(a.kernel(), a.geometry(), input.min(), BIG_DOUBLE, tol)?;
@@ -256,7 +385,13 @@ impl<O: ClassObject> CurveClassification<O> {
                 let (coin, end) =
                     are_coincident_maybe(a.kernel(), a.geometry(), self, self, index)?;
                 match coin {
-                    Coincident::Unsure => return Err(SolidError::sm_err(OP)),
+                    // unsure only for an end classified to an edge whose object is not an
+                    // edge (`are_coincident_maybe`): the classification's object (rule 9)
+                    Coincident::Unsure => {
+                        return Err(Failure::new(OP, IntersectFailure::NoClassObject)
+                            .with_status(crate::error::SM_ERR)
+                            .into_error())
+                    }
                     Coincident::Yes => {
                         connect_intervals(self, index, end, false)?;
                         return Ok(true);
@@ -271,11 +406,80 @@ impl<O: ClassObject> CurveClassification<O> {
                     && input.mid.point_class() == Pc::Edge
                     && input.end.point_class() == Pc::Edge)
             {
+                // Not upstream (WR-647): upstream combines the input into the whole of
+                // every interval from i to j, which is the input's extent only when the
+                // input starts and ends on those intervals' boundaries (its [B53] and
+                // big-cube cases). An input that ends inside interval j (or starts inside
+                // interval i) would label the rest of that interval, where the curve may
+                // have left the edge or face, as on it. Such an interval is split at the
+                // input's end first (once per end), so the combined intervals are the
+                // input's extent, unless the part beyond the end lies on the input's edge
+                // or face at its midpoint and far end (`part_lies_on`): that part is then
+                // labelled with the input, as upstream labels it. An end whose split is
+                // refused (an interior classification there conflicts) was tested off, so
+                // its interval gets the input only at its other end, if that end is a
+                // boundary; its middle stays as it was, over the input's part too.
+                for (at, inside, done, end, param) in [
+                    (
+                        1,
+                        pb == IntervalPosition::Inside,
+                        split[1],
+                        &input.end,
+                        input.max(),
+                    ),
+                    (
+                        0,
+                        pa == IntervalPosition::Inside,
+                        split[0],
+                        &input.start,
+                        input.min(),
+                    ),
+                ] {
+                    if inside && !done {
+                        if let Some(flag) = split.get_mut(at) {
+                            *flag = true;
+                        }
+                        // the part of the interval beyond the input's end
+                        let (lo, hi) = if at == 1 {
+                            (param, self.at(j)?.interval.max())
+                        } else {
+                            (self.at(i)?.interval.min(), param)
+                        };
+                        let far = if at == 1 { hi } else { lo };
+                        if !self.part_lies_on(a, &input.mid, lo, hi, far)?
+                            && self.insert_point_class_in(a, end, param, BIG_DOUBLE, false)?
+                        {
+                            return Ok(true);
+                        }
+                    }
+                }
+                // An end left inside its interval (its part beyond the input lies on the
+                // input's edge or face, or its split was refused) leaves the part of
+                // interval i before the input's start (of interval j after its end) not
+                // covered by the input. That part is labelled with the input, as upstream
+                // labels it, only when the samples of `part_lies_on` (its midpoint and far
+                // end) lie on the input's edge or face.
+                let beyond_start = pa == IntervalPosition::Inside && {
+                    let lo = self.at(i)?.interval.min();
+                    self.part_lies_on(a, &input.mid, lo, input.min(), lo)?
+                };
+                let beyond_end = pb == IntervalPosition::Inside && {
+                    let hi = self.at(j)?.interval.max();
+                    self.part_lies_on(a, &input.mid, input.max(), hi, hi)?
+                };
                 for index in i..=j {
+                    let reaches_start = index > i || pa != IntervalPosition::Inside || beyond_start;
+                    let reaches_end = index < j || pb != IntervalPosition::Inside || beyond_end;
                     let ivl = self.at_mut(index)?;
-                    combine_in(a, &mut ivl.start, &input.start)?;
-                    combine_in(a, &mut ivl.mid, &input.mid)?;
-                    combine_in(a, &mut ivl.end, &input.end)?;
+                    if reaches_start {
+                        combine_in(a, &mut ivl.start, &input.start)?;
+                    }
+                    if reaches_start && reaches_end {
+                        combine_in(a, &mut ivl.mid, &input.mid)?;
+                    }
+                    if reaches_end {
+                        combine_in(a, &mut ivl.end, &input.end)?;
+                    }
                 }
                 return Ok(false);
             }
@@ -342,7 +546,10 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             i += 1;
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect(
+                OP,
+                IntersectFailure::IntervalEndMisplaced,
+            ));
         }
         if pb == IntervalPosition::End {
             combine_in(a, &mut self.at_mut(i)?.end, &input.end)?;
@@ -354,7 +561,10 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             self.insert_point_class_in(a, &input.end, input.max(), BIG_DOUBLE, false)?;
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect(
+                OP,
+                IntersectFailure::IntervalEndMisplaced,
+            ));
         }
         combine_in(a, &mut self.at_mut(i)?.mid, &input.mid)?;
         Ok(false)
@@ -812,7 +1022,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 let mut uv = uv.copy(a.kernel())?;
                 // SM_CAST_PTR(SmBSplineCurve, ...) then NER
                 if !is_bspline_curve(&uv) {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::intersect(OP, IntersectFailure::CurveNotBSpline));
                 }
                 uv.trim(a.kernel(), &mut interval, TrimMode::default())?;
                 self.at_mut(index)?.interval = interval;
@@ -962,7 +1172,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // check state
         let (Some(start_vu), Some(end_vu)) = (start_vu, end_vu) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::intersect(OP, IntersectFailure::NoEndSector));
         };
 
         // insert the interval into the face
@@ -1033,13 +1243,18 @@ impl<O: ClassObject> CurveClassification<O> {
         let new_tolerance = {
             let k = a.kernel();
             let g = a.geometry();
-            let curve = super::p3::edge_curve(g, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curve = super::p3::edge_curve(g, e)?
+                .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::EdgeWithoutCurve))?;
             let this_curve = self.curve_geometry(g)?;
 
             // Drop classificationInterval MidPoint to Edge->curve
             let pv = this_curve.evaluate(k, ivl.interval.evaluate(0.5), 1, true, true)?;
-            let p0 = *pv.first().ok_or_else(|| SolidError::sm_err(OP))?;
-            let t0 = *pv.get(1).ok_or_else(|| SolidError::sm_err(OP))?;
+            let (Some(&p0), Some(&t0)) = (pv.first(), pv.get(1)) else {
+                return Err(SolidError::intersect(
+                    OP,
+                    IntersectFailure::Defect { why: EVAL_1ST },
+                ));
+            };
             let drop = curve.drop_point(
                 k,
                 &edge_interval,
@@ -1053,7 +1268,9 @@ impl<O: ClassObject> CurveClassification<O> {
             if drop.success {
                 // we have a candidate - approximate max interval/Edge->Curve distance
                 let pv2 = curve.evaluate(k, drop.parameter, 1, true, true)?;
-                let t2 = *pv2.get(1).ok_or_else(|| SolidError::sm_err(OP))?;
+                let t2 = *pv2.get(1).ok_or_else(|| {
+                    SolidError::intersect(OP, IntersectFailure::Defect { why: EVAL_1ST })
+                })?;
                 if t0.dot(t2) < 0.0 {
                     core::mem::swap(&mut d_start, &mut d_end);
                 }
@@ -1887,7 +2104,13 @@ fn vertex_point<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Result<Point
 fn vertex_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Result<f64> {
     match entity_of(g, v, "unresolved vertex (SmVertex::GetBrep)")? {
         (b, EntityRef::Vertex(v)) => Ok(topo_vertex::brep(b, v)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| {
+                missing_defect(
+                    OP,
+                    "the vertex is in no B-rep, though classification reads the vertices of \
+                     finished B-reps",
+                )
+            })?
             .tolerance()),
         _ => Err(wrong_target("handle does not name a vertex")),
     }
@@ -1897,7 +2120,13 @@ fn vertex_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Res
 fn face_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, f: O) -> Result<f64> {
     match entity_of(g, f, "unresolved face (SmFace::GetBrep)")? {
         (b, EntityRef::Face(f)) => Ok(crate::topology::face::p4::brep(b, f)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| {
+                missing_defect(
+                    OP,
+                    "the face is in no B-rep, though classification reads the faces of \
+                     finished B-reps",
+                )
+            })?
             .tolerance()),
         _ => Err(wrong_target("handle does not name a face")),
     }
@@ -1906,9 +2135,8 @@ fn face_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, f: O) -> Resul
 /// `pFace->GetSurface()` (dereferenced upstream).
 fn face_surface<O: ClassObject>(g: &impl ClassGeometry<O>, f: O) -> Result<&Surface> {
     match entity_of(g, f, "unresolved face (SmFace::GetSurface)")? {
-        (b, EntityRef::Face(f)) => {
-            crate::topology::face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))
-        }
+        (b, EntityRef::Face(f)) => crate::topology::face::p2::surface(b, f)?
+            .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::FaceWithoutSurface)),
         _ => Err(wrong_target("handle does not name a face")),
     }
 }
@@ -1946,7 +2174,7 @@ fn face_point_classified(r: Result<()>) -> Result<bool> {
 fn edge_vertex<O: ClassObject>(g: &impl ClassGeometry<O>, e: O) -> Result<O> {
     match entity_of(g, e, "unresolved edge (SmEdge::GetVertex)")? {
         (b, EntityRef::Edge(e)) => {
-            let v = topo_edge::vertex(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let v = topo_edge::vertex(b, e)?.ok_or_else(|| missing_defect(OP, EDGE_NO_VERTEX))?;
             handle_in(g, b, EntityRef::Vertex(v))
         }
         _ => Err(wrong_target("handle does not name an edge")),
@@ -1958,9 +2186,9 @@ fn edge_vertex<O: ClassObject>(g: &impl ClassGeometry<O>, e: O) -> Result<O> {
 fn edge_vertices<O: ClassObject>(g: &impl ClassGeometry<O>, e: O) -> Result<(O, O)> {
     match entity_of(g, e, "unresolved edge (SmEdge::GetVertex)")? {
         (b, EntityRef::Edge(e)) => {
-            let v1 = topo_edge::vertex(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let v1 = topo_edge::vertex(b, e)?.ok_or_else(|| missing_defect(OP, EDGE_NO_VERTEX))?;
             let v2 = topo_edge::other_vertex(b, e, Some(v1))?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| missing_defect(OP, EDGE_NO_VERTEX))?;
             Ok((
                 handle_in(g, b, EntityRef::Vertex(v1))?,
                 handle_in(g, b, EntityRef::Vertex(v2))?,
@@ -1979,7 +2207,7 @@ fn interval_degenerate<O: ClassObject>(
     let curve = cc
         .curve()
         .and_then(|o| geometry.curve(o))
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::intersect(OP, IntersectFailure::NoSourceCurve))?;
     let surface = cc
         .surface1()
         .map(|o| {
@@ -1998,6 +2226,26 @@ fn interval_degenerate<O: ClassObject>(
         ivl.end.obj_zone_tol_3d(k, geometry)?,
     )?;
     curve_is_degenerate(k, Some(curve), &ivl.interval, tol)
+}
+
+/// Squeezes out the smallest interval of `cc`, its status ignored as upstream; a squeeze that
+/// leaves the number of intervals unchanged ends the homogenizing, with the squeeze's error
+/// as its cause where it gave one.
+fn squeeze_one<O: ClassObject>(cc: &mut CurveClassification<O>) -> Result<()> {
+    let count = cc.size();
+    let error = squeeze_out_smallest_interval(cc).err();
+    if let Some(e) = &error {
+        ignore_status(Err::<(), _>(e.clone()))?;
+    }
+    if cc.size() < count {
+        return Ok(());
+    }
+    let failure = Failure::new(OP, IntersectFailure::SqueezeStalled);
+    Err(match error {
+        Some(e) => failure.caused_by(e),
+        None => failure,
+    }
+    .into_error())
 }
 
 fn homogenize_boundaries<O: ClassObject>(
@@ -2024,10 +2272,9 @@ fn homogenize_boundaries<O: ClassObject>(
         let point = classify_crv_loc_by_index(k, geometry, src, index)?;
         let tol = pc.obj_zone_tol_3d(k, geometry)?;
         let found = dst.find_interval(k, geometry, param, last, tol)?;
+        // a found parameter is at an interval's start or end or inside one; find_interval
+        // fails otherwise, so no `Outside` reaches here (rule 11)
         let mut pos = found.position;
-        if pos == IntervalPosition::Outside {
-            return Err(SolidError::sm_err(OP));
-        }
         let mut force = false;
         if pos != IntervalPosition::Inside && found.end_dist_3d.abs() > point.scaled_zero() {
             let ivl = dst.at(found.index)?;
@@ -2069,7 +2316,10 @@ fn homogenize_boundaries<O: ClassObject>(
                 }
             }
             if !dst.insert_point_class(k, access.geometry(), &new_pc, param, last, force)? {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::intersect(
+                    OP,
+                    IntersectFailure::PointClassNotInserted,
+                ));
             }
         }
         last = param;
@@ -2169,6 +2419,130 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
     }
+    /// A face classification object, for the WR-647 split of an F-F-F input.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Fc {
+        A,
+        B,
+    }
+    impl ClassObject for Fc {
+        fn class_kind(&self) -> ClassObjectKind {
+            ClassObjectKind::Face
+        }
+    }
+    struct Gf(Curve);
+    impl ClassGeometry<Fc> for Gf {
+        fn curve(&self, _: Fc) -> Option<&Curve> {
+            Some(&self.0)
+        }
+        fn surface(&self, _: Fc) -> Option<&Surface> {
+            None
+        }
+        fn volume(&self, _: Fc) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _: Fc) -> Option<Point3> {
+            None
+        }
+        fn topology_zone_tol_3d(&self, _: Fc) -> Option<f64> {
+            Some(1e-6)
+        }
+    }
+
+    /// WR-647: an F-F-F input over [0.25, 0.75] across [0, 0.5] and [0.5, 1], where the
+    /// second interval's middle is already classified to another face. The split at the
+    /// input's start is made; the split at its end is refused (the conflicting middle),
+    /// so the part of [0.5, 1] beyond the input keeps its middle and end, and only its
+    /// start (the shared boundary, which the input covers) takes the input's face.
+    /// Upstream's combine labelled all of [0.5, 1], its end included, as on face A.
+    #[test]
+    fn fff_input_ending_inside_a_classified_interval_keeps_its_far_end() {
+        let k = Kernel::default();
+        let range = Extent1d::from_min_max(0.0, 1.0);
+        let g = Gf(Curve::from(Line::bounded(
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            &range,
+            &BoundedLineOptions::default(),
+        )));
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(Fc::A), false);
+        cc.set_size(&k, 2).unwrap();
+        cc.at_mut(0)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0.0, 0.5));
+        cc.at_mut(1)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0.5, 1.0));
+        cc.at_mut(1)
+            .unwrap()
+            .mid
+            .set_class_object(Pc::Face, Some(Fc::B));
+        let mut input = CurveInterval::with_interval(&k, &Extent1d::from_min_max(0.25, 0.75), None);
+        input.start.set_class_object(Pc::Face, Some(Fc::A));
+        input.mid = input.start;
+        input.end = input.start;
+        cc.insert_curve_interval(&k, &g, &input).unwrap();
+        assert_eq!(cc.size(), 3);
+        let (first, run, rest) = (*cc.at(0).unwrap(), *cc.at(1).unwrap(), *cc.at(2).unwrap());
+        assert_eq!(first.interval.max(), 0.25);
+        assert_eq!(first.mid.point_class(), Pc::Unknown);
+        assert_eq!((run.interval.min(), run.interval.max()), (0.25, 0.5));
+        assert_eq!(run.start.object(), Some(Fc::A));
+        assert_eq!(run.mid.object(), Some(Fc::A));
+        assert_eq!(run.end.object(), Some(Fc::A));
+        assert_eq!((rest.interval.min(), rest.interval.max()), (0.5, 1.0));
+        assert_eq!(rest.start.object(), Some(Fc::A));
+        assert_eq!(rest.mid.object(), Some(Fc::B));
+        assert_eq!(rest.end.point_class(), Pc::Unknown);
+    }
+
+    /// WR-647: an F-F-F input over [0.25, 0.75] across the unclassified [0, 0.5] and
+    /// [0.5, 1] splits both at the input's ends and labels exactly [0.25, 0.75]; the outer
+    /// pieces keep their unknown middles and far ends. Upstream's combine labelled all of
+    /// [0, 1] as on face A.
+    #[test]
+    fn fff_input_inside_two_intervals_labels_only_its_extent() {
+        let k = Kernel::default();
+        let range = Extent1d::from_min_max(0.0, 1.0);
+        let g = Gf(Curve::from(Line::bounded(
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            &range,
+            &BoundedLineOptions::default(),
+        )));
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(Fc::A), false);
+        cc.set_size(&k, 2).unwrap();
+        cc.at_mut(0)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0.0, 0.5));
+        cc.at_mut(1)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0.5, 1.0));
+        let mut input = CurveInterval::with_interval(&k, &Extent1d::from_min_max(0.25, 0.75), None);
+        input.start.set_class_object(Pc::Face, Some(Fc::A));
+        input.mid = input.start;
+        input.end = input.start;
+        cc.insert_curve_interval(&k, &g, &input).unwrap();
+        assert_eq!(cc.size(), 4);
+        let got: Vec<_> = (0..4).map(|n| *cc.at(n).unwrap()).collect();
+        let bounds: Vec<_> = got
+            .iter()
+            .map(|c| (c.interval.min(), c.interval.max()))
+            .collect();
+        assert_eq!(bounds, [(0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)]);
+        assert_eq!(got[0].start.point_class(), Pc::Unknown);
+        assert_eq!(got[0].mid.point_class(), Pc::Unknown);
+        for inner in &got[1..3] {
+            assert_eq!(inner.start.object(), Some(Fc::A));
+            assert_eq!(inner.mid.object(), Some(Fc::A));
+            assert_eq!(inner.end.object(), Some(Fc::A));
+        }
+        assert_eq!(got[3].mid.point_class(), Pc::Unknown);
+        assert_eq!(got[3].end.point_class(), Pc::Unknown);
+    }
+
     #[test]
     fn unclassified_merge_and_empty_homogenization_use_real_api() {
         let (k, g, mut cc) = setup();

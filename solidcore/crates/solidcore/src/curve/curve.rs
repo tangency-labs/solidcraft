@@ -18,7 +18,9 @@ pub mod p8;
 pub mod p9;
 mod projected_pair;
 mod projected_pair_all;
+mod projected_pair_ellipse;
 mod projected_pair_monotone;
+mod turning;
 
 pub use p2::{
     knots_ignoring_status, Curve, CurveEvaluate, CurveKind, CurvePropertyType, KnotsWithStatus,

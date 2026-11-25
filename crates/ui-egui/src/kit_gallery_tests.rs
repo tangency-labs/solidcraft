@@ -3,7 +3,8 @@
 //! of its surface dialogs) and the boards that need a running app. The kit's own gallery,
 //! drawn from plain data, is `ui_kit::gallery`; these are checked with its `check_elements`.
 use crate::dialogs_surface::{continuity_row, continuity_row_explained, continuity_tip};
-use crate::ui_kit::gallery::{ELEMENTS, Element, check_elements, element, example};
+use crate::ui_kit::element;
+use crate::ui_kit::gallery::{ELEMENTS, Element, Sample, check_elements, example};
 use crate::ui_kit::*;
 use egui::{Ui, vec2};
 use solidcraft_engine::kernel::Continuity;
@@ -35,8 +36,19 @@ const APP_ELEMENTS: &[Element] = &[
     element!("preference_specimens", |ui, _| {
         crate::prefs::figures::scale_specimen(ui, 1.1);
         crate::prefs::figures::status_palette_sample(ui, solidcraft_theme::ColorVision::Deutan);
+        crate::prefs::figures::colour_vision_sample(ui, &Tokens::get());
         crate::prefs::figures::autosave_timeline(ui, 5.0);
         crate::prefs::figures::pointer_preview(ui, true, "Normal", true);
+    }),
+    element!("visual_style_dropdown", "dialog:row:Visual style", Some("dialog:Visual style"), |ui, s| {
+        row(ui, "Visual style", |ui| {
+            let options: Vec<_> = crate::navigation_slots::VISUAL_STYLES
+                .iter()
+                .enumerate()
+                .map(|(index, (_, label))| (*label, crate::navigation_slots::visual_style_icon(index as u8)))
+                .collect();
+            dropdown_icons(ui, "gallery_visual_style", &mut s.selected, &options);
+        });
     }),
     element!("continuity_tip", "dialog:row:Gallery", None, |ui, _| {
         let tip = continuity_tip(&[Continuity::G0, Continuity::G1]);
@@ -46,7 +58,48 @@ const APP_ELEMENTS: &[Element] = &[
 
 #[test]
 fn app_elements_have_geometry_and_stay_in_their_allocation_in_both_themes() {
-    check_elements(APP_ELEMENTS);
+    check_elements(APP_ELEMENTS, crate::fonts::test_context);
+}
+
+#[test]
+fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() {
+    let previous = solidcraft_theme::is_dark();
+    let element = APP_ELEMENTS.iter().find(|element| element.name == "visual_style_dropdown").unwrap();
+    for dark in [false, true] {
+        solidcraft_theme::set_dark(dark);
+        let ctx = crate::fonts::test_context();
+        let sample = std::cell::RefCell::new(Sample { value: String::new(), second: String::new(), selected: 0, checked: false });
+        let mut draw = |ui: &mut Ui| {
+            (element.draw)(ui, &mut sample.borrow_mut());
+        };
+        for _ in 0..3 {
+            crate::ui_kit::test_support::frame(&ctx, vec![], &mut draw);
+        }
+        for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
+            let trigger = solidcraft_ui_registry::handle_at("dialog:Visual style").unwrap();
+            crate::ui_kit::test_support::frame(&ctx, crate::ui_kit::test_support::pointer(trigger, true), &mut draw);
+            crate::ui_kit::test_support::frame(&ctx, crate::ui_kit::test_support::pointer(trigger, false), &mut draw);
+            crate::ui_kit::test_support::frame(&ctx, vec![], &mut draw);
+            for (option, (_, name)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
+                let rect = solidcraft_ui_registry::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
+                let icon = crate::navigation_slots::visual_style_icon(option as u8);
+                let painted = solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+                let owner =
+                    if option == sample.borrow().selected { solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
+                assert!(owner.contains_rect(painted), "{name}: its real icon is in its option or selected trigger");
+            }
+            let option = solidcraft_ui_registry::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
+            crate::ui_kit::test_support::frame(&ctx, crate::ui_kit::test_support::pointer(option, true), &mut draw);
+            crate::ui_kit::test_support::frame(&ctx, crate::ui_kit::test_support::pointer(option, false), &mut draw);
+            crate::ui_kit::test_support::frame(&ctx, vec![], &mut draw);
+            assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
+            let icon = crate::navigation_slots::visual_style_icon(index as u8);
+            let trigger = solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap();
+            assert!(trigger.contains_rect(solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
+            assert!(solidcraft_ui_registry::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
+        }
+    }
+    solidcraft_theme::set_dark(previous);
 }
 
 #[cfg(test)]
@@ -57,90 +110,13 @@ fn history_example(ui: &mut Ui, names: bool) {
     app.run("timeline.roll_to", serde_json::json!({"position":3})).unwrap();
     let feature = app.session.doc.features.get(2).unwrap().id;
     app.run("select.set", serde_json::json!({"items":[{"type":"feature","id":feature}]})).unwrap();
-    let width = crate::timeline_left::strip_width(&app);
+    let width = crate::ui_kit::history_width(names);
     let rect = ui.allocate_space(vec2(width, 650.0)).1;
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(5.0)), |ui| {
         let frame = Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), Tokens::get().panel, crate::frame::Side::Left);
         Container::paint_frame(ui.painter(), frame, rect);
-        crate::timeline_left::left_timeline(&mut app, ui);
+        crate::timeline_left::panel_contents(&mut app, ui);
     });
-}
-
-/// CPU captures of the actual vertical strip and browser, in both themes and widths.
-#[test]
-fn history_board_in_both_themes_and_widths() {
-    use crate::ui_kit::{test_raster as raster, test_textures_update as textures_update};
-    use std::collections::HashMap;
-    let previous = solidcraft_theme::is_dark();
-    for dark in [false, true] {
-        for names in [false, true] {
-            for collapsed in [false, true] {
-                for state in [HistoryHandleState::Rest, HistoryHandleState::Hover, HistoryHandleState::Drag] {
-                    solidcraft_theme::set_dark(dark);
-                    let ctx = crate::fonts::test_context();
-                    ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
-                    ctx.global_style_mut(|style| style.animation_time = 0.0);
-                    let mut app = crate::test_support::sample_app();
-                    app.preferences.timeline_left = true;
-                    app.preferences.timeline_left_width = crate::ui_kit::history_width(names);
-                    app.preferences.timeline_left_browser_collapsed = collapsed;
-                    app.run("timeline.roll_to", serde_json::json!({"position":3})).unwrap();
-                    let feature = app.session.doc.features.get(2).unwrap().id;
-                    app.run("select.set", serde_json::json!({"items":[{"type":"feature","id":feature}]})).unwrap();
-                    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(560.0, 680.0));
-                    let mut textures = HashMap::new();
-                    let mut image = None;
-                    let mut drag_start = None;
-                    for pass in 0..9 {
-                        let mut events = vec![];
-                        if pass >= 2 {
-                            let card = app.shell.history.unwrap();
-                            if state == HistoryHandleState::Hover {
-                                events.push(egui::Event::PointerMoved(card.right_center()));
-                            } else if state == HistoryHandleState::Drag {
-                                let start = *drag_start.get_or_insert(egui::pos2(card.right() - 4.0, card.top() + 12.0));
-                                if pass == 2 {
-                                    events = crate::test_support::pointer(start, true);
-                                } else if pass == 3 {
-                                    events.push(egui::Event::PointerMoved(start + vec2(112.0 - history_width(names), 0.0)));
-                                }
-                            }
-                        }
-                        let mut output = ctx.run_ui(
-                            egui::RawInput { screen_rect: Some(bounds), time: Some(pass as f64 * 0.2), focused: true, events, ..Default::default() },
-                            |ui| {
-                                ui.painter().rect_filled(bounds, 0.0, Tokens::get().viewport_top);
-                                crate::timeline_left::left_panel(&mut app, ui);
-                                crate::browser::browser(&mut app, ui);
-                            },
-                        );
-                        textures_update(&mut textures, &output.textures_delta);
-                        output.textures_delta.clear();
-                        image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
-                    }
-                    if state == HistoryHandleState::Drag {
-                        assert_eq!(app.shell.history_drag_width, Some(112.0));
-                        assert_eq!(app.shell.history.unwrap().width(), 112.0);
-                    }
-                    assert!(app.shell.history.unwrap().right() < app.shell.browser.unwrap().left());
-                    if let Ok(dir) = std::env::var("SOLIDCRAFT_HISTORY_EVIDENCE") {
-                        std::fs::create_dir_all(&dir).unwrap();
-                        image
-                            .unwrap()
-                            .save(std::path::Path::new(&dir).join(format!(
-                                "history-{}-{}-{}-{:?}.png",
-                                if names { "names" } else { "icons" },
-                                if collapsed { "rail" } else { "browser" },
-                                if dark { "dark" } else { "light" },
-                                state
-                            )))
-                            .unwrap();
-                    }
-                }
-            }
-        }
-    }
-    solidcraft_theme::set_dark(previous);
 }
 
 /// Render actual egui geometry without a desktop window. Opt-in PNGs are reviewer evidence.

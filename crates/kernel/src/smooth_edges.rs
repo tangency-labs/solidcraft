@@ -584,6 +584,33 @@ mod tests {
         }
     }
 
+    /// Drawing is its own angle ([`ANGLE`], half a degree), not the tangent chain's 2°: the
+    /// upright edges of a prism whose outline turns 1° at every vertex are all drawn, and those of
+    /// one turning 0.4° are all hidden.
+    #[test]
+    fn edge_drawing_still_hides_a_join_only_under_half_a_degree() {
+        let uprights = |n: usize| {
+            let at = |k: usize| {
+                let a = std::f64::consts::TAU * k as f64 / n as f64;
+                Vec2::new(20. * a.cos(), 20. * a.sin())
+            };
+            let outer = Loop2::polygon(&(0..n).map(at).collect::<Vec<_>>());
+            let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 3.).unwrap().remove(0);
+            let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
+            let upright: Vec<bool> = mesh
+                .edges
+                .iter()
+                .zip(&mesh.smooth_edges)
+                .filter(|(line, _)| line.first().zip(line.last()).is_some_and(|(a, b)| (a.z - b.z).abs() > 1.))
+                .map(|(_, smooth)| *smooth)
+                .collect();
+            assert_eq!(upright.len(), n);
+            upright
+        };
+        assert!(uprights(360).iter().all(|smooth| !smooth), "1° is drawn");
+        assert!(uprights(900).iter().all(|smooth| *smooth), "0.4° is hidden");
+    }
+
     /// A plane tangent to a cylinder (a D-shaped prism): one tangent plane, but the curvature
     /// jumps from 0 to 1 / radius, so the join is drawn.
     #[test]

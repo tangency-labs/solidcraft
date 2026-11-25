@@ -29,6 +29,7 @@
 //!   kernel functions' errors pass through unchanged.
 
 use crate::curve::curve::Curve;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector3d::Point3;
@@ -176,7 +177,7 @@ pub fn create_offset_surface(k: &Kernel, surface: &Surface, distance: f64) -> Re
     let approx_tol = 0.001;
     surface
         .create_offset_surface(k, distance, approx_tol)?
-        .ok_or_else(|| SolidError::sm_err(OP_OFFSET))
+        .ok_or_else(|| SolidError::primitive(OP_OFFSET, PrimitiveFailure::OffsetMakesNoSurface))
 }
 
 /// The results of [`drop_curve_to_srf`].
