@@ -496,6 +496,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     part.body_offsets.retain(|b, _| moved.contains_key(b));
     keep_component_looks(&mut part, &sc.owners, &BTreeSet::from([comp]));
     part.materials.retain(|b, _| bodies.contains(b));
+    part.collision_shapes.retain(|b, _| bodies.contains(b));
     part.appearances.bodies.retain(|b, _| bodies.contains(b));
     part.appearances.faces.retain(|f| bodies.contains(&f.body));
     part.appearances.components.retain(|c, _| sc.children.contains(c));
@@ -612,7 +613,7 @@ fn clear_history(s: &mut Session, sc: &Scope) {
         s.active_component = 0;
         s.active_occurrence_path = None;
     }
-    s.selection.clear();
+    s.clear_selection();
 }
 
 /// The design as it was before a swap, to check the swap against.
@@ -887,6 +888,7 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         d.remove_configuration_components(&[t]);
         d.appearances.components.remove(&t);
         d.materials.retain(|b, _| !sc.bodies.contains(b));
+        d.collision_shapes.retain(|b, _| !sc.bodies.contains(b));
         d.appearances.bodies.retain(|b, _| !sc.bodies.contains(b));
         d.appearances.faces.retain(|f| !sc.bodies.contains(&f.body));
         d.browser_groups.retain(|g| g.component != t);
