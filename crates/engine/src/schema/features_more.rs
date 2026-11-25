@@ -19,9 +19,9 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, CoilAxis, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
-    IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList,
-    TouchingParam, feature_common, present,
+    AngleExpr, CoilAxis, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef,
+    FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef,
+    StringList, TouchingParam, feature_common, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
@@ -368,6 +368,27 @@ pub struct EmbossParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]
     pub face: Option<EmbossFacePoint>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Raise a planar face of a body into a dome along its outward normal. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DomeParams {
+    /// The face: a point [x, y, z] on it, or a face name from `model.faces`.
+    pub face: FaceRef,
+    /// How far the dome rises from the face, along its outward normal.
+    pub height: LengthExpr,
+    /// The dome's meridian. Default: elliptical.
+    #[serde(default)]
+    pub shape: Option<DomeShapeParam>,
+    /// Cut the dome into the body instead. Not supported yet: refused. Default: false.
+    #[serde(default)]
+    pub reverse: Option<bool>,
+    /// The body the face is on. Default: found from the face.
+    #[serde(default)]
+    pub body: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

@@ -1322,6 +1322,7 @@ fn hostile_params_never_panic() {
         "reference_style",
         "references",
         "refs",
+        "reverse",
         "rho",
         "scale",
         "seam",

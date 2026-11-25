@@ -454,6 +454,15 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
         }
     }
+    // Trim explains incomplete picks before OK can be pressed, including a whole cutting sheet.
+    if matches!(d.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { .. }))
+        && d.error.is_none()
+        && app.preview.error.is_none()
+        && let Err(reason) = apply_commands(app, d)
+    {
+        let hint = crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Hint("trim_missing_input"));
+        crate::scenario::publish_rect("dialog:trim_missing_input", hint.rect);
+    }
     let manage_hint = match &d.kind {
         Kind::Material { .. } => Some("manage.material_hint"),
         Kind::Appearance(_) => Some("manage.appearance_hint"),
@@ -1110,6 +1119,15 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Draft { angle } => {
             enter |= expr_row(ui, "Angle", angle);
+        }
+        Kind::Dome { spherical, reverse, .. } => {
+            form_row(ui, "Shape", |ui| {
+                let mut i = usize::from(*spherical);
+                let labels = [solidcraft_ui_text::tr("ui.dome_elliptical"), solidcraft_ui_text::tr("ui.dome_spherical")];
+                ui_kit::segmented(ui, &mut i, &labels, Default::default());
+                *spherical = i == 1;
+            });
+            ui_kit::options(ui, "feature_options", &mut [(solidcraft_ui_text::tr("ui.dome_reverse"), reverse)]);
         }
         Kind::Mirror => {
             // Feature replay retains the source operation; Join is for body copies.

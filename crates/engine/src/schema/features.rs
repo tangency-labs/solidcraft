@@ -574,6 +574,10 @@ pub struct SurfaceSweepParams {
     pub path_edges: Option<PathEdgePoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub shape: SweepShape,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
