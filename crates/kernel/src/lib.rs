@@ -451,8 +451,8 @@ pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
 pub use solidcore_ops::dome::DomeRefusal;
 pub use solidcore_ops::dome::DomeShape;
-pub use solidcore_ops::member_turn::ParallelTurnError;
-pub use solidcore_ops::member_turn::parallel_turn;
+pub use solidcore_ops::measure::ParallelTurnError;
+pub use solidcore_ops::measure::turn_to_parallel;
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
 /// inputs and errors.
 pub use solidcraft_kernel_api as api;
