@@ -7005,7 +7005,10 @@ mod persistent_ribbon_tests {
         let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
         assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "MESH"]);
         let (_, mesh, count) = lists.iter().find(|(p, _, _)| *p == "MESH").unwrap();
-        assert_eq!(mesh.iter().map(|c| c.id).collect::<Vec<_>>(), ["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"]);
+        assert_eq!(
+            mesh.iter().map(|c| c.id).collect::<Vec<_>>(),
+            ["mesh.reduce", "mesh.convert", "mesh.section_stack", "file.insert_mesh", "file.save_mesh"]
+        );
         assert_eq!(
             crate::toolbar_custom::buttons(&h.app, "SURFACE", "MESH", mesh, *count).iter().map(|c| c.id).collect::<Vec<_>>(),
             ["mesh.reduce", "mesh.convert"]
