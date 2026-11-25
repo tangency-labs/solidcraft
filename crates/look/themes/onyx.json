@@ -4,6 +4,7 @@
   "format": "solidcraft-theme/1",
   "name": "Onyx",
   "base": "dark",
+  "accepts_accent": true,
   "colors": {
     "accent": "#9eafbd",
     "accent_soft": "#3b4852",

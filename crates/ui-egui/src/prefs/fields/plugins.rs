@@ -10,6 +10,9 @@ macro_rules! plugins_preferences {
         $next! { $($rest),* ; $($fields)*
             /// A plugin's background effect, `plugin-id/shader-id` (`shaders@0.1`); empty for none.
             background_shader: String = String::new(), PAGE_PLUGINS;
+            /// The picture each chosen texture of a background effect shows, `plugin-id/shader-id/<texture
+            /// name>` to an absolute file path (`choose` in the manifest). Absent: the shipped `file`.
+            background_shader_pictures: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new(), PAGE_PLUGINS;
             /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
             /// A plugin's shader for see-through panels' backgrounds, `plugin-id/shader-id` (`shaders@0.2`);
