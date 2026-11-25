@@ -89,7 +89,12 @@ fn format_readout(app: &SolveApp, length: f64, count: usize) -> String {
 /// (see `viewport_details::legacy_legends`), placed as the next legend up would be. Not while a
 /// command dialog is open: Measure and the commands that take edges show their own values.
 pub(crate) fn paint(app: &SolveApp, painter: &Painter, free: Rect) {
-    if app.dialog.is_some() || app.session.selection.is_empty() {
+    if app.dialog.is_some() || app.session.selection.is_empty() || app.session.selection.len() > MAX_ITEMS {
+        return;
+    }
+    // Only edges and sketch curves have a length; anything else shows nothing, and the model
+    // isn't placed for it (a face lit during a joint drag must not place the world again).
+    if !app.session.selection.iter().all(|s| matches!(s, Sel::Edge { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. })) {
         return;
     }
     let id = egui::Id::unique("sc_selection_length");
