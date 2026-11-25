@@ -18,6 +18,10 @@ thread_local! {
     static MARKS_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Feature rows built, on screen or next to it (the tests count them).
     static ROWS_WORKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// History markers drawn (the tests count them).
+    static MARKERS_DRAWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Faint markers drawn in inactive components' History (the tests count them).
+    static FAINT_MARKERS_DRAWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Open the Features folder that lists this feature and scroll to its row, without changing the
@@ -198,15 +202,24 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
     let drag_id = rows.ui().scope_id().with(("sc_browser_history_drag", &scope));
     let mut dragged = app.tree.content.current_mut().feature_drags.get(&drag_id).cloned();
     let mut drops: Vec<DropSlot> = Vec::new();
+    // The marker is drawn and dragged only in the active component's History: in every other
+    // folder it would sit at the end of each one and clutter the tree. Another component rolled
+    // back shows where with a faint marker that doesn't drag.
+    let shows_marker = marker_here(app, component, path);
     let mut marker_resp = None;
+    let mut faint_y = None;
     for row in &plan.rows {
         let index = global(row.index);
         let drop = DropSlot { y: window.top, position: global(row.slot.min(row.index)), feature: Some(row.feature) };
-        if marker_resp.is_none() && index >= marker {
+        if marker_resp.is_none() && faint_y.is_none() && index >= marker {
             drops.push(drop);
             // The marker row is always built: its drag must not lose its row.
             window.catch_up(rows.ui());
-            marker_resp = Some(marker_row(app, rows.ui(), depth + 1));
+            if shows_marker {
+                marker_resp = Some(marker_row(app, rows.ui(), depth + 1));
+            } else {
+                faint_y = Some(faint_marker_row(app, rows.ui(), depth + 1));
+            }
             window.catch_up(rows.ui());
         }
         slots.push((window.top, global(row.slot)));
@@ -242,14 +255,33 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
         drops.push(DropSlot { y: window.top, position: end, feature: None });
     }
     window.catch_up(rows.ui());
-    let resp = marker_resp.unwrap_or_else(|| marker_row(app, rows.ui(), depth + 1));
+    if shows_marker && marker_resp.is_none() {
+        marker_resp = Some(marker_row(app, rows.ui(), depth + 1));
+    }
     if !plan.rows.is_empty() {
         let bottom = rows.ui().cursor().min.y;
         slots.push((bottom, end));
         drops.push(DropSlot { y: bottom, position: end, feature: None });
     }
-    drag_marker(app, rows.ui(), &resp, &slots, marker);
-    drag_rows(app, rows.ui(), &plan, drag_id, dragged, &drops, resp.rect.center().y);
+    // Rows dropped above the marker, drawn or faint, stay built; with neither, every row is built.
+    let marker_y = marker_resp.as_ref().map(|resp| resp.rect.center().y).or(faint_y).unwrap_or(f32::INFINITY);
+    if let Some(resp) = &marker_resp {
+        drag_marker(app, rows.ui(), resp, &slots, marker);
+    }
+    drag_rows(app, rows.ui(), &plan, drag_id, dragged, &drops, marker_y);
+}
+
+/// Whether this History folder is the active component's, the one the marker is shown in: the
+/// active placement, or the component's first placement when no placement is picked.
+fn marker_here(app: &SolveApp, component: u64, path: &[u64]) -> bool {
+    let session = &app.session;
+    if path.is_empty() {
+        return session.active_component == component;
+    }
+    match session.active_occurrence_path.as_deref() {
+        Some(active) => active == path,
+        None => session.active_component == component && session.doc.first_path(component) == path,
+    }
 }
 
 /// The Browser's model of the design as it is now: `None` while it is missing or made for
@@ -573,6 +605,8 @@ fn feature_row(
 
 /// The history marker between the rows, as in the vertical timeline.
 fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response {
+    #[cfg(test)]
+    MARKERS_DRAWN.with(|n| n.set(n.get() + 1));
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
     crate::semantic_content::record_capture(ui, &response);
@@ -584,6 +618,23 @@ fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response
     }
     response.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"))
 }
+
+/// The marker as it cuts an inactive component's History: faint, as the rows behind it, and it
+/// doesn't drag (the active component's History has the one that does). Gives its centre.
+fn faint_marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> f32 {
+    #[cfg(test)]
+    FAINT_MARKERS_DRAWN.with(|n| n.set(n.get() + 1));
+    let t = Tokens::get();
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::hover());
+    let line = Rect::from_min_max(pos2(rect.left() + 2.0 + depth as f32 * INDENT, rect.top()), rect.max);
+    let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
+    let faint = solidcraft_theme::TabAccent { color: accent.color.gamma_multiply(FAINT_MARKER_OPACITY), ..accent };
+    crate::ui_kit::history_marker(ui.painter(), line, true, faint);
+    rect.center().y
+}
+
+/// How strongly the faint marker is drawn: as the tree's dimmed icons.
+const FAINT_MARKER_OPACITY: f32 = 0.4;
 
 /// Dragging the marker shows where it lands; letting go rolls the history there, through the
 /// timeline's own command.
@@ -1998,6 +2049,52 @@ mod tests {
         settle_heavy(&mut h);
         assert_eq!(h.app.session.doc.marker, Some(2), "the marker drag still rolls back");
         assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "rolling back moves no feature");
+    }
+
+    /// With the History in the browser, only the active component's History shows the marker:
+    /// one in every placed component's folder cluttered the tree.
+    #[test]
+    fn browser_history_marker_shows_only_in_the_active_component() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":30,"width":30,"height":5,"body_name":"Plate"})).unwrap();
+        let bracket = h.app.run("component.create", json!({"name":"Bracket","grounded":false})).unwrap();
+        let comp = bracket["component"].as_u64().unwrap();
+        let path = vec![bracket["occurrence"].as_u64().unwrap()];
+        let block = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        settle_heavy(&mut h);
+        // Both History folders open, the placement's too.
+        let scope = occurrence_key(&path);
+        for key in [scope.clone(), format!("{scope}/history"), "c0/history".into()] {
+            set_open(&mut h.app, &key, true, true);
+        }
+        // The markers drawn in one frame: the one that drags, and faint ones.
+        let drawn = |h: &mut Harness| {
+            h.frames(2);
+            MARKERS_DRAWN.with(|n| n.set(0));
+            FAINT_MARKERS_DRAWN.with(|n| n.set(0));
+            h.frame();
+            (MARKERS_DRAWN.with(std::cell::Cell::get), FAINT_MARKERS_DRAWN.with(std::cell::Cell::get))
+        };
+        assert_eq!(drawn(&mut h), (1, 0), "the design is active: only its History has the marker");
+        assert!(crate::scenario::handle_at(&format!("row:browser-feature:{scope}:{block}")).is_some(), "the placement's History is open");
+        let at_root = crate::scenario::handle_at("browser:rollback").unwrap();
+
+        h.app.run("component.activate", json!({"component":comp,"occurrence":path[0]})).unwrap();
+        assert_eq!(drawn(&mut h), (1, 0), "the bracket is active: only its History has the marker");
+        let at_bracket = crate::scenario::handle_at("browser:rollback").unwrap();
+        assert!(at_bracket.y > at_root.y, "the marker moved down into the bracket's History");
+
+        // Rolled back in the bracket, then the design made active: the bracket's History keeps a
+        // faint marker where it is rolled back, and the design's History has the one that drags.
+        let position = h.app.session.doc.features.iter().position(|f| f.id == block).unwrap();
+        h.app.run("timeline.roll_to", json!({"position":position})).unwrap();
+        settle_heavy(&mut h);
+        assert_eq!(drawn(&mut h), (1, 0), "rolled back in the active bracket: its marker drags");
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        assert_eq!(drawn(&mut h), (1, 1), "the bracket is inactive but rolled back: a faint marker");
+        assert!(crate::scenario::handle_at("browser:rollback").unwrap().y < at_bracket.y, "the marker that drags is the design's");
     }
 
     /// #14850: a long History in the Browser builds only its rows in view, and a row dragged in
