@@ -53,7 +53,7 @@ use crate::geom::certified::{above, gamma};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d};
+use crate::geom::tol::{coincidence_tol_3d, xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::point_class::{ClassGeometry, PointClassType, PointClassification};
@@ -193,8 +193,19 @@ const PLANE_GAP_HALVINGS: usize = 1024;
 const PLANE_GAP_DEPTH: usize = 40;
 
 /// Not upstream: whether the planar faces `face` (on `face_plane`) and `other_face` (on
-/// `other_plane`) part by more than the band of their two zone tolerances: a point of either
-/// face is proved to lie farther than the band from the other's plane. The gap to a plane is
+/// `other_plane`) part by more than their coincidence tolerance (the coincidence rule,
+/// [`coincidence_tol_3d`]: the larger of their two zone tolerances and the contact tolerance):
+/// a point of either face is proved to lie farther than that band from the other's plane.
+/// The band was the sum of the two zone tolerances, the intersection tolerance: an insert's
+/// side 5.6e-6 rad off a chamfered block's facet, 1.1e-5 outside it at the insert's corner
+/// (#21687), stood within that sum, so the sector took the two walls for one while the
+/// intersector, whose plane check reads the tolerance, had made no curve where the side
+/// leaves the chamfer: the intersect lost both chamfer wedges. Two planes whose gap cannot
+/// change by the coincidence tolerance over the two faces (the sine of their angle times the
+/// diagonal of the faces' box) stand at an offset, not an angle, and keep the sum: the edge
+/// the sector turns about was placed on both faces at the intersection tolerance
+/// (`edge_solutions`), and read apart within it, two boxes whose bottoms lie 1.98e-5 apart
+/// lost their intersection (goldens `boolean.api_brep` `more0080`). The gap to a plane is
 /// affine, so over a planar face it is largest on the face's boundary, the exact edges. An
 /// exact edge lies on the face's plane, within the edge's tolerance `τ_e` of its curve (the
 /// tube, validity invariant 6), not on the curve: the curve may stand `τ_e + τ_f` off the
@@ -216,8 +227,23 @@ fn planes_part(
     other_face: FaceId,
     face_plane: &crate::surface::plane::Plane,
 ) -> Result<bool> {
-    let band = zone_tol3d(k, fp2::tolerance(brep, face)?)
-        + zone_tol3d(k, fp2::tolerance(other, other_face)?);
+    let zone = zone_tol3d(k, fp2::tolerance(brep, face)?);
+    let other_zone = zone_tol3d(k, fp2::tolerance(other, other_face)?);
+    let coincidence = coincidence_tol_3d(k, zone, other_zone);
+    // planes whose gap cannot change by the coincidence tolerance over the two faces stand at
+    // an offset, not at an angle: their common edge was placed on both at the intersection
+    // tolerance (`edge_solutions`), so they part only past it
+    let region = calculate_bounding_box(k, brep, face, false)?
+        .union(&calculate_bounding_box(k, other, other_face, false)?);
+    let size = region.size();
+    let diagonal = (size.x * size.x + size.y * size.y + size.z * size.z).sqrt();
+    let offset = PlaneLevel::new(face_plane, other_plane)
+        .is_some_and(|level| level.sin_phi * diagonal <= coincidence);
+    let band = if offset {
+        xsect_tol_3d_from_zones(k, zone, other_zone)
+    } else {
+        coincidence
+    };
     Ok(plane_gap(k, brep, face, face_plane, other_plane, band)?
         || plane_gap(k, other, other_face, other_plane, face_plane, band)?)
 }
