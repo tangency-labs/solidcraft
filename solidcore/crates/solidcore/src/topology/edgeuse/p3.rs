@@ -2038,11 +2038,17 @@ fn edge_before_move(b: &Brep, e: EdgeId) -> Result<Option<EdgeBeforeMove>> {
 /// ([`trim_image_gap_bound_within`]), the distance after it is at most `‖A‖ B0 + room`
 /// ([`moved_pair_room`]: the control points' rounding measured from the data before and after,
 /// enclosed, with the curve's slack and the net's residual after; `‖A‖` from
-/// [`affine_linear_norm_upper`]). Where that is above `T` the edge is raised to it
+/// [`affine_linear_norm_upper`]). That bound over-states the distance by up to `room`, so where
+/// it is above `T` the distance after the move is also proved directly on the moved geometry
+/// (the same certified enclosure): the edge is left alone where that proof shows it within
+/// `T`, and raised otherwise to the smaller of the two proved bounds
 /// ([`crate::topology::edge::set_tolerance`], raising its vertices with it, as
 /// `SetUVTrimCurve` raises). Where the trims' data before and after differ in structure
 /// ([`moved_pair_room`] is `None`), the distance after the move is proved directly instead and
-/// the edge raised to it the same way.
+/// the edge raised to it the same way. A raise is kept only where neither the raised edge's
+/// tube nor a raised vertex's ball may reach topology it does not bound ([`raise_moved_edge`],
+/// as [`raise_joined_edge`] keeps one); a tube that already reached at `T` withholds every
+/// raise of its edge.
 ///
 /// The tolerance covers a distance. The evaluation rounding a lowering also had to cover where
 /// it was made ([`lowered_covers_rounding`]) grows with the distance from the origin and is
@@ -2050,12 +2056,14 @@ fn edge_before_move(b: &Brep, e: EdgeId) -> Result<Option<EdgeBeforeMove>> {
 ///
 /// Left as the move leaves it (as upstream): a trim not proved within `T` before the move
 /// (nothing was covered), a raise past the B-rep check's limit
-/// ([`within_edge_tolerance_limit`]: a body the check refuses), and the edge curve's distance to
-/// a face whose uses hold no trim (a follow-up).
+/// ([`within_edge_tolerance_limit`]: a body the check refuses), a raise withheld because its
+/// tube or a vertex ball may reach other topology, and the edge curve's distance to a face
+/// whose uses hold no trim (a follow-up).
 ///
-/// The bounds are cut at [`TRIM_BOUND_FLOOR`] of `T` (of `room` where that is larger), not of
-/// the fit tolerance ([`fit_tolerance`] measures gaps): a bound only matters here where it is
-/// close to `T`, or to the raise.
+/// The bounds are cut at [`TRIM_BOUND_FLOOR`] of `T` (of `room` where that is larger; the
+/// direct proof after the move at the raise less `T` where that is smaller), not of the fit
+/// tolerance ([`fit_tolerance`] measures gaps): a bound only matters here where it is close to
+/// `T`, or to the raise.
 ///
 /// [`trim_image_gap_bound_within`]: crate::query::curve_surface_gap::trim_image_gap_bound_within
 /// [`moved_pair_room`]: crate::query::curve_surface_gap::moved_pair_room
@@ -2160,7 +2168,37 @@ fn cover_moved_edge(
                 Some(b0) if b0.is_finite() && b0 > covered => b0,
                 _ => continue,
             };
-            need = need.max(up((Ivl::from(norm) * Ivl::from(b0) + Ivl::from(room)).hi));
+            let raise = up((Ivl::from(norm) * Ivl::from(b0) + Ivl::from(room)).hi);
+            if !(raise.is_finite() && raise > tol) {
+                continue;
+            }
+            // (`‖A‖ B0 + room` encloses the distance after the move from the one before it,
+            // and over-states it by up to `room`: where it passes `T`, the distance after the
+            // move is proved directly too, on the moved geometry, and the edge is raised only
+            // where that proof does not show it within `T`, to the smaller of the two proved
+            // bounds. The direct bound is the same certified enclosure over the whole trim as
+            // `B0` (rounded interval arithmetic, outward); its floor only says where pieces
+            // stop being cut, never what the bound is. It is `raise - T`, at most
+            // [`TRIM_BOUND_FLOOR`] of `T`: a direct bound coarser than the raise itself cannot
+            // replace it. `topology.brep_mirror` edge 13: `T` 6.931683163198159e-3,
+            // `‖A‖ B0 + room` 6.931683163276889e-3, proved directly within
+            // 6.9316831631875565e-3, so not raised.)
+            let direct_floor = (raise - tol).min(TRIM_BOUND_FLOOR * tol);
+            let direct = trim_image_gap_bound_within(
+                k,
+                &surface,
+                &curve,
+                &trim,
+                range,
+                direct_floor,
+                [tol, raise],
+                None,
+            )?;
+            match direct {
+                Some(b1) if b1.is_finite() && b1 <= tol => {}
+                Some(b1) if b1.is_finite() => need = need.max(b1.min(raise)),
+                _ => need = need.max(raise),
+            }
             continue;
         }
         // (the structure changed: the distance after the move is proved directly, for a
@@ -2183,9 +2221,61 @@ fn cover_moved_edge(
         }
     }
     if need > tol && need.is_finite() && within_edge_tolerance_limit(b, need) {
-        crate::topology::edge::set_tolerance(b, edge.e, need, true, true)?;
+        raise_moved_edge(k, b, edge.e, need)?;
     }
     Ok(())
+}
+
+/// [`cover_moved_edge`]'s raise of `e` to `need`, as [`raise_joined_edge`] keeps one: the edge
+/// is raised with its end vertices ([`crate::topology::edge::set_tolerance`]), and the raise is
+/// kept only where neither the edge's tube nor a raised vertex's ball may reach topology it
+/// does not bound (a proof that fails counts as reaching); otherwise the edge and its end
+/// vertices get back the tolerances the move left them.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the reach proofs' unported and cancelled
+/// statuses (the tolerances restored first).
+fn raise_moved_edge(k: &Kernel, b: &mut Brep, e: EdgeId, need: f64) -> Result<()> {
+    let was = b.edge(e)?.tolerance;
+    let mut ends = Vec::new();
+    let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
+    for v in [v0, v1].into_iter().flatten() {
+        if !ends.iter().any(|&(u, _)| u == v) {
+            ends.push((v, b.vertex(v)?.tolerance));
+        }
+    }
+    let restore = |b: &mut Brep| -> Result<()> {
+        b.edge_mut(e)?.tolerance = was;
+        for &(v, t) in &ends {
+            b.vertex_mut(v)?.tolerance = t;
+        }
+        Ok(())
+    };
+    let reaches = (|| -> Result<bool> {
+        crate::topology::edge::set_tolerance(b, e, need, true, true)?;
+        let mut reaches = ignored(crate::topology::brep::validation::edge_tube_reaches(
+            k, b, e,
+        ))?
+        .unwrap_or(true);
+        for &(v, t) in &ends {
+            if !reaches && b.vertex(v)?.tolerance > t {
+                reaches = ignored(crate::topology::brep::validation::vertex_ball_reaches(
+                    k, b, v,
+                ))?
+                .unwrap_or(true);
+            }
+        }
+        Ok(reaches)
+    })();
+    match reaches {
+        Ok(false) => Ok(()),
+        Ok(true) => restore(b),
+        Err(err) => {
+            restore(b)?;
+            Err(err)
+        }
+    }
 }
 
 /// Not upstream (#18166): whether `tolerance` is one the B-rep check accepts for an edge of
