@@ -240,7 +240,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     let measured: Vec<usize> = (0..state.bodies.len()).filter(|i| owners.get(*i).is_some_and(|c| placed.contains(c))).collect();
     let shapes = solidcraft_kernel::map_on_threads(&measured, 16, |&i| -> Result<Shape> {
         let body = state.bodies.get(i).ok_or_else(|| EngineError::Other("body index out of range".into()))?;
-        let closed = crate::cmd::inspect::encloses_volume(&body.body);
+        let closed = body.is_closed();
         if !closed {
             return Ok(Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None });
         }

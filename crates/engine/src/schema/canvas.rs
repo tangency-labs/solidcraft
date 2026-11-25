@@ -318,7 +318,8 @@ pub struct CanvasDeleteParams {
 
 /// Trace a canvas or decal image into a new sketch lying exactly on its plane: the drawing is
 /// told from the background, its outlines become lines and cubic splines, and its holes stay
-/// holes. The picture is read at up to 512 pixels on a side, at most 40 megapixels.
+/// holes. Give `at` to trace one region of one colour instead (a click-to-pick). The picture is
+/// read at up to 512 pixels on a side, at most 40 megapixels.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CanvasToSketchParams {
@@ -331,6 +332,17 @@ pub struct CanvasToSketchParams {
     /// The new sketch's name. Default: `<the canvas's name> sketch`.
     #[serde(default)]
     pub name: Option<String>,
+    /// A point on the canvas's plane, in mm, [x, y] (as `canvas.calibrate` takes them). Given, only
+    /// the region of the picture around that point is traced: every pixel joined to it whose colour
+    /// is within `tolerance` of the colour there, instead of the drawing told from the background.
+    /// Refused when the point is off the image or the region is none of it or all of it.
+    #[serde(default)]
+    pub at: Option<Point2>,
+    /// With `at`: how far a pixel's colour may differ from the colour at `at` and still be part of
+    /// the region, from 0 (the same colour only) to 100 (any colour). Default: 20.
+    #[serde(default)]
+    #[schemars(range(min = 0.0, max = 100.0))]
+    pub tolerance: Option<f64>,
 }
 
 /// A key that is left out, `null`, or parses as `T`: `null` is the same as leaving it out, as

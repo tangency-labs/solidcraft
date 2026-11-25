@@ -201,7 +201,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
-use crate::context_menu::Target;
+use crate::context_menu::{Target, isolate_bodies_item};
 use crate::ui_kit::Item;
 use solidcraft_theme::Tokens;
 
@@ -612,7 +612,7 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({ "key": format!("{scope}/g{id}") })),
     ]);
     if g.folder == "bodies" {
-        v.push(Item::action("ui.isolate", "Isolate", "body").with(json!({ "bodies": group_bodies(app, id) })));
+        v.push(isolate_bodies_item(app, &group_bodies(app, id)));
     }
     v
 }
@@ -2722,6 +2722,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(placed.clone()),
         Item::action("canvas.frame_sketch", "Frame Sketch", "canvas").with(json!({ "canvas": id })).off_because(placed),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
+        Item::action("ui.traceCanvasRegion", "Trace Region...", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
         Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "canvas": id })),
@@ -2734,7 +2735,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
 /// Editing a canvas (position, size, angle, opacity, flip), calibrating it (two points on
 /// the image and their true distance) or straightening it (two points along an edge of the
 /// image and the direction that edge should have, #11989). Live edits of one opening are one
-/// undo step.
+/// undo step. Tracing a region (#20798) takes one click on the image and a colour tolerance.
 #[derive(Clone, Debug)]
 pub(crate) struct CanvasEditDrag {
     /// 0 move, 1 scale, 2 rotate, 3 opacity, 4 flip_h, 5 flip_v, 6 stretch_x, 7 stretch_y.
@@ -2752,6 +2753,10 @@ pub struct CanvasPanel {
     pub canvas: u64,
     pub calibrate: bool,
     pub straighten: bool,
+    /// Trace Region: the click on the image sets `a`, then Trace runs `canvas.to_sketch` there.
+    pub trace: bool,
+    /// Trace Region: how far a colour may differ from the clicked one (percent, 0 to 100).
+    pub tolerance: f64,
     /// Undo depth when the panel opened.
     pub(crate) depth: usize,
     pub a: [f64; 2],
@@ -2787,6 +2792,8 @@ impl CanvasPanel {
             canvas,
             calibrate,
             straighten: false,
+            trace: false,
+            tolerance: 20.0,
             depth: app.session.undo.len(),
             a,
             b,
@@ -2803,6 +2810,11 @@ impl CanvasPanel {
     /// The Straighten card: pick two points along an edge of the image, then the direction.
     pub fn straighten(app: &SolveApp, canvas: u64) -> Self {
         CanvasPanel { straighten: true, ..CanvasPanel::new(app, canvas, false) }
+    }
+
+    /// The Trace Region card: click the shape to trace, set the tolerance, then Trace.
+    pub fn trace(app: &SolveApp, canvas: u64) -> Self {
+        CanvasPanel { trace: true, ..CanvasPanel::new(app, canvas, false) }
     }
 
     /// Does a click on the image set Point A or B (Calibrate and Straighten)?

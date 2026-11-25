@@ -111,6 +111,10 @@ pub struct ModelBody {
     /// one of the bodies a feature works on unless the feature names it (not by `*`, nor by
     /// naming none).
     pub envelope: bool,
+    /// A surface body by what made it, whether or not its shells close: a Surface workspace
+    /// operation's result (a full turn of a closed profile is a closed sheet, not a solid). Stitch
+    /// makes a solid of it. False for bodies whose kind follows their shells ([`Body::is_surface`]).
+    pub sheet: bool,
     /// [`Body::retained_bytes`] of `body`, measured when a feature made or changed it (0: not
     /// measured), so the evaluation cache's budget does not walk every body after every feature.
     bytes: usize,
@@ -206,6 +210,7 @@ impl ModelBody {
             component: self.component,
             transferred: self.transferred,
             imported: self.imported.clone(),
+            sheet: self.sheet,
             ..ModelBody::new(self.name.clone(), body, self.feature)
         });
         if let Some(key) = key
@@ -248,6 +253,7 @@ impl ModelBody {
             split_from: None,
             imported: None,
             envelope: false,
+            sheet: false,
             bytes: 0,
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
@@ -290,16 +296,23 @@ impl ModelBody {
         (frame.normal().dot(exact.normal()) >= 1.0 - 1e-9 && (frame.origin - exact.origin).dot(exact.normal()).abs() <= tol).then_some(frame)
     }
 
-    /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
+    /// A surface body: one a Surface workspace operation made ([`ModelBody::sheet`]), closed or
+    /// not, or one some shell of which does not close ([`Body::is_surface`]), worked out once.
     pub fn is_surface(&self) -> bool {
-        !self.body.is_mesh() && self.is_open()
+        !self.body.is_mesh() && (self.is_closed_sheet() || self.is_open())
+    }
+
+    /// A surface body whose shells all close (a full turn of a closed profile): no solid until
+    /// Stitch makes it one.
+    pub fn is_closed_sheet(&self) -> bool {
+        self.sheet && !self.body.is_mesh() && !self.is_open()
     }
 
     /// The body encloses a volume: a solid whose shells all close ([`ModelBody::is_surface`]),
     /// or a mesh body every side of which two triangles share ([`Body::is_closed_mesh`]).
     /// Worked out once.
     pub fn is_closed(&self) -> bool {
-        !self.is_open()
+        !self.is_open() && !self.is_closed_sheet()
     }
 
     fn is_open(&self) -> bool {
@@ -6629,6 +6642,12 @@ pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String])
 }
 
 /// Suggest one nearby body without changing the default component scope or running a boolean.
+/// A boolean or other solid-only step refused on a closed surface body (#21969): its shells
+/// close, but a surface operation made it, so it is no solid until Stitch makes it one.
+pub(crate) fn closed_sheet_refusal(name: &str) -> DocError {
+    DocError::Invalid(format!("{name} is a surface body: Stitch it into a solid first."))
+}
+
 fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools: &[Traced], default_targets: bool) -> DocError {
     let plain = "there is no body to cut or intersect";
     if !default_targets {
@@ -6794,6 +6813,9 @@ fn apply_traced_with(
                         untouched.insert(i);
                         continue;
                     }
+                }
+                if b.is_closed_sheet() {
+                    return Err(closed_sheet_refusal(&b.name));
                 }
                 let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
                 return Err(DocError::Invalid(format!(
@@ -10526,8 +10548,8 @@ pub(crate) fn kernel_rail_fit(fit: crate::RailFit) -> kernel::RailFit {
 /// A sweep's or a loft's guide rails as polylines in the feature's frame, each a chain of its sketch's curves
 /// (planar or 3D) from the end nearest `start` (the start of the path, the loft's first section).
 pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::SweepRail], consumer: u64, start: Vec3) -> Result<Vec<Vec<Vec3>>> {
-    if rails.len() > 2 {
-        return Err(DocError::Invalid("a sweep or a loft takes one or two guide rails".into()));
+    if rails.len() > kernel::MAX_LOFT_RAILS {
+        return Err(DocError::Invalid(format!("a loft takes 1…{} guide rails (a sweep one or two)", kernel::MAX_LOFT_RAILS)));
     }
     rails
         .iter()
@@ -14875,6 +14897,22 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        FeatureKind::Dome { face, height, shape, reverse, body } => {
+            let h = val(vals, height, Kind::Length)?;
+            let i = body_at(st, body, &[face.0])?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let index =
+                crate::appearance::face_index_at(&mb, face.0).ok_or_else(|| DocError::Invalid("the dome's face is not on the body".into()))?;
+            let shape = match shape {
+                crate::DomeShape::Elliptical => kernel::DomeShape::Elliptical,
+                crate::DomeShape::Spherical => kernel::DomeShape::Spherical,
+            };
+            let nb = Traced::step(kernel::dome(&mb.body, index, h, shape, *reverse)?, &[&mb.traced()]);
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = mb.remade(nb);
+            }
+            Ok(())
+        }
         FeatureKind::Draft { faces, angle, neutral, pull, body } => {
             let a = val(vals, angle, Kind::Angle)?;
             let pl = doc.resolve_plane_in(vals, neutral, 0, f.component, Some(st))?;
@@ -14944,8 +14982,8 @@ fn eval_feature_kind(
             });
             Ok(())
         }
-        FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
-            if tools.is_empty() || tools.len() > 64 || cells.is_empty() || cells.len() > 1000 {
+        FeatureKind::BoundaryFill { tools, planes, cells, operation, remove_tools } => {
+            if tools.is_empty() || tools.len() + planes.len() > 64 || cells.is_empty() || cells.len() > 1000 {
                 return Err(DocError::Invalid("Boundary Fill needs 1…64 tool bodies and 1…1000 cells".into()));
             }
             let tb: Vec<ModelBody> =
@@ -14954,6 +14992,34 @@ fn eval_feature_kind(
             if tb.iter().any(|b| b.body.is_mesh() || b.body.is_surface()) {
                 return Err(DocError::Invalid("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported".into()));
             }
+            // A plane tool cuts space like an infinite plane: a cell lies on the side of it its point
+            // is on. The region a plane and the bodies close off may hold no body at all (the
+            // bore of an open tube), so with planes the cells are cut from a box (exact) that
+            // covers every tool and cell point with a margin; a cell that reaches that box is
+            // not enclosed.
+            let mut cut_planes: Vec<Plane> = Vec::new();
+            for pr in planes {
+                // A construction plane of another component is stored in that component's frame.
+                cut_planes.push(doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, pr)?, 0, f.component, Some(&*st))?);
+            }
+            let universe = match cells.first() {
+                Some(first) if !cut_planes.is_empty() => {
+                    let (mut lo, mut hi) = (first.0, first.0);
+                    for c in cells {
+                        lo = lo.min(c.0);
+                        hi = hi.max(c.0);
+                    }
+                    for b in &tb {
+                        let bb = b.body.exact_bounds()?;
+                        lo = lo.min(bb.min);
+                        hi = hi.max(bb.max);
+                    }
+                    let margin = (hi - lo).len() * 0.5 + 1.0;
+                    let pad = Vec3::new(margin, margin, margin);
+                    Some((kernel::box_solid(lo - pad, hi + pad)?, lo, hi, margin))
+                }
+                _ => None,
+            };
             let mut made = Vec::new();
             for p in cells {
                 // The cell: inside the tools that hold the point, outside the others.
@@ -14974,12 +15040,49 @@ fn eval_feature_kind(
                         Some(a) => kernel::boolean(&a.body, &b.body, BoolOp::Intersect)?.map(|r| Traced::step(r, &[&a, &b.traced()])),
                     };
                 }
-                let Some(mut cell) = acc else {
-                    return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
+                let mut cell = match (acc, &universe) {
+                    (Some(a), _) => a,
+                    (None, Some((u, ..))) => Traced { body: u.clone(), lineage: None, recipe: None },
+                    (None, None) => {
+                        return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
+                    }
                 };
+                for pl in &cut_planes {
+                    let side = pl.height(p.0);
+                    if side.abs() <= 1e-7 * (1.0 + cell.body.size()) {
+                        return Err(DocError::Invalid("Boundary Fill cell points must be away from tool planes".into()));
+                    }
+                    cell = half_traced(&cell, pl, side > 0.0)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
+                }
                 for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| !**i) {
                     let cut = kernel::boolean(&cell.body, &b.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
                     cell = Traced::step(cut, &[&cell, &b.traced()]);
+                }
+                if let Some((_, lo, hi, margin)) = &universe {
+                    // The planes can split a cell's region in pieces: the cell is the one holding the point.
+                    let lumps = cell.body.lumps()?;
+                    let lineages = crate::lineage::Lineage::lumps(&cell.body, cell.lineage.as_ref(), &lumps);
+                    let mut picked = None;
+                    for (lump, lineage) in lumps.into_iter().zip(lineages) {
+                        if matches!(lump.classify_point(p.0), Ok(kernel::PointClass::Inside)) {
+                            picked = Some(Traced { body: lump, lineage, recipe: None });
+                            break;
+                        }
+                    }
+                    cell = picked.ok_or_else(|| DocError::Invalid(format!("the point {p:?} is not inside a cell the tools and planes enclose")))?;
+                    let bb = cell.body.exact_bounds()?;
+                    let reach = *margin * 0.5;
+                    if bb.min.x < lo.x - reach
+                        || bb.min.y < lo.y - reach
+                        || bb.min.z < lo.z - reach
+                        || bb.max.x > hi.x + reach
+                        || bb.max.y > hi.y + reach
+                        || bb.max.z > hi.z + reach
+                    {
+                        return Err(DocError::Invalid(format!(
+                            "the point {p:?} is in a region the tools and planes leave open: no enclosed cell there"
+                        )));
+                    }
                 }
                 if cell.body.is_surface() {
                     return Err(DocError::Invalid("Boundary Fill did not produce a closed solid cell".into()));
@@ -15503,6 +15606,9 @@ fn eval_feature_kind(
                     let surface =
                         std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| b.is_surface()));
                     if let Some(name) = surface {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
                         )));
@@ -15510,6 +15616,9 @@ fn eval_feature_kind(
                 }
                 Operation::Cut => {
                     if let Some(name) = tools.iter().find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| !b.is_closed())) {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "\"{name}\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
                         )));
@@ -15517,6 +15626,9 @@ fn eval_feature_kind(
                 }
                 Operation::Intersect => {
                     if let Some(name) = tools.iter().find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| !b.is_closed())) {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "\"{name}\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
                         )));
@@ -17657,15 +17769,22 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
     let plane = &square_to_axes(plane);
     let mut parts = Vec::new();
     for positive in [true, false] {
-        let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
-        let Some(part) = part else { continue };
-        // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
-        let section = Some("section".to_string());
-        let caps = if positive { [section, None] } else { [None, section] };
-        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
-        parts.push(Traced::step(part, &[input, &tool]));
+        if let Some(part) = half_traced(input, plane, positive)? {
+            parts.push(part);
+        }
     }
     Ok(parts)
+}
+
+/// The part of `input` on one side of a plane (`None` when nothing is there), with its history.
+fn half_traced(input: &Traced, plane: &Plane, positive: bool) -> Result<Option<Traced>> {
+    let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
+    let Some(part) = part else { return Ok(None) };
+    // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
+    let section = Some("section".to_string());
+    let caps = if positive { [section, None] } else { [None, section] };
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
+    Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
 /// `plane` with its directions' parts below rounding (1e-12) along a world axis dropped. A flat
