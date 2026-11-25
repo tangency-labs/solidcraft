@@ -352,18 +352,18 @@ fn line(start: [f64; 3], end: [f64; 3]) -> crate::sweeps::Curve {
 
 /// A pipe of diameter 5 along lines and arcs, one of them a 1° arc of radius 50.8, and a second
 /// pipe joined to its end cap (#22146; the paths and profiles as SolidCraft sweeps them for the
-/// issue's design). Each arc of a pipe is a torus face carrying its NURBS form. Read back from
-/// its record (as a later feature reads its operands), each pipe still passes the check, and the
-/// join is one solid of the volume Pappus gives: a disc of radius 2.5 along a tangent-continuous
-/// path, π 2.5² L, with L = 517.852348653780 for the first path (9.684405810658 + 76.2 × 24.7278°
-/// + 107.151927790051 + 26.035 × 193.3178° + 266.7 + 50.8 × 1° + 12.7) and 51.076121171858 for
-/// the second (3.928214262990 + 124.0819 × 7° + 31.988436958318). Each pipe has a wall per
-/// segment and two caps; each circle where walls meet or a cap ends is one edge with one vertex,
-/// and each wall has one seam. The pipes touch on the first's end cap: the two caps go and their
-/// circles become one. The first pipe's last wall and the second's first wall are cylinders of
-/// radius 2.5 on one axis (both run along -y through (0, -127.39, 30.06)), so they become one face
-/// and the circle between them goes; its vertex stays where the two seams meet:
-/// (9 + 5 - 2 - 1, 15 + 7 - 1 - 1, 8 + 4 - 1) faces, edges and vertices.
+/// issue's design). Each arc of a pipe is a torus face carrying its NURBS form. Read back from its
+/// record (as a later feature reads its operands), each pipe still passes the check, and the join
+/// is one solid of the volume Pappus gives: a disc of radius 2.5 along a tangent-continuous path, π
+/// 2.5² L, with L = 517.852348653780 for the first path (9.684405810658 + 76.2 × 24.7278° +
+/// 107.151927790051 + 26.035 × 193.3178° + 266.7 + 50.8 × 1° + 12.7) and 51.076121171858 for the
+/// second (3.928214262990 + 124.0819 × 7° + 31.988436958318). Each pipe has a wall per segment and
+/// two caps; each circle where walls meet or a cap ends is one edge with one vertex, and each wall
+/// has one seam. The pipes touch on the first's end cap: the two caps go and their circles become
+/// one. The first pipe's last wall and the second's first wall are cylinders of radius 2.5 on one
+/// axis (both run along -y through (0, -127.39, 30.06)), so they become one face and the circle
+/// between them goes; its vertex stays where the two seams meet: (9 + 5 - 2 - 1, 15 + 7 - 1 - 1, 8 +
+/// 4 - 1) faces, edges and vertices.
 #[test]
 fn a_pipe_joins_the_end_of_a_pipe_bent_through_a_one_degree_arc() {
     use crate::check::CheckLevel;
