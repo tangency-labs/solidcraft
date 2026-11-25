@@ -1162,8 +1162,8 @@ fn no_leg_below_resolution(target: &Brep, refused: SolidError) -> SolidError {
 /// then that edge alone: a joint not yet built has no station that failed). Those before `at`
 /// were built at the sagitta asked, and every joint's legs and toes were checked before. Each
 /// of those joints' fits is its foot blend's over its spans
-/// ([`crate::blend::foot_blend::FootBlend::sagitta_that_fits`]): the lower end proved for the
-/// bound over every parameter, which the build reads too, so a retry at the fit is not refused
+/// ([`crate::blend::foot_blend::FootBlend::sagitta_that_fits`]): the least of its spans' own
+/// sizes, each the one the build reads for that span, so a retry at the fit is not refused
 /// for its sagitta. A joint refused for another reason is left to its own refusal at the
 /// retry; one that fails otherwise (a defect) is returned in place of `refused`, whose fit
 /// would not have looked at it. Any other `refused` is returned as it is.
