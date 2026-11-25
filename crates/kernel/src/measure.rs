@@ -217,6 +217,32 @@ mod tests {
         assert!(plate.bounds.lock().unwrap().is_some() && far.bounds.lock().unwrap().is_some());
     }
 
+    /// Overlapping cylinders whose only vertices lie on distant seams are still rejected by
+    /// `union_apart` using their analytic circle edges, without measuring any exact box.
+    #[test]
+    fn overlapping_cylinders_are_not_joined_apart_without_measuring() {
+        let a = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+        let b = cylinder(Vec3::new(6.0, 0.0, 0.0), Vec3::Z, 5.0, 10.0).unwrap();
+        assert!(crate::union_apart(&[a.clone(), b.clone()]).unwrap().is_none());
+        assert_eq!(*a.bounds.lock().unwrap(), None);
+        assert_eq!(*b.bounds.lock().unwrap(), None);
+    }
+
+    /// Contact tests reject clearly apart bodies from their exact boxes without meshing either.
+    #[test]
+    fn meets_rejects_apart_bodies_without_meshing() {
+        let a = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        let far = crate::box_solid(Vec3::new(50.0, 0.0, 0.0), Vec3::new(60.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        let touching = crate::box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        assert!(!a.meets(&far).unwrap());
+        assert_eq!(a.meets_each(&[far.clone()]).unwrap(), vec![false]);
+        assert_eq!(a.cached_mesh_count(), 0);
+        assert_eq!(far.cached_mesh_count(), 0);
+        assert!(a.meets(&touching).unwrap());
+        assert!(a.cached_mesh_count() > 0);
+        assert_eq!(a.meets_each(&[far, touching]).unwrap(), vec![false, true]);
+    }
+
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre
     /// the sums miss a cone of that facet to the centre (0.08 %), where about the origin they are
     /// 17 % over. Closed, it measures the same about either.

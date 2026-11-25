@@ -6070,9 +6070,9 @@ fn apply_traced_with(
     match op {
         Operation::Join => {
             let joined = join(state, tools, &target_idx)?;
-            if f.touching == crate::Touching::Separate {
+            if f.touching == crate::Touching::Separate && !joined.all_apart {
                 let mut kept = None;
-                for name in joined {
+                for name in joined.names {
                     kept = kept.max(separate_touching(state, &name)?);
                 }
                 if let Some(k) = kept {
@@ -6201,11 +6201,19 @@ fn apply_traced_with(
     Ok(())
 }
 
+/// Result of [`join`]: the target bodies that took tools, and whether every output lump is
+/// already known to lie apart from every other (no two operands touched and none held multiple
+/// lumps, so [`separate_touching`] has no contact to separate).
+struct Joined {
+    names: Vec<String>,
+    all_apart: bool,
+}
+
 /// Join `tools` into the bodies at `target_idx`: each tool joins every target it meets into one
 /// body, kept under the first one's name; a tool that meets none joins the first target as a
 /// separate piece. A sheet metal body keeps its own identity: only the first body met may be
 /// one. The names of the bodies the tools went into.
-fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Result<Vec<String>> {
+fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Result<Joined> {
     let mut live: Vec<String> = target_idx.iter().filter_map(|i| state.bodies.get(*i).map(|b| b.name.clone())).collect();
     // Each union keeps the lineage of what it joins, so the joined body's faces keep
     // their names (the tool's new faces are named by their roles).
@@ -6218,15 +6226,23 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
     if let [keep] = live.as_slice()
         && tools.len() > 1
     {
-        let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(Vec::new()) };
+        let Some(base) = state.body(keep).map(ModelBody::traced) else {
+            return Ok(Joined { names: Vec::new(), all_apart: false });
+        };
         // The tools go into the kept body's frame, where it is shown (#3383).
         let into_keep = tool_frame(keep);
         let tools = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
         let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
         // Bodies that are all apart need no intersection work: they are one body of several
         // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
+        let mut all_apart = false;
         let acc = match union_all_apart(&operands) {
-            Some(acc) => acc,
+            Some(acc) => {
+                // When every operand is a single material region and their grown exact boxes are
+                // mutually disjoint, no two lumps in the result can touch.
+                all_apart = operands.iter().all(|o| o.body.record().material_regions().len() <= 1);
+                acc
+            }
             // The kernel's union pairs the tools with each other before the target. Fins whose
             // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
             // the target one at a time, each tool's overlap with the others already lies inside.
@@ -6238,11 +6254,15 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
         }
-        return Ok(vec![keep.clone()]);
+        return Ok(Joined { names: vec![keep.clone()], all_apart });
     }
     let mut joined = Vec::new();
+    // Retain fine contact meshes per unchanged live target across tools (invalidated whenever a
+    // target is remade or absorbed), so overlapping pairs don't re-mesh the same target per tool.
+    let mut target_meshes: std::collections::HashMap<String, Body> = std::collections::HashMap::new();
     for tool in &tools {
         let mut met: Vec<String> = Vec::new();
+        let mut world_tool: Option<Body> = None;
         // Which bodies the tool meets picks the one it joins and those joined with it. A single
         // body takes the tool whether it meets it or not, so it is not asked: the test meshes
         // the body finely, and that took longer than the join itself on a part of a few hundred
@@ -6255,12 +6275,22 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             }
             #[cfg(test)]
             cost_tests::count(|c| c.contact_tests += 1);
+            let target_body = target_meshes.entry(name.clone()).or_insert_with(|| mb.body.keeping_meshes());
             // Each body is met where it is shown: the tool goes into its frame (#3383).
-            if mb.body.meets(&tool_in(tool, tool_frame(name))?.body)? {
+            let meets = match tool_frame(name) {
+                None => {
+                    let tb = world_tool.get_or_insert_with(|| tool.body.keeping_meshes());
+                    target_body.meets(tb)?
+                }
+                frame => target_body.meets(&tool_in(tool, frame)?.body)?,
+            };
+            if meets {
                 met.push(name.clone());
             }
         }
-        let Some(keep) = met.first().or(live.first()).cloned() else { return Ok(joined) };
+        let Some(keep) = met.first().or(live.first()).cloned() else {
+            return Ok(Joined { names: joined, all_apart: false });
+        };
         let Some(base) = state.body(&keep).map(ModelBody::traced) else { continue };
         let into_keep = tool_frame(&keep);
         let mut acc = union(&base, &tool_in(tool, into_keep)?)?;
@@ -6276,6 +6306,10 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             }
         }
         let absorbed: std::collections::BTreeSet<String> = met.into_iter().skip(1).collect();
+        target_meshes.remove(&keep);
+        for name in &absorbed {
+            target_meshes.remove(name);
+        }
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == keep) {
             *mb = mb.remade(acc);
         }
@@ -6288,7 +6322,7 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             joined.push(keep);
         }
     }
-    Ok(joined)
+    Ok(Joined { names: joined, all_apart: false })
 }
 
 /// With `Touching::Separate`: the joined body `name` never keeps two pieces that touch only
@@ -6394,24 +6428,92 @@ fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSe
 /// within the larger of their record tolerances. A distance only the meshes give is not trusted
 /// to say they touch.
 fn unrecorded_touches(pieces: &[Body], touches: &[Vec<usize>]) -> Result<Vec<[usize; 2]>> {
-    let meshes = pieces
-        .iter()
-        .map(|p| {
-            let chord = (p.size() * 1e-4).max(1e-6);
-            Ok((p.mesh(&kernel::MeshTolerance::chord(chord))?, chord))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let shapes: Vec<kernel::DistanceShape> = pieces.iter().zip(&meshes).map(|(p, (m, chord))| kernel::DistanceShape::new(p, m, *chord)).collect();
-    let mut out = Vec::new();
-    for (a, (sa, pa)) in shapes.iter().zip(pieces).enumerate() {
-        for (b, (sb, pb)) in shapes.iter().zip(pieces).enumerate().skip(a + 1) {
-            if touches.get(a).is_some_and(|t| t.contains(&b)) || !sa.bounds().meets(&sb.bounds()) {
+    // Prefilter candidate pairs using exact bounding boxes before building any fine meshes:
+    // two pieces whose exact boxes (each grown by its record tolerance) do not meet cannot have
+    // exact minimum distance within `max(tol_a, tol_b)`.
+    let mut boxed: Vec<(usize, solidcraft_geom::Aabb3)> = Vec::with_capacity(pieces.len());
+    let mut unboxed: Vec<usize> = Vec::new();
+    for (i, p) in pieces.iter().enumerate() {
+        match p.exact_bounds() {
+            Ok(b) if !b.is_empty() && b.min.is_finite() && b.max.is_finite() => {
+                boxed.push((i, b.inflated(p.record().tolerance)));
+            }
+            _ => unboxed.push(i),
+        }
+    }
+    boxed.sort_by(|(_, a), (_, b)| a.min.x.total_cmp(&b.min.x));
+    let mut candidates: Vec<[usize; 2]> = Vec::new();
+    for (k, &(i, ba)) in boxed.iter().enumerate() {
+        for &(j, bb) in boxed.iter().skip(k + 1) {
+            if bb.min.x > ba.max.x {
+                break;
+            }
+            if !ba.meets(&bb) {
                 continue;
             }
-            let tol = pa.record().tolerance.max(pb.record().tolerance);
-            if kernel::body_distance(sa, sb, tol)?.is_some_and(|d| d.exact && d.distance <= tol) {
-                out.push([a, b]);
+            let (a, b) = (i.min(j), i.max(j));
+            if !touches.get(a).is_some_and(|t| t.contains(&b)) {
+                candidates.push([a, b]);
             }
+        }
+    }
+    for &u in &unboxed {
+        for other in 0..pieces.len() {
+            if other == u {
+                continue;
+            }
+            if other < u && unboxed.contains(&other) {
+                continue;
+            }
+            let (a, b) = (u.min(other), u.max(other));
+            if !touches.get(a).is_some_and(|t| t.contains(&b)) {
+                candidates.push([a, b]);
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+
+    // Only mesh the pieces that actually participate in a candidate overlapping pair.
+    let mut needed = vec![false; pieces.len()];
+    for &[a, b] in &candidates {
+        if let Some(slot) = needed.get_mut(a) {
+            *slot = true;
+        }
+        if let Some(slot) = needed.get_mut(b) {
+            *slot = true;
+        }
+    }
+    let meshes: Vec<Option<(solidcraft_geom::Mesh, f64)>> = pieces
+        .iter()
+        .zip(&needed)
+        .map(|(p, &need)| {
+            if !need {
+                return Ok(None);
+            }
+            let chord = (p.size() * 1e-4).max(1e-6);
+            Ok(Some((p.mesh(&kernel::MeshTolerance::chord(chord))?, chord)))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let shapes: Vec<Option<kernel::DistanceShape>> = pieces
+        .iter()
+        .zip(&meshes)
+        .map(|(p, m)| m.as_ref().map(|(mesh, chord)| kernel::DistanceShape::new(p, mesh, *chord)))
+        .collect();
+    let mut out = Vec::new();
+    for [a, b] in candidates {
+        let (Some(Some(sa)), Some(Some(sb)), Some(pa), Some(pb)) = (shapes.get(a), shapes.get(b), pieces.get(a), pieces.get(b)) else {
+            continue;
+        };
+        if !sa.bounds().meets(&sb.bounds()) {
+            continue;
+        }
+        let tol = pa.record().tolerance.max(pb.record().tolerance);
+        if kernel::body_distance(sa, sb, tol)?.is_some_and(|d| d.exact && d.distance <= tol) {
+            out.push([a, b]);
         }
     }
     Ok(out)

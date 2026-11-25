@@ -72,9 +72,9 @@ pub fn apart(a: &Body, b: &Body) -> Result<bool> {
     if a.is_mesh() || b.is_mesh() {
         return Ok(false);
     }
-    // Every vertex lies in the body's exact box, so where the boxes of the two bodies' vertices,
-    // grown alike, meet, their exact boxes meet too, and nothing need be measured.
-    if let (Some(va), Some(vb)) = (vertex_box(a), vertex_box(b))
+    // Every vertex and analytic edge point lies in the body's exact box, so where two bodies'
+    // inner boxes, grown alike, meet, their exact boxes meet too, and nothing need be measured.
+    if let (Some(va), Some(vb)) = (grown_inner_box(a), grown_inner_box(b))
         && va.meets(&vb)
     {
         return Ok(false);
@@ -106,11 +106,11 @@ pub fn union_apart(bodies: &[Body]) -> Result<Option<Body>> {
         if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
             return Ok(None);
         }
-        // Every vertex lies in its body's exact box, so where two bodies' vertex boxes, grown alike,
-        // meet, their exact boxes meet too: the answer is `None` without measuring any exact box,
-        // which on a rounded spline body can take tens of seconds.
-        let vertex_boxes: Vec<solidcraft_geom::Aabb3> = bodies.iter().filter_map(vertex_box).collect();
-        if any_two_meet(&vertex_boxes) {
+        // Every vertex and analytic edge point lies in its body's exact box, so where two bodies'
+        // inner boxes, grown alike, meet, their exact boxes meet too: the answer is `None` without
+        // measuring any exact box, which on a rounded spline body can take tens of seconds.
+        let inner_boxes: Vec<solidcraft_geom::Aabb3> = bodies.iter().filter_map(grown_inner_box).collect();
+        if any_two_meet(&inner_boxes) {
             return Ok(None);
         }
         let mut boxes = Vec::with_capacity(bodies.len());
@@ -124,12 +124,37 @@ pub fn union_apart(bodies: &[Body]) -> Result<Option<Body>> {
     })
 }
 
-/// The box of a B-rep body's vertices, grown by twice its record's tolerance (as its exact box is
-/// in [`apart`] and [`union_apart`]); `None` for a body without vertices. It lies inside the grown
-/// exact box, so where two of them meet, the exact boxes meet too.
-fn vertex_box(x: &Body) -> Option<solidcraft_geom::Aabb3> {
-    let b: solidcraft_geom::Aabb3 = x.record().vertices.iter().map(|v| crate::body::v3(v.point)).collect();
-    (!b.is_empty()).then(|| b.inflated(2.0 * x.record().tolerance))
+/// A box of points guaranteed to lie on B-rep body `x`: its vertices and sampled interior points
+/// on its curved edges, so cylinders/revolved solids whose vertices all sit on one seam line
+/// still have a full 3D inner box. Strictly inside the body's exact box.
+pub(crate) fn inner_box(x: &Body) -> Option<solidcraft_geom::Aabb3> {
+    use solidcore_record::brep::Curve;
+    let rec = x.record();
+    let mut b = solidcraft_geom::Aabb3::EMPTY;
+    for v in &rec.vertices {
+        b.add(crate::body::v3(v.point));
+    }
+    let samples: u32 = if rec.edges.len() <= 256 { 8 } else { 4 };
+    for e in &rec.edges {
+        if !matches!(e.parameters(), Curve::Line { .. })
+            && let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters())
+        {
+            let [t0, t1] = e.interval;
+            for i in 1..samples {
+                if let Some(p) = eval.point(t0 + (t1 - t0) * f64::from(i) / f64::from(samples)) {
+                    b.add(p);
+                }
+            }
+        }
+    }
+    (!b.is_empty()).then_some(b)
+}
+
+/// [`inner_box`] grown by twice the body's record tolerance (as its exact box is in [`apart`] and
+/// [`union_apart`]). It lies inside the grown exact box, so where two of them meet, the exact boxes
+/// meet too.
+fn grown_inner_box(x: &Body) -> Option<solidcraft_geom::Aabb3> {
+    inner_box(x).map(|b| b.inflated(2.0 * x.record().tolerance))
 }
 
 /// Whether any two of `boxes` meet, swept along x: only boxes whose x ranges overlap are compared.

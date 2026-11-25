@@ -3724,6 +3724,50 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }
 
+/// Multi-target joins and `Touching::Separate` keep exact results when AABB prefiltering and mesh
+/// caching skip meshing disjoint pairs.
+#[test]
+fn multi_target_join_and_separate_touching_preserve_exact_results() {
+    let mut doc = Document::new("multi-target join");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(50.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // Boss on B joins B only; A and C stay untouched.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(52.0, 2.0, 10.0)),
+            length: "4".into(),
+            width: "4".into(),
+            height: "5".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    // Boss bridging B and C merges B and C into one body while A stays separate.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(58.0, 2.0, 2.0)),
+            length: "44".into(),
+            width: "4".into(),
+            height: "4".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "A") - 1000.0).abs() < 1e-6);
+    // B (1000) + boss (80) + C (1000) + bridge (44*4*4 = 704) - 2 overlaps (2*4*4 = 32 each)
+    let expected_bc = 1000.0 + 80.0 + 1000.0 + 704.0 - 64.0;
+    assert!((volume(&model, "B") - expected_bc).abs() < 1e-6, "{} vs {expected_bc}", volume(&model, "B"));
+}
+
 /// When an import's background checks end having healed a part, the model takes the healed
 /// body in the import's place: settling marks the import and what follows it stale, the next
 /// evaluation reads the healed body under another fingerprint, and settling the same heal again
