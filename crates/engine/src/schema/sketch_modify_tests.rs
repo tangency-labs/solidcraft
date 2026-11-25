@@ -50,7 +50,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<TrimPathParams>(), &["dry_run", "points", "sketch"]);
     assert_keys(input_schema_for::<BreakParams>(), &["at", "curve", "points", "sketch"]);
     assert_keys(input_schema_for::<ExtendParams>(), &["at", "curve", "curves", "sketch"]);
-    assert_keys(input_schema_for::<FilletParams>(), &["a", "b", "point", "points", "radius", "sketch"]);
+    assert_keys(input_schema_for::<FilletParams>(), &["a", "b", "end", "point", "points", "radius", "sketch"]);
     assert_keys(input_schema_for::<ChamferEqualParams>(), &["a", "b", "distance", "point", "points", "sketch"]);
     assert_keys(input_schema_for::<ChamferTwoParams>(), &["a", "b", "distance", "distance2", "point", "points", "sketch"]);
     assert_keys(input_schema_for::<ChamferDistanceAngleParams>(), &["a", "angle", "b", "distance", "point", "points", "sketch"]);

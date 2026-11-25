@@ -1424,6 +1424,12 @@ pub struct FaceProps<O: LoopObject> {
     pub raw_touch_list_v: Vec<TouchData<O>>,
     /// `m_sDoneTouchListV`.
     pub done_touch_list_v: Vec<TouchData<O>>,
+    /// Not upstream: whether anything reads the seams' touch lists after
+    /// [`crate::topology::face::p4::has_seam_problem_mut`] fills them (`true`, as
+    /// upstream always fills them). `false` only on the properties `HasSeamProblem` makes
+    /// for itself and drops, whose lists only its doubly periodic cases read: the seam
+    /// classifications then skip `GetLoopCrossings` on a surface periodic in one direction.
+    pub(crate) touch_lists_read: bool,
     /// `m_bBadCrossedPole`: one interior pole crossing is cached (after splitting,
     /// Stage 2 finds the next crossing).
     pub bad_crossed_pole: Tri,
@@ -1524,6 +1530,7 @@ impl<O: LoopObject> FaceProps<O> {
             crv_class_v: None,
             raw_touch_list_v: Vec::new(),
             done_touch_list_v: Vec::new(),
+            touch_lists_read: true,
             bad_crossed_pole: Tri::False,
             crossed_pole_edge: None,
             crossed_pole_parameter: 0.0,
