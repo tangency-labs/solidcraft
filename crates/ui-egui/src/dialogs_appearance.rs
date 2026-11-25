@@ -110,6 +110,22 @@ fn matches_library_filter(look: &Look, category: Option<&str>, query: &str, only
         && (!only_available || preset_available(look))
 }
 
+/// The Library choice that shows the looks marked as favorites; after it, the categories.
+pub(crate) const FAVORITES: usize = 1;
+
+/// The id a favorite look is kept under in `Prefs::render_library_favorites`, as the Render
+/// library and `appearance.favorite` key it (`render_workspace_library::appearance_id`): a preset's
+/// id, else the look's name, colour, opacity and surface response.
+pub(crate) fn favorite_id(look: &Look) -> String {
+    look.preset.as_ref().map_or_else(|| json!([look.name, hex(look.color), look.opacity, look.pbr]).to_string(), |preset| preset.id.clone())
+}
+
+/// The looks of `lib` and of the loaded local library that are marked as favorites.
+pub(crate) fn favorites(app: &SolveApp, lib: Vec<Look>, k: &Ap) -> Vec<Look> {
+    let marked = |look: &Look| app.preferences.render_library_favorites.contains(&("appearances".to_owned(), favorite_id(look)));
+    lib.into_iter().chain(crate::dialogs_library::local_looks(k)).filter(marked).collect()
+}
+
 /// Built-in looks, used until the engine offers a library (`appearance.library`).
 pub(crate) fn builtin() -> Vec<Look> {
     let l =
@@ -178,7 +194,7 @@ pub struct Ap {
     pub pbr: Option<PbrParameters>,
     /// The look picked last (its name), if the colour came from one.
     pub look: Option<String>,
-    /// Library category shown (0: all).
+    /// Library category shown (0: all, [`FAVORITES`]: the favorites, then the categories).
     pub category: usize,
     /// Library names can be searched without changing the selected look.
     pub search: String,
@@ -497,9 +513,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             });
         });
     }
-    // The library, by category.
+    // The library, by category; after All, the looks marked as favorites (#20361).
     let lib = library(app);
-    let mut cats: Vec<String> = vec!["All".into()];
+    let mut cats: Vec<String> = vec!["All".into(), app.tr("appearance.favorites").to_owned()];
     for l in &lib {
         if !cats.contains(&l.category) {
             cats.push(l.category.clone());
@@ -507,6 +523,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
     }
     let refs: Vec<&str> = cats.iter().map(String::as_str).collect();
     ui_kit::row(ui, "Library", |ui| combo(ui, "ap_cat", &refs, &mut k.category));
+    let lib = if k.category == FAVORITES { favorites(app, lib, k) } else { lib };
     let search = ui_kit::row(ui, "Search", |ui| {
         let id = ui.make_persistent_id("ap_search");
         ui_kit::search_field(ui, id, &mut k.search, "Appearance name")
@@ -518,7 +535,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
     let shown: Vec<(usize, &Look)> = lib
         .iter()
         .enumerate()
-        .filter(|(_, l)| matches_library_filter(l, (k.category != 0).then_some(want.as_str()), &query, k.only_available))
+        .filter(|(_, l)| matches_library_filter(l, (k.category > FAVORITES).then_some(want.as_str()), &query, k.only_available))
         .collect();
     if shown.is_empty() {
         ui_kit::text(ui, solidcraft_ui_text::tr_label("No matching appearances"), ui_kit::Text::Note("appearances_empty"));

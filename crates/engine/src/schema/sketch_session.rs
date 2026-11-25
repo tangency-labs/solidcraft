@@ -210,7 +210,20 @@ macro_rules! option_flags {
     )+};
 }
 
-option_flags!(value, show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, grid, snap, slice, sketch_3d);
+option_flags!(
+    value,
+    show_profile,
+    show_points,
+    show_dimensions,
+    show_constraints,
+    show_projected,
+    show_construction,
+    show_control_polygons,
+    grid,
+    snap,
+    slice,
+    sketch_3d
+);
 
 // ---------------------------------------------------------------------------------------------
 // sketch.create
@@ -1010,6 +1023,10 @@ pub struct OptionsParams {
     #[serde(default, deserialize_with = "show_construction", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub show_construction: Option<bool>,
+    /// Show the sides of spline control polygons.
+    #[serde(default, deserialize_with = "show_control_polygons", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub show_control_polygons: Option<bool>,
     /// Show the grid.
     #[serde(default, deserialize_with = "grid", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
@@ -1046,6 +1063,8 @@ pub struct SketchOptions {
     pub show_projected: bool,
     /// Construction geometry is shown.
     pub show_construction: bool,
+    /// Spline control polygons are shown.
+    pub show_control_polygons: bool,
     /// The grid is shown.
     pub grid: bool,
     /// Clicks snap to the grid.

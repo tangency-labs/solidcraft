@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "thread.form_unified": "لولب موحّد (ASME B1.1)"
+  },
+  "de": {
+    "thread.form_unified": "Unified-Gewinde (ASME B1.1)"
+  },
+  "en": {
+    "thread.form_unified": "Unified (ASME B1.1)"
+  },
+  "he": {
+    "thread.form_unified": "תבריג אחיד (ASME B1.1)"
+  },
+  "ja": {
+    "thread.form_unified": "ユニファイねじ (ASME B1.1)"
+  },
+  "ko": {
+    "thread.form_unified": "유니파이 나사 (ASME B1.1)"
+  },
+  "vi": {
+    "thread.form_unified": "Ren Unified (ASME B1.1)"
+  },
+  "zh": {
+    "thread.form_unified": "统一螺纹 (ASME B1.1)"
+  }
+}
