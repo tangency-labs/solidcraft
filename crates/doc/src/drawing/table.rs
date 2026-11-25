@@ -178,7 +178,7 @@ impl PartsList {
         };
         let mut rows: Vec<table::Row> = list.rows_deep().into_iter().map(row).collect();
         if self.hardware {
-            rows.extend(hardware.iter().map(|h| hardware_row(h, units)));
+            rows.extend(hardware.iter().map(hardware_row));
         }
         rows
     }
@@ -186,7 +186,7 @@ impl PartsList {
 
 /// The row of one kind of press-in hardware: its key is stable (`hardware:nut.m5`, a length after a
 /// colon in millimetres), so a row's overrides stay with it.
-fn hardware_row(h: &bom::HardwareCount, units: &str) -> table::Row {
+fn hardware_row(h: &bom::HardwareCount) -> table::Row {
     use crate::hardware_catalog::HardwareKind;
     let shown = match h.kind {
         HardwareKind::Nut => "Self-clinching nut",
@@ -196,7 +196,9 @@ fn hardware_row(h: &bom::HardwareCount, units: &str) -> table::Row {
     };
     let length = h.length.filter(|_| h.kind.has_length());
     let description = match length {
-        Some(mm) => format!("{} \u{d7} {}", h.thread, format_length(mm, units, 2)),
+        // The catalogue size is part of the metric designation (M4 × 10 mm), so it reads as the
+        // nominal millimetres whatever the drawing's units, with no trailing zeros.
+        Some(mm) => format!("{} \u{d7} {} mm", h.thread, (mm * 1000.0).round() / 1000.0),
         None => h.thread.clone(),
     };
     let key = match length {
