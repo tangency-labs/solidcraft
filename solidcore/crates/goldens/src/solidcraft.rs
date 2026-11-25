@@ -2477,9 +2477,9 @@ mod tests {
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
         enable_fix(&mut k, "offset_extension_as_itself").unwrap();
-        enable_fix(&mut k, "fillet_trace_reaches_rails").unwrap();
+        enable_fix(&mut k, "keep_exact_pcurves").unwrap();
         assert!(k.fixes.offset_extension_as_itself);
-        assert!(k.fixes.fillet_trace_reaches_rails);
+        assert!(k.fixes.keep_exact_pcurves);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 
@@ -2646,18 +2646,53 @@ mod tests {
     }
 
     #[test]
-    fn a_round_taller_than_its_wall_is_refused() {
-        // SolidCraft #190: an r 13 disc 2 high cannot take a round of 2.001 on its top
-        // circle; the pinned kernel refuses it, and the refused case passes on that.
+    fn rounds_past_half_their_end_face_are_refused() {
+        // SolidCraft #199 (`fixtures/solidcraft/199-round-uses-up-a-side-face.json`): the
+        // four long edges of a 14 x 6 x 10 bar rounded 3.5. Each 6 mm end face takes two of
+        // the rounds, each reaching 3.5 into it from its edge: 7 > 6, so the two rounds'
+        // tangent lines cross on the face and no body has both. The kernel refuses it, and
+        // the refused case passes on that.
         let case: Case = serde_json::from_value(json!({
-            "name": "disc-round-too-tall",
+            "name": "bar-rounds-past-half-the-end-face",
+            "steps": [
+                {"op": "box", "id": "bar", "origin": [14.0, 0.0, 0.0], "size": [14.0, 6.0, 10.0]},
+                {"op": "fillet", "id": "result", "body": "bar",
+                 "edges": [[14.0, 0.0, 5.0], [28.0, 0.0, 5.0], [14.0, 6.0, 5.0], [28.0, 6.0, 5.0]],
+                 "radius": 3.5}
+            ],
+            "expect": {"refused": {"step": "result", "error": "status 1001"}}
+        }))
+        .unwrap();
+        validate(&case).unwrap();
+        let run = run_rust(&case);
+        assert_eq!(verdict(&case.expect, &run).0, "PASS", "{run:?}");
+    }
+
+    #[test]
+    fn a_round_just_taller_than_its_wall_builds_its_closed_form() {
+        // SolidCraft #190 (`fixtures/solidcraft/190-round-as-tall-as-its-wall.json`,
+        // `disc_top_rounded_just_past_its_height`): an r 13 disc 2 high with its top circle
+        // rounded 2.001. The round is the torus of tube r = 2.001 about the circle of radius
+        // c = 13 - r at z_c = 2 - r = -0.001, tangent to the top; it leaves the disc through
+        // the bottom (z = 0, t_0 = -z_c = 0.001 above its centre), where its crease is at
+        // radius c + sqrt(r^2 - t_0^2), 2.5e-7 inside the bottom edge. The body is the disc
+        // less, at each height t = z - z_c in [t_0, r], the annulus between c + s(t),
+        // s = sqrt(r^2 - t^2), and c + r:
+        // V = pi (c+r)^2 h - pi [2 c r (r - t_0) - 2 c I + (r^3 - t_0^3)/3], with
+        // I = int_{t_0}^{r} s dt = pi r^2/4 - t_0 s(t_0)/2 - (r^2/2) asin(t_0/r),
+        // = 994.08536240219917634 (60 digits, Python `decimal`); the build measures it to
+        // 6e-13. The tolerance is the fixture's 1e-4.
+        let case: Case = serde_json::from_value(json!({
+            "name": "disc-round-just-taller-than-its-wall",
             "steps": [
                 {"op": "cylinder", "id": "disc", "origin": [0.0, 0.0, 0.0], "radius": 13.0,
                  "height": 2.0},
                 {"op": "fillet", "id": "result", "body": "disc", "edges": [[0.0, 13.0, 2.0]],
                  "radius": 2.001}
             ],
-            "expect": {"refused": {"step": "result", "error": "status 1001"}}
+            "expect": {"lumps": 1, "manifold": true,
+                       "volume": {"value": 994.085_362_402_199_2, "tol": 1e-4,
+                                  "formula": "the torus round cut by the bottom, closed form"}}
         }))
         .unwrap();
         validate(&case).unwrap();
