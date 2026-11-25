@@ -1224,8 +1224,18 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             (if matches!(kind, FeatureKind::Unstitch { .. }) { Surf::Unstitch } else { Surf::ReverseNormal }, vec![sels])
         }
         FeatureKind::Stitch { bodies, .. } => (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()]),
-        FeatureKind::Thicken { bodies, .. } => {
-            (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()])
+        FeatureKind::Thicken { bodies, targets, .. } => {
+            // An edit keeps the bodies the Thicken was told to change, as Pipe's does.
+            let k = Surf::simple_restore(kind)?;
+            let mut ins = inputs(&k);
+            if let Some(inp) = ins.first_mut() {
+                inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            }
+            let mut extra = Map::new();
+            if !targets.is_empty() {
+                extra.insert("targets".into(), json!(targets));
+            }
+            return Some((Kind::Surface(k), ins, extra));
         }
         FeatureKind::SurfaceExtend { edges, mode, up_to, neighbours, .. } => {
             // The dialog edits the edges and the distance; the rest is kept as it was.

@@ -248,12 +248,19 @@ fn a_pipe_or_thicken_cut_from_its_window_leaves_hidden_bodies_alone() {
         for (cmd, p) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
             h.app.run(&cmd, p).unwrap();
         }
-        found.push((tool, volume(&h, "A").unwrap_or_default(), volume(&h, "B").unwrap_or_default()));
+        // Editing it keeps the shown box as its only target.
+        let id = h.app.session.doc.features.last().map(|f| f.id);
+        let edit = id.and_then(|id| crate::dialogs::for_feature(&h.app, id, None)).and_then(|d| crate::dialogs::apply_commands(&h.app, &d).ok());
+        let kept = edit.as_ref().and_then(|c| c.first()).map(|(_, p)| p["params"]["targets"].clone());
+        found.push((tool, volume(&h, "A").unwrap_or_default(), volume(&h, "B").unwrap_or_default(), kept));
     }
     // Pipe: 6 mm across 20 mm takes 180π (565.49 mm3); Thicken: 20 x 4 x 2 takes 160 mm3.
-    for (tool, a, b) in &found {
+    for (tool, a, b, kept) in &found {
         let cut = if *tool == "solid.pipe" { 180.0 * std::f64::consts::PI } else { 160.0 };
-        assert!((a - (8000.0 - cut)).abs() < 1.0 && (b - 8000.0).abs() < 1e-6, "the shown box A is cut, the hidden B untouched: {found:?}");
+        assert!(
+            (a - (8000.0 - cut)).abs() < 1.0 && (b - 8000.0).abs() < 1e-6 && *kept == Some(json!(["A"])),
+            "the shown box A is cut, the hidden B untouched, an edit keeps A as the target: {found:?}"
+        );
     }
 }
 
