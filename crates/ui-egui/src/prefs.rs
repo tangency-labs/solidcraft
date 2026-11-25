@@ -1379,6 +1379,7 @@ pub struct PrefsWindow {
     /// that a decision was written while it ran, even one that leaves the value as it was.
     pub(crate) grants_revision: u64,
     pub(crate) plugin_remove: Option<(String, String)>,
+    pub(crate) plugin_remove_user_data: bool,
     panel_restore_details: bool,
     panel_restore_retry: bool,
     panel_popup_reset: bool,
@@ -4050,6 +4051,11 @@ fn prepare_preferences(
         && !matches!(v.as_str(), Some("view" | "window"))
     {
         return Err("`dimension_input` must be view or window".into());
+    }
+    if let Some(v) = p.get("isolate_others")
+        && !matches!(v.as_str(), Some("hidden" | "transparent" | "wireframe"))
+    {
+        return Err("`isolate_others` must be hidden, transparent or wireframe".into());
     }
     if let Some(value) = p.get("graphics_backend")
         && !value.as_str().is_some_and(|id| GRAPHICS_BACKENDS.contains(&id) || id == app.preferences.graphics_backend)
