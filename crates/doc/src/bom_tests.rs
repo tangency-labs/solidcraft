@@ -1077,6 +1077,44 @@ fn a_switched_off_part_leaves_its_subassembly_and_its_kit() {
     assert_eq!(rows(&shown), want);
 }
 
+/// A part's finish is what its row says, from its finish property, else its free property of that
+/// name; a single-part design (its own bodies, no component placed) is its own row, and its material
+/// and finish are the design's own properties.
+#[test]
+fn a_rows_finish_and_a_single_part_designs_own_material_and_finish() {
+    let mut doc = Document::default();
+    let (plate, _) = add(&mut doc, "Plate", 0);
+    let (cover, _) = add(&mut doc, "Cover", 0);
+    let (lid, _) = add(&mut doc, "Lid", 0);
+    for (id, key, text) in [(plate, "finish", "Powder coat, RAL 9005, matt"), (cover, "finish", "")] {
+        set(&mut doc, id, key, text);
+    }
+    doc.components.iter_mut().find(|c| c.id == cover).unwrap().properties.insert("finish".into(), "Zinc plate".into());
+    for id in [plate, cover, lid] {
+        boxed(&mut doc, id, false);
+    }
+    let finishes = |doc: &Document| {
+        let mut rows: Vec<(String, String)> =
+            evaluated(doc, view(View::PartsOnly)).rows.iter().map(|r| (r.names.join("; "), r.finish.clone())).collect();
+        rows.sort();
+        rows
+    };
+    let want = [("Cover", "Zinc plate"), ("Lid", ""), ("Plate", "Powder coat, RAL 9005, matt")].map(|(n, f)| (n.to_string(), f.to_string()));
+    assert_eq!(finishes(&doc), want, "the free property, none, the property");
+
+    let mut single = Document::default();
+    boxed(&mut single, 0, false);
+    single.metadata.0.insert("material".into(), json!("CRS, 16 ga"));
+    single.metadata.0.insert("finish".into(), json!("Zinc plate, clear"));
+    let bom = evaluated(&single, Request::default());
+    assert_eq!(bom.rows.len(), 1);
+    let row = &bom.rows[0];
+    assert_eq!(
+        (row.materials.as_slice(), row.finish.as_str(), row.statics.as_slice()),
+        (&["CRS, 16 ga".to_string()][..], "Zinc plate, clear", &[Static::Material][..])
+    );
+}
+
 /// What an assembly is made of leaves out a part switched off inside it: its static material names
 /// nothing, as its bodies weigh nothing, whether or not the list shows it.
 #[test]

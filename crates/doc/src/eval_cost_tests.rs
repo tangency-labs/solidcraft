@@ -4519,20 +4519,42 @@ fn round_of_every_edge(doc: &mut Document, body: &kernel::Body, radius: &str) ->
 /// search for the largest radius that fits (#4282): the search cannot be guided then, and it
 /// blends every edge again for each of the sizes it tries. On the design of #4282 (a cube with
 /// a hole through each axis, a 2 mm round of every edge) those ten blends of the forty-one edges
-/// took 77 s, fifteen times the blend that failed, and they found nothing: the round fails at
-/// any radius there.
+/// took 77 s, fifteen times the blend that failed, and they found nothing. That round now builds
+/// ([`the_round_of_every_edge_of_a_cube_holed_along_each_axis_builds`]); the refusal here is
+/// one the kernel still cannot size.
 #[test]
 fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
-    // The design of #4282 at a third of its size (the round and the holes keep their
-    // proportions): a cube with a hole through each axis, a round of every one of its edges.
-    // The kernel refuses the radius and cannot size the refusal.
-    let mut doc = Document::new("holed cube");
-    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    // A 60 x 40 x 25 block cut down to a ball of radius 35.75 about (0, 0, 12.5), and a 2 mm
+    // round of its four top edges (solidcore-ops'
+    // `rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused`).
+    // The top face is the rectangle less its corners outside the circle of radius
+    // rho = sqrt(35.75^2 - 12.5^2) = 33.49, so the four edges end on the ball and share no
+    // corner. Past their ends the rails of two neighbouring rounds run on as the lines
+    // x = 30 - r and y = 20 - r and cross on the top face while (30 - r)^2 + (20 - r)^2 < rho^2,
+    // so no round larger than r = 25 - sqrt(625 - (1300 - rho^2) / 2) = 1.850 fits. The kernel
+    // finds the bands overlapping past the edges' ends and refuses the round as having no room
+    // there, without naming a radius that fits.
+    let mut doc = Document::new("ball-trimmed block");
+    block(&mut doc, "Part", Vec3::new(-30.0, -20.0, 0.0), [60.0, 40.0, 25.0]);
+    let ball = FeatureKind::Sphere { center: point_expr(Vec3::new(0.0, 0.0, 12.5)), radius: "35.75".into(), operation: Operation::Intersect };
+    doc.add_feature(ball, None).unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
-    let body = model.state().bodies[0].body.clone();
-    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    let top = [Vec3::new(30.0, -10.0, 25.0), Vec3::new(-30.0, 10.0, 25.0), Vec3::new(-15.0, -20.0, 25.0), Vec3::new(15.0, 20.0, 25.0)];
+    let kind = FeatureKind::Fillet {
+        edges: top.into_iter().map(Position).collect(),
+        radius: "2".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: true,
+        edge_radii: Vec::new(),
+    };
+    let fillet = doc.add_feature(kind, None).unwrap();
     let work = counted(|| model.evaluate(&doc));
     let r = model.result(fillet);
     let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
@@ -4540,6 +4562,40 @@ fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
     // The blend the kernel refused, and no search for a radius that fits.
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 0, "{work:?}");
+}
+
+/// The design of #4282 at a third of its size: a 10 mm cube with a hole of radius 5/3 through
+/// its centre along each axis, and a round R = 2/3 of every one of its edges. The round builds
+/// one valid body (the kernel refused it without a radius to try until #21715: rail ends whose
+/// feet straddle a hole's seam at the three-hole corners), and it removes the volume derived here:
+/// - 11.04862 for the 12 cube edges with their 8 corners, exact: the cube less the rounded box
+///   of b = a - 2R, a^3 - (b^3 + 6 b^2 R + 3 pi b R^2 + 4/3 pi R^3).
+/// - 6.52825 for the 6 hole rims, exact: each a quarter-torus spandrel by Pappus, the area
+///   R^2 (1 - pi/4) about the hole's axis at r + R (10 - 3 pi) / (12 - 3 pi).
+/// - 2.15652 for the 12 edges where two holes meet, approximate: R^2 (tan(t/2) - t/2) along each
+///   2.840 mm edge, the angle t between the walls going from 90 to 60 degrees, the walls taken as
+///   flat and the three-hole corners left out.
+///
+/// Together 19.73339. The tolerance, 0.02 mm3, is about 1% of the approximate 2.157: the kernel's
+/// 19.72604 is 0.0073 below the sum.
+#[test]
+fn the_round_of_every_edge_of_a_cube_holed_along_each_axis_builds() {
+    let mut doc = Document::new("holed cube");
+    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let body = model.state().bodies[0].body.clone();
+    let before = kernel::measure(&body).unwrap().volume;
+    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    model.evaluate(&doc);
+    assert_eq!(model.result(fillet).and_then(|r| r.error.clone()), None);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    let rounded = &st.bodies[0].body;
+    kernel::check_kept(rounded).unwrap();
+    let removed = before - kernel::measure(rounded).unwrap().volume;
+    assert!((removed - 19.73339).abs() < 0.02, "{removed}");
 }
 
 /// A round the kernel refuses naming the radius that fits still searches for it: the search is

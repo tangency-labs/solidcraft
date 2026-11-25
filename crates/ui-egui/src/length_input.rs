@@ -203,7 +203,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::Primitive { fields, .. } => fields.iter_mut().filter(|(key, _)| *key != "revolutions").map(|(_, value)| value).collect(),
         D::Surface(k) => match k {
             Surf::Extrude { distance, to_offset, .. } => vec![distance, to_offset],
-            Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance } => vec![distance],
+            Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance, .. } => vec![distance],
             Surf::Thicken { thickness, .. } => vec![thickness],
             Surf::Stitch { tolerance } | Surf::Fair { tolerance, .. } => vec![tolerance],
             _ => vec![],

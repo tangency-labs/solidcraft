@@ -314,7 +314,7 @@ fn fixture() -> (Harness, u64, u64, u64) {
 
 #[test]
 fn viewport_restores_isolated_occurrences_and_undo_restores_isolation() {
-    for label in ["Show All", "Unisolate"] {
+    for label in ["Show All", "Exit Isolation"] {
         let (mut h, _, first, second) = fixture();
         h.app.session.selection.clear();
         let menu_item =
@@ -421,6 +421,34 @@ fn save_mesh_browser_pick_uses_the_body_of_the_clicked_placement() {
     let commands = crate::dialogs_save_mesh::commands(k, &d.inputs).unwrap();
     assert_eq!(commands[0].1["bodies"], json!(expected));
     assert_ne!(expected, h.app.session.occurrence_bodies(&[first], true).unwrap());
+}
+
+/// #8120: Isolate on an occurrence menu becomes Unisolate and restores sibling placements.
+#[test]
+fn occurrence_isolate_offers_unisolate_beside_it() {
+    let (mut h, _, first, second) = fixture();
+    let first_body = h.app.session.occurrence_bodies(&[first], true).unwrap()[0].clone();
+    let second_body = h.app.session.occurrence_bodies(&[second], true).unwrap()[0].clone();
+    let target = Target::Occurrence { path: vec![second] };
+    let isolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Isolate").expect("Isolate");
+    context_menu::run_item(&mut h.app, &isolate, egui::Pos2::ZERO);
+    assert!(!h.app.session.body_visible(&first_body));
+    assert!(h.app.session.body_visible(&second_body));
+
+    // The isolated placement: Isolate would change nothing, so Exit Isolation alone, with its key.
+    let own = context_menu::items(&h.app, &target);
+    assert!(!own.iter().any(|i| i.id == "ui.isolateOccurrence"), "no Isolate that changes nothing");
+    assert!(own.iter().any(|i| i.id == "ui.unisolate" && i.shortcut == "Ctrl+Shift+I"));
+    // The hidden placement keeps its own Isolate, then Exit Isolation.
+    let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![first] });
+    let at = items.iter().position(|i| i.id == "ui.isolateOccurrence").expect("Isolate on the hidden placement");
+    assert_eq!(items[at].params.as_ref().unwrap()["path"], json!([first]), "this placement's own Isolate");
+    assert_eq!((items[at].shortcut.as_str(), items[at + 1].id.as_str(), items[at + 1].shortcut.as_str()), ("Ctrl+I", "ui.unisolate", "Ctrl+Shift+I"));
+    let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Exit Isolation").expect("Exit Isolation");
+    context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
+    assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Exit Isolation"), "gone once everything is back");
+    assert!(h.app.session.body_visible(&first_body) && h.app.session.body_visible(&second_body));
+    assert!(h.app.session.visibility.hidden_occurrences.is_empty());
 }
 
 #[test]

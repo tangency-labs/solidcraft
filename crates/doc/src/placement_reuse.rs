@@ -175,6 +175,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         point_clouds,
+        // Display only: a plane's drawn size shapes nothing.
+        plane_extents: _,
         notes: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,
