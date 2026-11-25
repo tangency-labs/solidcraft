@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use solidcore_record::Vec3;
-use solidcraft_doc::{Dir, Document, FeatureKind, Operation, point_expr};
+use solidcraft_doc::{Document, FeatureKind, Operation, dir_expr, point_expr};
 use solidcraft_exchange::{Body, Edit, Error, MeshVertex, Options, Point, Snapshot, Tolerance, open};
 
 /// A `length` × 10 × 5 mm box at the origin, its length the user parameter `L`.
@@ -46,7 +46,7 @@ pub fn holed_doc() -> Document {
     doc.add_feature(
         FeatureKind::Cylinder {
             base: point_expr(Vec3::new(10.0, 10.0, -1.0)),
-            axis: Dir(Vec3::Z),
+            axis: dir_expr(Vec3::Z),
             radius: "3".into(),
             height: "12".into(),
             operation: Operation::Cut,

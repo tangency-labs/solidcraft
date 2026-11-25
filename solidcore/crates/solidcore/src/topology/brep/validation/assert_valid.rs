@@ -254,8 +254,8 @@ impl BrepCheck {
     /// (`None` for a synthetic line).
     fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
         let mut out = Vec::new();
-        let pointer_failures = self.pointer_reports.reports().iter().any(|r| !r.ok);
-        if self.pointers_status != SUCCESS && self.pointer_reports.is_empty() {
+        let pointer_failures = self.pointer_reports.reports().iter().any(is_failure);
+        if self.pointers_status != SUCCESS && !pointer_failures {
             out.push((FailureClass::PointersStatus(self.pointers_status), None));
         }
         out.extend(
@@ -413,6 +413,10 @@ fn check_brep_counted(
 /// `CheckFace`'s loop checks, so on the same body the second pass would report nothing,
 /// succeed and write nothing.
 ///
+/// (not upstream, #21105) Where a face of `b` lacks its UV trim curves, the whole check runs
+/// on a copy standing for `b` (`standing_where_trims_lack`), so the trims it builds and the
+/// tolerances their attaching raises stay off `b`.
+///
 /// # Errors
 ///
 /// Those of [`validate_pointers`](super::validate_pointers) and [`assert_valid`], including
@@ -450,6 +454,8 @@ fn check_with_keys_counted(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<(BrepCheck, usize)> {
+    let mut standing = standing_where_trims_lack(b)?;
+    let b = standing.as_mut().unwrap_or(b);
     let mut pointer_reports = AssertArray::new();
     let before = b.write_stamps();
     let mut faces_whole = true;
@@ -461,15 +467,16 @@ fn check_with_keys_counted(
         false,
         keys,
         &mut faces_whole,
+        false,
     )?;
     let pointers_repeat = !(k.memoize_curve_caches
         && pointers_status == SUCCESS
         && !exclusion_failed
         && faces_whole
-        && pointer_reports.is_empty()
+        && !pointer_reports.reports().iter().any(is_failure)
         && b.write_stamps() == before);
     let mut reports = AssertArray::new();
-    let assert_valid = if pointer_reports.reports().iter().any(|r| !r.ok) {
+    let assert_valid = if pointer_reports.reports().iter().any(is_failure) {
         None
     } else {
         Some(assert_valid_with(
@@ -483,6 +490,21 @@ fn check_with_keys_counted(
             pointers_repeat,
         )?)
     };
+    // Not upstream (#21105): a warning the first pointer pass reported (a turned-back
+    // curve end, test 147) is said once. The second pass (`AssertValid`'s level-0
+    // `ValidatePointers`, run when the first could not be skipped) reports it again; it is
+    // dropped there, so the check says the same whether that pass ran or was skipped.
+    let repeated: Vec<usize> = (0..reports.len())
+        .rev()
+        .filter(|&i| {
+            reports
+                .get(i)
+                .is_some_and(|r| r.is_warning() && pointer_reports.contains(r))
+        })
+        .collect();
+    for i in repeated {
+        reports.remove_at(i);
+    }
     let passes = usize::from(assert_valid.is_some() && pointers_repeat);
     Ok((
         BrepCheck {
@@ -499,7 +521,8 @@ fn check_with_keys_counted(
 /// classes, `ValidatePointers` at level 0, the validate-only tolerance pass, Brep
 /// tests 0-21; not upstream's `ContainsCoincidentTopology`, see `brep`) and, with `walk`,
 /// `AssertValid` of every region, shell, face, loop, edge and vertex. Failed checks are appended to `reports`
-/// in native order. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
+/// in native order. (not upstream, #21105) Where a face of `b` lacks its UV trim curves, it
+/// runs on a copy standing for `b`, as [`check_brep_with_keys`] does. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
 /// geometry owners' identities (as for [`validate_pointers`](super::validate_pointers)). Returns `false` when a
 /// check failed (at once when `ValidatePointers` does not succeed).
 ///
@@ -533,7 +556,42 @@ pub fn assert_valid_scoped(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<bool> {
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
+    let mut standing = standing_where_trims_lack(b)?;
+    let b = standing.as_mut().unwrap_or(b);
     assert_valid_with(k, b, reports, level, walk, keys, scope, true)
+}
+
+/// (not upstream, #21105) The B-rep a check runs on in place of `b`: a copy standing for it,
+/// its faces' definitions kept ([`Brep::clone_standing_for_self_keeping_definitions`]), where
+/// one of its faces lacks UV trim curves
+/// ([`face_uv_curves_present`](crate::topology::trimming_tools::face_uv_curves_present)),
+/// else `None`, and the check runs on `b`. The walk builds a face's missing trims (`CheckFace`,
+/// a vertex use's UV point), and attaching a trim raises the tolerances of its edge and
+/// vertices by an amount that depends on the trims the edge already has, so a check run on
+/// `b` would leave those trims and raises, in the walk's order, on the body it was asked
+/// about. On the copy the check builds and reads the same trims and reports the same, and `b`
+/// keeps none of it: no trims, no raised tolerances, and none of the gaps or repairs the check
+/// stores. A body that has its trims, the one a caller makes once
+/// ([`create_missing_uv_trim_curves`](crate::topology::brep::p2::create_missing_uv_trim_curves)),
+/// is checked on itself and builds none. A face whose trims cannot be looked up (a broken
+/// loop link) counts as lacking them: the check, on the copy, is what reports the link.
+///
+/// # Errors
+///
+/// Those of the copy's geometry copies.
+fn standing_where_trims_lack(b: &Brep) -> Result<Option<Brep>> {
+    for &f in b.face_list() {
+        if !matches!(
+            crate::topology::trimming_tools::face_uv_curves_present(b, f),
+            Ok(true)
+        ) {
+            return Ok(Some(b.clone_standing_for_self_keeping_definitions()?));
+        }
+    }
+    Ok(None)
 }
 
 /// [`assert_valid_scoped`]; without `pointers`, its `ValidatePointers` pass is taken as
@@ -604,9 +662,9 @@ pub fn validate_and_update_tolerances(
     };
     let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
     if status != SUCCESS {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             "topology::brep::validation::validate_and_update_tolerances",
-            "an edge use's vertex use has no vertex",
+            crate::error::topology::TopologyFailure::VertexuseWithoutVertex,
         ));
     }
     Ok(gaps)
@@ -846,9 +904,7 @@ mod tests {
         );
         assert_eq!(
             err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "an edge use's vertex use has no vertex"
-            ))
+            Some(&crate::error::topology::TopologyFailure::VertexuseWithoutVertex)
         );
     }
 
@@ -939,7 +995,7 @@ mod tests {
     #[test]
     fn a_pointer_pass_that_writes_nothing_is_not_run_again() {
         let (mut k, mut b) = checked_box(true);
-        // (a first check may make what the body lacks, such as a line's NURB)
+        // (a first check may store what the body lacks, such as its gaps)
         check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         let (skipped, passes) = check_counting(&mut k, &mut b);
         assert_eq!(passes, 0, "the second pointer pass ran");
@@ -952,8 +1008,97 @@ mod tests {
         assert_eq!(printed(&skipped), printed(&full));
     }
 
+    /// A check leaves a body it has checked before as it was (#21105): the gaps it stores
+    /// are stored already, the tolerance pass takes `bValidateOnly` as its argument instead
+    /// of setting and restoring it on the body, and no curve is repaired. Compared by
+    /// value, not by write stamps: the vertex/face gap refresh clears the caches of the
+    /// vertex's other uses on the face and stores only its own (`CalcVertexFaceGap`), so a
+    /// later read of a sibling computes its gap again and stores the same value.
+    #[test]
+    fn a_repeated_check_leaves_the_body_as_it_was() {
+        for memoize in [true, false] {
+            let (mut k, mut b) = checked_box(memoize);
+            check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+            let before = format!("{b:?}");
+            let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+            assert!(check.is_valid(), "{:?}", check.lines());
+            assert!(
+                format!("{b:?}") == before,
+                "a repeated check changed the body (memoize {memoize})"
+            );
+        }
+    }
+
+    /// What attaching a UV trim writes, entity by entity: each edge use's own trim slot and
+    /// drop record, and the edge and vertex tolerances an attached trim raises. Not the gaps
+    /// ([`written_fields`]): #21105 keeps a check's stored gaps as derived values.
+    fn trims_and_tolerances(b: &Brep) -> Vec<String> {
+        let mut out = Vec::new();
+        for &e in b.edge_list() {
+            let edge = b.edge(e).unwrap();
+            out.push(format!("{e:?} {:x}", edge.tolerance.to_bits()));
+            for &eu in &edge.edgeuses {
+                let u = b.edgeuse(eu).unwrap();
+                out.push(format!(
+                    "{eu:?} {:?} {:?}",
+                    u.uv_trim_curve, u.drop_curve_fail
+                ));
+            }
+        }
+        for &v in b.vertex_list() {
+            let tolerance = b.vertex(v).unwrap().tolerance;
+            out.push(format!("{v:?} {:x}", tolerance.to_bits()));
+        }
+        out
+    }
+
+    /// #21105 step 1: a check never creates a UV trim on the body it was given. A body whose
+    /// faces lack trims keeps its trims and tolerances through `check_brep` at levels 2 and 0
+    /// and through `assert_valid` with the walk, and a second check reports what the first
+    /// did (invariant 11 of `docs/validity-and-tolerances.md`).
+    #[test]
+    fn a_check_of_faces_without_trims_leaves_their_trims_and_tolerances() {
+        for level in [CheckLevel::Level2, CheckLevel::Level0] {
+            let (mut k, mut b) = box_and_cylinder(true);
+            let lacking = b
+                .face_list()
+                .iter()
+                .filter(|&&f| {
+                    !crate::topology::trimming_tools::face_uv_curves_present(&b, f).unwrap()
+                })
+                .count();
+            assert!(lacking > 0, "the united body already has every trim");
+            let before = trims_and_tolerances(&b);
+            let first = check_brep(&mut k, &mut b, level).unwrap();
+            assert!(first.is_valid(), "{level:?}: {:?}", first.lines());
+            assert_eq!(
+                trims_and_tolerances(&b),
+                before,
+                "{level:?}: the check wrote trims or tolerances on the body"
+            );
+            let second = check_brep(&mut k, &mut b, level).unwrap();
+            assert_eq!(printed(&second), printed(&first), "{level:?}");
+            assert_eq!(trims_and_tolerances(&b), before, "{level:?}: second check");
+        }
+        let (mut k, mut b) = box_and_cylinder(true);
+        let before = trims_and_tolerances(&b);
+        let naming = b.naming();
+        let recorded = b.geometry_owner_keys().clone();
+        let keys =
+            |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+        assert!(assert_valid(&mut k, &mut b, None, 2, true, &keys).unwrap());
+        assert_eq!(
+            trims_and_tolerances(&b),
+            before,
+            "AssertValid with the walk wrote trims or tolerances on the body"
+        );
+        // a level past 4 is refused before any copy is made
+        let err = assert_valid(&mut k, &mut b, None, 5, true, &keys).unwrap_err();
+        assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
+    }
+
     /// Replaces the curve of the box's first edge by a cubic B-spline along the same line
-    /// whose second control point lies 0.01 behind its start: `ValidatePointers` takes the
+    /// whose second control point lies 0.001 of the edge behind its start: `ValidatePointers` takes the
     /// polygon for a reversal and straightens it, a write to the body.
     fn bend_first_edge(k: &Kernel, b: &mut Brep) -> crate::topology::EdgeId {
         use crate::nurbs::b_spline_curve::p1::{
@@ -1002,34 +1147,57 @@ mod tests {
         base.gw_nurb().unwrap().cpts()[1].to_euclid()
     }
 
-    /// A first pass that repairs the body (here a reversed curve end) leaves a body the
-    /// second pass has not seen, so the second pass still runs, and the check and the
-    /// repaired body are those of the full check.
+    /// A reversed curve end is reported, not repaired (#21105 step 2): the check leaves the
+    /// edge curve as it is and says so in one warning (test 147, which does not fail the
+    /// check), the same with and without the memoized pass. The bent curve doubles back
+    /// along its line, so its speed vanishes inside it: the check now sees that too
+    /// (`SmBSplineCurve` test 12), where upstream straightened the end first and then
+    /// checked the straightened curve. The explicit fix path
+    /// (`ValidateGeometry(bFixTolerances = TRUE)`) still straightens the end, and the
+    /// body it leaves checks valid with no warning.
     #[test]
-    fn a_pointer_pass_that_repairs_the_body_is_run_again() {
+    fn a_reversed_end_is_reported_not_repaired() {
         let (mut k, mut b) = checked_box(true);
         let e = bend_first_edge(&k, &mut b);
         let bent = second_control_point(&b, e);
-        let (repaired, passes) = check_counting(&mut k, &mut b);
-        assert!(repaired.assert_valid.is_some(), "{:?}", repaired.lines());
-        assert_ne!(
+        let (reported, _) = check_counting(&mut k, &mut b);
+        assert_eq!(
             second_control_point(&b, e),
             bent,
-            "the check left the end reversed"
+            "the check repaired the reversed end"
         );
+        let warnings: Vec<_> = reported.warnings().map(|r| r.test_index).collect();
+        assert_eq!(warnings, [147], "{reported:?}");
+        let failures: Vec<_> = reported
+            .failures()
+            .map(|r| (r.reporting_type, r.test_index))
+            .collect();
         assert_eq!(
-            passes, 1,
-            "the second pointer pass was skipped after a repair"
+            failures,
+            [(crate::geom::assert_array::labels::B_SPLINE_CURVE_TYPE, 12)],
+            "{:?}",
+            reported.lines()
         );
 
         let (mut k, mut full_b) = checked_box(false);
         let e = bend_first_edge(&k, &mut full_b);
         let (full, _) = check_counting(&mut k, &mut full_b);
-        assert_eq!(printed(&repaired), printed(&full));
-        assert_eq!(
+        assert_eq!(printed(&reported), printed(&full));
+        assert_eq!(second_control_point(&full_b, e), bent);
+
+        let naming = b.naming();
+        let recorded = b.geometry_owner_keys().clone();
+        let keys =
+            |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+        super::super::validate_geometry(&k, &mut b, e, true, &keys).unwrap();
+        assert_ne!(
             second_control_point(&b, e),
-            second_control_point(&full_b, e)
+            bent,
+            "the fix path left the end reversed"
         );
+        let (fixed, _) = check_counting(&mut k, &mut b);
+        assert!(fixed.is_valid(), "{:?}", fixed.lines());
+        assert_eq!(fixed.warnings().count(), 0, "{:?}", fixed.lines());
     }
 
     /// A face without UV trims is checked on a copy standing for the body, which the first
@@ -1085,6 +1253,7 @@ mod tests {
             false,
             &keys,
             &mut whole,
+            false,
         );
         whole
     }

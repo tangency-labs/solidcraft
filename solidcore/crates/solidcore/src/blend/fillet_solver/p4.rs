@@ -4142,16 +4142,15 @@ mod tests_c5 {
             .set_fillet_edge_type(FilletEdgeType::CrossSection);
         f.fb.geom_mut(f.g).unwrap().edges.push(rail);
         // CalcCrossSection (blend.fillet_geom_p5) runs: the edge has no original face,
-        // a stage failure (#15034) that keeps SM_ERR_NULL_POINTER (#13790)
+        // a defect with its reason (#15034) that keeps SM_ERR_NULL_POINTER (#13790)
         let e = f.run().unwrap_err();
         assert_eq!(
-            (
-                e.operation(),
-                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect()
-            ),
+            (e.operation(), e.blend_failure()),
             (
                 "blend::fillet_geom::p5::FilletBrep::calc_cross_section",
-                true
+                Some(&BlendFailure::Defect {
+                    why: crate::blend::fillet_geom::p5::FE_NO_ORIGINAL_FACE
+                })
             )
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
@@ -5330,7 +5329,9 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
                 None
             };
         // a chamfer's chord and sizes, for the linear generator's definition (#2486)
-        let chord = if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::ConstDist {
+        let chord = if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::ConstDist
+            && self.ops.solver().station_setback().is_none()
+        {
             self.ops.constant_distance().ok()
         } else {
             None

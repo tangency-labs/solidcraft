@@ -133,6 +133,11 @@ pub(crate) fn features(doc: &Document, state: &ModelState, bodies: &[Body]) -> V
     let (vals, _) = doc.param_values();
     let eval = |e: &str, k: Kind| Document::eval_in(&vals, e, k).ok().filter(|v| v.is_finite());
     let at = |p: &[solidcraft_doc::Expr; 3]| Some(Point([eval(&p[0], Kind::Length)?, eval(&p[1], Kind::Length)?, eval(&p[2], Kind::Length)?]));
+    // A primitive's axis: its components evaluated as plain numbers, as the model builds it (#18822).
+    let axis_of = |d: &solidcraft_doc::DirExpr| {
+        let [x, y, z] = d;
+        solidcraft_doc::unit_direction(Vec3::new(eval(x, Kind::Unitless)?, eval(y, Kind::Unitless)?, eval(z, Kind::Unitless)?)).and_then(direction)
+    };
     let solved = |id: solidcraft_doc::SketchId| state.sketch(*id);
     doc.features
         .iter()
@@ -191,7 +196,7 @@ pub(crate) fn features(doc: &Document, state: &ModelState, bodies: &[Body]) -> V
                 DocKind::Cylinder { base, axis, operation: op, .. } => FeatureKind::Cylinder {
                     operation: operation(*op),
                     base: at(base),
-                    axis: direction(**axis),
+                    axis: axis_of(axis),
                     radius: length("Radius"),
                     height: length("Height"),
                 },

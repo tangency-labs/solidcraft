@@ -45,6 +45,18 @@ fn features_list_their_kinds_dimensions_and_faces() {
     assert_eq!((made(block.id), made(hole.id)), (6, 1));
 }
 
+/// A cylinder's axis is its expressions evaluated and normalized, as the model builds it (#18836).
+#[test]
+fn a_cylinder_axis_is_its_expressions_evaluated() {
+    let mut doc = holed_doc();
+    let Some(solidcraft_doc::FeatureKind::Cylinder { base, axis, .. }) = doc.features.get_mut(1).map(|f| &mut f.kind) else { panic!("the cylinder") };
+    *base = solidcraft_doc::point_expr(solidcore_record::Vec3::new(10.0, 10.0, 11.0));
+    *axis = ["0".into(), "1 - 1".into(), "-2 * 3".into()];
+    let s = snap_with(&doc, Vec::new()).unwrap();
+    let FeatureKind::Cylinder { axis, .. } = &s.features[1].kind else { panic!("{:?}", s.features[1].kind) };
+    assert_eq!(*axis, Direction::new([0.0, 0.0, -1.0]));
+}
+
 /// Suppressing the hole fills it: six planes, the full volume; the design itself keeps it.
 #[test]
 fn suppressing_a_feature_rebuilds_without_it() {

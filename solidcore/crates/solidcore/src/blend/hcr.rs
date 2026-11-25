@@ -87,7 +87,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -308,11 +309,11 @@ fn brep_surfaces(brep: &Brep) -> Result<Vec<FaceId>> {
     let mut out = Vec::new();
     // for every face
     for f in crate::topology::brep::p1::faces(brep, None)? {
-        let surface = brep
-            .face(f)?
-            .surface
-            .as_ref()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+        let surface = brep.face(f)?.surface.as_ref().ok_or_else(|| {
+            Failure::new(OP, BlendFailure::FaceWithoutSurface { face: f })
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+        })?;
         // add all standalone face->Surfaces to the list
         if surface.owner() == Some(crate::topology::brep::p1::default_face_owner(brep, f)) {
             out.push(f);
@@ -1412,7 +1413,15 @@ impl Hcr {
                 .as_ref()
                 .ok_or(undefined("face without surface"))?;
             if b_spline_part(surface).is_none() {
-                return Err(SolidError::blend_missing(OP, "the surface's B-spline form"));
+                return Err(Failure::new(
+                    OP,
+                    BlendFailure::SurfaceWithoutBSplineForm {
+                        face: f,
+                        kind: surface.type_string(),
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error());
             }
             // skip Planes - they don't have silhouettes.
             if matches!(surface.kind(), SurfaceKind::Plane(_)) {

@@ -1288,13 +1288,7 @@ trait IntoNav {
 }
 impl IntoNav for egui::PointerButton {
     fn into_nav(self) -> crate::prefs::NavButton {
-        match self {
-            egui::PointerButton::Middle => crate::prefs::NavButton::Middle,
-            egui::PointerButton::Secondary => crate::prefs::NavButton::Right,
-            egui::PointerButton::Extra1 => crate::prefs::NavButton::Extra1,
-            egui::PointerButton::Extra2 => crate::prefs::NavButton::Extra2,
-            egui::PointerButton::Primary => crate::prefs::NavButton::Left,
-        }
+        crate::prefs::NavButton::of_pointer(self)
     }
 }
 

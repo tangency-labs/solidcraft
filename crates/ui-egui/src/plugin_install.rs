@@ -7,6 +7,11 @@ use solidcraft_ui_text::{format, tr};
 
 use crate::{SolveApp, ui_kit};
 
+/// The plugin package jobs running now, for `control.pending` and `control.running` (#20814).
+pub fn running_jobs() -> Vec<Value> {
+    crate::plugins::running_jobs()
+}
+
 /// The plugin waiting for the user's answer.
 #[derive(Default)]
 pub(crate) struct State {
@@ -80,6 +85,7 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
                 grant
             })
             .collect(),
+        fuel: fuel_request(&plugin, app.preferences.plugin_max_fuel),
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
         input_folder: permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false),
     };
@@ -91,7 +97,7 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
 
 fn browse_folder(app: &mut SolveApp, name: String) {
     let generation = app.plugin_install.generation;
-    app.pick_folder(move |app, path| {
+    app.pick_folder("", move |app, path| {
         if app.plugin_install.generation == generation
             && let Some(path) = path
             && let Some(ask) = app.plugin_install.ask.as_mut()
@@ -107,6 +113,12 @@ fn browse_folder(app: &mut SolveApp, name: String) {
 pub(crate) fn memory_request(plugin: &Value, ceiling: usize) -> Option<usize> {
     let asked = plugin.pointer("/limits/memory_mib").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok())?;
     (asked > ceiling && asked <= solidcraft_engine::plugin::MAX_MEMORY_MIB).then_some(asked)
+}
+
+/// The manifest's fuel request when it needs approval above Max plugin fuel.
+pub(crate) fn fuel_request(plugin: &Value, ceiling: u64) -> Option<u64> {
+    let asked = plugin.pointer("/limits/fuel").and_then(Value::as_u64)?;
+    (asked > ceiling && asked <= solidcraft_engine::plugin::MAX_APPROVED_FUEL).then_some(asked)
 }
 
 fn text(plugin: &Value, key: &str) -> String {
@@ -153,6 +165,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.clock").to_string());
     }
+    for panel in plugin.get("panels").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(title) = panel.get("title").and_then(Value::as_str) {
+            lines.push(format("plugin_install.panel", &[("title", title)]));
+        }
+    }
     for listener in plugin.get("listeners").and_then(Value::as_array).into_iter().flatten() {
         if let Some(entry) = listener.get("entry").and_then(Value::as_str) {
             lines.push(format("prefs.plugin_design_listener", &[("entry", entry)]));
@@ -190,11 +207,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, &summary, ui_kit::Text::Report("plugin_install_summary", false));
                 }
                 ui_kit::text(ui, tr("plugin_install.asks"), ui_kit::Text::Report("plugin_install_asks", false));
-                if lines.is_empty() && ask.grants.memory_mib.is_none() {
+                if lines.is_empty() && ask.grants.memory_mib.is_none() && ask.grants.fuel.is_none() {
                     ui_kit::text(ui, tr("plugin_install.asks_nothing"), ui_kit::Text::Hint("plugin_install_nothing"));
                 }
                 for (i, line) in lines.iter().enumerate() {
                     ui.push_id(i, |ui| ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_permission")));
+                }
+                if let Some(fuel) = ask.grants.fuel {
+                    let line = format("plugin_install.fuel", &[("fuel", &fuel.to_string()), ("limit", &app.preferences.plugin_max_fuel.to_string())]);
+                    ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_fuel"));
                 }
                 if let Some(memory) = ask.grants.memory_mib {
                     let line = format(
@@ -297,7 +318,7 @@ fn install_now(app: &mut SolveApp, ask: &Ask) {
     if let Err(error) = crate::plugins::start_package(
         app,
         "plugin.install",
-        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
+        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"fuel":ask.grants.fuel,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
         crate::plugins::PackageAction::Install,
     ) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
@@ -327,6 +348,7 @@ mod tests {
                 if frame == 5 {
                     let text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
                     assert!(text.contains("Install") && text.contains("exports (write)"), "{text}");
+                    assert!(text.contains("10000000000000 fuel") && text.contains("100000000000"), "{text}");
                     assert!(text.contains("Browse…"), "{text}");
                     if size.x > 1000.0 {
                         assert!(text.contains("Menu: Plugins") && text.contains("Ribbon: Plugins"), "{text}");
@@ -380,7 +402,7 @@ mod tests {
             lines,
             [
                 "Change application settings and use application diagnostics.",
-                "Open, recover or switch designs.",
+                "Open, recover or switch designs, and see where the open design is saved.",
                 "Read or write files within the approved folders.",
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",
@@ -555,7 +577,7 @@ mod tests {
         let chosen = h.dir.join("Chosen exports");
         std::fs::create_dir(&chosen).unwrap();
         let answer = chosen.to_string_lossy().into_owned();
-        h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+        h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(Some(answer.clone())))));
         review_folder_package(&mut h, "0.1.0", json!([{"name":"source","read":true},{"name":"exports","write":true}]));
         h.frames(3);
         h.step(&json!({"widget":"Browse…","near":"exports (write)"})).unwrap();
@@ -564,7 +586,7 @@ mod tests {
         assert!(ask.grants.folders[0].folder.as_os_str().is_empty());
         assert_eq!(ask.grants.folders[1].folder, chosen);
         assert!(h.app.session.plugin_state.grants.is_empty(), "Browse does not approve anything");
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         h.frames(3);
         h.step(&json!({"widget":"Browse…","near":"exports (write)"})).unwrap();
         crate::file_picker::tick(&mut h.app, &h.ctx);
@@ -585,7 +607,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         let answer = std::rc::Rc::new(std::cell::RefCell::new(None::<Option<String>>));
         let response = answer.clone();
-        h.app.services.pick_folder = Some(Box::new(move || {
+        h.app.services.pick_folder = Some(Box::new(move |_: &str| {
             let response = response.clone();
             Box::pin(std::future::poll_fn(move |_| response.borrow_mut().take().map_or(std::task::Poll::Pending, std::task::Poll::Ready)))
         }));
@@ -628,12 +650,21 @@ mod tests {
     }
 
     #[test]
+    fn plugin_install_asks_for_fuel_only_above_the_default_and_within_the_hard_ceiling() {
+        let default = 100_000_000_000_u64;
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":10_000_000_000_000_u64}}), default), Some(10_000_000_000_000));
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":default}}), default), None);
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":10_000_000_000_001_u64}}), default), None);
+        assert_eq!(fuel_request(&json!({}), default), None);
+    }
+
+    #[test]
     fn install_plugin_reviews_then_installs_and_says_so() {
         let mut h = crate::scenario::Harness::new();
         let plugins = h.dir.join("plugins");
         h.app.session.plugin_state.plugins_dir = Some(plugins.clone());
         let manifest = json!({"id":"gears","name":"Gears","version":"0.1.0","description":"Spur gears","capabilities":["commands@0.1"],
-            "runtime":{"module":"gears.wasm","entries":[{"name":"make","slots":[{"kind":"menu","name":"Manufacturing"},{"kind":"ribbon","name":"Manufacturing"}]}],"commands":["solid.box","file.export_stl"],
+            "runtime":{"limits":{"fuel":10_000_000_000_000_u64,"memory_mib":64,"deadline_ms":5000},"module":"gears.wasm","entries":[{"name":"make","slots":[{"kind":"menu","name":"Manufacturing"},{"kind":"ribbon","name":"Manufacturing"}]}],"commands":["solid.box","file.export_stl"],
             "permissions":{"command_groups":["file"],"files":[{"name":"exports","write":true}]}}});
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         for (name, bytes) in [("gears/plugin.json", serde_json::to_vec(&manifest).unwrap()), ("gears/gears.wasm", b"\0asm".to_vec())] {
@@ -658,7 +689,7 @@ mod tests {
         assert!(!crate::plugins::valid_grants(&ask.grants));
         // The screenshot shows a folder a person would pick; the install below uses the test's own folder.
         h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = std::path::PathBuf::from("/home/maker/Documents/Gear exports");
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         capture_confirm(&mut h.app);
         h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = h.dir.clone();
         let ask = h.app.plugin_install.ask.take().unwrap();
@@ -682,6 +713,7 @@ mod tests {
         let grants = &h.app.preferences.plugin_grants["gears"];
         assert!(grants.command_groups.contains("file"));
         assert_eq!(grants.folders[0].folder, h.dir);
+        assert_eq!(serde_json::to_value(grants).unwrap()["fuel"], 10_000_000_000_000_u64);
         // A broken .zip is refused in plain words, with no question.
         let bad = h.dir.join("bad.ZIP");
         std::fs::write(&bad, b"not a zip").unwrap();
