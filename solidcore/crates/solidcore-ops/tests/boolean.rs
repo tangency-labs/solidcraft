@@ -4239,9 +4239,9 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
     let insert = fitted_loft_insert(200.0);
     let (vb, vi) = (volume(&bin), volume(&insert));
     let share = 2.0 * 1.15 * 1.15 * (1.0 - PI / 4.0) * 21.0;
-    let _ = session::take_failure_code();
+    let _ = (session::take_failure_code(), session::take_failure_detail());
     let joined = boolean(bin, insert, BooleanOp::Union);
-    let code = session::take_failure_code();
+    let (code, detail) = (session::take_failure_code(), session::take_failure_detail());
     match joined {
         Ok(Some(r)) => {
             let report = r.check(CheckLevel::All).unwrap();
@@ -4263,6 +4263,12 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
             assert_eq!(
                 code.operation, "boolean::merge::p4::manifold_boolean",
                 "{e:?} ({code}): refused before the leak check (#21822)"
+            );
+            // the leak check's own cause (`BooleanFailure::SolidLeaks`), not another refusal there
+            let detail = detail.unwrap_or_default();
+            assert!(
+                detail.contains("the solid it bounded merged into the outside"),
+                "{e:?}: {detail}"
             );
         }
     }

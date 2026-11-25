@@ -1038,6 +1038,67 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(())
     }
 
+    /// Not upstream (#21801): combines the vertex definition `vd` with an imprinted
+    /// definition of its proto vertex, as [`ProtoTopologyManager::resolve_proto_vertex`]
+    /// combines a proto vertex's definitions before they are imprinted. A definition added
+    /// while vertex definitions were being imprinted (the split point of an edge definition,
+    /// [`ProtoTopologyManager::edge_definition_split`]) joins its proto vertex after that
+    /// combining, so it is never weighed against the definitions there: when one of them is
+    /// the same point (the two would be combined there, with the same distance allowance)
+    /// and is already imprinted, imprinting `vd` as well would put a second vertex
+    /// beside that one's. `vd` instead takes that definition's final vertices in both B-reps
+    /// (the nearest such definition when several qualify) and its classifications stay as
+    /// they are; upstream would keep one of the two by the dimension of their topology, and
+    /// here the imprinted one is kept. Answers whether `vd` was combined (and so needs no
+    /// imprint).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ProtoTopologyManager::can_combine_vertex_definitions`];
+    /// [`SolidError::InvalidInput`] for a deleted definition or proto vertex.
+    pub fn combine_with_imprinted(
+        &mut self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        vd: VertexDefId,
+    ) -> Result<bool> {
+        let v = self.vd_ref(vd)?;
+        if v.final_vertex(1).is_some() || v.final_vertex(2).is_some() {
+            return Ok(false);
+        }
+        let position = v.position();
+        let pv = self.pv_live(v.proto_vertex())?;
+        let siblings = self
+            .proto_vertex(pv)
+            .map(|p| p.vertex_definitions().to_vec())
+            .unwrap_or_default();
+        let mut nearest: Option<(f64, [O; 2])> = None;
+        for other in siblings {
+            if other == vd {
+                continue;
+            }
+            let o = self.vd_ref(other)?;
+            let (Some(v1), Some(v2)) = (o.final_vertex(1), o.final_vertex(2)) else {
+                continue;
+            };
+            let dist = position.distance(o.position());
+            if nearest.is_some_and(|(d, _)| dist >= d) {
+                continue;
+            }
+            let factor = self.vertex_combine_factor(brep, vd, other)?;
+            if self.can_combine_vertex_definitions_within(k, brep, vd, other, factor)? != 0 {
+                nearest = Some((dist, [v1, v2]));
+            }
+        }
+        let Some((_, [v1, v2])) = nearest else {
+            return Ok(false);
+        };
+        let v = self.vd_mut(vd)?;
+        v.set_final_vertex(1, Some(v1));
+        v.set_final_vertex(2, Some(v2));
+        Ok(true)
+    }
+
     // ---- SmEdgeDefinition ------------------------------------------------------------
 
     /// Imprints the edge definition `ed` into both B-reps (`Imprint`; the vertex

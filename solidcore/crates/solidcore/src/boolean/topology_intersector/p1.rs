@@ -2532,7 +2532,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // point (`SM_ERR_NULL_POINTER` in `Imprint`) and the curve is missing from the face it
         // lies in. Every definition left over is imprinted in the same way, in list order,
         // until a pass adds none; past `LATE_VERTEX_PASSES` passes the remainder stays as
-        // before.
+        // before. It joined its proto vertex after the definitions there were combined, so when
+        // one of them is the same point and already imprinted, it is combined with that one
+        // and takes its vertices: imprinted as well, it would put a second vertex beside that
+        // one's (#20408's collars; `ProtoTopologyManager::combine_with_imprinted`).
         for _ in 0..LATE_VERTEX_PASSES {
             let late: Vec<VertexDefId> = mgr
                 .all_vertex_definitions()?
@@ -2547,7 +2550,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 if !imprinted.insert(vd) {
                     continue;
                 }
-                if !record(mgr.imprint_vertex_definition(k, brep, vd), ret)? {
+                let imprint = match mgr.combine_with_imprinted(k, brep, vd) {
+                    Ok(true) => Ok(()),
+                    Ok(false) => mgr.imprint_vertex_definition(k, brep, vd),
+                    Err(e) => Err(e),
+                };
+                if !record(imprint, ret)? {
                     *failure_edited = true;
                 }
             }
