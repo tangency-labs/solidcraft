@@ -287,6 +287,66 @@ pub fn frame_point(origin: RecordVec3, axes: [RecordVec3; 3], point: RecordVec3)
     ))
 }
 
+/// Express a line's point and direction in the local coordinates of a frame that maps
+/// local coordinates to world coordinates. The kernel applies translation only to the point.
+/// # Errors
+/// Returns an argument error for an invalid frame or a non-finite mapped coordinate.
+pub fn line_in_frame(
+    frame: &Matrix,
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<([f64; 3], [f64; 3])> {
+    let map = Transform { m: inverse(frame)? };
+    let (origin, direction) = map.transform_line(vec3(origin), vec3(direction));
+    let origin = [origin.x, origin.y, origin.z];
+    let direction = [direction.x, direction.y, direction.z];
+    if !finite(&origin) || !finite(&direction) {
+        return Err(Error::Argument);
+    }
+    Ok((origin, direction))
+}
+
+/// Orient an undirected axis by its largest component.
+pub fn canonical_axis_direction(direction: [f64; 3]) -> [f64; 3] {
+    vec3(direction).canonical_axis_direction().to_array()
+}
+
+/// The unit direction of an undirected axis, oriented by its largest component as
+/// [`canonical_axis_direction`] orients it. `None` for a direction no longer than
+/// `min_length` or one that is not finite.
+#[must_use]
+pub fn unit_axis_direction(direction: [f64; 3], min_length: f64) -> Option<[f64; 3]> {
+    vec3(direction)
+        .unit_axis_direction(min_length)
+        .map(Vec3::to_array)
+}
+
+/// Carry a definition's axis into world coordinates, orient it there, and express it in the
+/// authoring frame using the supplied world-to-author map.
+/// # Errors
+/// Returns an argument error for coordinates or a direction the kernel refuses.
+pub fn placed_axis(
+    definition_to_world: &Matrix,
+    world_to_author: &Matrix,
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<([f64; 3], [f64; 3])> {
+    let (origin, direction) = (Transform {
+        m: *definition_to_world,
+    })
+    .transform_canonical_axis(vec3(origin), vec3(direction))
+    .map_err(|_| Error::Argument)?;
+    let (origin, direction) = (Transform {
+        m: *world_to_author,
+    })
+    .transform_line(origin, direction);
+    let (origin, direction) = (origin.to_array(), direction.to_array());
+    if !finite(&origin) || !finite(&direction) {
+        return Err(Error::Argument);
+    }
+    Ok((origin, direction))
+}
+
 /// How far `point` stands from `origin` along `direction`: the dot product of `point - origin`
 /// with `direction`, which is as many lengths as `direction` is long (a unit direction gives
 /// the distance itself). Negative behind `origin`.
@@ -598,6 +658,61 @@ mod tests {
     }
 
     #[test]
+    fn a_line_uses_the_frames_inverse_and_only_its_point_is_translated() {
+        let frame = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 30.0, 1.0],
+        ];
+        let origin = [8.0, 21.0, 33.0];
+        let direction = [-5.0, 4.0, 6.0];
+        assert_eq!(
+            line_in_frame(&IDENTITY, origin, direction).unwrap(),
+            (origin, direction)
+        );
+        assert_eq!(
+            line_in_frame(&frame, origin, direction).unwrap(),
+            ([1.0, 2.0, 3.0], [4.0, 5.0, 6.0])
+        );
+        assert_eq!(
+            line_in_frame(&[[0.0; 4]; 4], origin, direction),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
+    fn a_placed_axis_is_oriented_in_world_before_entering_the_author_frame() {
+        let source = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 30.0, 1.0],
+        ];
+        let target_inverse = [
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [8.0, 21.0, -33.0, 1.0],
+        ];
+        let point = [1.0, 2.0, 3.0];
+        for direction in [[-4.0, 0.0, 0.0], [4.0, 0.0, 0.0]] {
+            assert_eq!(
+                placed_axis(&source, &target_inverse, point, direction).unwrap(),
+                ([0.0; 3], [0.0, -1.0, 0.0])
+            );
+        }
+        assert_eq!(
+            placed_axis(&source, &target_inverse, point, [0.0; 3]),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            placed_axis(&source, &target_inverse, [f64::NAN; 3], [1.0; 3]),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
     fn a_mirror_in_y_0_is_the_mirror_matrix_and_twice_is_the_identity() {
         assert_eq!(reflection([0.0; 3], [0.0, 1.0, 0.0]).unwrap(), MIRROR_Y);
         // any length of an axis normal, any origin on its plane's side: exact
@@ -835,6 +950,26 @@ mod tests {
             span_along([0.0; 3], [f64::MAX; 3], o, d),
             Err(Error::Argument)
         );
+    }
+
+    /// An axis comes out unit and pointing its largest component positive, whichever way it
+    /// was given; a direction too short or not finite has none.
+    #[test]
+    fn unit_axis_direction_is_unit_and_oriented() {
+        assert_eq!(
+            unit_axis_direction([0.0, -2.0, 0.0], 1e-9),
+            Some([0.0, 1.0, 0.0])
+        );
+        assert_eq!(
+            unit_axis_direction([0.0, 0.0, 4.0], 1e-9),
+            Some([0.0, 0.0, 1.0])
+        );
+        let d = unit_axis_direction([-3.0, 4.0, 0.0], 1e-9).unwrap_or([0.0; 3]);
+        assert!(near(d, [-0.6, 0.8, 0.0], 1e-15), "{d:?}");
+        assert_eq!(unit_axis_direction([0.0; 3], 1e-9), None);
+        assert_eq!(unit_axis_direction([1e-10, 0.0, 0.0], 1e-9), None);
+        assert_eq!(unit_axis_direction([f64::NAN, 1.0, 0.0], 1e-9), None);
+        assert_eq!(unit_axis_direction([f64::INFINITY, 0.0, 0.0], 1e-9), None);
     }
 
     #[test]

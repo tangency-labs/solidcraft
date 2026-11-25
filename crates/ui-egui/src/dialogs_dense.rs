@@ -960,17 +960,41 @@ fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
     }
 }
 
-/// The coil's section, where the section sits on the diameter, the way it turns and where it
-/// starts (#3862). A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
-/// A sketch profile is the section, so only the turn and Flip rows show with one (#17870).
-fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from_sketch: bool) -> bool {
-    const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
-    // Flip winds the coil the other way along its axis, e.g. down from a sketch profile (#17870).
-    let options: &[(&str, &str)] = &[("Clockwise", "clockwise"), ("Flip", "flip")];
-    if from_sketch {
-        extra_options(ui, "coil_options", extra, options);
-        return false;
+/// The coil's axis, section, where the section sits on the diameter, the way it turns and where
+/// it starts. A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
+/// A sketch profile is the section, so the section rows are hidden then.
+fn coil_rows(
+    ui: &mut egui::Ui,
+    extra: &mut serde_json::Map<String, Value>,
+    placed_axis: Option<Vec3>,
+    picked_axis: bool,
+    unresolved_axis: bool,
+    from_sketch: bool,
+) -> bool {
+    let placed_axis = placed_axis.map(pt);
+    let mut axis = if unresolved_axis {
+        String::new()
+    } else {
+        extra.get("axis").or(placed_axis.as_ref()).map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())).unwrap_or_default()
+    };
+    let before = axis.clone();
+    let axis_enter = !picked_axis && ui_kit::text_row(ui, "ui.direction", &mut axis, "Z (X, Y, Z, [x, y, z])").0;
+    if axis != before {
+        if axis.trim().is_empty() {
+            extra.remove("axis");
+        } else {
+            let value = serde_json::from_str::<Value>(&axis).ok().filter(|v| v.is_array() || v.is_object()).unwrap_or_else(|| json!(axis.trim()));
+            extra.insert("axis".into(), value);
+        }
     }
+    let enter = !from_sketch && coil_section_rows(ui, extra);
+    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise"), ("Reverse Direction", "reversed")]);
+    enter || axis_enter
+}
+
+/// The primitive coil's own section: its shape, where it sits on the diameter and where it starts.
+fn coil_section_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+    const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
     form_row(ui, "Section", |ui| extra_segments(ui, extra, "section", &[("Circular", "circular"), ("Square", "square")]));
     form_row(ui, "Section position", |ui| {
         let current =
@@ -997,7 +1021,6 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from
             extra.insert("start_angle".into(), json!(angle));
         }
     }
-    extra_options(ui, "coil_options", extra, options);
     enter
 }
 
@@ -1033,6 +1056,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
     let pasted = crate::dialogs_move::pasted(d);
     // Picked components moved earlier and not captured: Revert Position puts just them back.
     let revertible = if placing { crate::dialogs_move::revertible(app, d) } else { Vec::new() };
+    let unresolved_axis = unresolved_coil_axis(d, &app.session);
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -1349,7 +1373,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 };
             }
             if *cmd == "solid.coil" {
-                enter |= coil_rows(ui, &mut d.extra, from_sketch);
+                let picked_axis = d.inputs.get(1).is_some_and(|input| !input.items.is_empty());
+                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis, unresolved_axis, from_sketch);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);

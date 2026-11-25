@@ -539,6 +539,7 @@ impl GeoRef {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs(f, depth + 1),
             Self::Snap { of, .. } => of.walk_feature_refs(f, depth + 1),
+            Self::PlacedEdge { body, .. } => f(Ref::Body(body)),
             Self::Point { .. }
             | Self::Datum { .. }
             | Self::Origin
@@ -559,6 +560,7 @@ impl GeoRef {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs_mut(f, depth + 1),
             Self::Snap { of, .. } => of.walk_feature_refs_mut(f, depth + 1),
+            Self::PlacedEdge { body, .. } => f(Ref::Body(body)),
             Self::Point { .. }
             | Self::Datum { .. }
             | Self::Origin
@@ -664,6 +666,16 @@ impl Walk for crate::document::ScaleAbout {
 /// A feature's own reference to the model (a revolve's or circular pattern's axis on an edge or
 /// round face): walked like a construction axis's.
 impl Walk for GeoRef {
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        if let Self::PlacedEdge { body, .. } = self {
+            f(Ref::Body(body));
+        }
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        if let Self::PlacedEdge { body, .. } = self {
+            f(Ref::Body(body));
+        }
+    }
     fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
         plane_exprs(vec![self], f)
     }

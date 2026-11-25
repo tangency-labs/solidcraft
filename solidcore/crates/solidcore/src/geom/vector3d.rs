@@ -181,6 +181,34 @@ impl Vec3 {
     /// constructor).
     pub const UNDEF: Self = Self::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
 
+    /// Orient an undirected axis toward the positive side of its largest component, keeping
+    /// its length. Components within a relative 1e-9 of the largest magnitude tie in X, Y, Z
+    /// order, at any scale, so a zero component never decides; the zero vector stays as it is.
+    #[must_use]
+    pub fn canonical_axis_direction(self) -> Self {
+        let coordinates = self.to_array();
+        let largest = coordinates
+            .iter()
+            .fold(0.0_f64, |size, coordinate| size.max(coordinate.abs()));
+        match coordinates
+            .iter()
+            .find(|coordinate| coordinate.abs() >= largest * (1.0 - 1e-9))
+        {
+            Some(coordinate) if *coordinate < 0.0 => -self,
+            _ => self,
+        }
+    }
+
+    /// The unit direction of an undirected axis, oriented as [`Vec3::canonical_axis_direction`]
+    /// orients it: the vector divided by its length. `None` for a vector no longer than
+    /// `min_length` or one whose length is not finite.
+    #[must_use]
+    pub fn unit_axis_direction(self, min_length: f64) -> Option<Self> {
+        let length = self.length();
+        (length > min_length && length.is_finite())
+            .then(|| (self / length).canonical_axis_direction())
+    }
+
     /// Creates a vector from its components (`SmVector3d(dX, dY, dZ)`, `Set`).
     #[must_use]
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
@@ -1399,6 +1427,47 @@ mod tests {
         ] {
             assert_eq!(v.length_and_unit(), None, "{v:?}");
         }
+    }
+
+    #[test]
+    fn a_canonical_axis_direction_is_one_orientation_at_any_scale() {
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        // unit vectors: the largest component turns positive, the first of equal ones decides
+        for (v, expected) in [
+            (Vec3::new(0.0, -1.0, 0.0), Vec3::Y),
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
+            (Vec3::new(half, -half, 0.0), Vec3::new(half, -half, 0.0)),
+            (Vec3::new(-half, half, 0.0), Vec3::new(half, -half, 0.0)),
+        ] {
+            assert_eq!(v.canonical_axis_direction(), expected, "{v:?}");
+        }
+        // X within a relative 1e-12 of the larger Y still ties first, whichever way the axis points
+        let (x, y) = (half, half * (1.0 + 1e-12));
+        for v in [Vec3::new(-x, y, 0.0), Vec3::new(x, -y, 0.0)] {
+            assert_eq!(v.canonical_axis_direction(), Vec3::new(x, -y, 0.0), "{v:?}");
+        }
+        // below 1e-9 a zero component never decides; the length is kept
+        for (y, z) in [(1e-10, 0.0), (0.0, 1e-200), (0.0, 5e-324)] {
+            for sign in [1.0, -1.0] {
+                let v = Vec3::new(0.0, sign * y, sign * z);
+                assert_eq!(v.canonical_axis_direction(), Vec3::new(0.0, y, z), "{v:?}");
+            }
+        }
+        assert_eq!(Vec3::ZERO.canonical_axis_direction(), Vec3::ZERO);
+    }
+
+    /// An axis comes out unit and pointing its largest component positive, whichever way it
+    /// was given; a vector too short or not finite has no direction.
+    #[test]
+    fn a_unit_axis_direction_is_unit_and_oriented() {
+        let unit = |x, y, z| Vec3::new(x, y, z).unit_axis_direction(1e-9);
+        assert_eq!(unit(0.0, -2.0, 0.0), Some(Vec3::Y));
+        assert_eq!(unit(0.0, 0.0, 4.0), Some(Vec3::Z));
+        assert_eq!(unit(-3.0, 4.0, 0.0), Some(Vec3::new(-0.6, 0.8, 0.0)));
+        assert_eq!(unit(0.0, 0.0, 0.0), None);
+        assert_eq!(unit(1e-10, 0.0, 0.0), None);
+        assert_eq!(unit(f64::NAN, 1.0, 0.0), None);
+        assert_eq!(unit(f64::INFINITY, 0.0, 0.0), None);
     }
 
     #[test]
