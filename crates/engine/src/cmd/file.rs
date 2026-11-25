@@ -25,6 +25,7 @@ use solidcraft_io::{DesignContainerReader, Format};
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
+use crate::schema::apps::{AppInfo, AppsParams, AppsResult, SendToAppParams, SendToAppResult};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
@@ -326,6 +327,27 @@ pub static COMMANDS: &[CommandSpec] = &[
             "copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N>, and the reply has `version` and `copy`; ",
             "copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk); with copy_to the slicer opens the file in that folder instead",
         )),
+    CommandSpec::new("file.send_to_app", "Send to App", crate::checked!("file.send_to_app", send_to_app))
+        .enabled(starts_apps)
+        .at("INSERT", "FILES")
+        .icon("mesh_export")
+        .noundo()
+        .contract(&SEND_TO_APP_CONTRACT)
+        .output(output_schema_for::<SendToAppResult>)
+        .params(concat!(
+            "target: id or name from file.apps (only an app the user added in Send to App can be started; no command adds one); ",
+            "format?: 3mf|3mf-tagged|step|stl|sc (default: the app's own default; it must take it; sc: a copy of the whole design file, never the file you have open); ",
+            "bodies?: [names] (default: the selected bodies; not read for sc); ",
+            "copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N> and is never replaced, and the reply has `version` and `copy`; ",
+            "copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time); ",
+            "wait?: milliseconds to wait for the app to end, 0 to 10000 (default 0) → saves the file in this user's send folder, starts the app with its argument template ({file}, {name}, {dir}, {format}; no shell) and answers {path, bytes, format, app, pid}; with wait, an app that ended has exited, exit_code and, when it did not end with 0, app_error",
+        )),
+    CommandSpec::new("file.apps", "Send to App Targets", crate::checked!("file.apps", list_apps))
+        .icon("export")
+        .noundo()
+        .contract(&APPS_CONTRACT)
+        .output(output_schema_for::<AppsResult>)
+        .params("→ the apps the user added in Send to App: [{id, name, kind, program, args, formats, default_format, found}]; pass an id or a name as file.send_to_app's `target`"),
     CommandSpec::new("file.open_in_easyprint", "Open with EasyPrint", easyprint::open_in_easyprint)
         .icon("mesh_export")
         .noundo()
@@ -423,6 +445,8 @@ const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::Exp
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
 const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const SLICERS_CONTRACT: TypedContract<SlicersParams> = TypedContract::new();
+const SEND_TO_APP_CONTRACT: TypedContract<SendToAppParams> = TypedContract::new();
+const APPS_CONTRACT: TypedContract<AppsParams> = TypedContract::new();
 const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
 const EXPORT_SDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportSdfParams> = crate::schema::TypedContract::new();
 const EXPORT_MJCF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMjcfParams> = crate::schema::TypedContract::new();
@@ -3960,6 +3984,8 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
                 copy: None,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait: send::Wait::Block,
+                design: false,
+                wait_ms: 0,
             },
         );
     }
@@ -3994,17 +4020,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
-        // A folder to keep the file in, in place of the slicer folder; an agent reaches only its own folders.
-        // The folder as given: a blank one is no folder, but a name with spaces at its end is a name.
-        let copy = match str_(p, "copy_to").filter(|d| !d.trim().is_empty()) {
-            None => None,
-            Some(dir) if dir.len() < 4096 => {
-                // It may not exist yet: its nearest folder that does is checked.
-                solidcraft_io::vfs::check_new(dir).map_err(|e| EngineError::Other(e.to_string()))?;
-                Some(send::Copy { dir: dir.into(), overwrite: bool_(p, "copy_overwrite").unwrap_or(false) })
-            }
-            Some(_) => return Err(bad(cmd, "`copy_to` is too long")),
-        };
+        let copy = copy_param(p, cmd)?;
         send::send(
             s,
             send::Send {
@@ -4019,9 +4035,110 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
                 copy,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait,
+                design: false,
+                wait_ms: 0,
             },
         )
     }
+}
+
+/// A folder to keep the sent file in, in place of the send folder; an agent reaches only its own folders.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_param(p: &Value, cmd: &str) -> Result<Option<send::Copy>> {
+    // The folder as given: a blank one is no folder, but a name with spaces at its end is a name.
+    match str_(p, "copy_to").filter(|d| !d.trim().is_empty()) {
+        None => Ok(None),
+        Some(dir) if dir.len() < 4096 => {
+            // It may not exist yet: its nearest folder that does is checked.
+            solidcraft_io::vfs::check_new(dir).map_err(|e| EngineError::Other(e.to_string()))?;
+            Ok(Some(send::Copy { dir: dir.into(), overwrite: bool_(p, "copy_overwrite").unwrap_or(false) }))
+        }
+        Some(_) => Err(bad(cmd, "`copy_to` is too long")),
+    }
+}
+
+/// The browser build can't start a program: Send to App offers the download instead.
+fn starts_apps(_: &Session) -> std::result::Result<(), String> {
+    if cfg!(target_arch = "wasm32") { Err(crate::apps::WEB_REFUSAL.into()) } else { Ok(()) }
+}
+
+/// A copy of the design as a `.sc` file's bytes, for the folder `at` is in: the file the user has
+/// open is never written, so an app that edits the copy can't change it.
+#[cfg(not(target_arch = "wasm32"))]
+fn design_copy_bytes(s: &Session, cmd: &str, at: &str) -> Result<Vec<u8>> {
+    if s.moved_uncaptured() {
+        return Err(bad(
+            cmd,
+            "a component was moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then send",
+        ));
+    }
+    s.container_bytes(Some(at), solidcraft_io::DesignCompression::Fast, false, true, None, true).map_err(|e| EngineError::Other(format!("{at}: {e}")))
+}
+
+/// Send the design, or some bodies of it, to an app the user added, and start it with the file.
+fn send_to_app(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.send_to_app";
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (s, p);
+        Err(bad(cmd, crate::apps::WEB_REFUSAL))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let spec = str_(p, "target").ok_or_else(|| bad(cmd, "give `target` (see file.apps)"))?;
+        let app = crate::apps::resolve(spec).ok_or_else(|| {
+            bad(cmd, format!("no app `{spec}` (see file.apps; a program can be started only once the user has added it under Send to App)"))
+        })?;
+        let asked = str_(p, "format").map(str::to_ascii_lowercase).unwrap_or_else(|| app.target.default_format.clone());
+        let (format, design) = match asked.as_str() {
+            "3mf" => (Format::ThreeMf, false),
+            "stl" => (Format::StlBinary, false),
+            "3mf-tagged" => (Format::ThreeMfTagged, false),
+            "step" => (Format::Step, false),
+            "sc" => (Format::ThreeMf, true),
+            other => return Err(bad(cmd, format!("unknown format `{other}` (3mf, 3mf-tagged, step, stl, sc)"))),
+        };
+        let wait_ms = match p.get("wait") {
+            None | Some(Value::Null) => 0,
+            Some(v) => v.as_u64().filter(|n| *n <= 10_000).ok_or_else(|| bad(cmd, "`wait` is a number of milliseconds, 0 to 10000"))?,
+        };
+        let copy = copy_param(p, cmd)?;
+        send::send(
+            s,
+            send::Send {
+                cmd,
+                kind: crate::slicers::TargetKind::App,
+                spec,
+                bodies: string_list(cmd, p, "bodies")?,
+                parts: Vec::new(),
+                format,
+                quality: Default::default(),
+                dest: send::Dest::Folder,
+                copy,
+                single_instance: false,
+                wait: send::Wait::No,
+                design,
+                wait_ms,
+            },
+        )
+    }
+}
+
+fn list_apps(_: &mut Session, _: &Value) -> Result<Value> {
+    let apps = crate::apps::targets()
+        .into_iter()
+        .map(|t| AppInfo {
+            found: crate::apps::resolved(&t).is_some(),
+            id: t.id,
+            name: t.name,
+            kind: "app".into(),
+            program: t.program,
+            args: t.args,
+            formats: t.formats,
+            default_format: t.default_format,
+        })
+        .collect();
+    serde_json::to_value(AppsResult { apps, param_warnings: Vec::new() }).map_err(|e| bad("file.apps", e.to_string()))
 }
 
 fn slicers(_: &mut Session, _: &Value) -> Result<Value> {

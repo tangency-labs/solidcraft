@@ -4,14 +4,15 @@
 //! `file.send_to_slicer` writes it into this user's slicer folder under a stable name, so sending
 //! again replaces it; `file.save_mesh` writes it where the caller said.
 //!
-//! It takes a [`TargetKind`], and slicers are the only kind there is; a later Send to App would add
-//! one (see `slicers::TargetKind`) and send through this same function.
+//! It takes a [`TargetKind`]: a slicer, or an app the user added (`file.send_to_app`, RFC 0018),
+//! which is sent a mesh, STEP or a copy of the design file and started with its argument template.
 
 use serde_json::{Value, json};
 use solidcraft_io::Format;
 
 use super::easyprint::{Exported, export_bodies};
 use super::export_laid_to;
+use crate::apps;
 use crate::params::bad;
 use crate::schema::save_mesh::SlicerDelivery;
 use crate::slicers::{self, Slicer, TargetKind};
@@ -71,18 +72,26 @@ pub(super) struct Send<'a> {
     pub copy: Option<Copy>,
     pub single_instance: bool,
     pub wait: Wait,
+    /// An app only: send a copy of the design file (`sc`) instead of a mesh; `format` is then not read.
+    pub design: bool,
+    /// An app only: how long to wait, in milliseconds, for the program to end and report its exit code.
+    pub wait_ms: u64,
 }
 
 fn format_name(f: Format) -> &'static str {
     match f {
         Format::StlBinary | Format::StlAscii => "stl",
         Format::ThreeMfTagged => "3mf-tagged",
+        Format::Step => "step",
         _ => "3mf",
     }
 }
 
 /// Send the bodies to the target named by `r.spec`.
 pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
+    if r.kind == TargetKind::App {
+        return send_app(s, &r);
+    }
     // The target is found before anything is written, so a name that matches nothing writes nothing.
     let target = slicers::resolve_for(r.kind, r.spec).ok_or_else(|| {
         bad(r.cmd, format!("no slicer `{}` (see file.slicers; a program works only once the user has added it under Custom…)", r.spec))
@@ -102,7 +111,7 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
 /// Write the bodies into the slicer folder.
 fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     use crate::slicer_files;
-    let Exported { bytes, ext, fell_back, bodies, laid } = export_bodies(s, r.cmd, &r.bodies, r.format)?;
+    let Exported { bytes, ext, fell_back, bodies, laid } = export_for(s, r)?;
     if let Some(copy) = &r.copy {
         // The file the user keeps: named after the design, in their folder, and the slicer opens it.
         let stem = slicer_files::copy_stem(&s.doc.name);
@@ -124,9 +133,97 @@ fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     }
     let dir = slicer_files::dir().ok_or_else(|| bad(r.cmd, "no per-user folder on this system"))?;
     let stem = slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies);
+    if ext == "sc" {
+        // A design copy an app may edit is never replaced by a later send: each is a new `-v<N>`.
+        let (file, version) =
+            slicer_files::write_private_version(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
+        return Ok(json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": false, "version": version}));
+    }
     let (file, numbered) = slicer_files::write(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
     let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back});
     laid.report(&mut out);
+    Ok(out)
+}
+
+/// The bytes to send: the bodies as a mesh, as STEP, or a copy of the design file.
+fn export_for(s: &Session, r: &Send<'_>) -> Result<Exported> {
+    if r.design {
+        // The folder the copy will be in decides the relative paths of its links.
+        let dir = match &r.copy {
+            Some(copy) => copy.dir.clone(),
+            None => slicer_files::dir().ok_or_else(|| bad(r.cmd, "no per-user folder on this system"))?,
+        };
+        let at = dir.join("design.sc");
+        let bytes = super::design_copy_bytes(s, r.cmd, &at.to_string_lossy())?;
+        return Ok(Exported { bytes, ext: "sc", fell_back: false, bodies: Vec::new(), laid: Default::default() });
+    }
+    if r.format == Format::Step {
+        let mut bodies = r.bodies.clone();
+        if bodies.is_empty() {
+            bodies = s.selected_items()?.into_iter().filter_map(|x| if let crate::Sel::Body { name } = x { Some(name) } else { None }).collect();
+        }
+        if bodies.is_empty() {
+            return Err(bad(r.cmd, "select the bodies to send, or give `bodies`"));
+        }
+        let doc = s.doc.painted(&*s.world_state()?);
+        let (bytes, _) = solidcraft_io::export_with_parts_noted(
+            &doc,
+            &bodies,
+            &[],
+            Format::Step,
+            &s.doc.name,
+            &s.doc.metadata,
+            solidcraft_io::MeshQuality::Standard,
+            None,
+        )?;
+        return Ok(Exported { bytes, ext: "step", fell_back: false, bodies, laid: Default::default() });
+    }
+    export_bodies(s, r.cmd, &r.bodies, r.format)
+}
+
+/// Send to an app the user added: write the file in the send folder (or the copy folder), start the
+/// program with its argument template, and say how that went. The file is saved either way.
+fn send_app(s: &mut Session, r: &Send<'_>) -> Result<Value> {
+    let app = apps::resolve(r.spec).ok_or_else(|| {
+        bad(r.cmd, format!("no app `{}` (see file.apps; a program can be started only once the user has added it under Send to App)", r.spec))
+    })?;
+    let format = if r.design { "sc" } else { format_name(r.format) };
+    if !app.target.accepts(format) {
+        return Err(bad(r.cmd, format!("{} does not take {format} (it takes {})", app.target.name, app.target.formats.join(", "))));
+    }
+    if !matches!(r.dest, Dest::Folder) {
+        return Err(bad(r.cmd, "an app is sent the file in the send folder"));
+    }
+    let mut out = write_in_folder(s, r)?;
+    let path = out.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
+    // What the template calls the format: the one written, which is an STL when a 3MF could not be.
+    let written = if out.get("stl_fallback").and_then(Value::as_bool) == Some(true) { "stl" } else { format };
+    let design = slicer_files::copy_stem(&s.doc.name);
+    let Some(obj) = out.as_object_mut() else { return Ok(out) };
+    // What is started, with its real values, whether or not it starts.
+    if let Ok(argv) = apps::argv(&app, std::path::Path::new(&path), &design, written) {
+        obj.insert("command".into(), json!(argv));
+    }
+    match apps::launch(&app, std::path::Path::new(&path), &design, written) {
+        Ok(pid) => {
+            obj.insert("app".into(), json!(app.target.name));
+            obj.insert("pid".into(), json!(pid));
+            if r.wait_ms > 0
+                && let Some(exit) = apps::wait_exit(pid, std::time::Duration::from_millis(r.wait_ms))
+            {
+                obj.insert("exited".into(), json!(true));
+                if let Some(code) = exit.code {
+                    obj.insert("exit_code".into(), json!(code));
+                }
+                if let Some(problem) = exit.problem(&app.target.name, &path) {
+                    obj.insert("app_error".into(), json!(problem));
+                }
+            }
+        }
+        Err(e) => {
+            obj.insert("app_error".into(), json!(e));
+        }
+    }
     Ok(out)
 }
 
@@ -260,5 +357,46 @@ mod tests {
         let log = lines(&root);
         assert!(log.iter().all(|l| !l.contains("part.3mf")), "{log:?}: the file was not sent");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn design_send<'a>(copy: Option<Copy>) -> Send<'a> {
+        Send {
+            cmd: "file.send_to_app",
+            kind: TargetKind::App,
+            spec: "x",
+            bodies: Vec::new(),
+            parts: Vec::new(),
+            format: Format::ThreeMf,
+            quality: Default::default(),
+            dest: Dest::Folder,
+            copy,
+            single_instance: false,
+            wait: Wait::No,
+            design: true,
+            wait_ms: 0,
+        }
+    }
+
+    #[test]
+    fn a_design_copy_is_never_replaced_by_a_later_send_and_the_original_is_not_touched() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
+        let a = write_in_folder(&mut s, &design_send(None)).unwrap();
+        let b = write_in_folder(&mut s, &design_send(None)).unwrap();
+        assert_ne!(a["path"], b["path"], "{a} {b}");
+        assert_eq!(b["version"].as_u64(), a["version"].as_u64().map(|v| v + 1));
+        assert!(std::path::Path::new(a["path"].as_str().unwrap()).exists() && std::path::Path::new(b["path"].as_str().unwrap()).exists());
+        assert_eq!(a["format"], "sc");
+        // The same into the user's own folder: -v1, -v2, and what is there is kept.
+        let dir = std::env::temp_dir().join(format!("solidcraft-send-sc-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let copy = || Some(Copy { dir: dir.clone(), overwrite: false });
+        let c = write_in_folder(&mut s, &design_send(copy())).unwrap();
+        let first = std::fs::read(c["path"].as_str().unwrap()).unwrap();
+        let d = write_in_folder(&mut s, &design_send(copy())).unwrap();
+        assert_eq!((c["version"].as_u64(), d["version"].as_u64()), (Some(1), Some(2)), "{c} {d}");
+        assert!(c["path"].as_str().unwrap().ends_with("-v1.sc") && d["path"].as_str().unwrap().ends_with("-v2.sc"));
+        assert_eq!(std::fs::read(c["path"].as_str().unwrap()).unwrap(), first, "the first copy is untouched");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

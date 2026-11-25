@@ -79,6 +79,7 @@ pub const DOCUMENTED: &[&str] = &[
     "file.insert_mesh",
     "file.insert_step",
     "file.save_mesh",
+    "file.send_to_app",
     "file.send_to_slicer",
     "frame.end_cap",
     "frame.gusset",

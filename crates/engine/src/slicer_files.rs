@@ -161,6 +161,13 @@ pub fn write_version(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Res
     Err(io::Error::other("no free version number"))
 }
 
+/// [`write_version`] into this user's private send folder: for a file an app may edit (a design
+/// copy), which is never replaced, so a send never takes work from under the app.
+pub fn write_private_version(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<(PathBuf, u32)> {
+    make_private(dir)?;
+    write_version(dir, stem, ext, bytes)
+}
+
 /// Delete the files in `dir` last changed before `now - keep`; how many went.
 pub fn sweep(dir: &Path, now: SystemTime, keep: Duration) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };

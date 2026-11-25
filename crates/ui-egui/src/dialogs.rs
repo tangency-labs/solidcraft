@@ -4934,7 +4934,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         // Nothing picked is an answer too: OK adds no pill.
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
-        Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
+        Kind::SaveMesh(k) => crate::dialogs_save_mesh::ready_for(k, &d.inputs),
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }) => {
             // Corner dialogs: preview errors are visual only; validation errors from
             // `apply_commands` go to `d.error`. OK stays enabled when the preview fails.

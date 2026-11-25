@@ -556,7 +556,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             let selected = sel_bodies(app);
             if selected.len() > 1 && selected.contains(name) {
                 for item in &mut v {
-                    if matches!(item.id.as_str(), "ui.export" | "ui.saveMesh" | "ui.sendToSlicer") {
+                    if matches!(item.id.as_str(), "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" | "ui.sendToApp") {
                         item.params = Some(json!({ "bodies": selected }));
                     }
                 }
@@ -1196,6 +1196,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         Item::sep(),
         act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })),
         act("ui.sendToSlicer", "Send to Slicer", "export").with(json!({ "bodies": names })).on(crate::dialogs_save_mesh::available(app)),
+        act("ui.sendToApp", "Send to App", "export").with(json!({ "bodies": names })).on(crate::dialogs_save_mesh::apps_available(app)),
         act("ui.export", "Export…", "export").with(json!({ "bodies": names })),
         Item::sep(),
         // The clipboard beside Delete, Remove and Rename, as in every menu.
@@ -1492,7 +1493,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         }
         // This placement's own Isolate, whatever the component's first placement shows.
         "ui.isolate" => *item = isolate_occurrence_item(app, path),
-        "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
+        "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" | "ui.sendToApp" => item.params = Some(json!({"bodies": bodies})),
         // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
         // whole tree.
         "browser.expand_all" | "browser.collapse_all" if item.params.as_ref().is_some_and(|p| p.get("component").is_some()) => {
@@ -1648,6 +1649,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             act("ui.sendToSlicer", "Send to Slicer", "export")
                 .with(json!({ "bodies": names }))
                 .on(!bodies.is_empty() && crate::dialogs_save_mesh::available(app)),
+            act("ui.sendToApp", "Send to App", "export")
+                .with(json!({ "bodies": names }))
+                .on(!bodies.is_empty() && crate::dialogs_save_mesh::apps_available(app)),
         ],
     ));
     v.push(Item::sep());
@@ -2733,10 +2737,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let _ = app.run("select.set", json!({ "items": items }));
             app.start("material.assign");
         }
-        "ui.saveMesh" | "ui.sendToSlicer" => {
+        "ui.saveMesh" | "ui.sendToSlicer" | "ui.sendToApp" => {
             let items: Vec<Value> = bodies.iter().map(|b| json!({"type": "body", "name": b})).collect();
             let _ = app.run("select.set", json!({ "items": items }));
-            app.start(if item.id == "ui.saveMesh" { "file.save_mesh" } else { "file.send_to_slicer" });
+            app.start(match item.id.as_str() {
+                "ui.saveMesh" => "file.save_mesh",
+                "ui.sendToApp" => "file.send_to_app",
+                _ => "file.send_to_slicer",
+            });
         }
         "ui.exportDxf" => {
             if let Some(id) = id_of(&p, "sketch") {

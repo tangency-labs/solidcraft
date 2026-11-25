@@ -154,6 +154,7 @@ fn reads_only(id: &str) -> bool {
                 | "render.backends"
                 | "render.settings.get"
                 | "file.slicers"
+                | "file.apps"
                 | "engine.describe"
                 | "plugin.check"
                 | "plugin.tools"
@@ -228,12 +229,29 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
     // Files, and commands that replace or reload the whole design.
     let file_command = id.starts_with("file.") || id.starts_with("doc.") || matches!(id, "render.export" | "render.start");
     // The question says which program a send to a slicer would start.
-    let with_slicer =
-        |question: String| match params.get("slicer").and_then(Value::as_str).filter(|_| id.ends_with("save_mesh") || id.ends_with("send_to_slicer"))
-        {
-            Some(slicer) => format!("{question}, send to {}", slicer.chars().take(200).collect::<String>()),
-            None => question,
+    // An app is named by its `target`: the user added it, and the question says which one starts.
+    let with_slicer = |question: String| {
+        let program = if id.ends_with("send_to_app") {
+            params.get("target")
+        } else if id.ends_with("save_mesh") || id.ends_with("send_to_slicer") {
+            params.get("slicer")
+        } else {
+            None
         };
+        match program.and_then(Value::as_str) {
+            // An app: the command it would start, as its template says, so the user can see what runs.
+            Some(program) if id.ends_with("send_to_app") => match solidcraft_engine::apps::describe(program) {
+                Some(command) => format!(
+                    "{question}, send to {} (starts: {})",
+                    program.chars().take(200).collect::<String>(),
+                    command.chars().take(400).collect::<String>()
+                ),
+                None => format!("{question}, send to {}", program.chars().take(200).collect::<String>()),
+            },
+            Some(program) => format!("{question}, send to {}", program.chars().take(200).collect::<String>()),
+            None => question,
+        }
+    };
     // The model leaves the machine: the user is asked, whatever the agent says about consent.
     if id == "file.open_in_easyprint" {
         return Verdict::Ask(format!("{id}, upload the model to Printables' servers (EasyPrint)"));
@@ -419,6 +437,22 @@ mod tests {
             matches!(exec("file.open_in_easyprint", json!({"bodies": ["Part"], "consent": true})), Verdict::Ask(a) if a.contains("upload the model"))
         );
         assert!(matches!(exec("file.send_to_slicer", json!({})), Verdict::Ask(_)));
+        // An app the user added is named in the question, and listing the apps asks nothing.
+        assert!(matches!(exec("file.send_to_app", json!({"target": "Viewer", "format": "sc"})), Verdict::Ask(a) if a.ends_with("send to Viewer")));
+        assert!(matches!(exec("file.send_to_app", json!({})), Verdict::Ask(_)));
+        // With the app known, the question shows the command it would start.
+        let known = solidcraft_engine::apps::AppTarget {
+            id: "gatetest".into(),
+            name: "Gate Test".into(),
+            program: "/opt/gatetest".into(),
+            args: vec!["--title={name}".into(), "{file}".into()],
+            ..Default::default()
+        };
+        solidcraft_engine::apps::set_targets(&[known]);
+        let asked = exec("file.send_to_app", json!({"target": "gatetest"}));
+        solidcraft_engine::apps::set_targets(&[]);
+        assert!(matches!(asked, Verdict::Ask(a) if a.contains("starts: /opt/gatetest --title={name} {file}")));
+        assert!(runs(&exec("file.apps", json!({}))));
     }
 
     /// `path`, `source` and friends are also geometry (curve ids, edges, occurrence ids): those
@@ -552,6 +586,7 @@ mod tests {
             ("doc.open", json!({"path": "other.sc"})),
             ("file.export", json!({"path": "x.stl"})),
             ("file.send_to_slicer", json!({"slicer": "prusa"})),
+            ("file.send_to_app", json!({"target": "viewer"})),
             ("render.export", json!({})),
         ];
         let same = |a: &Verdict, b: &Verdict| std::mem::discriminant(a) == std::mem::discriminant(b);

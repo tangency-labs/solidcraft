@@ -237,6 +237,39 @@ is started on its own first, SolidCraft waits up to ten seconds for it to be rea
 file. If the version can't be read, the command decides: the `slic3r-app-launcher` launcher is
 treated as PrusaSlicer 3, and any other entry is left as it is.
 
+### Send to App
+
+**Insert → Files → Send to App** (also in the File menu and the body context menu) sends the
+design to any program you add, in a format that program takes. Unlike Send to Slicer, the list is
+yours: choose **Add app…**, pick the program, give it a name, and say which formats it takes (3MF,
+3MF with face tags, STEP, STL, or **SolidCraft design (.sc)**, a copy of the whole design) and which
+is the default. The window shows the command with sample values before you add it, and every send
+shows the real command in the status line. **Remove** takes an app off the list and leaves the program
+alone. The desktop app only: a browser can't start a program, so there Send to App says so and you
+download the file instead.
+
+The **Arguments** are a list, one per line, not a command line. Each may contain `{file}` (the
+absolute path of the file sent), `{name}` (the design's name as a safe file name), `{dir}` (the
+folder that holds the file) and `{format}` (such as `step`); the default is just `{file}`. They are
+replaced inside the argument and never split, so a name with spaces stays one argument, and no
+shell is ever started. An argument may not start with `{name}`, so a design called `-rf` can never
+become an option: write a value after an option joined to it, `--title={name}`. A shell, a script
+interpreter or a `.bat`, `.cmd`, `.ps1` file can't be added. The program runs in the folder that holds
+the file, with no input.
+
+Files go where Send to Slicer's go (the private send folder, or **Keep in a folder** with the next
+free `-v<N>` and **Replace file**). A `.sc` copy is never replaced by a later send: each send is a
+new `-v<N>` file, and the design you have open is never written. If the program ends within a few
+seconds with an error, the status line says so with its exit code; one that keeps running is left
+running.
+
+Scripts and agents use `file.apps` (the apps you added, and whether each program was found) and
+`file.send_to_app` (`target`, `format?`, `bodies?`, `copy_to?`, `copy_overwrite?`, `wait?` in
+milliseconds). They can start only an app you added: there is no command that adds a program, and a
+program path is refused as `target`. The reply carries the `command` that was started with its
+real values, and with `wait` the app's `exit_code`. An agent's request asks first and shows the
+command the app would start.
+
 Closed meshes can be rebuilt as solids with the `mesh.convert` command (command palette,
 scripts and the control channel): a mesh with a constant cross-section as analytic planar and
 cylindrical faces, any other closed mesh as the faceted solid its triangles describe.

@@ -760,6 +760,8 @@ pub struct SolveApp {
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
+    /// Send to App: the program just started, whose early exit is read without blocking the window.
+    pub(crate) app_exit: Option<dialogs_save_mesh::AppExit>,
     /// Open with EasyPrint: the upload in flight and the question before the first one.
     pub(crate) easyprint: easyprint_ui::State,
     /// Install plugin…: the plugin waiting for the user's answer.
@@ -1192,6 +1194,7 @@ impl SolveApp {
             services,
             file_picker: None,
             slicer_wait: None,
+            app_exit: None,
             easyprint: Default::default(),
             plugin_install: Default::default(),
             plugin_updates: Default::default(),
@@ -1825,6 +1828,9 @@ impl SolveApp {
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
+        // Commands may start only the apps the user added in Send to App.
+        // Every command, so a question asked before an agent's send can show what would start.
+        solidcraft_engine::apps::set_targets(&self.preferences.app_targets);
         self.session.set_validation(self.preferences.validation);
         workspace::command_receiver(self, id, &params)?;
         print_face_ui::sync(&mut self.session, &self.preferences);
@@ -2929,6 +2935,11 @@ impl SolveApp {
         // Send to Slicer always asks which slicer (the dialog pre-selects the last one).
         if matches!(id, "file.send_to_slicer" | "file.open_in_easyprint") && !dialogs_save_mesh::available(self) {
             self.set_status(self.tr("ui.send_to_slicer_unavailable").to_string(), true);
+            self.restore_command_tab();
+            return;
+        }
+        if id == "file.send_to_app" && !dialogs_save_mesh::apps_available(self) {
+            self.set_status(self.tr("ui.send_to_app_unavailable").to_string(), true);
             self.restore_command_tab();
             return;
         }
@@ -4584,6 +4595,7 @@ impl SolveApp {
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);
         dialogs_save_mesh::tick_wait(self, ctx);
+        dialogs_save_mesh::tick_app_exit(self, ctx);
         easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
