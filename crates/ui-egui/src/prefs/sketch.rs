@@ -118,6 +118,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
         let right_labels = [
             "prefs.sketch.shortcut_again_ends_tool",
             "prefs.sketch.shortcut_cycles_modes",
+            "prefs.sketch.shortcut_starts_listed_tool",
             "prefs.ribbon_click_ends_tool",
             "ui.project_face_edges_sketch",
             "ui.project_references_construction",
@@ -229,6 +230,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "prefs.sketch.shortcut_cycles_modes",
                     Some("prefs.sketch.shortcut_cycles_modes_tip"),
                     &mut app.preferences.shortcut_cycles_modes,
+                );
+                check(
+                    ui,
+                    "shortcut_starts_listed_tool",
+                    "prefs.sketch.shortcut_starts_listed_tool",
+                    Some("prefs.sketch.shortcut_starts_listed_tool_tip"),
+                    &mut app.preferences.shortcut_starts_listed_tool,
                 );
                 check(
                     ui,

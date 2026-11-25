@@ -30,6 +30,7 @@ Two columns of checkboxes.
 | Dimension new shapes fully | Checkbox | `Prefs.sketch_auto_dimensions` | `false` | "Typed values plus every dimension that fixes the shape." | none | |
 | Place from the sketch origin | Checkbox (dimmed on the board while the one above is off) | `Prefs.sketch_auto_locate` | `false` | "With full dimensions." | none | Dimmed unless "Dimension new shapes fully" is on. |
 | Shortcut again switches mode | Checkbox | `Prefs.shortcut_cycles_modes` | `false` | "Off: it starts the tool again." | none | |
+| Shortcuts start the tool listed with them | Checkbox | `Prefs.shortcut_starts_listed_tool` | `false` | "C, R and the other shape keys start the tool the menu shows next to the key. Off: the tool used last from that menu." | none | New in #22247. |
 | Clicking the running tool's button ends it | Checkbox | `Prefs.ribbon_click_ends_tool` | `true` | Existing `prefs.ribbon_click_ends_tool_note`: the lit ribbon button ends the tool and restores selection; off restarts it. | none | Retained newer control; immediately after shortcut cycling, before the Project pair. |
 | Project face edges into new sketches | Checkbox | `app.session.auto_project` (session; in the Snapshot) | per session | none | none | Not a `Prefs` field. |
 | Ask for Project options first | Checkbox | `Prefs.project_options_dialog` | `true` | none | none | |

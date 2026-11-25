@@ -1,0 +1,30 @@
+{
+  "en": {
+    "prefs.sketch.shortcut_starts_listed_tool": "Shortcuts start the tool listed with them",
+    "prefs.sketch.shortcut_starts_listed_tool_tip": "C, R and the other shape keys start the tool the menu shows next to the key. Off: the tool used last from that menu."
+  },
+  "ar": {
+    "prefs.sketch.shortcut_starts_listed_tool": "الاختصارات تبدأ الأداة المدرجة بجانبها",
+    "prefs.sketch.shortcut_starts_listed_tool_tip": "تبدأ مفاتيح C وR وبقية مفاتيح الأشكال الأداة التي تعرضها القائمة بجانب المفتاح. عند الإيقاف: آخر أداة استُخدمت من تلك القائمة."
+  },
+  "de": {
+    "prefs.sketch.shortcut_starts_listed_tool": "Tastenkürzel starten das Werkzeug, neben dem sie stehen",
+    "prefs.sketch.shortcut_starts_listed_tool_tip": "C, R und die anderen Formtasten starten das Werkzeug, das das Menü neben der Taste zeigt. Aus: das zuletzt aus diesem Menü benutzte Werkzeug."
+  },
+  "he": {
+    "prefs.sketch.shortcut_starts_listed_tool": "קיצורי מקשים מפעילים את הכלי שמופיע לצידם",
+    "prefs.sketch.shortcut_starts_listed_tool_tip": "C,‏ R ושאר מקשי הצורות מפעילים את הכלי שהתפריט מציג ליד המקש. כבוי: הכלי האחרון שהופעל מאותו תפריט."
+  },
+  "ja": {
+    "prefs.sketch.shortcut_starts_listed_tool": "ショートカットで横に表示されたツールを開始",
+    "prefs.sketch.shortcut_starts_listed_tool_tip": "C、R などの形状キーで、メニューでそのキーの横に表示されたツールを開始します。オフ: そのメニューで最後に使ったツールを開始します。"
+  },
+  "vi": {
+    "prefs.sketch.shortcut_starts_listed_tool": "Phím tắt mở công cụ được ghi bên cạnh",
+    "prefs.sketch.shortcut_starts_listed_tool_tip": "C, R và các phím hình khác mở công cụ mà menu hiển thị cạnh phím đó. Tắt: công cụ dùng gần nhất trong menu đó."
+  },
+  "zh": {
+    "prefs.sketch.shortcut_starts_listed_tool": "快捷键启动其旁边列出的工具",
+    "prefs.sketch.shortcut_starts_listed_tool_tip": "C、R 等形状快捷键启动菜单中该键旁边显示的工具。关闭时：启动该菜单中最近使用的工具。"
+  }
+}

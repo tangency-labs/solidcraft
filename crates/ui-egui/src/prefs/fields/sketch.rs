@@ -103,6 +103,9 @@ macro_rules! sketch_preferences {
             /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
             /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
             shortcut_cycles_modes: bool = false, PAGE_SKETCH;
+            /// A shape's shortcut (C, R, ...) starts the tool the menu lists it next to (#22247). Off
+            /// (the default): it starts the family's tool used last, as before (#4308).
+            shortcut_starts_listed_tool: bool = false, PAGE_SKETCH;
             /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
             /// horizontal or vertical snap to the previous point, and the click adds the alignments
             /// (#7828). Off by default: only with the previous point, one axis at a time, as before.

@@ -561,8 +561,12 @@ fn keeps_old_show_hide(app: &SolveApp, key: &str) -> bool {
 
 /// What a family's key starts: the variant used last (#4308), unless that variant has a key of
 /// its own; then the family's key starts the command it is bound to, and the other key the
-/// variant.
+/// variant. With Preferences › Sketch asking for it, the key starts the command the menu lists it
+/// next to, whichever variant was used last (#22247).
 fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
+    if app.preferences.shortcut_starts_listed_tool {
+        return id;
+    }
     let chosen = app.preferences.sketch_variants.resolve(id);
     if chosen != id && effective(app, chosen).is_some() { id } else { chosen }
 }
