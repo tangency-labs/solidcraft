@@ -7,6 +7,7 @@ use super::{cardinal, coords, expansion_span, trim, Arm, Corridor, PointBounds, 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::line::Line;
 use crate::error::Result;
+use crate::geom::certified::{next_down, next_up};
 use crate::geom::expansion;
 use crate::geom::extent3d::Extent3d;
 use crate::kernel::Kernel;
@@ -135,12 +136,12 @@ fn cardinal_point_roundoff(level: &[f64]) -> Option<Ivl> {
         } else if at.to_bits() & 1 == 0 {
             half
         } else {
-            half.next_down()
+            next_down(half)
         }
     };
     Some(Ivl::new(
-        -half_gap(at.next_up() - at),
-        half_gap(at - at.next_down()),
+        -half_gap(next_up(at) - at),
+        half_gap(at - next_down(at)),
     ))
 }
 
@@ -595,7 +596,7 @@ mod tests {
         let tangent = Vec3::new(-0.8, 0.6, 0.0);
         let line = Line::bounded(
             normal,
-            Vec3::new(tangent.x, tangent.y.next_up(), 0.0),
+            Vec3::new(tangent.x, next_up(tangent.y), 0.0),
             &Extent1d::from_min_max(length, length + 1.0),
             &BoundedLineOptions::default(),
         );
@@ -660,7 +661,7 @@ mod tests {
             let level = direction * at;
             let no_rounding = Ivl::from(0.0);
             let stored = cardinal_point_roundoff(&[level]).expect("finite stored coordinate");
-            for (x, contact) in [(at.next_down(), false), (at, true), (at.next_up(), false)] {
+            for (x, contact) in [(next_down(at), false), (at, true), (next_up(at), false)] {
                 let point = [Ivl::from(x), Ivl::from(2.0), Ivl::from(3.0)];
                 assert_eq!(
                     reaches_level(axis.coordinate_bounds(point), no_rounding, level),
@@ -670,7 +671,7 @@ mod tests {
                 let residual = Ivl::from(direction * x - level);
                 assert_eq!(reaches_level(residual, stored, 0.0), contact);
             }
-            let inside_rounding_cell = direction * (at.next_up() - at) * 0.25;
+            let inside_rounding_cell = direction * (next_up(at) - at) * 0.25;
             assert!(reaches_level(Ivl::from(inside_rounding_cell), stored, 0.0));
         }
     }
