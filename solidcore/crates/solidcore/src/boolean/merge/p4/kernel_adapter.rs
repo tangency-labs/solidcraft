@@ -29,6 +29,7 @@ use crate::boolean::merge::p2::{self, MergeContext, MergeOperand, TopologyCopy};
 use crate::boolean::merge::p5;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::boolean::topology_intersector::p1::{set_subset_objects, Relations};
+use crate::error::boolean::BooleanFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::{BooleanOperation, REGION_TYPE};
 use crate::geom::attribute::{ids, AttributeStore, ObjectKey};
@@ -55,18 +56,16 @@ fn key(namespace: u32, other: bool, kind: u64, index: u32) -> ObjectKey {
 }
 
 // Cache construction takes only &Kernel; preserve the caller's settings and
-// RNG state for that read-only work rather than evaluating under defaults.
+// seed for that read-only work rather than evaluating under defaults.
 fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
     Kernel {
         tolerances: k.tolerances,
-        rng: k.rng.clone(),
+        seed: k.seed,
         caches: crate::kernel::Caches {
             prove_lazy_trim_raise: k.caches.prove_lazy_trim_raise,
             ..crate::kernel::Caches::default()
         },
         context: context.metadata_copy(),
-        fillet_point_step: core::cell::Cell::new(k.fillet_point_step.get()),
-        process_fillet_point_step: k.process_fillet_point_step,
         upstream_ub_passed: Vec::new(),
         memoize_curve_caches: k.memoize_curve_caches,
         fixes: k.fixes,
@@ -100,9 +99,6 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         // (the test seam is shared: the copy's drops are the operation's)
         #[cfg(test)]
         strip_probe: k.strip_probe.clone(),
-        // (the caller's WR-57 replay seam, test only: the copy calls through it)
-        #[cfg(feature = "wr57-replay")]
-        replay: k.replay.clone(),
     }
 }
 
@@ -775,7 +771,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::entity_missing(OP, "the face has no surface"))?;
+            .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::FaceWithoutSurface))?;
         Ok(surface
             .owner()
             .unwrap_or_else(|| arena_identity(CacheObject::Face(face))))
@@ -1624,7 +1620,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
-        assert_eq!(error.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(error.kind(), crate::error::ErrorKind::Failed);
         assert!(made);
         assert!(deleted.0.is_empty() && deleted.1.is_empty());
         assert!(!adapter.topology_deleted());

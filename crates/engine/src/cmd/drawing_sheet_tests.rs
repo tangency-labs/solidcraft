@@ -3,6 +3,7 @@ use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::cmd::drawing_view::tests::three_views;
+use crate::drawing_scene::tests::in_the_model;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"))
@@ -290,6 +291,9 @@ fn a_sheets_title_block_by_command() {
     // The built-in block comes back by name.
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 2", "title_block": "built-in"}));
     assert_eq!(sheets(&s)[1].title_block, Some(solidcraft_geom::title_block::default_block()));
+    // So does the older, compact one (#20126).
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 2", "title_block": "compact"}));
+    assert_eq!(sheets(&s)[1].title_block, Some(solidcraft_geom::title_block::compact_block()));
 }
 
 /// A view a new block covers is listed with the ones the drawing space leaves out, and nothing
@@ -326,13 +330,41 @@ fn cells(s: &mut Session) -> BTreeMap<String, (String, Option<String>)> {
     cells.iter().map(|c| (text(&c["name"]).unwrap(), (text(&c["text"]).unwrap(), text(&c["value"])))).collect()
 }
 
-/// Runs model command `id` with the drawing closed, then opens it again: the path of a drawing
-/// reopened after the model changed.
-fn on_model(s: &mut Session, id: &str, p: Value) {
-    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", drawing);
+/// The built-in block has ISO 7200's cells (#20121). The scale follows the sheet's base view, the language
+/// the drawing's and the revision the newest revision row; the document type is the kind of drawing,
+/// and the status and the department start empty. Each takes typed text like any cell, and typing the
+/// value it has back follows it again.
+#[test]
+fn the_title_block_has_the_iso_7200_cells() {
+    let (mut s, _) = three_views();
+    let shown = cells(&mut s);
+    let own = |name: &str| shown.get(name).unwrap_or_else(|| panic!("no cell {name}")).clone();
+    assert_eq!(own("scale"), ("1:2".into(), None));
+    assert_eq!(own("language"), ("EN".into(), None));
+    assert_eq!(own("document_type").0, solidcraft_doc::drawing::template::PART_TYPE);
+    assert_eq!((own("document_status").0.as_str(), own("department").0.as_str(), own("revision").0.as_str()), ("", "", ""));
+    run(&mut s, "drawing.revision.add", json!({"set": {"revision": "B"}}));
+    assert_eq!(cells(&mut s)["revision"].0, "B");
+    for (cell, text) in [
+        ("scale", "NTS"),
+        ("document_type", "Fabrication drawing"),
+        ("document_status", "Released"),
+        ("language", "DE"),
+        ("revision", "C"),
+        ("department", "Sheet metal"),
+    ] {
+        run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {cell: text}}));
+        assert_eq!(cells(&mut s)[cell].0, text, "{cell}");
+    }
+    assert_eq!(cells(&mut s)["scale"], ("NTS".to_string(), Some("1:2".to_string())), "the value it hides follows the views");
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": null}));
+    assert_eq!(cells(&mut s)["scale"], ("1:2".to_string(), None));
+    // Hostile text: long, empty and multi-script text is typed, never a panic.
+    for text in ["x".repeat(4000), String::new(), "\u{202e}Ünïcode 図面 \u{1f600}".to_string()] {
+        let reply = s.execute("drawing.sheet.set", &json!({"sheet": "Sheet 1", "title_block_overrides": {"department": text}}));
+        assert!(reply.is_ok() || reply.is_err());
+        run(&mut s, "drawing.inspect", json!({}));
+    }
 }
 
 /// The built-in block's cells read the model: the sheet's component, a steel block 100 x 50 x 10
@@ -365,13 +397,13 @@ fn a_title_blocks_cells_read_the_model() {
     // of its own, the drawing is numbered by the component's name.
     let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", solidcraft_doc::drawing::template::ASSEMBLY_NOTE, ""];
     assert_eq!(shown(&mut s, &read), expected);
-    on_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
-    on_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));
+    in_the_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
+    in_the_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));
     assert_eq!(shown(&mut s, &["mass", "finish"]), ["0.39 kg", ""]);
     // An override, and the value under it moving on.
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {"material": "See note 3"}}));
     assert_eq!(cells(&mut s)["material"], ("See note 3".to_string(), Some("Steel".to_string())));
-    on_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
+    in_the_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
     assert_eq!(cells(&mut s)["material"], ("See note 3".to_string(), Some("Aluminum".to_string())));
     let steps = s.undo.len();
     for (overrides, why) in [

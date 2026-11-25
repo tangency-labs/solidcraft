@@ -25,8 +25,10 @@
 //!   tolerance constructed first, then doubled, as `SmTol`). A vertex outside any
 //!   B-rep (`GetBrep()` null, which upstream dereferences) returns
 //!   [`SolidError::InvalidInput`]. `SmTol::GetApproxTol3d(GetContext())` reads the
-//!   zone tolerance of the vertex's context, the B-rep's: the kernel's context
-//!   (`context_approx_tol_3d(k, Some(&k.context), ..)`, as the B-rep constructor reads it).
+//!   zone tolerance of the vertex's context, the B-rep's, which upstream describes the
+//!   model being worked on: here half the zone tolerance of the B-rep's own model size
+//!   estimate (`approx_tol3d(k, 0.5 * brep_size_zone_tol_3d(k, b))`, the kernel
+//!   context's when the B-rep stores the default), as the B-rep constructor reads it.
 //! - **Temporary point.** `SmTemporaryChangeValue<SmPoint3d>` (the parallel-face branch
 //!   of `CalcCornerFromFaces`) sets the vertex point and restores it afterwards; it is
 //!   restored before any error is returned too.
@@ -312,9 +314,8 @@ pub struct FaceCorner {
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for a vertex
-/// outside a B-rep and where upstream dereferences null; `SM_ERR` (more than three
-/// target faces, unreachable upstream); [`SolidError::Unported`] from the evaluations
-/// and solves.
+/// outside a B-rep and where upstream dereferences null; [`SolidError::Unported`] from
+/// the evaluations and solves.
 #[allow(clippy::too_many_lines)] // one upstream routine
 pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<FaceCorner> {
     let mut out = FaceCorner {
@@ -325,9 +326,10 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
     };
 
     let mut uv: Point2;
-    let mut tgt_faces: Vec<FaceId> = Vec::new();
-    let mut tgt_uvs: Vec<Point2> = Vec::new();
-    let mut tgt_normals: Vec<Vec3> = Vec::new();
+    // the target faces with their UVs and normals: at most three, the ones the corner
+    // calculation handles, so upstream's default case (more) cannot happen
+    let mut tgt: [Option<(FaceId, Point2, Vec3)>; 3] = [None; 3];
+    let mut n = 0usize;
 
     let vertexuses = super::vertexuses(b, v)?;
     let faces = super::faces(b, v)?;
@@ -336,8 +338,9 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
         return Ok(out);
     }
 
-    let approx_tol_3d =
-        tol::context_approx_tol_3d(k, Some(&k.context), tol::SmallTopoType::NormalSize);
+    // (upstream asks the B-rep's context, there this model's: half the zone tolerance
+    // of this B-rep's own model size estimate)
+    let approx_tol_3d = tol::approx_tol3d(k, 0.5 * tol::brep_size_zone_tol_3d(k, b));
 
     let parallel = has_parallel_faces(k, b, v, Some(tol::ANG_TOL_DEG))?;
 
@@ -403,51 +406,55 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
             continue;
         };
 
-        if let Some(indx) = tgt_faces.iter().position(|&f| f == face) {
+        if let Some(&(_, tgt_uv, _)) = tgt.iter().flatten().find(|t| t.0 == face) {
             let zone = crate::topology::face::p2::tolerance(b, face)?;
             let tol_2d = map_to_2d(k, zone, uv, surface)?;
-            let close = tgt_uvs.get(indx).is_some_and(|t| t.closer_than(tol_2d, uv));
+            let close = tgt_uv.closer_than(tol_2d, uv);
             if close {
                 continue;
             }
         }
 
         // switch with fall-through on the number of found targets
-        let n = tgt_faces.len();
         if n <= 2 {
             // case 2: skip surfaces with normals parallel to 2nd target
             let skip2 = n == 2
-                && tgt_normals
+                && tgt
                     .get(1)
-                    .is_some_and(|&t| surface_normal.is_parallel_to(t, 1.0));
+                    .copied()
+                    .flatten()
+                    .is_some_and(|(_, _, t)| surface_normal.is_parallel_to(t, 1.0));
             // case 1: skip surfaces with normals parallel to 1st target
             let skip1 = !skip2
                 && n >= 1
-                && tgt_normals
+                && tgt
                     .first()
-                    .is_some_and(|&t| surface_normal.is_parallel_to(t, 1.0));
+                    .copied()
+                    .flatten()
+                    .is_some_and(|(_, _, t)| surface_normal.is_parallel_to(t, 1.0));
             // case 0: arrive here - save the face as next target
             if !skip2 && !skip1 {
-                tgt_faces.push(face);
-                tgt_uvs.push(uv);
-                tgt_normals.push(surface_normal);
+                if let Some(slot) = tgt.get_mut(n) {
+                    *slot = Some((face, uv, surface_normal));
+                    n += 1;
+                }
             }
         }
         // default: the vertexuse goes to sChkVertexuses, which nothing reads
     }
 
-    match (tgt_faces.as_slice(), tgt_uvs.as_slice()) {
-        ([], _) => {
+    let f0 = match tgt {
+        [None, _, _] => {
             // SM_DBG_WARN: unexpected number of TgtFaces
             return Ok(out);
         }
 
-        ([f0], [uv0]) => {
+        [Some((f0, uv0, _)), None, _] => {
             // Drop Current Vertex->Point to Face->Surface
-            let surface = face_surface(b, *f0)?;
+            let surface = face_surface(b, f0)?;
             let point = b.vertex(v)?.point;
             let opts = DropPointOptions {
-                guess_uv: Some(*uv0),
+                guess_uv: Some(uv0),
                 ..Default::default()
             };
             let domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -460,12 +467,13 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
             if !found_answer {
                 return Ok(out);
             }
+            f0
         }
 
-        ([f0, f1], [uv0, uv1]) => {
+        [Some((f0, uv0, _)), Some((f1, uv1, _)), None] => {
             // Refine Tgt DropPoints to Intersection Curve between two faces
-            let surface1 = face_surface(b, *f0)?;
-            let surface2 = face_surface(b, *f1)?;
+            let surface1 = face_surface(b, f0)?;
+            let surface2 = face_surface(b, f1)?;
             let ssi = SurfaceIntersector::new(
                 k,
                 surface1,
@@ -477,8 +485,8 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
             // CROSSING here works for Tangent curve cases as well
             let r = ssi.refine_point(
                 k,
-                *uv0,
-                *uv1,
+                uv0,
+                uv1,
                 IntersectionPointType::Crossing,
                 None,
                 None,
@@ -495,39 +503,32 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
             }
 
             uv = uvs[0];
+            f0
         }
 
-        ([f0, f1, f2], [uv0, uv1, uv2]) => {
+        [Some((f0, uv0, _)), Some((f1, uv1, _)), Some((f2, uv2, _))] => {
             // find the surf/surf/surf intersection of the 3 face->Surfaces
-            let d0 = crate::topology::face::p2::uv_domain(b, *f0)?;
-            let d1 = crate::topology::face::p2::uv_domain(b, *f1)?;
-            let d2 = crate::topology::face::p2::uv_domain(b, *f2)?;
-            let s0 = face_surface(b, *f0)?;
-            let s1 = face_surface(b, *f1)?;
-            let s2 = face_surface(b, *f2)?;
+            let d0 = crate::topology::face::p2::uv_domain(b, f0)?;
+            let d1 = crate::topology::face::p2::uv_domain(b, f1)?;
+            let d2 = crate::topology::face::p2::uv_domain(b, f2)?;
+            let s0 = face_surface(b, f0)?;
+            let s1 = face_surface(b, f1)?;
+            let s2 = face_surface(b, f2)?;
             // (status passed on: the fork's SER, tangency-labs/smlib 7a35f33)
             let sol =
-                s0.local_surface_surface_intersect(k, &d0, s1, &d1, s2, &d2, *uv0, *uv1, *uv2)?;
+                s0.local_surface_surface_intersect(k, &d0, s1, &d1, s2, &d2, uv0, uv1, uv2)?;
             let Some(s) = sol else {
                 return Ok(out);
             };
             uv = s.uv1;
+            f0
         }
-
-        _ => {
-            // SM_DBG_WARN: unexpected number of TgtFaces
-            return Err(SolidError::topology_failed(
-                OP,
-                "the vertex has more than three faces",
-            ));
-        }
-    }
+    };
 
     // SM_ASSERT_MSG(bFoundAnswer == TRUE) is compiled out
 
     out.found_point = true;
 
-    let f0 = *tgt_faces.first().ok_or_else(|| null("no target face"))?;
     // (status passed on: the fork's SER, tangency-labs/smlib 7a35f33)
     out.best_point = face_surface(b, f0)?.evaluate_point(k, uv)?;
 
@@ -542,15 +543,15 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
 ///
 /// # Errors
 ///
-/// Those of [`calc_corner_from_faces`] but its `SM_ERR` (more than three target faces),
-/// whose status upstream ignores.
+/// The unported or cancelled errors of [`calc_corner_from_faces`] that carry no upstream
+/// status of its own; any other failure is no best point, as upstream ignores the status.
 pub fn is_on_face_corner(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<(bool, FaceCorner)> {
     // look for a best vertex point position defined by the faces connected to the
     // vertex (status ignored: the outputs keep their initial values)
     let corner = match calc_corner_from_faces(k, b, v) {
         Ok(c) => c,
-        // the SM_ERR of more than three target faces leaves the initial outputs; as the
-        // fork, any failure is no best point (tangency-labs/smlib 7a35f33)
+        // a failure with an upstream status leaves the initial outputs; as the fork, any
+        // failure is no best point (tangency-labs/smlib 7a35f33)
         Err(e)
             if (e.operation() == OP && e.upstream_status().is_some())
                 || !e.is_unported_or_cancelled() =>

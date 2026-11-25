@@ -1278,7 +1278,7 @@ fn sketch_options_and_compass_share_measured_clearance() {
                 );
             }
             if width > 1000.0 {
-                h.app.start("construct.plane.offset");
+                h.app.start("sketch.offset");
                 h.settle();
                 let dialog = h.app.viewport.dialog_rect.unwrap();
                 let viewport = h.app.viewport.rect.unwrap();
@@ -1766,41 +1766,74 @@ fn status_bar_spans_the_window_below_history_in_both_layouts_and_is_covered() {
     }
 }
 
+/// The sketch state shows in the sketch panel, never drawn over the view: the in-view status
+/// line was removed by the owner's decision, so the view paints no "Sketch1 — ..." text.
 #[test]
-fn viewport_sketch_status_distinguishes_empty_and_constrained_geometry() {
+fn sketch_status_shows_in_the_panel_and_not_over_the_view() {
     for mode in [LayoutMode::Docked, LayoutMode::Floating] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         let corner = |h: &Harness| painted_texts(h).into_iter().filter(|t| t.starts_with("Sketch1 — ")).collect::<Vec<_>>();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "{mode:?}: an empty sketch is not fully constrained");
-        assert!(h.widget("No geometry yet").is_some(), "the palette agrees with the viewport");
+        assert!(corner(&h).is_empty(), "{mode:?}: no status over the view");
+        assert!(h.widget("No geometry yet").is_some(), "{mode:?}: an empty sketch is not fully constrained");
 
         let rectangle = h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
         h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — 2 degrees of freedom"], "the rectangle's width and height are free");
+        assert!(h.widget("2 degrees of freedom left").is_some(), "the rectangle's width and height are free");
         h.app.run("sketch.constraint.fix", json!({"entities":rectangle["curves"]})).unwrap();
         h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — fully constrained"], "drawn geometry can be fully constrained");
+        assert!(h.widget("Fully constrained").is_some(), "drawn geometry can be fully constrained");
+        assert!(corner(&h).is_empty(), "{mode:?}: no status over the view");
 
         h.app.run("edit.undo", json!({})).unwrap();
-        h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — 2 degrees of freedom"]);
         h.app.run("edit.undo", json!({})).unwrap();
         h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "undoing the geometry restores the empty status");
+        assert!(h.widget("No geometry yet").is_some(), "undoing the geometry restores the empty status");
+    }
+}
+
+/// Tile and mode chrome only tells views apart (`ui_kit::disambiguates`): with one view, sketching
+/// draws no green frame round the view, no "Model · Sketch1" label and no "Editing" pill, and the
+/// view's tab keeps its own name and colour. Overlay removed by owner decision.
+#[test]
+fn a_single_view_shows_no_tile_or_sketch_mode_chrome() {
+    fn walk<'a>(shape: &'a egui::Shape, out: &mut Vec<&'a egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            shape => out.push(shape),
+        }
+    }
+    for mode in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert_eq!(crate::view_windows::strip_views(&h.app).len(), 1, "{mode:?}: one view");
+        assert!(!crate::ui_kit::disambiguates(1) && crate::ui_kit::disambiguates(2));
+        let texts = painted_texts(&h);
+        assert!(!texts.iter().any(|t| t == "Editing" || t.contains(" · Sketch1")), "{mode:?}: no sketch label or pill: {texts:?}");
+        let t = solidcraft_theme::Tokens::get();
+        let mut shapes = Vec::new();
+        h.shapes.iter().for_each(|s| walk(&s.shape, &mut shapes));
+        let frame = shapes.iter().find(|shape| {
+            matches!(shape, egui::Shape::Rect(rect) if rect.stroke.color == t.sketch_accent && rect.rect.width() > 300.0 && rect.rect.height() > 200.0)
+        });
+        assert!(frame.is_none(), "{mode:?}: no green frame round the view: {frame:?}");
+        assert!(rect_of(&format!("view:title:{}", h.app.docs.views.active().id)).is_none(), "{mode:?}: no view name pill");
     }
 }
 
 #[test]
-fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_corner_text() {
+fn status_bar_names_what_is_edited_and_the_sketch_state() {
     use crate::status_bar::SketchState;
     let mut h = Harness::new();
     let corner = |h: &Harness| painted_texts(h).into_iter().filter(|t| t.starts_with("Sketch1 — ")).collect::<Vec<_>>();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.settle();
-    assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "without the bar the state stays in the view's corner");
+    // The in-view status line was removed by the owner's decision: nothing in the corner, bar or not.
+    assert!(corner(&h).is_empty(), "the view's corner shows no state");
     h.call("ui.prefs", json!({"status_bar": true}));
     h.settle();
     let contents = crate::status_bar::contents(&h.app);
@@ -1812,7 +1845,7 @@ fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_c
     let Some(SketchState::Under(dof)) = contents.sketch else { panic!("{contents:?}") };
     assert!(dof > 0);
     let texts = painted_texts(&h);
-    assert!(corner(&h).is_empty(), "with the bar on, the view's corner shows no state: {texts:?}");
+    assert!(corner(&h).is_empty(), "the view's corner shows no state: {texts:?}");
     assert!(texts.contains(&format!("Under constrained ({dof} degrees of freedom)")), "{texts:?}");
     assert!(texts.iter().any(|t| t == "Editing Sketch1") && texts.iter().any(|t| t == "mm"), "{texts:?}");
     assert!(crate::scenario::handle_at("status:editing").unwrap().x < crate::scenario::handle_at("status:sketch").unwrap().x);

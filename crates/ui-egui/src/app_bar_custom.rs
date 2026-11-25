@@ -368,10 +368,10 @@ pub(crate) fn menu(app: &mut SolveApp, ui: &egui::Ui, content: Rect, out: &app_b
 }
 fn label_icon(app: &SolveApp, id: &str) -> (String, String) {
     if let Some(c) = id.strip_prefix("quick:").and_then(solidcraft_engine::find_command) {
-        return (app.tr_label(c.label).into(), c.info(&app.session).icon.into());
+        return (app.tr_command(c.id, c.label).into(), c.info(&app.session).icon.into());
     }
     let (key, icon) = match id {
-        "documents" => ("app_bar.documents", "document_browser"),
+        "documents" => ("parts_library.title", "document_browser"),
         "separator" => ("app_bar.separator", "help"),
         "space" => ("app_bar.space", "help"),
         "file" => ("ui.file", "new"),

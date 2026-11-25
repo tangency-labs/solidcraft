@@ -293,6 +293,46 @@ pub fn footer(ui: &mut Ui, ok_label: &str, cancel_label: &str, ok_enabled: bool,
     footer_with_left(ui, ok_label, cancel_label, ok_enabled, options, |_| {})
 }
 
+fn footer_labels<'a>(ok: &'a str, cancel: &'a str, apply: Option<&'a str>) -> impl Iterator<Item = (&'a str, Action)> {
+    [(ok, Action::Ok), (apply.unwrap_or(""), Action::Apply), (cancel, Action::Cancel)].into_iter().filter(|(label, _)| !label.is_empty())
+}
+
+fn action_button_space(primary: bool, tokens: &Tokens) -> (f32, f32) {
+    if primary { (tokens.space_16, tokens.space_24 * 3.0) } else { (tokens.space_12, 0.0) }
+}
+
+/// The height of a stacked footer when the translated labels do not fit in one row.
+/// Measure before laying out the scrollable body so the footer always has its own space.
+pub(super) fn stacked_footer_height(ui: &Ui, ok: &str, cancel: &str, apply: Option<&str>, valid: bool) -> Option<f32> {
+    let t = Tokens::get();
+    let width = (dimension(ui.available_width()) - t.space_12 * 2.0).max(0.0);
+    let labels = footer_labels(ok, cancel, apply);
+    let font = |action| {
+        if action == Action::Ok && valid { crate::type_face::bold(t.font_label) } else { egui::FontId::proportional(t.font_label) }
+    };
+    let gaps = (footer_labels(ok, cancel, apply).count().saturating_sub(1) as f32) * t.space_6;
+    let normal_width = labels
+        .map(|(label, action)| {
+            let (padding, min_width) = action_button_space(action == Action::Ok, &t);
+            let size = ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(label).to_owned(), font(action), t.form_ink).size();
+            (size.x.ceil() + padding * 2.0).max(min_width)
+        })
+        .sum::<f32>()
+        + gaps;
+    if normal_width <= width {
+        return None;
+    }
+    let buttons = footer_labels(ok, cancel, apply)
+        .map(|(label, action)| {
+            let (padding, _) = action_button_space(action == Action::Ok, &t);
+            let wrap_at = width - padding.min(width / 8.0).floor() * 2.0;
+            let size = ui.painter().layout(solidcraft_ui_text::tr_label(label).to_owned(), font(action), t.form_ink, wrap_at).size();
+            size.y.ceil().max(t.form_button_height).max(ui.spacing().interact_size.y)
+        })
+        .sum::<f32>();
+    Some(t.form_footer_height - t.form_button_height + buttons + gaps)
+}
+
 pub(super) fn footer_with_left(
     ui: &mut Ui,
     ok_label: &str,
@@ -301,15 +341,25 @@ pub(super) fn footer_with_left(
     options: Footer<'_>,
     left: impl FnOnce(&mut Ui),
 ) -> Action {
+    draw_footer(ui, ok_label, cancel_label, ok_enabled, options, None, left)
+}
+
+pub(super) fn draw_footer(
+    ui: &mut Ui,
+    ok_label: &str,
+    cancel_label: &str,
+    ok_enabled: bool,
+    options: Footer<'_>,
+    stacked_height: Option<f32>,
+    left: impl FnOnce(&mut Ui),
+) -> Action {
     let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left, nothing_to_apply } = options;
     let t = Tokens::get();
     let ok_enabled = ok_enabled && !ok_label.is_empty();
     // The footer is a full-width band (the card has no margin of its own): its own fill, a rule
     // on top, and the buttons right-aligned with 10 pt above/below and 12 pt at the sides.
-    let (band, _) = ui.allocate_exact_size(
-        vec2(dimension(ui.available_width()), t.form_footer_height + if confirm { t.space_4 } else { 0.0 }),
-        egui::Sense::hover(),
-    );
+    let height = stacked_height.unwrap_or(t.form_footer_height) + if confirm { t.space_4 } else { 0.0 };
+    let (band, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), height), egui::Sense::hover());
     let corners = corners.unwrap_or(egui::CornerRadius::same(t.radius_xl));
     ui.painter().rect_filled(
         band,
@@ -319,7 +369,9 @@ pub(super) fn footer_with_left(
     t.secondary_hline(ui.painter(), band.x_range(), band.top(), t.dialog_rule);
     solidcraft_ui_registry::publish_rect("dialog:footer", band);
     solidcraft_ui_registry::publish_count("dialog:ok:enabled", f64::from(ok_enabled && ui.is_enabled()));
-    let inner = band.shrink2(vec2(t.space_12, t.space_10));
+    let stacked = stacked_height.is_some();
+    let inset = if stacked { t.space_12.min(band.width() / 2.0) } else { t.space_12 };
+    let inner = band.shrink2(vec2(inset, t.space_10));
     solidcraft_ui_registry::publish_rect("dialog:footer:actions", inner);
     let mut action = if ui.is_enabled() { keyboard(ui.ctx(), ok_enabled) } else { Action::None };
     let look = ActionLook::new(ok_enabled, !nothing_to_apply, selected, danger);
@@ -328,22 +380,20 @@ pub(super) fn footer_with_left(
         solidcraft_ui_registry::publish_count("dialog:apply:enabled", f64::from(live && ui.is_enabled()));
     }
     let mut actions_left = inner.right();
+    let layout = if stacked { egui::Layout::top_down(egui::Align::Max) } else { egui::Layout::right_to_left(egui::Align::Center) };
     let row = ui.scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.with_layout(layout, |ui| {
             ui.spacing_mut().item_spacing.x = t.space_6;
-            for (label, kind) in [(ok_label, Action::Ok), (apply_label.unwrap_or(""), Action::Apply), (cancel_label, Action::Cancel)] {
-                if (kind == Action::Apply && (apply_label.is_none() || confirm)) || (kind == Action::Ok && ok_label.is_empty()) || label.is_empty() {
-                    continue;
+            if stacked {
+                ui.spacing_mut().item_spacing.y = t.space_6;
+            }
+            for (label, kind) in footer_labels(ok_label, cancel_label, apply_label.filter(|_| !confirm)) {
+                let (mut padding, mut min_width) = action_button_space(look.primary(kind), &t);
+                if stacked {
+                    padding = padding.min(inner.width() / 8.0).floor();
+                    min_width = min_width.min(inner.width());
                 }
-                let primary = look.primary(kind);
-                let response = action_button(
-                    ui,
-                    label,
-                    kind,
-                    &look,
-                    if primary { t.space_16 } else { t.space_12 },
-                    if primary { t.space_24 * 3.0 } else { 0.0 },
-                );
+                let response = action_button(ui, label, kind, &look, padding, min_width, stacked);
                 actions_left = actions_left.min(response.rect.left());
                 if response.clicked() {
                     action = kind;
@@ -423,7 +473,7 @@ impl ActionLook {
 
 /// One OK, Apply or Cancel button, `padding` at its sides and at least `min_width` wide, with its
 /// scenario handles (`dialog:ok`, `dialog:apply`, `dialog:cancel` and `dialog:<label>`).
-fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padding: f32, min_width: f32) -> Response {
+fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padding: f32, min_width: f32, wrap: bool) -> Response {
     let t = Tokens::get();
     let ok_enabled = look.ok_enabled;
     let marked = look.selected == Some(kind);
@@ -441,7 +491,11 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     // Style after add_enabled sets the state, preserving the native button's ID and layout.
     let response = ui.add_enabled(live, |ui: &mut Ui| {
         let text = if primary && ok_enabled { text.bold_face() } else { text };
-        ui.add(form_action_widget(ui, text, tone, marked && !primary, vec2(min_width, t.form_button_height)))
+        let mut button = form_action_widget(ui, text, tone, marked && !primary, vec2(min_width, t.form_button_height));
+        if wrap {
+            button = button.wrap_mode(egui::TextWrapMode::Wrap);
+        }
+        ui.add(button)
     });
     t.button_bevel(ui, &response, false);
     pointer_on_hover(ui, &response);
@@ -535,7 +589,7 @@ impl<'a> HeaderActions<'a> {
                 .id_salt(("header_action", *kind as u8))
                 .max_rect(*rect)
                 .layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight));
-            let response = ui.scope_builder(builder, |ui| action_button(ui, label, *kind, &look, padding, 0.0)).inner;
+            let response = ui.scope_builder(builder, |ui| action_button(ui, label, *kind, &look, padding, 0.0, false)).inner;
             if response.clicked() {
                 action = *kind;
             }
@@ -647,14 +701,20 @@ fn selected_button_palette(t: &Tokens) -> (egui::Color32, egui::Color32) {
 pub fn persistent_button_shape(ui: &Ui, response: &Response, rect: egui::Rect) -> egui::Shape {
     let t = Tokens::get();
     let (fill, _) = selected_button_palette(&t);
-    let mut shapes = vec![
+    egui::Shape::Vec(vec![
         egui::Shape::rect_filled(rect, t.radius_sm, fill),
         egui::Shape::rect_stroke(rect, t.radius_sm, egui::Stroke::new(1.0, t.form_primary), egui::StrokeKind::Inside),
-    ];
+        persistent_kept_shape(ui, response, rect),
+    ])
+}
+
+/// [`persistent_button_shape`]'s accent underline alone, for an effect that is on while its tool is closed.
+pub fn persistent_kept_shape(ui: &Ui, response: &Response, rect: egui::Rect) -> egui::Shape {
+    let t = Tokens::get();
     let inset = t.space_8.min(rect.width() / 4.0);
     let y = rect.bottom() - t.space_4;
-    shapes
-        .push(egui::Shape::line_segment([egui::pos2(rect.left() + inset, y), egui::pos2(rect.right() - inset, y)], egui::Stroke::new(2.0, t.accent)));
+    let mut shapes =
+        vec![egui::Shape::line_segment([egui::pos2(rect.left() + inset, y), egui::pos2(rect.right() - inset, y)], egui::Stroke::new(2.0, t.accent))];
     if response.has_focus() {
         shapes.push(native_button_focus(ui, response, rect));
     }
@@ -777,16 +837,36 @@ pub fn action_menu<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) 
 /// use the kit chevron rather than a font-dependent triangle. Tokens: form_close_size,
 /// space_4, control_radius, form_primary/dim/ink, selected_bg, hover, font_label.
 pub fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, selected: bool) -> Response {
+    compact_button_presentation(ui, glyph, tooltip, enabled, selected, false)
+}
+
+/// An ink-only toggle: the selected glyph carries the accent, with a quiet hover surface.
+/// Tokens: compact_button tokens, text (neutral hover), form_primary (focus).
+pub fn compact_toggle(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, selected: bool) -> Response {
+    compact_button_presentation(ui, glyph, tooltip, enabled, selected, true)
+}
+
+fn compact_button_presentation(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, selected: bool, toggle: bool) -> Response {
     let t = Tokens::get();
     let arrow = matches!(glyph, MOVE_UP | MOVE_DOWN);
     let width = if arrow { t.form_close_size - t.space_4 } else { t.form_close_size };
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             let (rect, response) = ui.allocate_exact_size(vec2(width, t.form_close_size), egui::Sense::click());
-            if response.hovered() || selected {
-                ui.painter().rect_filled(rect, t.control_radius, if selected { t.selected_bg } else { t.hover });
+            if response.hovered() || (selected && !toggle) {
+                let fill = if toggle {
+                    t.text.gamma_multiply(0.06)
+                } else if selected {
+                    t.selected_bg
+                } else {
+                    t.hover
+                };
+                ui.painter().rect_filled(rect, t.control_radius, fill);
             }
-            let ink = if !enabled {
+            if toggle && response.has_focus() {
+                ui.painter().rect_stroke(rect, t.control_radius, egui::Stroke::new(1.5, t.form_primary), egui::StrokeKind::Inside);
+            }
+            let ink = if !ui.is_enabled() {
                 t.form_dim.gamma_multiply(0.35)
             } else if selected {
                 t.form_primary
@@ -803,7 +883,13 @@ pub fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, se
             } else {
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(t.font_label), ink);
             }
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), glyph));
+            response.widget_info(|| {
+                if toggle {
+                    egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, solidcraft_ui_text::tr_label(tooltip))
+                } else {
+                    egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), glyph)
+                }
+            });
             response
         })
         .inner;

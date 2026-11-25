@@ -20,7 +20,8 @@
 use std::borrow::Cow;
 
 use super::series::{GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S, STORE_E, V3};
-use crate::error::{Result, SolidError};
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit, SectionProof};
+use crate::error::{Failure, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -29,6 +30,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOW;
+use crate::nurbs::nurbs_crv::MAX_DERIV;
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -187,17 +189,29 @@ impl Nurbs {
         let q = s.degree(SurfParamType::V);
         let u = full_knots(&ku, &mu);
         let v = full_knots(&kv, &mv);
-        if p < 1 || q < 1 || u.len() != lnu + p + 1 || v.len() != lnv + q + 1 {
-            // "SmGnSectionFSG: a face's NURBS data do not agree"
-            return Err(SolidError::blend_failed(
+        // "SmGnSectionFSG: a face's NURBS data do not agree"
+        if p < 1 || q < 1 {
+            return Err(SolidError::blend(
                 OP,
-                "a face's NURBS data do not agree",
+                BlendFailure::SectionUnsupported(SectionLimit::DegreeBelowOne),
+            ));
+        }
+        if u.len() != lnu + p + 1 || v.len() != lnv + q + 1 {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "a face's knots do not number its control points plus its order: a \
+                          B-spline surface the kernel holds keeps the two consistent",
+                },
             ));
         }
         if cps.len() != lnu * lnv {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "a face's control net does not match its knots",
+                BlendFailure::Defect {
+                    why: "a face's control net is not its rows by its columns: a B-spline \
+                          surface the kernel holds keeps its net that size",
+                },
             ));
         }
         let mut pw = Vec::new();
@@ -208,9 +222,9 @@ impl Nurbs {
             let positive = w > 0.0;
             if !positive {
                 // "SmGnSectionFSG: a face's weights are not positive"
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "a face's weights are not positive",
+                    BlendFailure::SectionUnsupported(SectionLimit::FaceWeightNotPositive),
                 ));
             }
         }
@@ -531,9 +545,12 @@ pub fn surface_partials_pinned(
     sides: [i32; 2],
 ) -> Result<Partials<f64>> {
     if lk > MAX_K {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: lk,
+                most: MAX_K,
+            }),
         ));
     }
     let definition = matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
@@ -564,7 +581,13 @@ pub fn surface_partials_pinned(
     for a in 0..=lk {
         for b in 0..=(lk - a) {
             let v = d.get(a).and_then(|r| r.get(b)).copied().ok_or_else(|| {
-                SolidError::blend_failed(OP, "the surface has no partial of this order")
+                SolidError::blend(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "the surface's evaluation returned fewer partials than asked: it \
+                              returns every partial up to the orders asked",
+                    },
+                )
             })?;
             out.set(a, b, V3::from_vec3(v));
         }
@@ -592,6 +615,9 @@ pub struct GnSystem<'a, T: GnScalar> {
     /// `pR`: a ball whose radius varies, `r(s)` as a series in sigma (`r` unused), or
     /// none (014f66f).
     pub law: Option<&'a Ser<T>>,
+    /// Equal setbacks measured at the current oriented normals, instead of fixed offsets
+    /// or a radius prescribed along the leader.
+    pub equal_setback: Option<f64>,
 }
 
 /// The Taylor coefficients `W[a][b]` (`a + b <= deg`) of a face's offset point
@@ -863,6 +889,40 @@ fn offset_at<T: GnScalar>(w: &[V3<T>], deg: usize, a: usize, b: usize) -> V3<T> 
     w.get(a * (deg + 1) + b).copied().unwrap_or(vz)
 }
 
+/// An equal setback d has radius d * (1 + q) / sqrt((1 - q) * (1 + q)), where
+/// q is the dot product of the unit normals towards the centre. Both factors must be
+/// positive over the station or enclosure. Treating q as a series retains its dependence
+/// on the two feet in the Jacobian as well as in the higher coefficients.
+fn equal_setback_radius<T: GnScalar>(
+    normals: &[VSer<T>; 2],
+    side: [f64; 2],
+    distance: f64,
+    tr: Trunc,
+) -> Result<Ser<T>> {
+    if !(distance.is_finite() && distance > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the chamfer's setback is finite and positive",
+        ));
+    }
+    let [first, second] = normals;
+    let [side_first, side_second] = side;
+    let q = first
+        .dot(second, tr)
+        .scale(T::of(side_first * side_second), tr);
+    let one = Ser::constant(T::of(1.0));
+    let one_plus = one.add(&q, tr);
+    let one_minus = one.sub(&q, tr);
+    if !(one_plus.at(0, 0).is_positive() && one_minus.at(0, 0).is_positive()) {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
+        ));
+    }
+    let inv_sqrt = one_plus.mul(&one_minus, tr).inv_sqrt(tr)?;
+    Ok(one_plus.mul(&inv_sqrt, tr).scale(T::of(distance), tr))
+}
+
 /// G's four series and the two feet's (`sm_GnEvaluate`'s `rG`, `rF`).
 pub type GnValues<T> = ([Ser<T>; 4], [VSer<T>; 2]);
 
@@ -924,9 +984,12 @@ pub fn gn_evaluate_vn<T: GnScalar>(
     let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
     for (f, ((xf, pf), (&rf, sidef))) in rows.enumerate() {
         let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the station's system has no foot for the face",
+                BlendFailure::Defect {
+                    why: "the station's system has no foot for a face: its feet are taken in \
+                          exact pairs",
+                },
             ));
         };
         let mut du = xu.clone();
@@ -939,7 +1002,7 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         // the offset point's own expansion (enclosures near a focal distance, #16652,
         // #19306): its constant offset d0
         let d0 = offset_d0(sys, rf, sidef);
-        let wt = if offset_near_focal(pf, d0) {
+        let wt = if sys.equal_setback.is_none() && offset_near_focal(pf, d0) {
             Some(offset_taylor(pf, d0, top)?)
         } else {
             None
@@ -949,9 +1012,12 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         let mut pv = vec![Ser::constant(T::of(1.0))];
         for a in 1..=top {
             let (Some(lu), Some(lv)) = (pu.last(), pv.last()) else {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the face's powers are missing",
+                    BlendFailure::Defect {
+                        why: "the face's powers lack the previous order: they start with the \
+                              0th and each order pushes its own before the next is asked",
+                    },
                 ));
             };
             pu.push(lu.mul_valued(&du, a - 1, 1, tr));
@@ -992,6 +1058,13 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         }
         let nrm = su.cross(&sv, tr);
         let inv_len = nrm.dot(&nrm, tr).inv_sqrt(tr)?;
+        if sys.equal_setback.is_some() {
+            if let (Some(foot), Some(normal)) = (f_out.get_mut(f), n_out.get_mut(f)) {
+                *foot = s;
+                *normal = nrm.times(&inv_len, tr);
+            }
+            continue;
+        }
         // the offset towards the ball: tau r_i s_i, tau = 1 + eps (r_i a series in sigma
         // for a law)
         let mut d = Ser::constant(T::of(rf * sidef));
@@ -1016,6 +1089,19 @@ pub fn gn_evaluate_vn<T: GnScalar>(
             *vo = vf;
             *no = nrm.times(&inv_len, tr);
             *fo = s;
+        }
+    }
+    if let Some(distance) = sys.equal_setback {
+        let radius = equal_setback_radius(&n_out, sys.side, distance, tr)?;
+        let mut tau = Ser::constant(T::of(1.0));
+        if !sys.hold && tr.e() >= 1 {
+            tau.set(0, 1, T::of(1.0));
+        }
+        let offset = radius.mul(&tau, tr);
+        for (((centre, foot), normal), side) in
+            v_out.iter_mut().zip(&f_out).zip(&n_out).zip(sys.side)
+        {
+            *centre = foot.add(&normal.times(&offset.scale(T::of(side), tr), tr), tr);
         }
     }
     let [v0, v1] = &v_out;
@@ -1145,6 +1231,14 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
     ///
     /// As [`gn_evaluate_vn`].
     pub fn evaluate(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<GnValuesVN<T>> {
+        // With equal setbacks the two faces' offsets depend on both normals. The
+        // per-face cache below assumes each offset is independent of the other foot.
+        if self.sys.equal_setback.is_some() {
+            self.computed = self
+                .computed
+                .saturating_add(u64::from(tr.computed_mask().count_ones()));
+            return gn_evaluate_vn(self.sys, x, tr);
+        }
         let out = self.evaluate_kept(x, tr);
         if out.is_err() {
             // the kept series are part way through an update
@@ -1192,9 +1286,12 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
         let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
         for (fs, ((xf, pf), (&rf, sidef))) in self.faces.iter_mut().zip(rows) {
             let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the station's system has no foot for the face",
+                    BlendFailure::Defect {
+                        why: "the station's system has no foot for a face: its feet are taken \
+                              in exact pairs",
+                    },
                 ));
             };
             let mut du = xu.clone();
@@ -1203,9 +1300,12 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
             dv.set(0, 0, T::of(0.0));
             for a in 1..=top {
                 let (Some(lu), Some(lv)) = (fs.pu.get(a - 1), fs.pv.get(a - 1)) else {
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the face's powers are missing",
+                        BlendFailure::Defect {
+                            why: "the face's kept powers lack an order: they start with the \
+                                  0th and each order pushes its own before the next is asked",
+                        },
                     ));
                 };
                 let (nu, nv) = (
@@ -1217,9 +1317,12 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                     fs.pv.push(zero.clone());
                 }
                 let (Some(pua), Some(pva)) = (fs.pu.get_mut(a), fs.pv.get_mut(a)) else {
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the face's powers are missing",
+                        BlendFailure::Defect {
+                            why: "the face's kept powers lack an order: they start with the \
+                                  0th and each order pushes its own before the next is asked",
+                        },
                     ));
                 };
                 pua.merge_computed(&nu, btr);
@@ -1368,8 +1471,8 @@ pub fn gn_top_jets<T: GnScalar>(top: usize, tr: Trunc, n: &[VSer<T>; 2], f: &mut
     }
 }
 
-/// `sm_GnJacobian`: the Jacobian `dG/dx` at x's constant terms, offsets held: G along
-/// `x + e_j eps`, first order.
+/// `sm_GnJacobian`: the Jacobian `dG/dx` at x's constant terms and tau = 1: G along
+/// `x + e_j eps`, first order. An equal setback's offset still follows the feet.
 ///
 /// # Errors
 ///
@@ -1428,9 +1531,9 @@ pub fn solve4(ca: &[[f64; 4]; 4], cb: &[f64; 4]) -> Result<[f64; 4]> {
         let regular = a.at(p, c).abs() > 1.0e-13 * scale;
         if !regular {
             // "the blend's system is singular at a station (its faces' normals agree there)"
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the blend's system is singular at a station (its faces' normals agree there)",
+                BlendFailure::SectionDegenerate(SectionDegeneracy::NormalsAgree),
             ));
         }
         for j in 0..5 {
@@ -1533,6 +1636,8 @@ impl GnStation {
 pub struct StationOptions<'a> {
     /// `pR`.
     pub law: Option<&'a Ser<f64>>,
+    /// Equal setbacks measured at the current station, instead of a leader law.
+    pub equal_setback: Option<f64>,
     /// `lTop`.
     pub top: usize,
     /// `pSides`.
@@ -1580,12 +1685,27 @@ pub fn leader_series_sided(
     if !c.is_rational()? {
         derivs = derivs.min(c.degree()?);
     }
-    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated"
-    let mut d = c.evaluate(s, derivs, !before, false).map_err(|_| {
-        SolidError::blend_failed(
+    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated": a
+    // rational leader's order can pass the most the curve evaluator takes
+    if derivs > MAX_DERIV {
+        return Err(SolidError::blend(
             OP,
-            "the leader's derivatives of this order are not evaluated",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: derivs,
+                most: MAX_DERIV,
+            }),
+        ));
+    }
+    let mut d = c.evaluate(s, derivs, !before, false).map_err(|e| {
+        Failure::new(
+            OP,
+            BlendFailure::Defect {
+                why: "the leader's evaluation failed at an order within the most the curve \
+                      evaluator takes, on a curve whose degree it just read",
+            },
         )
+        .caused_by(e)
+        .into_error()
     })?;
     d.resize(tr.s() + 2, Vec3::ZERO);
     let zero = V3 {
@@ -1596,16 +1716,11 @@ pub fn leader_series_sided(
     let mut l = VSer::constant(zero);
     let mut d1 = l;
     let mut fact = 1.0_f64;
-    for j in 0..=tr.s() {
+    // (`d` holds the orders 0 to `tr.s() + 1`: each j and the next, j to `tr.s()`)
+    for (j, (dj, dj1)) in d.iter().zip(d.iter().skip(1)).enumerate() {
         if j > 0 {
             fact *= j as f64;
         }
-        let (Some(dj), Some(dj1)) = (d.get(j), d.get(j + 1)) else {
-            return Err(SolidError::blend_failed(
-                OP,
-                "the leader has no derivative of this order",
-            ));
-        };
         let cl = [dj.x, dj.y, dj.z];
         let cd = [dj1.x, dj1.y, dj1.z];
         for ((la, da), (&x, &y)) in l.a.iter_mut().zip(d1.a.iter_mut()).zip(cl.iter().zip(&cd)) {
@@ -1702,11 +1817,15 @@ fn solve_station_body(
     steps: &mut u32,
 ) -> Result<(GnStation, StationCurves)> {
     let law = opts.law;
+    let equal_setback = opts.equal_setback;
     let sides = opts.sides.unwrap_or([0, 0, 0, 0]);
     if tr.s() > MAX_S {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: tr.s(),
+                most: MAX_S,
+            }),
         ));
     }
     let lk = tr.s() + tr.e() + 1;
@@ -1739,6 +1858,8 @@ fn solve_station_body(
     let point = Trunc::new(0, 0)?;
     let mut converged = false;
     let mut it = 0;
+    // the last iteration's residual and step, for a station that does not converge
+    let mut last: Option<(f64, f64)> = None;
     while it < 50 && !converged {
         *steps += 1;
         let pp = partials_at(&x, 2)?;
@@ -1751,6 +1872,7 @@ fn solve_station_body(
             side,
             hold: false,
             law,
+            equal_setback,
         };
         let sx = x.map(Ser::constant);
         let (g, _) = gn_evaluate(&sys, &sx, point)?;
@@ -1771,12 +1893,19 @@ fn solve_station_body(
         if res <= tol && step <= STATION_STEP {
             converged = true;
         }
+        last = Some((res, step));
         it += 1;
     }
     if !converged {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the feet of a station did not converge",
+            BlendFailure::StationDidNotConverge {
+                s,
+                residual: last.map(|(res, _)| res),
+                tolerance: tol,
+                step: last.map(|(_, step)| step),
+                iterations: u32::try_from(it).ok(),
+            },
         ));
     }
 
@@ -1791,6 +1920,7 @@ fn solve_station_body(
         side,
         hold: false,
         law,
+        equal_setback,
     };
     let mut sx = x.map(Ser::constant);
     let jac = gn_jacobian(&sys, &sx)?;
@@ -1997,6 +2127,55 @@ mod tests {
     /// Two planes at a square corner, the ball of radius r on the edge along y: the point
     /// at distance tau r from both is (tau r, y, tau r), its feet (tau r, y, 0) and
     /// (0, y, tau r), linear in tau, and y = L s along the leader.
+    #[test]
+    fn equal_setback_uses_the_oriented_wedge_and_its_derivative() {
+        let tr = Trunc::new(1, 0).unwrap();
+        let first = VSer::constant(V3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        let root3 = 3.0_f64.sqrt();
+        let mut second = VSer::constant(V3 {
+            x: 0.5,
+            y: 0.5 * root3,
+            z: 0.0,
+        });
+        let [cosine, sine, _] = &mut second.a;
+        cosine.set(1, 0, 1.0);
+        sine.set(1, 0, -1.0 / root3);
+        let d = 0.2;
+        let radius = equal_setback_radius(&[first, second], [1.0, -1.0], d, tr).unwrap();
+        // The signed cosine is -1/2. The radius is d/sqrt(3), and
+        // differentiating its squared constraint gives dr/dq = r/(1-q^2).
+        let expected = d / root3;
+        assert!((radius.at(0, 0) - expected).abs() < 1.0e-15);
+        assert!((radius.at(1, 0) + 4.0 * expected / 3.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn equal_setback_encloses_the_radius_only_inside_its_wedge_domain() {
+        let tr = Trunc::new(0, 0).unwrap();
+        let normal = |x, y| {
+            VSer::constant(V3 {
+                x,
+                y,
+                z: Ivl::from(0.0),
+            })
+        };
+        let first = normal(Ivl::from(1.0), Ivl::from(0.0));
+        let second = normal(Ivl::new(0.4, 0.6), Ivl::new(0.8, 0.92));
+        let d = 0.2;
+        let radius = equal_setback_radius(&[first.clone(), second], [1.0, 1.0], d, tr)
+            .unwrap()
+            .at(0, 0);
+        assert!(radius.lo <= d * (7.0_f64 / 3.0).sqrt());
+        assert!(radius.hi >= 2.0 * d);
+        // A box reaching the degenerate wedge cannot prove a radius there.
+        let second = normal(Ivl::new(0.9, 1.0), Ivl::new(0.0, 0.44));
+        assert!(equal_setback_radius(&[first, second], [1.0, 1.0], d, tr).is_err());
+    }
+
     #[test]
     fn square_corner_station_is_the_closed_form() {
         let k = Kernel::default();
@@ -2413,6 +2592,7 @@ mod tests {
             side: [1.0, -1.0],
             hold,
             law: law.then_some(&law_ser),
+            equal_setback: None,
         };
         let near = [
             offset_near_focal(p0, offset_d0(&sys, r[0], 1.0)),
@@ -2507,7 +2687,13 @@ mod tests {
         let error = surface_partials(&k, &s, Point2::new(0.5, 0.5), MAX_K + 1).unwrap_err();
         assert_eq!(
             error,
-            SolidError::blend_failed(OP, "the order is past the most the series hold")
+            SolidError::blend(
+                OP,
+                BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                    order: MAX_K + 1,
+                    most: MAX_K
+                })
+            )
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }
@@ -2765,6 +2951,7 @@ mod tests {
             side: [side, 1.0],
             hold: true,
             law: None,
+            equal_setback: None,
         };
         let half = 1e-6;
         let mut xu = Ser::constant(Ivl::from(u));

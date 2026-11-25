@@ -32,7 +32,10 @@ impl SolveApp {
     /// Keep the target design and editors unchanged until the picker answers.
     /// (A save being written keeps it unchanged too, see [`crate::save_job`].)
     pub fn file_picker_busy(&self) -> bool {
-        self.file_picker.is_some() || self.saving.is_some() || self.disk_prompt
+        self.file_picker.is_some()
+            || self.saving.is_some()
+            || self.disk_prompt
+            || (crate::documents::saving_to_close(self) && crate::save_job::host_pending(self, self.session.uid))
     }
 
     pub(crate) fn pick_open(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
@@ -82,14 +85,15 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
-    /// Ask for a folder: a plugin field's Browse button, or the document library's folder.
-    /// The plugin dialog shows Browse only when this service is set. Without a host dialog,
-    /// the answer is a cancel and nothing is changed.
-    pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+    /// Ask for a folder, starting in `current` (empty: the folder last used): a plugin field's
+    /// Browse button, the document library's folder, or a folder setting. The plugin dialog shows
+    /// Browse only when this service is set. Without a host dialog, the answer is a cancel and
+    /// nothing is changed.
+    pub(crate) fn pick_folder(&mut self, current: &str, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
         }
-        let future = self.services.pick_folder.as_ref().map(|pick| pick());
+        let future = self.services.pick_folder.as_ref().map(|pick| pick(current));
         self.begin_picker(future, Box::new(complete));
     }
 

@@ -87,6 +87,10 @@
 //!   [`SolidError::Unported`] and [`SolidError::InvalidInput`]; the ignored call's
 //!   outputs keep their initial values (a failed `DropPoint` is "no drop point", a
 //!   failed coincidence check "not coincident").
+//! - **Face-pair interval edges** (not upstream, #18927): a failed step of
+//!   `FindOrCreateProtoEdge` for an interval of a face pair's intersection refuses with
+//!   [`BooleanFailure::IntervalEdgeNotMade`], its error the cause, where upstream leaves
+//!   the intersection without that edge (`find_or_create_needed_proto_edge`).
 //! - **Curve ownership.** `EdgeFaceCoincidence` resets the curve's owner to the
 //!   original edge after `MakeEdgeInFace`; the port has no curve owners (the curve
 //!   copy is a new handle), so there is nothing to reset.
@@ -160,14 +164,16 @@ use crate::topology::proto_topology::p3::Mates;
 use crate::topology::proto_topology::{
     ProtoBrep, ProtoEdgeId, ProtoTopologyManager, ProtoVertexId,
 };
+use crate::EntityRef;
 
 use super::coincident_strip::{crossing_inside_coincident_pair, strip_contacts};
 use super::curved_strip::drop_strip_crossings;
+use super::duplicate_edge_run::drop_duplicate_edge_runs;
 use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
     intersect_shell_vertices, intersect_wire_lamina_edges, new_curve_classification,
-    set_edge_class, solve_with_face_caches, surface_coincidence_check,
+    set_edge_class, solve_with_face_caches, split_soft, surface_coincidence_check,
     surface_solve_with_face_caches, FaceIntersectOutputs, IntersectionCurves, IntersectionResults,
     IntersectorBrep, TopologyIntersector,
 };
@@ -277,17 +283,15 @@ impl<O: Ord + Copy> MapMates<O> {
     /// `RemoveRelationship`: `SM_ERR` unless the two are a mated pair.
     fn remove(&mut self, brep_entity: Option<O>, other_entity: Option<O>) -> Result<()> {
         let (Some(b), Some(o)) = (brep_entity, other_entity) else {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 OP_REMOVE,
-                BooleanStage::Relate,
-                "the two entities are not a related pair",
+                BooleanFailure::NotRelatedPair,
             ));
         };
         if self.other(Some(b)) != Some(o) {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 OP_REMOVE,
-                BooleanStage::Relate,
-                "the two entities are not a related pair",
+                BooleanFailure::NotRelatedPair,
             ));
         }
         if let Some(m) = self.b_to_o.as_mut() {
@@ -485,10 +489,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             for ii in 0..c.curves_3d.len() {
                 let c3 = c.curves_3d.get(ii).copied().flatten();
                 let copy = Self::b_spline_copy(geometry, c3)?.ok_or_else(|| {
-                    SolidError::stage_failed(
-                        OP_REGISTER,
-                        "a curve could not be copied for the intersection",
-                    )
+                    SolidError::boolean(OP_REGISTER, BooleanFailure::IntersectionCurveNotCopyable)
                 })?;
                 if let Some(slot) = c.curves_3d.get_mut(ii) {
                     *slot = Some(copy);
@@ -526,10 +527,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         other_entity: Option<O>,
     ) -> Result<()> {
         if !self.is_mated_pair(brep_entity, other_entity) {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 OP_REMOVE,
-                BooleanStage::Relate,
-                "the two entities are not a related pair",
+                BooleanFailure::NotRelatedPair,
             ));
         }
         if let (Some(m), Some(b)) = (self.b_to_o.as_mut(), brep_entity) {
@@ -612,10 +612,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let dist_old = p.distance(brep.vertex_point(other_v)?);
             let dist_new = p.distance(brep.vertex_point(other_vertex)?);
             if dist_new > dist_old + EFF_ZERO_SQRT {
-                return Err(SolidError::boolean_stage_failed(
+                return Err(SolidError::boolean(
                     OP_SQUEEZE,
-                    BooleanStage::Relate,
-                    "the existing relation of the vertex is better",
+                    BooleanFailure::ExistingRelationBetter,
                 ));
             }
 
@@ -647,10 +646,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let dist_old = p.distance(brep.vertex_point(brep_v)?);
             let dist_new = p.distance(brep.vertex_point(brep_vertex)?);
             if dist_new > dist_old + EFF_ZERO_SQRT {
-                return Err(SolidError::boolean_stage_failed(
+                return Err(SolidError::boolean(
                     OP_SQUEEZE,
-                    BooleanStage::Relate,
-                    "the existing relation of the vertex is better",
+                    BooleanFailure::ExistingRelationBetter,
                 ));
             }
 
@@ -830,18 +828,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // when no largerThanTol common edge is found between V1 and V2
                 if !found_common_edge {
                     // Have a good candidate for squeezing
-                    let other_v1 = self.other_mate(Some(v1)).ok_or_else(|| {
-                        SolidError::entity_missing(
-                            OP_FIX_GAPS,
-                            "a related vertex in the other B-rep",
-                        )
-                    })?;
-                    let other_v2 = self.other_mate(Some(v2)).ok_or_else(|| {
-                        SolidError::entity_missing(
-                            OP_FIX_GAPS,
-                            "a related vertex in the other B-rep",
-                        )
-                    })?;
+                    let related = |v| {
+                        self.other_mate(Some(v)).ok_or_else(|| {
+                            SolidError::boolean(OP_FIX_GAPS, BooleanFailure::LoopVertexUnrelated)
+                        })
+                    };
+                    let other_v1 = related(v1)?;
+                    let other_v2 = related(v2)?;
                     // (the casts to SmVertex* are used by CombineCoincidentVertices)
                     Self::as_vertex(Some(other_v1))?;
                     Self::as_vertex(Some(other_v2))?;
@@ -1065,21 +1058,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ) -> Result<bool> {
         // check input
         let brep_vertex = brep_vertex.ok_or_else(|| {
-            SolidError::boolean_entity_missing(
+            SolidError::boolean_null_defect(
                 OP_CLOSE_LOOP,
                 BooleanStage::CloseLoop,
-                "a vertex to close the loop at",
+                "the intersection loop is to be closed at no vertex, though the merge closes \
+                 it only at the vertex where the loop's last edge ends",
             )
         })?;
 
         // find mating vertex in m_pOther brep
         let other_vertex = Self::cast(self.other_mate(Some(brep_vertex)), ClassObjectKind::Vertex)
             .ok_or_else(|| {
-                SolidError::boolean_entity_missing(
-                    OP_CLOSE_LOOP,
-                    BooleanStage::CloseLoop,
-                    "a vertex of the other B-rep related to the loop's vertex",
-                )
+                SolidError::boolean(OP_CLOSE_LOOP, BooleanFailure::LoopVertexUnrelated)
             })?;
 
         // init output
@@ -1612,7 +1602,36 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
             Ok(out)
         };
-        let (boxes1, boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
+        let (mut boxes1, mut boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
+        // Not upstream: those boxes narrowed to what each face holds
+        // (`query::face::p1::proved_bounding_box`). The box above of a curved face is its
+        // surface's whole control net, so a sliver of a whole turn was paired with every
+        // face round its ring, and each such pair cost a surface intersection that found
+        // nothing. Only the faces those boxes pair are boxed again, and nothing is made or
+        // written on the operands (a UV trim made here, before the intersections that would
+        // make it, would change what they make).
+        {
+            let (paired1, paired2) = loosely_paired(&boxes1, &boxes2, self.this_approx_tol_3d());
+            for (faces, paired, boxes) in [
+                (&faces1, paired1, &mut boxes1),
+                (&faces2, paired2, &mut boxes2),
+            ] {
+                for ((&f, paired), b) in faces.iter().zip(paired).zip(boxes.iter_mut()) {
+                    k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
+                    if !paired {
+                        continue;
+                    }
+                    if let Some((arena, EntityRef::Face(face))) = brep.topology_entity(f) {
+                        if let Some(proved) =
+                            crate::query::face::p1::proved_bounding_box(k, arena, face)?
+                        {
+                            // both hold the face: so does their common part
+                            *b = b.intersect(&proved).unwrap_or(proved);
+                        }
+                    }
+                }
+            }
+        }
         // (the fork's tangency-labs/smlib@84a7998) the other B-rep's faces whose box may
         // lie within the tolerance of a face's box: a superset of the pairs the box test
         // below keeps, in ascending order. The pairs it leaves out reach nothing before
@@ -1626,6 +1645,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // proto topology of theirs yet), so that the contacts a rule declares from them are
         // known before the first of their proto vertices is made.
         let mut intersections = Vec::new();
+        // Not upstream: each face's edge piece boxes and control net span boxes, made the
+        // first time a pair asks (`chords_apart`, `spans_apart`).
+        let mut edge_pieces: std::collections::BTreeMap<O, Option<Vec<Extent3d>>> =
+            std::collections::BTreeMap::new();
+        let mut span_boxes: std::collections::BTreeMap<O, Option<Vec<Extent3d>>> =
+            std::collections::BTreeMap::new();
         for (ii, &f1) in faces1.iter().enumerate() {
             k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
             let pairs: Vec<usize> = match (&pair_search, boxes1.get(ii)) {
@@ -1667,6 +1692,75 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // Check for coincident surfaces -- partial coincidence is ok.
                 let surf1 = s1.ok_or(invalid(OP_INTERSECT_TOPOLOGY, "face without surface"))?;
                 let surf2 = s2.ok_or(invalid(OP_INTERSECT_TOPOLOGY, "face without surface"))?;
+                // Not upstream: no work either for a pair whose boxes overlap only away from
+                // the plane of a planar face of theirs (`pair_apart_off_planes`).
+                if let (Some(box1), Some(box2), Some(t1), Some(t2)) = (
+                    boxes1.get(ii),
+                    boxes2.get(jj),
+                    ProtoBrep::topology_tolerance(&*brep, f1),
+                    ProtoBrep::topology_tolerance(&*brep, f2),
+                ) {
+                    let plane = |s| brep.surface(s).and_then(plane_of);
+                    let (plane1, plane2) = (plane(surf1), plane(surf2));
+                    let margin = tol + t1 + t2;
+                    if pair_apart_off_planes(box1, box2, [plane1, plane2], tol, margin) {
+                        continue;
+                    }
+                    // Not upstream: a curved face meets the other only where a span of its
+                    // control net reaches the other's box and plane (`spans_apart`).
+                    if plane1.is_none() || plane2.is_none() {
+                        for (f, s, plane) in [(f1, surf1, plane1), (f2, surf2, plane2)] {
+                            if plane.is_none() && !span_boxes.contains_key(&f) {
+                                let domain = ProtoBrep::face_uv_domain(&*brep, f);
+                                let spans = brep
+                                    .surface(s)
+                                    .zip(domain)
+                                    .and_then(|(s, d)| net_span_boxes(s, &d))
+                                    .map(|mut v| {
+                                        let t =
+                                            ProtoBrep::topology_tolerance(&*brep, f).unwrap_or(0.0);
+                                        for b in &mut v {
+                                            b.expand_absolute(t);
+                                        }
+                                        v
+                                    });
+                                span_boxes.insert(f, spans);
+                            }
+                        }
+                        let parts = |f, b: &Extent3d, plane: Option<(Point3, Point3)>| match plane {
+                            Some(_) => Some(vec![*b]),
+                            None => span_boxes.get(&f).cloned().flatten(),
+                        };
+                        if let (Some(p1), Some(p2)) =
+                            (parts(f1, box1, plane1), parts(f2, box2, plane2))
+                        {
+                            if spans_apart(&p1, &p2, box1, box2, [plane1, plane2], tol, margin) {
+                                continue;
+                            }
+                        }
+                    }
+                    // Not upstream: two planar faces on crossing planes meet only where
+                    // their edges near the other's plane allow (`chords_apart`).
+                    if let (Some(p1), Some(p2)) = (plane1, plane2) {
+                        // (parallel planes have no such segments)
+                        if p1.1.cross(p2.1).length() > 0.0 {
+                            for f in [f1, f2] {
+                                if let std::collections::btree_map::Entry::Vacant(slot) =
+                                    edge_pieces.entry(f)
+                                {
+                                    slot.insert(edge_piece_boxes(k, &*brep, f));
+                                }
+                            }
+                            if let (Some(Some(e1)), Some(Some(e2))) =
+                                (edge_pieces.get(&f1), edge_pieces.get(&f2))
+                            {
+                                if chords_apart(e1, e2, p1, p2, tol, margin) {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
                 let (are_coincident, _coincident_distance) =
                     surface_coincidence_check(k, brep, surf1, surf2, tol, false)?;
 
@@ -1678,6 +1772,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 }
 
                 let ang_tol_deg = 20.0;
+                k.work_counters.add_face_intersection();
                 let mut uv_curves1 = Vec::new();
                 let mut uv_curves2 = Vec::new();
                 let mut int_pts: Vec<Point3> = Vec::new();
@@ -1740,6 +1835,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         super::curved_strip::probe(k, &*brep, &intersections)?;
         drop_strip_crossings(k, &*brep, &mut intersections, approx_tol)?;
 
+        // Not upstream (WR-647): a curve's run along part of an edge that another curve of
+        // the same pair is from end to end is a second copy of that edge, no event
+        // (module docs of `duplicate_edge_run`).
+        drop_duplicate_edge_runs(k, &*brep, &mut intersections)?;
+
         // Not upstream: the contact points the strip rule proves (module docs of
         // `coincident_strip`), declared before any proto vertex of a face pair is made.
         let contacts = strip_contacts(k, brep, &intersections, approx_tol)?;
@@ -1772,16 +1872,34 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 for ll in 0..num_ivls {
                     let mut ci1 = *cc1.at(ll)?;
                     let mut ci2 = *cc2.at(ll)?;
-                    // (status unchecked)
-                    let found = ignore_soft(mgr.find_or_create_proto_edge(
-                        k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
-                    ))?;
+                    // (status unchecked upstream). Not upstream (#18927): a failed step of
+                    // making the interval's edge (any but the geometric quits, which make
+                    // no edge) refuses the Boolean, which would otherwise build a body
+                    // lacking that edge or its definition; that holds too where another
+                    // face pair made the edge already.
+                    let (found, _was_created) = match split_soft(
+                        mgr.find_or_create_needed_proto_edge(
+                            k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
+                        ),
+                    )? {
+                        Ok(r) => r,
+                        // (a preparation request is retried by its caller, as it is)
+                        Err(cause @ SolidError::PreparationRequired { .. }) => return Err(cause),
+                        Err(cause) => {
+                            return Err(Failure::new(
+                                OP_INTERSECT_TOPOLOGY,
+                                BooleanFailure::IntervalEdgeNotMade,
+                            )
+                            .caused_by(cause)
+                            .into_error())
+                        }
+                    };
                     *cc1.at_mut(ll)? = ci1;
                     *cc2.at_mut(ll)? = ci2;
 
                     // remember pNewPE is part of the trim boundary of this
                     // coincident face pair
-                    if let Some((Some(pe), _was_created)) = found {
+                    if let Some(pe) = found {
                         if are_coincident {
                             add_unique(&mut coinc_pes, pe);
                         }
@@ -1836,10 +1954,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // Not upstream: proto vertices that a point's uncertainty region does not tell
         // apart are one (docs/booleans.md, "One point or two")
-        mgr.combine_proto_vertices_not_proved_apart(
-            k,
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?;
+        mgr.combine_proto_vertices_with_incidence(k, &*brep)?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
         // (the list is re-read after each split: splitting appends proto edges)
@@ -2138,10 +2253,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .is_some()
         {
             // (only a common edge is ever deleted, and there is none)
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean_defect(
                 OP_SET_RELS,
                 BooleanStage::Relate,
-                "combining two images of one vertex deleted an edge",
+                "combining two images of one vertex deleted an edge, though combining deletes \
+                 only an edge common to both, and the check above found none",
             ));
         }
 
@@ -2186,9 +2302,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // error condition - curveClassifications not homogenized
         if cc_brep.size() != cc_other.size() {
-            return Err(SolidError::stage_failed(
+            return Err(SolidError::boolean_defect(
                 OP_CLASS_MATES,
-                "the curve classifications differ in length",
+                BooleanStage::MergeClassifications,
+                "the two classifications of one curve differ in length, though every caller \
+                 homogenizes them first",
             ));
         }
 
@@ -2336,10 +2454,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let (success_o, drop_param_o, dist_to_curve_o) = drop(&pc_o)?;
 
         if !success_b && !success_o {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean(
                 OP_SPLIT_PAIR,
-                BooleanStage::Split,
-                "neither vertex of the pair can be dropped onto the other's curve",
+                BooleanFailure::VertexPairNotDropped {
+                    brep_gap: dist_to_curve_b,
+                    other_gap: dist_to_curve_o,
+                },
             ));
         }
 
@@ -2486,6 +2606,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     Err(
                         e @ (SolidError::Unported { .. }
                         | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                         | SolidError::InvalidInput { .. }
                         | SolidError::PortInvariant { .. }),
                     ) => return Err(e),
@@ -2520,10 +2641,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 edges2.push(Some(e2));
                 edges2.extend(split.new_edges2.iter().copied());
                 if edges1.len() > MAX_EDGE_LIST || edges2.len() > MAX_EDGE_LIST {
-                    return Err(SolidError::boolean_stage_failed(
+                    return Err(SolidError::boolean(
                         OP_EDGE_EDGE,
-                        BooleanStage::Split,
-                        "the edges split too many times",
+                        BooleanFailure::EdgeListLimit {
+                            limit: MAX_EDGE_LIST,
+                        },
                     ));
                 }
 
@@ -2785,6 +2907,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             Err(
                                 err @ (SolidError::Unported { .. }
                                 | SolidError::Cancelled { .. }
+                                | SolidError::OutOfFuel { .. }
                                 | SolidError::InvalidInput { .. }
                                 | SolidError::PortInvariant { .. }),
                             ) => return Err(err),
@@ -2804,18 +2927,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 }
 
 /// The failure of [`TopologyIntersector::edge_face_coincidence`] where the glue of a new
-/// edge to the edge it was made from fails: a coincidence stage failure (status `SM_ERR`,
-/// upstream `return SE(SM_ERR)`), keeping the glue's error as its cause (#13790).
+/// edge to the edge it was made from fails (status `SM_ERR`, upstream
+/// `return SE(SM_ERR)`), keeping the glue's error as its cause (#13790).
 fn coincidence_unresolved(cause: SolidError) -> SolidError {
-    Failure::new(
-        OP_EDGE_FACE_COIN,
-        BooleanFailure::StageFailed {
-            stage: BooleanStage::Coincidence,
-            what: "the coincidence of an edge with a face could not be resolved",
-        },
-    )
-    .caused_by(cause)
-    .into_error()
+    Failure::new(OP_EDGE_FACE_COIN, BooleanFailure::CoincidenceUnresolved)
+        .caused_by(cause)
+        .into_error()
 }
 
 /// Whether `~SmProtoTopologyManager` reads freed memory (UB-175): it deletes the listed
@@ -3055,6 +3172,300 @@ fn line_edge<O: ClassObject>(
     Some((curve, ProtoBrep::edge_interval(brep, e)?))
 }
 
+/// Which faces of each side the boxes `boxes1` and `boxes2` pair with a face of the other
+/// side (their boxes within `tol`), as the face-pair loop of `intersect_topology` pairs them.
+fn loosely_paired(boxes1: &[Extent3d], boxes2: &[Extent3d], tol: f64) -> (Vec<bool>, Vec<bool>) {
+    let search = SpatialIndex::new(boxes2.iter().copied().map(Some));
+    let mut paired1 = vec![false; boxes1.len()];
+    let mut paired2 = vec![false; boxes2.len()];
+    for (box1, p1) in boxes1.iter().zip(paired1.iter_mut()) {
+        for jj in search.boxes_in_box(box1, tol) {
+            if let (Some(box2), Some(p2)) = (boxes2.get(jj), paired2.get_mut(jj)) {
+                if !box1.are_disjoint(box2, tol) {
+                    *p1 = true;
+                    *p2 = true;
+                }
+            }
+        }
+    }
+    (paired1, paired2)
+}
+
+/// The most span boxes [`net_span_boxes`] gives a surface.
+const MAX_SPAN_BOXES: usize = 4096;
+
+/// Not upstream: boxes around the knot spans of the control net of `surface` (a B-spline
+/// or a surface of extrusion with its NURB): over each span the surface lies in the
+/// convex hull of the control points acting there (rows `a - p ..= a`, columns
+/// `b - q ..= b` of span `(a, b)`), so in their box. The whole surface's spans, so a face
+/// on it lies in their union whatever its trim. `None` for another kind, a missing NURB,
+/// a weight that is not positive, a point that is not finite, more than
+/// [`MAX_SPAN_BOXES`] spans, or a face domain `face_domain` reaching past the natural
+/// domain of the NURB.
+fn net_span_boxes(
+    surface: &crate::surface::surface::p2::Surface,
+    face_domain: &crate::geom::extent2d::Extent2d,
+) -> Option<Vec<Extent3d>> {
+    use crate::surface::surface::p2::SurfaceKind;
+    let nurb = match surface.kind() {
+        SurfaceKind::BSpline(b) => b.gw_nurb()?,
+        SurfaceKind::SurfOfExtrusion(e) => e.base().gw_nurb()?,
+        _ => return None,
+    };
+    let (n, m, p, q) = (nurb.n(), nurb.m(), nurb.p(), nurb.q());
+    let (u, v) = (nurb.u_knots(), nurb.v_knots());
+    // the hull holds the surface over its natural domain only: a face reaching past it
+    // (an extended surface) gets no boxes
+    let natural = crate::geom::extent2d::Extent2d::from_points(
+        crate::math::Point2::new(*u.get(p)?, *v.get(q)?),
+        crate::math::Point2::new(*u.get(n + 1)?, *v.get(m + 1)?),
+    );
+    if !face_domain.is_contained_by(&natural, 0.0) {
+        return None;
+    }
+    let spans = |knots: &[f64], last: usize, degree: usize| -> Option<Vec<usize>> {
+        let mut out = Vec::new();
+        for a in degree..=last {
+            if knots.get(a)? < knots.get(a + 1)? {
+                out.push(a);
+            }
+        }
+        Some(out)
+    };
+    let (us, vs) = (spans(u, n, p)?, spans(v, m, q)?);
+    if us.is_empty() || vs.is_empty() || us.len().saturating_mul(vs.len()) > MAX_SPAN_BOXES {
+        return None;
+    }
+    let point = |i: usize, j: usize| -> Option<Point3> {
+        let c = nurb.cpt(i, j).ok()?;
+        let w = if c.w == crate::nurbs::math::NOW {
+            1.0
+        } else {
+            c.w
+        };
+        if w.is_nan() || w <= 0.0 {
+            return None;
+        }
+        let pt = Point3::new(c.x / w, c.y / w, c.z / w);
+        (pt.x.is_finite() && pt.y.is_finite() && pt.z.is_finite()).then_some(pt)
+    };
+    let mut out = Vec::new();
+    for &a in &us {
+        for &b in &vs {
+            let mut bx: Option<Extent3d> = None;
+            for i in a.checked_sub(p)?..=a {
+                for j in b.checked_sub(q)?..=b {
+                    let pt = point(i, j)?;
+                    match &mut bx {
+                        Some(x) => x.add_point(pt),
+                        None => bx = Some(Extent3d::from_points(pt, pt)),
+                    }
+                }
+            }
+            out.push(bx?);
+        }
+    }
+    Some(out)
+}
+
+/// Not upstream: whether two faces, the first within the union of the boxes `parts1` and
+/// its box `box1`, the second within `parts2` and `box2`, on surfaces of which `planes`
+/// gives each that is a plane, cannot come within `tol` of each other: no part of the
+/// one, within `tol` of a part of the other and inside both face boxes, lies within
+/// `margin` of each plane ([`pair_apart_off_planes`] part by part).
+fn spans_apart(
+    parts1: &[Extent3d],
+    parts2: &[Extent3d],
+    box1: &Extent3d,
+    box2: &Extent3d,
+    planes: [Option<(Point3, Point3)>; 2],
+    tol: f64,
+    margin: f64,
+) -> bool {
+    let near = |parts: &[Extent3d], other: &Extent3d| -> Vec<Extent3d> {
+        parts
+            .iter()
+            .filter(|b| !b.are_disjoint(other, tol))
+            .copied()
+            .collect()
+    };
+    let (near1, near2) = (near(parts1, box2), near(parts2, box1));
+    for a in &near1 {
+        for b in &near2 {
+            if !pair_apart_off_planes(a, b, planes, tol, margin) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// How many pieces [`edge_piece_boxes`] cuts each edge's interval into.
+const EDGE_PIECES: usize = 16;
+
+/// Not upstream: boxes around the edges of `face`, each edge's interval cut into
+/// [`EDGE_PIECES`] equal pieces, each piece's curve box grown by the edge's tolerance.
+/// `None` when an edge has no curve, interval, tolerance or box, or the face has none.
+fn edge_piece_boxes<O: ClassObject + SolutionObject + Ord>(
+    k: &Kernel,
+    brep: &impl IntersectorBrepP2<O>,
+    face: O,
+) -> Option<Vec<Extent3d>> {
+    let request = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let mut out = Vec::new();
+    for e in brep.face_edges(face).ok()? {
+        let curve = ProtoBrep::edge_curve(brep, e)
+            .flatten()
+            .and_then(|c| ClassGeometry::curve(brep, c))?;
+        let interval = ProtoBrep::edge_interval(brep, e)?;
+        let tolerance = ProtoBrep::topology_tolerance(brep, e)?;
+        let (lo, hi) = (interval.min(), interval.max());
+        if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+            return None;
+        }
+        for i in 0..EDGE_PIECES {
+            let at = |j: usize| lo + (hi - lo) * j as f64 / EDGE_PIECES as f64;
+            let piece = crate::geom::extent1d::Extent1d::from_min_max(at(i), at(i + 1));
+            let mut b = curve
+                .calculate_bounding_box(k, &piece, request, true)
+                .ok()?
+                .normal?;
+            b.expand_absolute(tolerance);
+            out.push(b);
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Not upstream: whether two planar faces with the edge piece boxes `edges1` and `edges2`
+/// ([`edge_piece_boxes`]) on the crossing planes `plane1` and `plane2` cannot come within
+/// `tol` of each other. A point of the first face within `margin` of the second plane lies
+/// on a segment of the face parallel to the planes' line, at that distance all along,
+/// whose ends lie on the face's edges: so it lies in the box of the edge pieces' parts
+/// within `margin` of the second plane, and the same holds the other way round. Where
+/// one of those parts is empty, or the two boxes lie farther than `tol` apart, the faces
+/// do not meet.
+fn chords_apart(
+    edges1: &[Extent3d],
+    edges2: &[Extent3d],
+    plane1: (Point3, Point3),
+    plane2: (Point3, Point3),
+    tol: f64,
+    margin: f64,
+) -> bool {
+    let near = |edges: &[Extent3d], plane| {
+        let mut out: Option<Extent3d> = None;
+        for b in edges {
+            if let Some(part) = clip_to_slab(b, plane, margin) {
+                out = Some(out.map_or(part, |o| o.union(&part)));
+            }
+        }
+        out
+    };
+    let (Some(near1), Some(near2)) = (near(edges1, plane2), near(edges2, plane1)) else {
+        return true;
+    };
+    near1.are_disjoint(&near2, tol)
+}
+
+/// The point and unit normal of `surface` when it is a plane with a finite normal.
+fn plane_of(surface: &crate::surface::surface::p2::Surface) -> Option<(Point3, Point3)> {
+    let crate::surface::surface::p2::SurfaceKind::Plane(plane) = surface.kind() else {
+        return None;
+    };
+    let (origin, normal, _) = plane.is_planar();
+    let (_, n) = normal.length_and_unit()?;
+    let finite = |v: Point3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    (finite(origin) && finite(n)).then_some((origin, n))
+}
+
+/// The box around the part of `b` within `margin` of the plane through `origin` with unit
+/// normal `n`: the corners of `b` inside that slab and the points where the edges of `b`
+/// cross its two sides. `None` when no part of `b` is in the slab.
+fn clip_to_slab(b: &Extent3d, (origin, n): (Point3, Point3), margin: f64) -> Option<Extent3d> {
+    let corner = |c: usize| {
+        let at = |axis: usize| {
+            if c >> axis & 1 == 0 {
+                b.min_at(axis)
+            } else {
+                b.max_at(axis)
+            }
+        };
+        Point3::new(at(0), at(1), at(2))
+    };
+    let corners: Vec<(Point3, f64)> = (0..8)
+        .map(|c| (corner(c), (corner(c) - origin).dot(n)))
+        .collect();
+    if corners
+        .iter()
+        .any(|(p, d)| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite() && d.is_finite()))
+    {
+        return Some(*b);
+    }
+    let mut out: Option<Extent3d> = None;
+    let mut add = |p: Point3| match &mut out {
+        Some(o) => o.add_point(p),
+        None => out = Some(Extent3d::from_points(p, p)),
+    };
+    for &(p, d) in &corners {
+        if d.abs() <= margin {
+            add(p);
+        }
+    }
+    for (i, &(pi, di)) in corners.iter().enumerate() {
+        for axis in 0..3 {
+            if i >> axis & 1 == 1 {
+                continue;
+            }
+            let Some(&(pj, dj)) = corners.get(i | 1 << axis) else {
+                continue;
+            };
+            for side in [margin, -margin] {
+                if (di - side) * (dj - side) < 0.0 {
+                    add(pi + (pj - pi) * ((side - di) / (dj - di)));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Not upstream: whether two faces in the boxes `box1` and `box2`, on surfaces of which
+/// `planes` gives each one that is a plane, cannot come within `tol` of each other. A
+/// point where they meet lies in `box1`, within `tol` of `box2`, and within `margin` (the
+/// intersection tolerance and both faces' tolerances) of each such plane: when no part of
+/// the boxes' overlap lies within `margin` of each plane in turn, there is no such point,
+/// and the intersection would find nothing.
+///
+/// Before it each pair whose boxes met was intersected: the faces of long flat strips
+/// across a large body have boxes that meet most of its faces. In a union of 2,036 faces
+/// with 108, 47,113 pairs were intersected and 3,580 of them met.
+fn pair_apart_off_planes(
+    box1: &Extent3d,
+    box2: &Extent3d,
+    planes: [Option<(Point3, Point3)>; 2],
+    tol: f64,
+    margin: f64,
+) -> bool {
+    let mut grown = *box1;
+    grown.expand_absolute(tol);
+    // boxes farther apart than `tol` hold nothing that meets
+    let Ok(mut overlap) = grown.intersect(box2) else {
+        return true;
+    };
+    for plane in planes.into_iter().flatten() {
+        match clip_to_slab(&overlap, plane, margin) {
+            Some(part) => overlap = part,
+            None => return true,
+        }
+    }
+    false
+}
+
 /// The smallest distance between two distinct vertices of `b` (by their points);
 /// infinite with fewer than two vertices. The points are swept along x, so a pair is
 /// compared only while its x gap is below the best distance found so far.
@@ -3131,15 +3542,12 @@ mod tests {
         }
     }
 
-    /// The glue failure of an edge-face coincidence is reported as before (the same
-    /// coincidence stage failure, operation and status), keeping the glue's error as its
-    /// cause, whose class it now takes (#13790).
+    /// The glue failure of an edge-face coincidence is reported as its named cause (same
+    /// operation and status), keeping the glue's error as its cause, whose class it takes
+    /// (#13790, #19856).
     #[test]
     fn an_unresolved_edge_face_coincidence_keeps_the_glue_error() {
-        let reason = crate::error::Reason::Boolean(BooleanFailure::StageFailed {
-            stage: BooleanStage::Coincidence,
-            what: "the coincidence of an edge with a face could not be resolved",
-        });
+        let reason = crate::error::Reason::Boolean(BooleanFailure::CoincidenceUnresolved);
         for cause in [
             SolidError::sm_err("glue"),
             SolidError::blend("glue", crate::error::blend::BlendFailure::StageFailed),

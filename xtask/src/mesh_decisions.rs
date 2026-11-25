@@ -53,6 +53,7 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/engine/src/fuzz.rs", "the fuzz harness, which frames what it built"),
     ("crates/engine/src/mesh_lines/meshes.rs", "a drawing's view lines from display meshes"),
     ("crates/engine/src/mesh_lines/scene.rs", "a drawing's hidden-line occlusion over display meshes"),
+    ("crates/engine/src/pick_pieces.rs", "the pieces a click on a rim or surface picks, over the display mesh, as hover and box select take them"),
     ("crates/engine/src/product_scene.rs", "the scene a rendered picture draws"),
     ("crates/engine/src/render_jobs.rs", "rendered pictures"),
     ("crates/engine/src/schema/drawing_view.rs", "the counts of a drawing's view lines from display meshes"),
@@ -94,6 +95,8 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:mesh_content_digest", "mesh-body imports: hashes source arrays without geometric classification"),
     ("crates/doc/src/placement_reuse.rs:same_feature", "mesh bodies: compares imported mesh source-array identities"),
     ("crates/doc/src/project3d.rs:flat_outline", "mesh bodies: the flat patch of an imported mesh's triangles that a face pick on it means"),
+    ("crates/engine/src/cmd/component_link.rs:session_bodies", "mesh bodies: copies a linked mesh body's data"),
+    ("crates/engine/src/cmd/file.rs:mesh_data", "mesh bodies: copies a linked mesh body's data"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
     ("crates/engine/src/cmd/plugin.rs:mesh", "a plugin's model.mesh export: a bounded copy of a body's display tessellation"),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
@@ -232,7 +235,7 @@ fn scan_skipping(root: &Path, modules: &[(&str, &str)], functions: &[(&str, &str
     Ok(found)
 }
 
-fn relative(root: &Path, path: &Path) -> String {
+pub(crate) fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
@@ -251,6 +254,23 @@ fn module(file: &Path, owns_dir: bool, model_body: bool) -> Result<(Sites, Vec<(
     let mut children = Vec::new();
     declared_modules(&ast.items, here, &dir, &mut children);
     Ok((sites_in(&ast, model_body), children))
+}
+
+/// The source files of the module at `file` and of every non-test module below it, into `out`.
+/// `owns_dir` is whether `file` is a `lib.rs` or `mod.rs` (its submodules sit beside it) rather
+/// than `name.rs` (its submodules sit in `name/`).
+pub(crate) fn module_files(file: &Path, owns_dir: bool, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let source = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let ast = syn::parse_file(&source).map_err(|e| format!("{}: cannot parse Rust source: {e}", file.display()))?;
+    out.push(file.to_path_buf());
+    let here = file.parent().unwrap_or(Path::new("."));
+    let dir = if owns_dir { here.to_path_buf() } else { here.join(file.file_stem().unwrap_or_default()) };
+    let mut children = Vec::new();
+    declared_modules(&ast.items, here, &dir, &mut children);
+    for (child, owns) in children {
+        module_files(&child, owns, out)?;
+    }
+    Ok(())
 }
 
 /// The files of the out-of-line modules `items` declare, each with whether it owns its directory.
@@ -303,7 +323,7 @@ fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
 
 /// Whether `attrs` keep an item to test builds: `#[test]`, `#[cfg(test)]` or
 /// `#[cfg(all(.., test, ..))]`.
-fn test_only(attrs: &[syn::Attribute]) -> bool {
+pub(crate) fn test_only(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
         if a.path().is_ident("test") {
             return true;
@@ -375,7 +395,7 @@ impl Finder {
     }
 }
 
-fn type_name(ty: &syn::Type) -> String {
+pub(crate) fn type_name(ty: &syn::Type) -> String {
     match ty {
         syn::Type::Path(p) => p.path.segments.last().map_or_else(|| "<type>".to_owned(), |s| s.ident.to_string()),
         syn::Type::Reference(r) => type_name(&r.elem),

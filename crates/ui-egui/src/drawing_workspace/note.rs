@@ -32,8 +32,11 @@ pub(super) struct Draft {
     text: String,
     /// Which end of the text sits at its place: left for a note about to be placed, as the command
     /// has it, and the note's own when one is edited. None for an edited note saved before alignments,
-    /// which stays as it is unless the choice is touched (the control shows it as centre).
+    /// which stays as it is unless the choice is touched (the control has its own entry for it).
     align: Option<HAlign>,
+    /// The note being edited was saved before alignments: the control has a fourth entry for its layout
+    /// (the block centred, its lines starting at the block's left edge), selected while `align` is None.
+    legacy: bool,
     /// The note being edited has linked fields: its text isn't edited here, its alignment is.
     fields: bool,
     /// The preview last drawn: for this text, with the pointer here, on this sheet, aligned so. Drawn again only
@@ -63,7 +66,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
                     Part::Field { .. } => None,
                 });
                 let plain = text.collect::<Option<String>>();
-                Some(Draft { fields: plain.is_none(), text: plain.unwrap_or_default(), align: note.align, shown: None })
+                Some(Draft { fields: plain.is_none(), text: plain.unwrap_or_default(), align: note.align, legacy: note.align.is_none(), shown: None })
             }),
         };
         app.drawing_workspace.note = draft;
@@ -79,15 +82,22 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
                 crate::scenario::publish_rect("drawing:note:text", field.rect);
                 valid = ready(&draft.text);
             }
-            let labels = ALIGNS.map(|(_, _, key, _)| tr(key));
-            let targets = ALIGNS.map(|(.., target)| target);
-            let shown = draft.align.unwrap_or(HAlign::Centre);
-            let mut index = ALIGNS.iter().position(|(align, ..)| *align == shown).unwrap_or(1);
+            let mut labels = ALIGNS.map(|(_, _, key, _)| tr(key)).to_vec();
+            let mut targets = ALIGNS.map(|(.., target)| target).to_vec();
+            if draft.legacy {
+                labels.push(tr("ui.drawing_note.align_saved"));
+                targets.push("drawing:note:align:saved");
+            }
+            // The entry for the layout a note was saved with is selected until another is chosen; choosing
+            // Centre then is per-line centring, a different layout.
+            let saved = ALIGNS.len();
+            let shown = draft.align.and_then(|shown| ALIGNS.iter().position(|(align, ..)| *align == shown)).unwrap_or(saved);
+            let mut index = shown;
             ui_kit::row(ui, tr("ui.drawing_note.align"), |ui| {
                 ui_kit::segmented(ui, &mut index, &labels, ui_kit::Segments { targets: &targets, ..Default::default() })
             });
-            if let Some((align, ..)) = ALIGNS.get(index).filter(|(align, ..)| *align != shown) {
-                draft.align = Some(*align);
+            if index != shown {
+                draft.align = ALIGNS.get(index).map(|(align, ..)| *align);
             }
             if selected.is_none() {
                 ui_kit::text(ui, tr("ui.drawing_note.place"), ui_kit::Text::Note("drawing_note_place"));

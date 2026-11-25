@@ -29,8 +29,11 @@ pub const SHARED_ENGLISH: &str = include_str!("../locales/en.json");
 pub struct Catalog {
     pub id: &'static str,
     pub name: &'static str,
-    /// The catalog as JSON.
+    /// The catalog as JSON, for one made with [`Catalog::new`]. Empty for a packed one: read
+    /// [`Catalog::json`], which serves both.
     pub source: &'static str,
+    /// The catalog's JSON, deflated (zlib), for one made with [`Catalog::packed`].
+    packed: &'static [u8],
     messages: OnceLock<Messages>,
     /// The messages in display order, for a catalog with right-to-left text (see [`bidi`]).
     shown: OnceLock<Option<Messages>>,
@@ -40,13 +43,36 @@ pub struct Catalog {
 
 impl Catalog {
     pub const fn new(id: &'static str, name: &'static str, source: &'static str) -> Self {
-        Self { id, name, source, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+        Self { id, name, source, packed: &[], messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+    }
+
+    /// A catalog embedded compressed: `packed` is its JSON as a zlib stream. It is inflated when
+    /// the catalog is first read, so a program that embeds many languages carries each at about
+    /// a quarter of its size and unpacks only the ones it shows (the chosen one and English).
+    pub const fn packed(id: &'static str, name: &'static str, packed: &'static [u8]) -> Self {
+        Self { id, name, source: "", packed, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+    }
+
+    /// The catalog as JSON, inflated if it was packed. A packed catalog that does not inflate to
+    /// text is logged and reads as empty.
+    pub fn json(&self) -> Cow<'static, str> {
+        if self.packed.is_empty() {
+            return Cow::Borrowed(self.source);
+        }
+        let mut json = String::new();
+        match std::io::Read::read_to_string(&mut flate2::read::ZlibDecoder::new(self.packed), &mut json) {
+            Ok(_) => Cow::Owned(json),
+            Err(error) => {
+                log::error!("invalid packed {} message catalog: {error}", self.id);
+                Cow::Borrowed("{}")
+            }
+        }
     }
 
     /// The messages in reading order, as the catalog holds them. An invalid catalog is logged and
     /// reads as empty.
     pub fn messages(&'static self) -> &'static Messages {
-        self.messages.get_or_init(|| match serde_json::from_str(self.source) {
+        self.messages.get_or_init(|| match serde_json::from_str(&self.json()) {
             Ok(messages) => messages,
             Err(error) => {
                 log::error!("invalid embedded {} message catalog: {error}", self.id);
@@ -155,18 +181,23 @@ fn normalize_legacy_id(tag: &str) -> Cow<'_, str> {
 /// resolves through [`system_language`] wherever a catalog is needed.
 pub const SYSTEM: &str = "system";
 
+/// Catalogs that are only used when chosen in the preferences, never from the system's language:
+/// Serbian in Latin script, so a system set to `sr-Latn-RS` keeps the Cyrillic `sr` it always had.
+const CHOSEN_BY_HAND: &[&str] = &["sr-Latn"];
+
 /// Match the system's preferred locale tags against the catalogs: the exact tag first
 /// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
 /// then English. Legacy `iw` tags resolve as Hebrew (`he`), and a Chinese tag goes by its script
 /// or region instead ([`chinese_catalog`]). Tags come in the system's order of preference; the
 /// first one that matches wins.
+/// A catalog in [`CHOSEN_BY_HAND`] is never picked from the system's tags.
 pub fn match_system_tags(tags: &[String]) -> &'static str {
     for tag in tags {
         let tag = normalize_legacy_id(tag.trim()).replace('_', "-");
         if let Some(catalog) = chinese_catalog(&tag) {
             return catalog;
         }
-        if let Some(catalog) = locales().iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag)) {
+        if let Some(catalog) = locales().iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag) && !CHOSEN_BY_HAND.contains(&catalog.id)) {
             return catalog.id;
         }
         let base = tag.split('-').next().unwrap_or(&tag);
@@ -278,6 +309,28 @@ impl Locale {
         self.text(label)
     }
 
+    /// A command's label in this language, from the command's own entry: `cmd.<id>`, or
+    /// `cmd.<id with its dots as underscores>` as most entries are named. Several entries
+    /// can share one English text ("Export" is the Export command, the start page's button
+    /// and two of Preferences'), and [`Self::label`] cannot tell which is meant.
+    ///
+    /// `label` is the English text the caller has for the command. The own entry is taken
+    /// only where its English text is that label: a label a command shows in place of its
+    /// own, an id that is no command's and a language without the own entry are translated
+    /// as any label is ([`Self::label`]).
+    pub fn command<'a>(self, id: &str, label: &'a str) -> &'a str {
+        let english = english().messages();
+        for key in [format!("cmd.{id}"), format!("cmd.{}", id.replace('.', "_"))] {
+            if english.get(&key).is_some_and(|text| text == label) {
+                if let Some(text) = self.0.shown().get(&key) {
+                    return text;
+                }
+                break;
+            }
+        }
+        self.label(label)
+    }
+
     pub fn format(self, id: &str, args: &[(&str, &str)]) -> String {
         interpolate(self.text(id), args)
     }
@@ -380,6 +433,11 @@ pub fn tr_label(label: &str) -> &str {
     if RESOLVED_LABELS.with(Cell::get) { label } else { locale().label(label) }
 }
 
+/// The label of the command `id` in this thread's language ([`Locale::command`]).
+pub fn tr_command<'a>(id: &str, label: &'a str) -> &'a str {
+    if RESOLVED_LABELS.with(Cell::get) { label } else { locale().command(id, label) }
+}
+
 /// Every English catalog entry `(id, text)`, for Preferences search to match a translation
 /// back to the words it was written in.
 pub fn each_english_message(mut f: impl FnMut(&str, &str)) {
@@ -412,6 +470,34 @@ mod tests {
 
     fn installed() {
         install(LOCALES);
+    }
+
+    fn deflated(json: &str) -> &'static [u8] {
+        let mut packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        std::io::Write::write_all(&mut packer, json.as_bytes()).unwrap();
+        Box::leak(packer.finish().unwrap().into_boxed_slice())
+    }
+
+    /// A packed catalog reads as the JSON it was packed from.
+    #[test]
+    fn a_packed_catalog_reads_as_its_json() {
+        let json = r#"{"ui.cancel":"キャンセル","dialog.selected_count":"{count} 件を選択"}"#;
+        let packed: &'static Catalog = Box::leak(Box::new(Catalog::packed("ja", "日本語", deflated(json))));
+        let plain: &'static Catalog = Box::leak(Box::new(Catalog::new("ja", "日本語", json)));
+        assert_eq!(packed.json(), json);
+        assert_eq!(packed.messages(), plain.messages());
+        assert_eq!(packed.messages().get("ui.cancel").map(String::as_str), Some("キャンセル"));
+        assert_eq!(plain.json(), json);
+    }
+
+    /// Bytes that are no zlib stream, or one cut short, read as an empty catalog and never panic.
+    #[test]
+    fn a_broken_packed_catalog_reads_as_empty() {
+        let whole = deflated(r#"{"ui.cancel":"Cancel"}"#);
+        for broken in [&b"not a zlib stream"[..], &whole[..whole.len() / 2], &[0xff; 4]] {
+            let catalog: &'static Catalog = Box::leak(Box::new(Catalog::packed("en", "English", broken)));
+            assert!(catalog.messages().is_empty());
+        }
     }
 
     #[test]
