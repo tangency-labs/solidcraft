@@ -23,10 +23,10 @@ use crate::params::{bad, num, req_vec2, str_, string_list, vec2_list};
 use crate::schema::sketch_create::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
     ControlKnotsSplineParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams,
-    InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult,
-    SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams,
-    SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult,
-    ThreeTangentCircleParams, ToleranceSplineParams, ToleranceSplineResult, TwoTangentCircleParams,
+    InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineControlPolygonParams, SplineHandlesParams,
+    SplineHandlesResult, SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult,
+    SplineResetHandlesParams, SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions,
+    TextResult, ThreeTangentCircleParams, ToleranceSplineParams, ToleranceSplineResult, TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -60,6 +60,7 @@ const EDIT_TEXT_CONTRACT: TypedContract<EditTextParams> = TypedContract::new();
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
 const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
 const SPLINE_INSERT_POINT_CONTRACT: TypedContract<SplineInsertPointParams> = TypedContract::new();
+const SPLINE_CONTROL_POLYGON_CONTRACT: TypedContract<SplineControlPolygonParams> = TypedContract::new();
 const SPLINE_HANDLES_CONTRACT: TypedContract<SplineHandlesParams> = TypedContract::new();
 const SPLINE_RESET_HANDLES_CONTRACT: TypedContract<SplineResetHandlesParams> = TypedContract::new();
 
@@ -162,7 +163,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), cubic; periodic?: boolean (default false): closes the control polygon into a loop (at least 4 points)", created_doc!())),
+        .params(concat!("points: control points (2…500), cubic; periodic?: boolean (default false): closes the control polygon into a loop (at least 4 points); control_polygon?: create selectable construction sides (default false)", created_doc!())),
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", crate::checked!("sketch.spline.control_point_5", spline_cv5))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -170,7 +171,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points)", created_doc!())),
+        .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points); control_polygon?: create selectable construction sides (default false)", created_doc!())),
     CommandSpec::new("sketch.spline.control_knots", "Control Point Spline with Knots", crate::checked!("sketch.spline.control_knots", spline_knots))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -191,6 +192,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_REMOVE_POINT_CONTRACT)
         .output(output_schema_for::<SplineRemovePointResult>)
         .params("curve: spline id, point: one of its points (a point id, or the curve's start or end such as s1.end): the spline runs through (or over) its other points only, and the point goes with the constraints on it unless another curve uses it. Fit point, control point and closed splines. Refused for a closed spline's closing point, for an end joined to other geometry or held by a constraint, when fewer than 2 points would be left (3 on a closed spline), and for a projected, offset or patterned spline. Returns curve, point: the point's id, deleted: whether the point went too"),
+    CommandSpec::new(
+        "sketch.spline.control_polygon",
+        "Add Control Polygon",
+        crate::checked!("sketch.spline.control_polygon", spline_control_polygon),
+    )
+    .icon("spline_cv")
+    .enabled(in_sketch)
+    .contract(&SPLINE_CONTROL_POLYGON_CONTRACT)
+    .output(output_schema_for::<DrawResult>)
+    .params("curve: an editable control point spline id. Add finite construction segments between its own control points for sketch constraints and dimensions. Returns the segment ids in order."),
     CommandSpec::new("sketch.spline.handles", "Add Tangent Handles", crate::checked!("sketch.spline.handles", spline_handles))
         .icon("spline")
         .enabled(in_sketch)
@@ -765,6 +776,9 @@ fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         for id in &ids {
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+            if sk.is_control_polygon_segment(c) {
+                return Err(bad(cmd, "control polygon segments stay finite construction lines"));
+            }
             let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
             if !matches!(cu.kind, CurveKind::Line { .. }) {
                 return Err(bad(cmd, format!("`{id}` is not a line")));
@@ -790,6 +804,9 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         for id in &ids {
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+            if sk.is_control_polygon_segment(c) {
+                return Err(bad(cmd, "control polygon segments stay finite construction lines"));
+            }
             let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
             if !matches!(cu.kind, CurveKind::Line { .. }) {
                 return Err(bad(cmd, format!("`{id}` is not a line")));
@@ -923,6 +940,9 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8, nurb
             .add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: nurbs.clone(), handles: Vec::new() }, None)
             .map_err(|e| if knotted { bad(cmd, e.to_string()) } else { EngineError::from(e) })?;
         mark_construction(sk, &[c], p);
+        if control && p.get("control_polygon").and_then(Value::as_bool) == Some(true) {
+            sk.add_spline_control_polygon(c)?;
+        }
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
     drawn(out, info)
@@ -1064,6 +1084,17 @@ fn spline_remove_point(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let reply = SplineRemovePointResult { curve: id, point, deleted, sketch: info, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn spline_control_polygon(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.control_polygon";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let curve = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        let sides = sk.add_spline_control_polygon(curve).map_err(|error| bad(cmd, error.to_string()))?;
+        Ok((ids_of(sk, &sides), Vec::new()))
+    })?;
+    drawn(out, info)
 }
 
 fn spline_handles(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1599,6 +1630,68 @@ mod blend_tests {
     fn sketch(s: &Session) -> solidcraft_sketch::Sketch {
         let id = s.active_sketch.unwrap();
         s.model.state().sketch(id).unwrap().sketch.clone()
+    }
+
+    #[test]
+    fn spline_control_polygon_constraints_move_the_real_control_points() {
+        let mut s = new_sketch();
+        let sketch_id = s.active_sketch.unwrap();
+        run(&mut s, "parameters.add", json!({"name":"leg","expression":"20 mm"}));
+        let spline = ids(&run(&mut s, "sketch.spline.control_point", json!({"points":["origin",[10,2],[20,15],[30,10]]}))["curves"])[0].clone();
+        let sides = ids(&run(&mut s, "sketch.spline.control_polygon", json!({"curve":spline}))["curves"]);
+        assert_eq!(sides.len(), 3);
+        let sk = sketch(&s);
+        let point = sk.points[sk.resolve_point(&format!("{}.end", sides[0])).unwrap()].id.clone();
+        run(&mut s, "sketch.construction", json!({"points":[point],"value":true}));
+        assert!(sketch(&s).points.iter().any(|p| p.id == point && p.construction));
+        let before = s.doc.to_json();
+        assert!(s.execute("sketch.spline.control_polygon", &json!({"curve":spline})).is_err());
+        assert!(s.execute("sketch.construction", &json!({"curves":[sides[0]],"points":[point],"value":false})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line":sides[0],"mode":"horizontal"}));
+        run(&mut s, "sketch.dimension", json!({"entities":[sides[0]],"type":"length","value":"leg"}));
+        let check = |s: &Session, length: f64| {
+            let st = s.model.state();
+            let solved = st.sketch(sketch_id).unwrap();
+            let sk = &solved.sketch;
+            let CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&spline).unwrap()].kind else { panic!("expected a spline") };
+            let guide = &sk.curves[sk.curve_index(&sides[0]).unwrap()];
+            assert!(guide.construction && matches!(guide.kind, CurveKind::Line { a, b } if a == pts[0] && b == pts[1]));
+            let point = sk.point(pts[1]).unwrap();
+            assert!((point.x.abs() - length).abs() < 1e-6 && point.y.abs() < 1e-6, "{point:?}");
+            assert!(solved.profiles.is_empty(), "construction lines never form profiles");
+        };
+        check(&s, 20.0);
+        run(&mut s, "sketch.finish", json!({}));
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        run(&mut reopened, "parameters.change", json!({"name":"leg","expression":"25 mm"}));
+        check(&reopened, 25.0);
+        run(&mut reopened, "sketch.edit", json!({"sketch":sketch_id}));
+        run(&mut reopened, "sketch.delete", json!({"entities":[spline]}));
+        assert!(reopened.model.state().sketch(sketch_id).unwrap().sketch.curves.is_empty());
+    }
+
+    #[test]
+    fn control_polygon_visibility_keeps_its_dimension_and_shape() {
+        let mut s = new_sketch();
+        let spline =
+            ids(&run(&mut s, "sketch.spline.control_point", json!({"points":[[0,0],[0,20],[30,20],[30,0]],"control_polygon":true}))["curves"])[0]
+                .clone();
+        let sk = sketch(&s);
+        let (index, side) =
+            sk.curves.iter().enumerate().find(|(_, curve)| curve.spline_control_polygon_of.as_deref() == Some(spline.as_str())).unwrap();
+        let side = side.id.clone();
+        assert!(crate::view::sketch_curve_visible(&sk, index));
+        run(&mut s, "sketch.dimension", json!({"entities":[side],"type":"length","value":"25 mm"}));
+        let visible = sketch(&s);
+        run(&mut s, "sketch.options", json!({"show_control_polygons":false}));
+        let hidden = sketch(&s);
+        assert!(!crate::view::sketch_curve_visible(&hidden, index));
+        assert_eq!(visible.points, hidden.points);
+        assert_eq!(visible.curves, hidden.curves);
+        assert_eq!(visible.constraints, hidden.constraints);
+        run(&mut s, "sketch.options", json!({"show_control_polygons":true}));
+        assert!(crate::view::sketch_curve_visible(&sketch(&s), index));
     }
 
     /// #6502: Reset Tangent Handles takes a spline's handles, their construction lines and the

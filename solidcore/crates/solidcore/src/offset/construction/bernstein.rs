@@ -26,9 +26,10 @@ use crate::nurbs::math::gamma;
 
 const OP: &str = "offset::construction::bernstein";
 
-/// The largest degree in either direction a product may reach (well above the
-/// certificates' degrees, which stay below 40 for bicubic inputs).
-pub const MAX_DEGREE: usize = 96;
+/// The largest degree in either direction a product may reach: above the certificates'
+/// degrees, the highest of which is the regularity test's tangent bound on a G2 round's
+/// rational septic net, `q1 (x2 + c^2)` of degree 100 (`sheets::RegularityForms`).
+pub const MAX_DEGREE: usize = 128;
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::InvalidInput {
