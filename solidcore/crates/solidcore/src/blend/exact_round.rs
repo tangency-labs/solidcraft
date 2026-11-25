@@ -4,7 +4,7 @@
 //! (its `blend::exact_round`) put these together into the body's record in front of the fillet
 //! sessions, which build every round this does not cover.
 //!
-//! Not upstream (from yack learnings): a round of radius `r` on a straight edge
+//! Not upstream: a round of radius `r` on a straight edge
 //! between two planes is a piece of the cylinder whose axis is where the planes' offsets by `r`
 //! meet (into the material at a convex edge, out of it at a concave one); its cross-section is
 //! the same circle all along the edge, so it touches each plane along a line, and every curve
