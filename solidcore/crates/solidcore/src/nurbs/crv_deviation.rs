@@ -1,13 +1,26 @@
-//! A certified bound of how far apart two B-spline curves are at the same parameters, and of
-//! their Hausdorff distance over two parameter intervals.
+//! A certified bound of how far apart two B-spline curves are at the same parameters, over
+//! their whole domain or span by span, and of their Hausdorff distance over two parameter
+//! intervals.
 //!
 //! Upstream: none (not upstream; solidcore-native).
 //!
-//! | Rust                   | Upstream |
-//! |------------------------|----------|
-//! | [`certified_distance`] | none     |
-//! | [`certified_hausdorff`] | none    |
-//! | [`interpolation_bound`] | none    |
+//! | Rust                           | Upstream |
+//! |--------------------------------|----------|
+//! | [`certified_distance`]         | none     |
+//! | [`certified_distance_by_span`] | none     |
+//! | [`certified_distance_floor`]   | none     |
+//! | [`SpanDistance`]               | none     |
+//! | [`certified_hausdorff`]        | none     |
+//! | [`interpolation_bound`]        | none     |
+//!
+//! [`certified_distance_by_span`] gives one bound per common span of the two curves (the
+//! union of their breakpoints), so a caller can tell where they are far apart, for one where
+//! to add knots; [`certified_distance`] is the largest of those bounds. Each span's bound is
+//! formed from that span's own largest control point difference, with the same rounding
+//! terms: addition and multiplication by a positive number round monotonically, so the
+//! largest of the spans' bounds is, to the bit, the bound formed from the largest difference.
+//! [`certified_distance_floor`] is what the rounding terms come to at the least for a curve,
+//! whatever it is compared with: a tolerance below it is one no refinement reaches.
 //!
 //! Both curves are cut into Bézier pieces over the union of their breakpoints (and, for
 //! [`certified_hausdorff`], the intervals' ends; [`Curve::refine`], [`Curve::decompose_bez`]) and each piece raised to the higher of the
@@ -39,7 +52,8 @@
 //! lost to underflow.
 //!
 //! Deviations: none (no upstream counterpart). Non-rational 3D curves only, of degree 1 to
-//! [`MAX_DEGREE`]; their knot vectors clamped, on one domain for [`certified_distance`].
+//! [`MAX_DEGREE`]; their knot vectors clamped, on one domain for [`certified_distance`] and
+//! [`certified_distance_by_span`].
 
 use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
@@ -49,6 +63,8 @@ use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 
 const OP: &str = "nurbs::crv_deviation::certified_distance";
+const OP_BY_SPAN: &str = "nurbs::crv_deviation::certified_distance_by_span";
+const OP_FLOOR: &str = "nurbs::crv_deviation::certified_distance_floor";
 const OP_HAUSDORFF: &str = "nurbs::crv_deviation::certified_hausdorff";
 const OP_FIT: &str = "nurbs::crv_deviation::interpolation_bound";
 
@@ -121,28 +137,124 @@ pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result
 /// curves on different domains; [`QueryFailure::BoundOverflows`] when the bound overflows the
 /// floating range; those of the refinement, the extraction and the elevation.
 pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
-    check(a, OP)?;
-    check(b, OP)?;
+    // the largest of the spans' bounds: the bound of the largest difference, to the bit
+    // (module docs)
+    by_span(a, b, OP)?
+        .iter()
+        .map(|s| s.bound)
+        .reduce(f64::max)
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::Defect { why: "the Bézier extraction refuses a curve without a span of non-zero length, so it gives at least one piece" }))
+}
+
+/// One common span of two curves and how far apart they are over it
+/// ([`certified_distance_by_span`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpanDistance {
+    /// Where the span starts.
+    pub from: f64,
+    /// Where the span ends.
+    pub to: f64,
+    /// A bound of `|a(t) - b(t)|` for every `t` of the span, every rounding included.
+    pub bound: f64,
+}
+
+/// [`certified_distance`] span by span: for each common span of the two curves (the union of
+/// their breakpoints), in order from the domain's start to its end, each once and without a
+/// gap, a bound `d` with `|a(t) - b(t)| <= d` at every parameter `t` of the span, every
+/// rounding of computing it included. Each span's bound is formed as [`certified_distance`]'s,
+/// from the largest distance between the control points of that span's two Bézier pieces
+/// raised to one degree (module docs); the largest of the bounds is [`certified_distance`].
+///
+/// # Errors
+///
+/// Those of [`certified_distance`]: `InvalidInput` for a rational or 2D curve, a number not
+/// finite, knots not clamped, or two curves on different domains;
+/// [`QueryFailure::BoundOverflows`] when a bound overflows the floating range; those of the
+/// refinement, the extraction and the elevation.
+pub fn certified_distance_by_span(a: &Curve, b: &Curve) -> Result<Vec<SpanDistance>> {
+    by_span(a, b, OP_BY_SPAN)
+}
+
+/// A number that no bound of [`certified_distance`] for `a` and another curve, and no span's
+/// bound of [`certified_distance_by_span`], is below, `a` being the first of the two: the
+/// rounding the bounds count on `a`'s own size. A caller that refines a curve towards a
+/// tolerance below it can stop, since no refinement brings a span's bound within it.
+///
+/// A bound is `(g + e) (1 + γ_2)`: `g` the span's largest difference, not negative, and `e`
+/// twice the sum of the two curves' coordinate errors. Each coordinate error is at least
+/// `γ_12` of twice the size (the term of a refinement that inserts no knot) plus `γ_2` of the
+/// size (the move into the curves' own frame), and the size is at least the largest
+/// coordinate of `a` in its own frame, whatever the other curve. The floor is that least
+/// value, formed by the operations the bounds are formed by on numbers that are never larger:
+/// each of them rounds monotonically, so no bound is below it, to the bit. A curve of one
+/// span against itself has it as its bound.
+///
+/// # Errors
+///
+/// `InvalidInput` for a rational or 2D curve, a number not finite, or knots not clamped, as
+/// [`certified_distance`] refuses them.
+pub fn certified_distance_floor(a: &Curve) -> Result<f64> {
+    check(a, OP_FLOOR)?;
+    let Some(&c0) = a.cpts().first() else {
+        return Err(SolidError::invalid_input(
+            OP_FLOOR,
+            "a curve without points",
+        ));
+    };
+    // the largest coordinate of `a` in its own frame, each formed as `in_own_frame` forms it
+    let size = a.cpts().iter().fold(0.0_f64, |m, p| {
+        m.max((p.x - c0.x).abs())
+            .max((p.y - c0.y).abs())
+            .max((p.z - c0.z).abs())
+    });
+    // one curve's coordinate error where its refinement inserts no knot and nothing is raised
+    let least = gamma(12) * 2.0 * size + gamma(2) * size;
+    Ok(2.0 * (least + least) * (1.0 + gamma(2)))
+}
+
+/// The common spans of `a` and `b` with their bounds, the refusals named by `op`: the one
+/// implementation behind [`certified_distance`] and [`certified_distance_by_span`]. Every
+/// difference is computed before any bound, so the refusals come in the order they always
+/// came.
+fn by_span(a: &Curve, b: &Curve, op: &'static str) -> Result<Vec<SpanDistance>> {
+    check(a, op)?;
+    check(b, op)?;
     if a.knots().first() != b.knots().first() || a.knots().last() != b.knots().last() {
         return Err(SolidError::invalid_input(
-            OP,
+            op,
             "the curves are not on one domain",
         ));
     }
-    let (a_local, b_local) = in_own_frame(a, b, OP)?;
+    let (a_local, b_local) = in_own_frame(a, b, op)?;
     let (a, b) = (&a_local, &b_local);
     let q = a.degree().max(b.degree());
     let size = largest_coordinate(a).max(largest_coordinate(b));
     let moved = gamma(2) * size;
-    let (pa, ea) = pieces(a, b, &[], q, size, OP)?;
-    let (pb, eb) = pieces(b, a, &[], q, size, OP)?;
+    let (pa, ea) = pieces(a, b, &[], q, size, op)?;
+    let (pb, eb) = pieces(b, a, &[], q, size, op)?;
     let (ea, eb) = (ea + moved, eb + moved);
-    let largest = largest_gap(&pa, &pb, OP)?;
-    let bound = (largest + 2.0 * (ea + eb)) * (1.0 + gamma(2));
-    if !bound.is_finite() {
-        return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
+    let gaps = span_gaps(&pa, &pb, op)?;
+    // one rounding term and one factor for every span, each formed as the whole curves'
+    let err = 2.0 * (ea + eb);
+    let grow = 1.0 + gamma(2);
+    let mut spans = Vec::new();
+    for (piece, gap) in pa.iter().zip(gaps) {
+        let (Some(&from), Some(&to)) = (piece.knots().first(), piece.knots().last()) else {
+            return Err(SolidError::query(
+                op,
+                QueryFailure::Defect {
+                    why:
+                        "a curve holds at least one knot, so a Bézier piece has a first and a last",
+                },
+            ));
+        };
+        let bound = (gap + err) * grow;
+        if !bound.is_finite() {
+            return Err(SolidError::query(op, QueryFailure::BoundOverflows));
+        }
+        spans.push(SpanDistance { from, to, bound });
     }
-    Ok(bound)
+    Ok(spans)
 }
 
 /// A bound `d` such that every point of `a` over `ia` is within `d` of a point of `b` over
@@ -270,12 +382,20 @@ fn in_own_frame(a: &Curve, b: &Curve, op: &'static str) -> Result<(Curve, Curve)
 }
 
 /// The largest distance between the control points of two lists of Bézier pieces of one
-/// degree on the same spans (computed, each rounded up by `γ_8`).
+/// degree on the same spans (computed, each rounded up by `γ_8`): the largest of
+/// `span_gaps`. Every distance is finite and not negative, so the largest of the spans'
+/// largest is the largest of all, to the bit.
 fn largest_gap(pa: &[Curve], pb: &[Curve], op: &'static str) -> Result<f64> {
+    Ok(span_gaps(pa, pb, op)?.into_iter().fold(0.0_f64, f64::max))
+}
+
+/// For each pair of Bézier pieces of one degree on the same span, in order, the largest
+/// distance between their control points (computed, each rounded up by `γ_8`).
+fn span_gaps(pa: &[Curve], pb: &[Curve], op: &'static str) -> Result<Vec<f64>> {
     if pa.len() != pb.len() {
         return Err(SolidError::query(op, QueryFailure::Defect { why: "both curves are cut into Bézier pieces at the union of their breakpoints, so their pieces pair up span by span" }));
     }
-    let mut largest = 0.0_f64;
+    let mut gaps = Vec::new();
     for (x, y) in pa.iter().zip(pb) {
         if x.knots().first() != y.knots().first() || x.knots().last() != y.knots().last() {
             return Err(SolidError::query(op, QueryFailure::Defect { why: "both curves are cut into Bézier pieces at the union of their breakpoints, so their pieces pair up span by span" }));
@@ -283,13 +403,15 @@ fn largest_gap(pa: &[Curve], pb: &[Curve], op: &'static str) -> Result<f64> {
         if x.cpts().len() != y.cpts().len() {
             return Err(SolidError::query(op, QueryFailure::Defect { why: "both curves' pieces are raised to the higher of the two degrees, so paired pieces have as many control points" }));
         }
+        let mut largest = 0.0_f64;
         for (p, r) in x.cpts().iter().zip(y.cpts()) {
             let d = norm_up(p.x - r.x, p.y - r.y, p.z - r.z)
                 .ok_or_else(|| SolidError::query(op, QueryFailure::BoundOverflows))?;
             largest = largest.max(d);
         }
+        gaps.push(largest);
     }
-    Ok(largest)
+    Ok(gaps)
 }
 
 /// An upper bound of the length of the difference `(dx, dy, dz)` (each one subtraction),
@@ -726,5 +848,366 @@ mod tests {
             certified_distance(&c, &rational),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    /// The pairs of curves the tests above compare, and pairs of other degrees and knots on
+    /// one domain.
+    fn pairs() -> Vec<(Curve, Curve)> {
+        let c = spline(&WAVE, 3);
+        let mut moved = WAVE;
+        moved[2][2] += 1.0;
+        let far: Vec<[f64; 3]> = WAVE.iter().map(|&[x, y, z]| [x + 1e9, y, z]).collect();
+        let far = spline(&far, 3);
+        let polyline = spline(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0].map(|x| [x, 0.0, 0.0]), 1);
+        let line = spline(&[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]], 1);
+        let bent = spline(&[[0.0, 0.0, 0.0], [2.5, 4.0, 0.0], [5.0, 0.0, 0.0]], 2);
+        let tiny = spline(&[[0.0, 0.0, 0.0], [1e-200, 0.0, 0.0]], 1);
+        let beside = spline(&[[0.0, 1e-200, 0.0], [1e-200, 1e-200, 0.0]], 1);
+        let quadratic = spline(&WAVE, 2);
+        // the wave's points on knots that are not the uniform ones
+        let uneven = Curve::new(
+            c.cpts().to_vec(),
+            3,
+            vec![0.0, 0.0, 0.0, 0.0, 0.1, 0.75, 1.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let more = c.insert_knot(0.3, 2).unwrap();
+        let higher = c.elevate_degree(2).unwrap();
+        vec![
+            (c.clone(), c.clone()),
+            (c.clone(), more.clone()),
+            (more, c.clone()),
+            (c.clone(), higher.clone()),
+            (higher, c.clone()),
+            (c.clone(), spline(&moved, 3)),
+            (polyline.clone(), line.clone()),
+            (polyline.clone(), line.elevate_degree(2).unwrap()),
+            (polyline.clone(), bent.clone()),
+            (bent, polyline),
+            (far.clone(), far.elevate_degree(1).unwrap()),
+            (tiny, beside),
+            (quadratic.clone(), quadratic.elevate_degree(1).unwrap()),
+            (c.clone(), quadratic.clone()),
+            (quadratic, uneven.clone()),
+            (c, uneven.clone()),
+            (spline(&WAVE[..4], 1), uneven),
+        ]
+    }
+
+    /// The whole curves' bound formed as it was formed before the spans: one largest
+    /// difference over every pair of pieces, then one bound from it.
+    fn bound_of_the_largest_gap(a: &Curve, b: &Curve) -> f64 {
+        let (a, b) = in_own_frame(a, b, OP).unwrap();
+        let q = a.degree().max(b.degree());
+        let size = largest_coordinate(&a).max(largest_coordinate(&b));
+        let moved = gamma(2) * size;
+        let (pa, ea) = pieces(&a, &b, &[], q, size, OP).unwrap();
+        let (pb, eb) = pieces(&b, &a, &[], q, size, OP).unwrap();
+        let (ea, eb) = (ea + moved, eb + moved);
+        let mut largest = 0.0_f64;
+        for (x, y) in pa.iter().zip(&pb) {
+            for (p, r) in x.cpts().iter().zip(y.cpts()) {
+                largest = largest.max(norm_up(p.x - r.x, p.y - r.y, p.z - r.z).unwrap());
+            }
+        }
+        (largest + 2.0 * (ea + eb)) * (1.0 + gamma(2))
+    }
+
+    /// The largest span bound is the whole curves' bound to the bit, by both routes: the one
+    /// `certified_distance` takes now, and the largest difference first, as it was formed
+    /// before. Rounding is monotone, so the span of the largest difference has the largest
+    /// bound, and it is formed by the same operations on the same numbers.
+    #[test]
+    fn the_largest_span_bound_is_the_certified_distance_bit_for_bit() {
+        for (a, b) in pairs() {
+            let whole = certified_distance(&a, &b).unwrap();
+            let spans = certified_distance_by_span(&a, &b).unwrap();
+            let largest = spans
+                .iter()
+                .map(|s| s.bound)
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert_eq!(
+                largest.to_bits(),
+                whole.to_bits(),
+                "{largest} against {whole}"
+            );
+            let before = bound_of_the_largest_gap(&a, &b);
+            assert_eq!(
+                whole.to_bits(),
+                before.to_bits(),
+                "{whole} against {before}"
+            );
+        }
+    }
+
+    /// The spans are the spans of the union of the two curves' breakpoints, in order, each
+    /// once: they start at the domain's start, end at its end and chain without a gap.
+    #[test]
+    fn the_spans_are_the_union_of_the_breakpoints_in_order() {
+        for (a, b) in pairs() {
+            let spans = certified_distance_by_span(&a, &b).unwrap();
+            let mut breaks: Vec<f64> = a.knots().iter().chain(b.knots()).copied().collect();
+            breaks.sort_by(f64::total_cmp);
+            breaks.dedup();
+            assert_eq!(spans.len(), breaks.len() - 1);
+            for (s, w) in spans.iter().zip(breaks.windows(2)) {
+                assert_eq!((s.from, s.to), (w[0], w[1]));
+            }
+            assert_eq!(spans[0].from, a.knots()[0]);
+            assert_eq!(spans[spans.len() - 1].to, a.knots()[a.knots().len() - 1]);
+            for w in spans.windows(2) {
+                assert_eq!(w[0].to, w[1].from);
+                assert!(w[0].from < w[0].to);
+            }
+        }
+    }
+
+    /// `|a(t) - b(t)|` as computed at `t` (each point by the general basis, as
+    /// `interpolation_bound` evaluates), and what the two evaluations and the distance may
+    /// round past the curves' own difference: each coordinate of a point carries
+    /// `γ_(12 q + 4)` of the nets' largest coordinate `M` (module docs), so each point moves by
+    /// at most twice that and the two by four times.
+    fn sampled_gap(a: &Curve, b: &Curve, t: f64) -> (f64, f64) {
+        let pa = a.derivs(t, Side::Left, 0).unwrap()[0];
+        let pb = b.derivs(t, Side::Left, 0).unwrap()[0];
+        let q = a.degree().max(b.degree());
+        let size = largest_coordinate(a).max(largest_coordinate(b));
+        (pa.distance(pb), 4.0 * gamma(12 * q + 4) * size)
+    }
+
+    /// Whether a sampled gap is within a bound: the computed distance (squares, a sum and a
+    /// root) rounds by `γ_4` and the sum and product here by two more roundings, so the bound
+    /// plus the evaluations' slack, grown by `γ_8`, holds it.
+    fn held(gap: f64, slack: f64, bound: f64) -> bool {
+        gap <= (bound + slack) * (1.0 + gamma(8))
+    }
+
+    #[test]
+    fn each_span_bound_holds_the_gaps_sampled_in_its_span() {
+        for (a, b) in pairs() {
+            for s in certified_distance_by_span(&a, &b).unwrap() {
+                for i in 0..=16 {
+                    // held inside the span: the sum may round past its end
+                    let t = (s.from + (s.to - s.from) * f64::from(i) / 16.0).clamp(s.from, s.to);
+                    let (gap, slack) = sampled_gap(&a, &b, t);
+                    assert!(
+                        held(gap, slack, s.bound),
+                        "at {t} in [{}, {}]: {gap} past {}",
+                        s.from,
+                        s.to,
+                        s.bound
+                    );
+                }
+            }
+        }
+    }
+
+    /// The pair of `a_gap_near_the_bottom_of_the_floating_range_is_not_lost_to_underflow`,
+    /// span by span: the curves are 1e-200 apart at every parameter. The square of that
+    /// underflows, so a distance sampled with squares reads 0 and holds under any bound; the
+    /// span's bound itself still has to enclose the gap, and not by much.
+    #[test]
+    fn a_span_bound_near_the_bottom_of_the_floating_range_is_not_lost_to_underflow() {
+        let tiny = spline(&[[0.0, 0.0, 0.0], [1e-200, 0.0, 0.0]], 1);
+        let beside = spline(&[[0.0, 1e-200, 0.0], [1e-200, 1e-200, 0.0]], 1);
+        let spans = certified_distance_by_span(&tiny, &beside).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert!(spans[0].bound >= 1e-200, "{}", spans[0].bound);
+        assert!(spans[0].bound <= 1.0001e-200, "{}", spans[0].bound);
+    }
+
+    /// No bound is below the floor of the first curve, for the whole curves and for every
+    /// span. A curve of one span against itself has the floor as its bound, to the bit: no
+    /// knot is inserted, nothing is raised and no control point differs, so the bound is the
+    /// rounding terms alone, formed as the floor forms them. The floor follows the curve's
+    /// size in its own frame, not its place.
+    #[test]
+    fn no_bound_is_below_the_floor_of_the_first_curve() {
+        for (a, b) in pairs() {
+            let floor = certified_distance_floor(&a).unwrap();
+            assert!(floor >= 0.0 && floor.is_finite(), "{floor}");
+            for s in certified_distance_by_span(&a, &b).unwrap() {
+                assert!(s.bound >= floor, "{} below the floor {floor}", s.bound);
+            }
+            assert!(certified_distance(&a, &b).unwrap() >= floor);
+        }
+        let line = spline(&[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]], 1);
+        let cubic = spline(&WAVE[..4], 3);
+        for c in [&line, &cubic] {
+            assert_eq!(
+                certified_distance(c, c).unwrap().to_bits(),
+                certified_distance_floor(c).unwrap().to_bits()
+            );
+        }
+        let far: Vec<[f64; 3]> = WAVE[..4].iter().map(|&[x, y, z]| [x + 1e9, y, z]).collect();
+        let far = spline(&far, 3);
+        let (here, there) = (
+            certified_distance_floor(&cubic).unwrap(),
+            certified_distance_floor(&far).unwrap(),
+        );
+        assert!(there <= here * 1.0001, "{there} against {here}");
+        // what the bound refuses, the floor refuses under its own name
+        let mut rational = cubic.clone();
+        rational.non_rat_to_rat();
+        let e = certified_distance_floor(&rational).unwrap_err();
+        assert!(matches!(e, SolidError::InvalidInput { .. }), "{e}");
+        assert_eq!(e.operation(), OP_FLOOR);
+    }
+
+    /// The wave against a copy with its last control point raised by 1 in z. That point's
+    /// basis function is zero before its first knot (The NURBS Book, P2.1: `N_(i,p)` is zero
+    /// outside `[u_i, u_(i+p+1))`), and the Bézier extraction forms each piece from the
+    /// control points of its own span only, so the pieces before that knot are equal and
+    /// their difference is 0. The largest coordinate of both nets in the first's frame is
+    /// still the wave's (5, the last point's x), so the rounding terms are the wave's against
+    /// itself: those spans' bound is `certified_distance` of the wave and itself, to the bit.
+    /// The span inside the support holds the sampled gaps, and at its end, where both curves
+    /// end on their last control points 1 apart, it holds 1.
+    #[test]
+    fn spans_outside_a_moved_control_points_support_are_at_rounding_level() {
+        let c = spline(&WAVE, 3);
+        let mut raised = WAVE;
+        raised[5][2] += 1.0;
+        let m = spline(&raised, 3);
+        let alone = certified_distance(&c, &c).unwrap();
+        let start = c.knots()[5];
+        let spans = certified_distance_by_span(&c, &m).unwrap();
+        let (outside, inside): (Vec<SpanDistance>, Vec<SpanDistance>) =
+            spans.iter().partition(|s| s.to <= start);
+        // six points of a cubic: interior knots 1/3 and 2/3, the support from 2/3 on
+        assert_eq!(outside.len(), 2);
+        assert_eq!(inside.len(), 1);
+        for s in &outside {
+            assert_eq!(
+                s.bound.to_bits(),
+                alone.to_bits(),
+                "{} against {alone}",
+                s.bound
+            );
+        }
+        for s in &inside {
+            assert!(s.bound > alone, "{} against {alone}", s.bound);
+            for i in 0..=16 {
+                let t = (s.from + (s.to - s.from) * f64::from(i) / 16.0).clamp(s.from, s.to);
+                let (gap, slack) = sampled_gap(&c, &m, t);
+                assert!(held(gap, slack, s.bound), "at {t}: {gap} past {}", s.bound);
+            }
+        }
+        assert!(spans[spans.len() - 1].bound >= 1.0);
+    }
+
+    /// The refusals are `certified_distance`'s, in its order, under the new function's own
+    /// name; `certified_distance` keeps its name.
+    #[test]
+    fn span_bounds_refuse_what_the_distance_refuses_under_their_own_name() {
+        let c = spline(&WAVE, 3);
+        let mut nan = WAVE;
+        nan[2][0] = f64::NAN;
+        let mut infinite = WAVE;
+        infinite[3][1] = f64::INFINITY;
+        let mut other = c.clone();
+        other
+            .reparam_to_interval(crate::nurbs::geom::Interval { ul: 0.0, ur: 2.0 })
+            .unwrap();
+        let mut rational = c.clone();
+        rational.non_rat_to_rat();
+        let flat_points = WAVE
+            .iter()
+            .map(|&[x, y, _]| CPoint::new(x, y, NOZ, NOW))
+            .collect();
+        let flat = Curve::new(flat_points, 3, c.knots().to_vec()).unwrap();
+        let square = [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+        ];
+        let pw = square
+            .iter()
+            .chain(&square[..3])
+            .map(|&[x, y, z]| CPoint::from_point(Vec3::new(x, y, z)))
+            .collect();
+        let periodic = crate::nurbs::knots::periodic_uniform(4, 3).unwrap();
+        let closed = Curve::new(pw, 3, periodic).unwrap();
+        let wild = Curve::new(c.cpts().to_vec(), usize::MAX, c.knots().to_vec()).unwrap();
+        for bad in [
+            spline(&nan, 3),
+            spline(&infinite, 3),
+            other,
+            rational,
+            flat,
+            closed,
+            wild,
+        ] {
+            for (x, y) in [(&c, &bad), (&bad, &c)] {
+                let e = certified_distance_by_span(x, y).unwrap_err();
+                assert!(matches!(e, SolidError::InvalidInput { .. }), "{e}");
+                assert_eq!(e.operation(), OP_BY_SPAN);
+                let e = certified_distance(x, y).unwrap_err();
+                assert!(matches!(e, SolidError::InvalidInput { .. }), "{e}");
+                assert_eq!(e.operation(), OP);
+            }
+        }
+        // too far apart: each difference finite, its length not
+        let a = spline(&[[8e307, 8e307, 0.0], [8e307, 8e307, 1.0]], 1);
+        let b = spline(&[[-8e307, -8e307, 0.0], [-8e307, -8e307, 1.0]], 1);
+        let e = certified_distance_by_span(&a, &b).unwrap_err();
+        assert_eq!(
+            e.query_failure(),
+            Some(&QueryFailure::BoundOverflows),
+            "{e}"
+        );
+        assert_eq!(e.operation(), OP_BY_SPAN);
+        let e = certified_distance(&a, &b).unwrap_err();
+        assert_eq!(
+            e.query_failure(),
+            Some(&QueryFailure::BoundOverflows),
+            "{e}"
+        );
+        assert_eq!(e.operation(), OP);
+    }
+
+    /// Hostile numbers give an answer or an error, never a panic; an answer's spans chain and
+    /// its bounds are finite and not negative.
+    #[test]
+    fn hostile_numbers_never_panic_the_span_bounds() {
+        let big = f64::MAX;
+        let tiny = f64::from_bits(1);
+        let nets: [[[f64; 3]; 2]; 6] = [
+            [[big, big, big], [-big, -big, -big]],
+            [[big, 0.0, 0.0], [big, 0.0, 0.0]],
+            [[tiny, -tiny, 0.0], [0.0, tiny, tiny]],
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            [[1e300, -1e300, 1e300], [-1e-300, 1e-300, 0.0]],
+            [[f64::NEG_INFINITY, 0.0, 0.0], [0.0, f64::NAN, 0.0]],
+        ];
+        let curves: Vec<Curve> = nets.iter().map(|n| spline(n, 1)).collect();
+        let knots = [
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![big, big, big, big],
+            vec![-big, -big, big, big],
+            vec![1.0, 1.0, 0.0, 0.0],
+            vec![0.0, 0.0, tiny, tiny],
+            vec![0.0, 0.0],
+            vec![f64::NAN, f64::NAN, 1.0, 1.0],
+        ];
+        let line = spline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], 1);
+        let mut all = curves;
+        for k in knots {
+            all.push(Curve::new(line.cpts().to_vec(), 1, k).unwrap());
+        }
+        for x in &all {
+            for y in &all {
+                let Ok(spans) = certified_distance_by_span(x, y) else {
+                    continue;
+                };
+                for s in &spans {
+                    assert!(s.bound.is_finite() && s.bound >= 0.0, "{}", s.bound);
+                }
+                for w in spans.windows(2) {
+                    assert_eq!(w[0].to, w[1].from);
+                }
+            }
+        }
     }
 }

@@ -1,37 +1,13 @@
-//! The WR-587 retirement's substitution replay (`curve_loop_normal_from_area` retired,
-//! tangency-labs/solidcraft#18931): every golden row the retirement moved moved only
-//! through the loop normal's answers, and each of those answers is certified.
+//! The certificate of the loop normal (`compute_crvs_normal`, `SmCurve::ComputeCrvsNormal`):
+//! a success is the direction of the EXACT area vector of the sampled polygon (expansion
+//! arithmetic) within a derived rounding bound, or, for an open chain whose area has no
+//! certain direction, a normal of the plane of every sample; a refusal is an exact area
+//! vector shorter than `SM_EFF_ZERO` within those bounds (`Unitize`'s refusal), a single
+//! linear curve, or a failed evaluation of a sample ([`certify`]).
 //!
-//! The retirement changes one function: `compute_crvs_normal` (`SmCurve::ComputeCrvsNormal`)
-//! now answers the unit area vector of the sampled polygon, where main answered upstream's
-//! weighted turns. Every other row it moved is downstream of that answer. The loop normal
-//! seam (`solidcore`'s `surface::surface::replay::LoopNormalHook`, feature `wr57-replay`,
-//! which this crate turns on for its tests only) sees each call of it a runner's kernel
-//! makes ([`crate::runner_kernel`]), with the curves and this branch's answer, and may put
-//! another answer in its place.
-//!
-//! For each moved row ([`ROWS`]: unit, case and the FNV-1a hash of main's golden line at
-//! [`MAIN_COMMIT`]), [`every_moved_row_moved_only_through_the_loop_normal`] runs the case
-//! twice:
-//! 1. with every call's answer replaced by main's ([`main_normal`], main's weighted-turns
-//!    code, copied here as the reference it replays: the same samples, sums and
-//!    `Unitize`), the encoded row hashes to main's line. At every call this branch's own
-//!    answer is certified ([`certify`]): a success is the direction of the EXACT area
-//!    vector of the samples (expansion arithmetic) within a derived rounding bound, or,
-//!    for an open chain whose area has no certain direction, a normal of the plane of
-//!    every sample; a refusal is an exact area vector shorter than `SM_EFF_ZERO` within
-//!    those bounds (`Unitize`'s refusal), a single linear curve, or a failed evaluation of
-//!    a sample;
-//! 2. as is, the encoded row equals the committed golden line.
-//!
-//! So each committed row is this branch's output, and it differs from main's only through
-//! the loop normal's answers, each the certified area normal. The calls are classed by how
-//! main's answer relates to this branch's ([`Move`]) and the classes counted per unit and
-//! asserted.
-//!
-//! **When a later change moves one of these rows:** the replay is the retirement's proof
-//! against [`MAIN_COMMIT`] and is not kept in step with later code. A change that re-blesses
-//! a row listed in [`ROWS`] deletes that row and lowers the counts below.
+//! `curve.curve_p3`'s `wr587_every_normal_row_is_the_area_normal` certifies every
+//! committed `Normal` row with it; [`plane_normals_of_open_chains_certify`] exercises the
+//! plane normal branch no such row reaches.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -40,41 +16,10 @@
     clippy::print_stderr
 )] // test
 
-use std::collections::BTreeMap;
-use std::fmt::Write as _;
-use std::sync::{Arc, Mutex};
-
-use serde_json::Value;
 use solidcore::curve::curve::p2::Curve;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::math::EFF_ZERO;
-use solidcore::surface::surface::replay::ReplaySeam;
-use solidcore::{Kernel, SolidError};
-
-use crate::case::{repo_root, Case, CaseContext};
-use crate::golden::{default_dir, encode, read};
-use crate::rng::fnv1a64;
-
-/// The main commit whose golden lines [`ROWS`] hashes.
-const MAIN_COMMIT: &str = "769bea6b0b";
-
-/// The goldens' default number of generated cases per unit (the seeds they were blessed with).
-const SEEDS: usize = 16;
-
-/// The moved rows: `unit case main-line-hash` (hex), one per line.
-const ROWS: &str = include_str!("wr587_replay/rows.txt");
-
-/// The moved rows per unit, and their loop normal calls by certificate and by move. The
-/// classes (`Move`): `SameSide` and `Reversed` both succeed (the area normal against the
-/// weighted turns' normal, on the same side or reversed); `NowAnswered` main refused a
-/// nonzero area (its turns cancelled); `NowRefused` the exact area is zero (a line run back
-/// over itself) where the turns gave a normal; `BothRefuse` neither has a normal (no curves,
-/// a single line), the row moving only by the status's message.
-const EXPECTED: &str = "\
-curve.curve_p3: 222 rows; calls certified {AreaNormal: 222}; moves {SameSide: 169, Reversed: 52, NowAnswered: 1}
-primitive.api_curve_ops: 19 rows; calls certified {AreaNormal: 19}; moves {SameSide: 10, Reversed: 9}
-primitive.primitive_creation_p1: 2 rows; calls certified {ZeroArea: 2, SingleLinear: 2}; moves {BothRefuse: 4}
-";
+use solidcore::Kernel;
 
 // ---- exact arithmetic ------------------------------------------------------------------
 
@@ -141,7 +86,7 @@ impl Exact {
     }
 }
 
-// ---- the certificate of this branch's answer ---------------------------------------------
+// ---- the certificate of the kernel's answer ---------------------------------------------
 
 /// An answer of the loop normal, as a call returns it or a golden row records it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -154,20 +99,7 @@ pub(crate) enum Answer {
     OtherRefusal,
 }
 
-impl Answer {
-    fn of(own: &(Vec3, Result<(), SolidError>)) -> Self {
-        match &own.1 {
-            Ok(()) => Self::Normal(own.0),
-            Err(SolidError::InvalidInput { .. }) => {
-                assert_eq!(own.0, Vec3::Z, "a refused normal is written (0, 0, 1)");
-                Self::ZeroNormal
-            }
-            Err(_) => Self::OtherRefusal,
-        }
-    }
-}
-
-/// How this branch's answer at a call is certified.
+/// How the kernel's answer at a call is certified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Cert {
     /// Success: the direction of the exact area vector of the samples.
@@ -194,7 +126,7 @@ pub(crate) enum Cert {
     FailedEvaluation,
 }
 
-/// The samples of `curves` this branch sums (upstream's: one chord for a two-point curve,
+/// The samples of `curves` the kernel sums (upstream's: one chord for a two-point curve,
 /// else the six points at `j / 5` of the natural interval), or `None` when an evaluation
 /// fails.
 fn samples(k: &Kernel, curves: &[Curve]) -> Option<Vec<Vec3>> {
@@ -216,7 +148,7 @@ fn samples(k: &Kernel, curves: &[Curve]) -> Option<Vec<Vec3>> {
     Some(out)
 }
 
-/// Certifies `own`, this branch's answer for `curves`, and classes it; panics when it is not
+/// Certifies `own`, the kernel's answer for `curves`, and classes it; panics when it is not
 /// the certified area normal.
 ///
 /// A success must be the direction of the exact fan area vector `A` of the samples about the
@@ -341,8 +273,8 @@ pub(crate) fn certify(k: &Kernel, curves: &[Curve], own: Answer) -> Cert {
 /// unit normal of the plane of every sample, `|n . (p - p0)| <= 2e-6 |p - p0|` (the
 /// kernel's angular zero, 1.75e-6, and rounding), on the side of the exact area vector
 /// `a` when `|a . n|` exceeds its error `e` (a few `u` of `|a|` covering `n`'s rounding);
-/// else its sense is the kernel's documented tie-break (the chain's turns), classed
-/// against main's answer by the moves.
+/// else its sense is the kernel's documented tie-break (the chain's turns), positive
+/// where their sum is certain.
 fn certify_plane(points: &[Vec3], n: Vec3, a: Vec3, e: f64) -> Cert {
     let (first, last) = (points[0], points[points.len() - 1]);
     assert!(
@@ -413,310 +345,6 @@ fn in_plane(points: &[Vec3], n: Vec3) -> bool {
     })
 }
 
-// ---- main's answer ---------------------------------------------------------------------
-
-/// Main's `ComputeCrvsNormal` ([`MAIN_COMMIT`], `curve_loop_normal_from_area` off): the sum
-/// of the cross products of consecutive chords of 5 samples per curve (1 for a two-point
-/// curve), plus the closing corner when the last sample returns to the start point, then
-/// `Unitize` (a zero sum writes `(0, 0, 1)` and returns its error). The normal it wrote,
-/// and its status. Copied from main as the reference this replay substitutes.
-///
-/// A single linear curve's status is main's and this branch's alike (the same code, before
-/// any sum): main's answer there is `own`.
-fn main_normal(
-    k: &Kernel,
-    curves: &[Curve],
-    own: &(Vec3, Result<(), SolidError>),
-) -> (Vec3, Result<(), SolidError>) {
-    let mut normal = Vec3::new(0.0, 0.0, 0.0);
-    match main_normal_into(k, curves, &mut normal) {
-        Some(r) => (normal, r),
-        None => own.clone(),
-    }
-}
-
-/// Main's computation; `None` for a single linear curve.
-fn main_normal_into(
-    k: &Kernel,
-    curves: &[Curve],
-    normal: &mut Vec3,
-) -> Option<Result<(), SolidError>> {
-    match main_turns_into(k, curves, normal) {
-        Ok(true) => None,
-        Ok(false) => Some(Ok(())),
-        Err(e) => Some(Err(e)),
-    }
-}
-
-/// Main's computation: `Ok(true)` for a single linear curve.
-fn main_turns_into(k: &Kernel, curves: &[Curve], normal: &mut Vec3) -> Result<bool, SolidError> {
-    *normal = Vec3::new(0.0, 0.0, 0.0);
-    let mut pt2;
-    let mut pt3;
-    let mut vec1;
-    let mut vec2 = Vec3::new(0.0, 0.0, 0.0);
-    let mut start_pt = Vec3::new(0.0, 0.0, 0.0);
-    let mut start_vector = Vec3::new(0.0, 0.0, 0.0);
-    let mut total_points: u64 = 0;
-    let num_curves = curves.len();
-    for (ii, crv) in curves.iter().enumerate() {
-        let domain = crv.natural_interval();
-        if crv.is_linear(k, EFF_ZERO, false)?.linear && num_curves == 1 {
-            // main's `SolidError::curve(OP_NORMAL, SingleLinearCurve)`, this branch's too
-            return Ok(true);
-        }
-        let mut t = 0.0;
-        pt3 = crv.evaluate_point(k, domain.evaluate(t))?;
-        if ii == 0 {
-            start_pt = pt3;
-        }
-        total_points += 1;
-        let mut count: u64 = 5;
-        if crv.number_control_points()? == 2 {
-            count = 1;
-        }
-        let t_incr = 1.0 / count as f64;
-        for _jj in 0..count {
-            pt2 = pt3;
-            vec1 = vec2;
-            pt3 = crv.evaluate_point(k, domain.evaluate(t + t_incr))?;
-            total_points += 1;
-            vec2 = pt3 - pt2;
-            t += t_incr;
-            if t > 1.0 {
-                t = 1.0;
-            }
-            if total_points < 3 {
-                start_vector = vec2;
-                continue;
-            }
-            *normal += vec1.cross(vec2);
-            if ii == num_curves - 1 && start_pt.approx_eq(pt3) {
-                *normal += vec2.cross(start_vector);
-            }
-        }
-    }
-    match normal.unitize() {
-        Ok(n) => {
-            *normal = n;
-            Ok(false)
-        }
-        Err(e) => {
-            *normal = Vec3::Z;
-            Err(e)
-        }
-    }
-}
-
-// ---- the replay -------------------------------------------------------------------------
-
-/// How main's answer at a call relates to this branch's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Move {
-    /// Both succeed, the same normal bit for bit.
-    Same,
-    /// Both succeed on the same side (a positive dot product), another normal.
-    SameSide,
-    /// Both succeed, reversed (a negative dot product).
-    Reversed,
-    /// Both succeed, square to each other (a zero dot product).
-    Square,
-    /// Main succeeded; this branch refuses.
-    NowRefused,
-    /// Main refused; this branch succeeds.
-    NowAnswered,
-    /// Both refuse.
-    BothRefuse,
-}
-
-fn moved(main: &(Vec3, Result<(), SolidError>), own: &(Vec3, Result<(), SolidError>)) -> Move {
-    match (&main.1, &own.1) {
-        (Ok(()), Ok(())) if main.0 == own.0 => Move::Same,
-        (Ok(()), Ok(())) => {
-            let d = main.0.dot(own.0);
-            if d > 0.0 {
-                Move::SameSide
-            } else if d < 0.0 {
-                Move::Reversed
-            } else {
-                Move::Square
-            }
-        }
-        (Ok(()), Err(_)) => Move::NowRefused,
-        (Err(_), Ok(())) => Move::NowAnswered,
-        (Err(_), Err(_)) => Move::BothRefuse,
-    }
-}
-
-/// `unit_id`'s expected file `text` with each row the retirement moved (`rows.txt`) put
-/// back to main's line: the case run with main's loop normal substituted at every call,
-/// whose line must hash to main's. Another ledger that digests the whole file against
-/// main ([`crate::certify::trim_tolerance`]) so sees main's lines for these independent
-/// changes; a row it changes itself (`keep`) must not be one of them.
-pub(crate) fn put_back_main_lines(
-    unit_id: &str,
-    text: &str,
-    keep: &[&str],
-) -> Result<String, String> {
-    let mut moved: BTreeMap<&str, u64> = BTreeMap::new();
-    for line in ROWS.lines().filter(|l| !l.trim().is_empty()) {
-        let mut f = line.split_whitespace();
-        let (Some(unit), Some(case), Some(h)) = (f.next(), f.next(), f.next()) else {
-            return Err(format!("rows.txt: a short line {line:?}"));
-        };
-        if unit == unit_id {
-            let h = u64::from_str_radix(h, 16).map_err(|e| format!("rows.txt {case}: {e}"))?;
-            moved.insert(case, h);
-        }
-    }
-    if moved.is_empty() {
-        return Ok(text.to_string());
-    }
-    if let Some(case) = keep.iter().find(|c| moved.contains_key(**c)) {
-        return Err(format!("{unit_id} {case}: changed by both ledgers"));
-    }
-    let unit = crate::registry()
-        .into_iter()
-        .find(|u| u.id() == unit_id)
-        .ok_or_else(|| format!("no unit {unit_id}"))?;
-    let ctx = CaseContext {
-        root: repo_root(),
-        seeds: SEEDS,
-    };
-    let cases: BTreeMap<String, Case> = unit
-        .cases(&ctx)
-        .map_err(|e| format!("{unit_id}: {e:?}"))?
-        .into_iter()
-        .map(|c| (c.name.clone(), c))
-        .collect();
-    let mut out = String::new();
-    let mut found = 0;
-    for line in text.lines() {
-        let v: Value = serde_json::from_str(line).map_err(|e| format!("{unit_id}: {e}"))?;
-        let case = v["case"].as_str().unwrap_or_default();
-        let Some(&main_hash) = moved.get(case) else {
-            out.push_str(line);
-            out.push('\n');
-            continue;
-        };
-        let c = cases
-            .get(case)
-            .ok_or_else(|| format!("{unit_id}: no case {case}"))?;
-        let seam = ReplaySeam::loop_normal(Box::new(|k, curves, own| main_normal(k, curves, &own)));
-        let replayed = crate::replay_seam::with_installed(seam, || unit.run_rust(c))
-            .map_err(|e| format!("{unit_id} {case}: {e:?}"))?;
-        let replayed = encode(case, &replayed);
-        if hash(&replayed) != main_hash {
-            return Err(format!("{unit_id} {case}: the replayed row is not main's"));
-        }
-        out.push_str(&replayed.to_string());
-        out.push('\n');
-        found += 1;
-    }
-    if found != moved.len() {
-        return Err(format!(
-            "{unit_id}: {found} of {} moved rows in the file",
-            moved.len()
-        ));
-    }
-    Ok(out)
-}
-
-fn hash(v: &Value) -> u64 {
-    fnv1a64(&serde_json::to_string(v).unwrap())
-}
-
-/// Per unit: the moved rows, the calls by certificate and by move.
-type Tally = BTreeMap<String, (usize, BTreeMap<Cert, usize>, BTreeMap<Move, usize>)>;
-
-#[test]
-fn every_moved_row_moved_only_through_the_loop_normal() {
-    let mut rows: BTreeMap<&str, BTreeMap<&str, u64>> = BTreeMap::new();
-    for line in ROWS.lines().filter(|l| !l.trim().is_empty()) {
-        let mut f = line.split_whitespace();
-        let (unit, case, h) = (f.next().unwrap(), f.next().unwrap(), f.next().unwrap());
-        let h = u64::from_str_radix(h, 16).unwrap();
-        assert!(
-            rows.entry(unit).or_default().insert(case, h).is_none(),
-            "{unit} {case} twice"
-        );
-    }
-    let ctx = CaseContext {
-        root: repo_root(),
-        seeds: SEEDS,
-    };
-    let tally: Arc<Mutex<Tally>> = Arc::default();
-    for unit in crate::registry() {
-        let Some(moved_rows) = rows.get(unit.id()) else {
-            continue;
-        };
-        let golden = read(&default_dir(), unit.id()).unwrap();
-        let cases: BTreeMap<String, Case> = unit
-            .cases(&ctx)
-            .unwrap()
-            .into_iter()
-            .map(|c| (c.name.clone(), c))
-            .collect();
-        for (&name, &main_hash) in moved_rows {
-            let case = cases
-                .get(name)
-                .unwrap_or_else(|| panic!("{}: no case {name}", unit.id()));
-            let calls = Arc::new(Mutex::new(0usize));
-            let (t, c, id) = (Arc::clone(&tally), Arc::clone(&calls), unit.id().to_owned());
-            let seam = ReplaySeam::loop_normal(Box::new(move |k, curves, own| {
-                let cert = certify(k, curves, Answer::of(&own));
-                let main = main_normal(k, curves, &own);
-                let m = moved(&main, &own);
-                let mut t = t.lock().unwrap();
-                let e = t.entry(id.clone()).or_default();
-                *e.1.entry(cert).or_default() += 1;
-                *e.2.entry(m).or_default() += 1;
-                *c.lock().unwrap() += 1;
-                main
-            }));
-            let replayed = crate::replay_seam::with_installed(seam, || unit.run_rust(case));
-            let replayed = encode(name, &replayed.unwrap());
-            assert!(
-                *calls.lock().unwrap() > 0,
-                "{} {name}: the row makes no loop normal call",
-                unit.id()
-            );
-            assert_eq!(
-                hash(&replayed),
-                main_hash,
-                "{} {name}: with main's loop normals the row is not main's (at {MAIN_COMMIT})",
-                unit.id()
-            );
-            let own = encode(name, &unit.run_rust(case).unwrap());
-            assert_eq!(
-                Some(&own),
-                golden.get(name),
-                "{} {name}: the committed line is not this branch's row",
-                unit.id()
-            );
-            tally
-                .lock()
-                .unwrap()
-                .entry(unit.id().to_owned())
-                .or_default()
-                .0 += 1;
-        }
-    }
-    let tally = tally.lock().unwrap();
-    let mut got = String::new();
-    for (unit, (n, certs, moves)) in tally.iter() {
-        writeln!(
-            got,
-            "{unit}: {n} rows; calls certified {certs:?}; moves {moves:?}"
-        )
-        .unwrap();
-    }
-    eprint!("{got}");
-    assert_eq!(got, EXPECTED);
-    let total: usize = tally.values().map(|v| v.0).sum();
-    assert_eq!(total, rows.values().map(BTreeMap::len).sum::<usize>());
-}
-
 /// The polyline through `points` as line segments (B-splines with two control points).
 fn polyline(points: &[[f64; 3]]) -> Vec<Curve> {
     points
@@ -734,8 +362,7 @@ fn polyline(points: &[[f64; 3]]) -> Vec<Curve> {
         .collect()
 }
 
-/// No moved row reaches the plane normal (both rows that did now answer main's normal),
-/// so its certificate is exercised here: the Z path, whose area cancels exactly, at the
+/// No `curve.curve_p3` row reaches the plane normal, so its certificate is exercised here: the Z path, whose area cancels exactly, at the
 /// origin and tilted, offset and scaled, and the Z path with its end raised (area along
 /// +Z, of no certain direction), certify as plane normals; the reversed answer does not.
 #[test]
