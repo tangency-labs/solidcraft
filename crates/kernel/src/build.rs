@@ -1590,3 +1590,14 @@ pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<
 pub fn plane_gap(sketch: &Plane, from: &Plane, to: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
     solidcore_ops::prism::plane_gap(sketch, from, to, regions).map_err(|e| KernelError::Invalid(e.to_string()))
 }
+
+/// `plane` moved by `by` along `sketch`'s normal ([`solidcore_ops::prism::plane_raised`]).
+pub fn plane_raised(sketch: &Plane, plane: &Plane, by: f64) -> Result<Plane> {
+    solidcore_ops::prism::plane_raised(sketch, plane, by).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// Which side of `from` and of `to` holds what lies between them along `travel`, `true` for the
+/// side each plane's normal points to ([`solidcore_ops::prism::slab_sides`]).
+pub fn slab_sides(travel: Vec3, from: &Plane, to: &Plane) -> Result<(bool, bool)> {
+    solidcore_ops::prism::slab_sides(travel, from, to).map_err(|e| KernelError::Invalid(e.to_string()))
+}

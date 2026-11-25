@@ -142,8 +142,6 @@ crates/doc/src/eval.rs:seg_at cross,normalized
 crates/doc/src/eval.rs:sketch_line_plane normalized
 crates/doc/src/eval.rs:slanted_plane dot
 crates/doc/src/eval.rs:tangent_face_chain dot,normalized,triangles
-crates/doc/src/eval.rs:trim_between_planes dot
-crates/doc/src/eval.rs:trim_between_slopes dot
 crates/doc/src/eval.rs:trim_to_curved_face dot
 crates/doc/src/eval.rs:trim_to_face dot
 crates/doc/src/eval.rs:trim_to_plane dot

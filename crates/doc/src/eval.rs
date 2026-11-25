@@ -10203,7 +10203,7 @@ fn feature_tools_with_constructor(
                     tools = trim_between_planes(tools, fp, tp, n, d.signum())?;
                 } else if let Some(fp) = &from_slope {
                     let shift = off - from;
-                    tools = trim_between_slopes(tools, fp, n, lo + shift, hi + shift)?;
+                    tools = trim_between_slopes(tools, fp, &ss.plane, lo + shift, hi + shift)?;
                 }
             }
             // A cut or a join by profiles apart in the sketch (the letters of a text): each tool
@@ -14410,16 +14410,18 @@ fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> 
     Ok(((lo - level).min(0.0), (hi - level).max(0.0)))
 }
 
-/// Each tool's part between `slope` moved `lo` and `hi` along `n` (the extrusion direction).
-fn trim_between_slopes(tools: Vec<Traced>, slope: &Plane, n: Vec3, lo: f64, hi: f64) -> Result<Vec<Traced>> {
-    let with_normal = n.dot(slope.normal()) > 0.0;
-    let moved = |d: f64| Plane { origin: slope.origin + n * d, ..*slope };
+/// Each tool's part between `slope` moved `lo` and `hi` along `plane`'s normal (the extrusion
+/// direction): the planes [`kernel::plane_raised`] moves it to, each cut on the side
+/// [`kernel::slab_sides`] keeps.
+fn trim_between_slopes(tools: Vec<Traced>, slope: &Plane, plane: &Plane, lo: f64, hi: f64) -> Result<Vec<Traced>> {
+    let (bottom, top) = (kernel::plane_raised(plane, slope, lo)?, kernel::plane_raised(plane, slope, hi)?);
+    let (past_bottom, short_of_top) = kernel::slab_sides(plane.normal(), &bottom, &top)?;
     let mut out = Vec::new();
     for t in &tools {
         // The two ends are named as a two-sided extrude's caps are, by the end they close:
         // both may lie on one side of the sketch plane, so their height can't tell them apart.
-        let Some(above) = half_space_traced(t, &moved(lo), with_normal, "bottom")? else { continue };
-        if let Some(part) = half_space_traced(&above, &moved(hi), !with_normal, "top")? {
+        let Some(above) = half_space_traced(t, &bottom, past_bottom, "bottom")? else { continue };
+        if let Some(part) = half_space_traced(&above, &top, short_of_top, "top")? {
             out.push(part);
         }
     }
@@ -14431,16 +14433,15 @@ fn trim_between_slopes(tools: Vec<Traced>, slope: &Plane, n: Vec3, lo: f64, hi: 
 
 /// Each tool's part past `from` and short of `to` along `n` times `sign` (the way the extrude
 /// runs; `n` is the sketch's normal): an extrude From one flat face To another (#18825). The ends
-/// are named as [`trim_between_slopes`] names them, `bottom` the one lower along `n`.
+/// are named as [`trim_between_slopes`] names them, `bottom` the one lower along `n`. Each cut
+/// keeps the side of its plane [`kernel::slab_sides`] gives.
 fn trim_between_planes(tools: Vec<Traced>, from: &Plane, to: &Plane, n: Vec3, sign: f64) -> Result<Vec<Traced>> {
-    let travel = n * sign;
+    let (past_from, short_of_to) = kernel::slab_sides(n * sign, from, to)?;
     let (from_cap, to_cap) = if sign > 0.0 { ("bottom", "top") } else { ("top", "bottom") };
     let mut out = Vec::new();
     for t in &tools {
-        // Past `from`: the side its normal points to when the travel runs with it. Short of `to`:
-        // the side its normal points to when the travel runs against it.
-        let Some(past) = half_space_traced(t, from, travel.dot(from.normal()) > 0.0, from_cap)? else { continue };
-        if let Some(part) = half_space_traced(&past, to, travel.dot(to.normal()) < 0.0, to_cap)? {
+        let Some(past) = half_space_traced(t, from, past_from, from_cap)? else { continue };
+        if let Some(part) = half_space_traced(&past, to, short_of_to, to_cap)? {
             out.push(part);
         }
     }
