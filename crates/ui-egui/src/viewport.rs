@@ -93,6 +93,8 @@ pub(crate) struct ViewScenes {
     moving_key: u64,
     body_tris: std::sync::Mutex<std::collections::HashMap<String, crate::gpu::BlockTris>>,
     body_lines: std::sync::Mutex<std::collections::HashMap<String, (u64, std::ops::Range<u32>)>>,
+    origin_hidden: std::sync::Mutex<Option<OriginHiddenCache>>,
+    origin_hidden_postponed: std::sync::atomic::AtomicBool,
 }
 
 impl ViewScenes {
@@ -142,6 +144,8 @@ impl ViewScenes {
         std::mem::swap(&mut self.moving_key, &mut vp.moving_key);
         std::mem::swap(&mut self.body_tris, &mut vp.body_tris);
         std::mem::swap(&mut self.body_lines, &mut vp.body_lines);
+        std::mem::swap(&mut self.origin_hidden, &mut vp.origin_hidden);
+        std::mem::swap(&mut self.origin_hidden_postponed, &mut vp.origin_hidden_postponed);
     }
 }
 
