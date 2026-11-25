@@ -141,7 +141,12 @@ pub(super) fn check_raw(value: &Value) -> Result<()> {
             require(records.len() <= limit, || format!("sheet fill: raw `{key}` exceeds {limit} records"))?;
         }
     }
-    for snapshot in value.get("patterns").and_then(Value::as_array).into_iter().flatten() {
+    check_raw_patterns(value.get("patterns").and_then(Value::as_array).into_iter().flatten())?;
+    check_raw_fills(value.get("fills").and_then(Value::as_array).into_iter().flatten())
+}
+
+pub(super) fn check_raw_patterns<'a>(records: impl IntoIterator<Item = &'a Value>) -> Result<()> {
+    for snapshot in records {
         if let Some(pattern) = snapshot.get("pattern") {
             if let Some(name) = pattern.get("name").and_then(Value::as_str) {
                 require(name.len() <= solidcore_record::hatch::MAX_NAME_BYTES, || "sheet fill: raw pattern name exceeds 31 bytes".into())?;
@@ -162,9 +167,13 @@ pub(super) fn check_raw(value: &Value) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+pub(super) fn check_raw_fills<'a>(records: impl IntoIterator<Item = &'a Value>) -> Result<()> {
     let mut count = 0usize;
     let mut curve_ids = 0usize;
-    for fill in value.get("fills").and_then(Value::as_array).into_iter().flatten() {
+    for fill in records {
         if let Some(boundary) = fill.get("boundary") {
             let holes = boundary.get("holes").and_then(Value::as_array);
             require(holes.is_none_or(|holes| holes.len() <= WHOLE_MAX_HOLES), || "sheet fill: raw boundary exceeds 128 holes".into())?;
@@ -286,7 +295,7 @@ impl Drawing {
                 let point = |id| solved.sketch.point(id).ok_or_else(|| fail("arc references an unknown point"));
                 let (center, start, end) = (point(c)?, point(a)?, point(b)?);
                 if start != end {
-                    let sweep = solidcore_ops::prism::counterclockwise_sweep(center, start, end)
+                    let sweep = solidcraft_kernel::services::prism::counterclockwise_sweep(center, start, end)
                         .ok_or_else(|| fail("arc has no finite nonzero radial directions"))?;
                     if sweep <= 1e-12 {
                         return Err(fail("noncoincident arc sweep at or below 1e-12 radians cannot be converted exactly"));
@@ -407,6 +416,9 @@ impl Drawing {
             }
         }
         retained_budget(&next)?;
+        if let Some(file) = &self.newer_file {
+            file.check_fill_budget(next.iter().map(AsRef::as_ref))?;
+        }
         self.fills = next;
         Ok(())
     }

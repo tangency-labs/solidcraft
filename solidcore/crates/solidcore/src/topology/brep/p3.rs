@@ -44,9 +44,9 @@
 //!   new [`Brep`] and return it;
 //!   `MergeBrep` copies from another [`Brep`] (a self-merge, `MergeBrep(*this)`, cannot
 //!   be expressed).
-//! - **Ignored statuses.** The copy constructor ignores `MergeBrep`'s status (`SE`):
-//!   only [`SolidError::Unported`] propagates. `MergeBrep` ignores the list inserts'
-//!   statuses (`SE(PostInsert(..))`) as upstream.
+//! - **Copy failures.** The copy constructor propagates every `MergeBrep` failure,
+//!   rather than returning a partial body as upstream's ignored status (`SE`) can.
+//!   `MergeBrep` ignores the list inserts' statuses (`SE(PostInsert(..))`) as upstream.
 //! - **Sliced curve copy.** `MakeWireEdge`/`MakeWireEdgeVertex` copy a curve that
 //!   already belongs to an edge with `new SmCurve(*pCurve)`, a base-class copy without
 //!   geometry; the port clones the curve with its geometry (`Curve`'s `Clone`, the
@@ -216,6 +216,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<()> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -710,8 +711,7 @@ fn new_brep_in(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from [`merge_brep`] and [`p2::set_tolerance`] (other
-/// `MergeBrep` failures are ignored, as upstream); those of the notification;
+/// Those of [`merge_brep`], [`p2::set_tolerance`] and the notification;
 /// `InvalidInput` for a caller key in the kernel's reserved range.
 #[allow(clippy::too_many_arguments)]
 pub fn copy_brep(
@@ -755,8 +755,8 @@ pub fn copy_brep(
     *b.tolerance = *src.tolerance;
 
     with_caller_identities(k, &mut b, env, Some((src, source_key)), |k, b, env| {
-        // do the actual copying (SE: the status is not acted on)
-        if let Err(e) = merge_brep_in(
+        // A failed merge has only part of the source's topology: never return it as a copy.
+        merge_brep_in(
             k,
             env,
             b,
@@ -768,11 +768,7 @@ pub fn copy_brep(
             copy_map,
             reverse_map.as_deref_mut(),
             add_analytics,
-        ) {
-            if e.is_unported_or_cancelled() {
-                return Err(e);
-            }
-        }
+        )?;
 
         // inform the public about the construction and the copy
         ignore_soft(brep_notify(
@@ -6085,6 +6081,84 @@ mod tests {
         notify_copy_with_context(&mut env, None, from, Some(to), None, None).unwrap();
         let copy = records[&to.key];
         assert_eq!(copy.all_flags(), 5);
+    }
+
+    /// A failed face copy must not return the faces copied before it as a successful
+    /// body. The same error reaches every copy entry point, including the constructor
+    /// that can add analytic surfaces, and the source keeps its topology and attributes.
+    #[test]
+    fn a_refused_surface_copy_never_returns_a_partial_body() {
+        use crate::geom::attribute::{ids, Attribute, Behavior};
+        use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+
+        for refused_face in [0, 2, 5] {
+            for route in ["copy", "mapped", "api", "constructor", "analytics"] {
+                let mut k = Kernel::default();
+                let mut b = crate::primitive::api_primitives::create_box(
+                    &mut k,
+                    Point3::ZERO,
+                    10.0,
+                    20.0,
+                    30.0,
+                )
+                .unwrap();
+                let face = b.face_list()[refused_face];
+                let basis = b.face_mut(face).unwrap().surface.take().unwrap();
+                b.face_mut(face).unwrap().surface = Some(
+                    CurveBoundedSurface::new(basis, Vec::new(), Vec::new(), true)
+                        .unwrap()
+                        .into(),
+                );
+                b.add_attribute(
+                    EntityRef::Face(face),
+                    Attribute::long(ids::USER_1, 917, Behavior::Copy),
+                )
+                .unwrap();
+                let expected = b
+                    .face(face)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .unwrap()
+                    .copy(&k)
+                    .unwrap_err();
+                let before = format!("{b:?}");
+                let mut records = crate::topology::topology::NotifyRecords::new();
+                let mut attributes = crate::geom::attribute::AttributeStore::default();
+                let mut env = NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attributes,
+                    context: None,
+                    key_of: &dest_key,
+                };
+                let result = match route {
+                    "copy" => brep_copy(&mut k, &b),
+                    "mapped" => brep_copy_mapped(&mut k, &b).map(|(copy, _)| copy),
+                    "api" => api_brep_copy(&mut k, &mut env, Some(&b), &source_key),
+                    _ => copy_brep(
+                        &mut k,
+                        &mut env,
+                        &b,
+                        &source_key,
+                        None,
+                        None,
+                        true,
+                        route == "analytics",
+                    ),
+                };
+                let error = result.expect_err("a refused face must fail the whole body copy");
+                assert_eq!(error, expected, "face {refused_face}, {route}");
+                assert_eq!(format!("{b:?}"), before, "face {refused_face}, {route}");
+                assert_eq!(
+                    (
+                        b.face_list().len(),
+                        b.edge_list().len(),
+                        b.vertex_list().len()
+                    ),
+                    (6, 12, 8)
+                );
+            }
+        }
     }
 
     #[test]

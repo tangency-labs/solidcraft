@@ -172,13 +172,14 @@ fn inputs(s: &Session, t: &MotionTrace) -> Result<Value> {
         let mut definition = j.clone();
         definition.name.clear();
         definition.values = seeds.get(&j.id).map(|q| (*q).clone()).unwrap_or_default();
-        let (offset, angle, q) = joints::expressed(&params, &definition)?;
+        let (offset_xy, offset, angle, q) = joints::expressed(&params, &definition)?;
+        definition.offset_xy = offset_xy;
         definition.offset = offset;
         definition.angle = angle;
         definition.values = q;
         definition.limits = joints::expressed_limits(&params, &definition)?;
         definition.exprs = Default::default();
-        let fa = j.offset_frame_a(joints::resolve_origin(&s.doc, &st, &j.a)?);
+        let fa = definition.offset_frame_a(joints::resolve_origin(&s.doc, &st, &j.a)?);
         let fb = joints::resolve_origin(&s.doc, &st, &j.b)?;
         joints.push(json!([definition, fa, fb]));
     }
