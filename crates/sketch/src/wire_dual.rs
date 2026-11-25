@@ -1,6 +1,6 @@
 //! The kernel's derivative-aware numbers and their record-vector conversion.
 
-pub use solidcore_ops::constraint::{Dual, Num, V, of};
+pub use solidcraft_kernel::services::constraint::{Dual, Num, V, of};
 
 #[cfg(test)]
-pub use solidcore_ops::constraint::N;
+pub use solidcraft_kernel::services::constraint::N;

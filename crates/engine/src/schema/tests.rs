@@ -302,13 +302,13 @@ fn present_null_is_refused_but_absent_is_fine() {
     assert!(c.check(&json!({"distance": 5})).is_empty());
     // `body` picks the placed instance `face` is read in (frames::to_local), so it is a key.
     assert!(c.check(&json!({"distance": 5, "face": [0, 0, 0], "body": "Part"})).is_empty());
-    for key in ["sketch", "profiles", "faces", "convention", "to", "from", "thin"] {
+    for key in ["sketch", "profiles", "faces", "face", "convention", "to", "from", "thin"] {
         let mut p = json!({"distance": 5});
         p[key] = Value::Null;
         assert_eq!(c.check(&p).len(), 1, "{key}: null");
     }
     // Keys today's reader treats `null` like absence stay optional.
-    for key in ["taper", "direction", "face", "operation", "name"] {
+    for key in ["taper", "direction", "operation", "name"] {
         let mut p = json!({"distance": 5});
         p[key] = Value::Null;
         assert!(c.check(&p).is_empty(), "{key}: null");

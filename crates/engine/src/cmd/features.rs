@@ -1386,8 +1386,9 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
     let (sketch, face_profile, face_body) = if let Some(grouped) = grouped {
         grouped
     } else {
-        match p.get("face").and_then(vec3) {
-            Some(fp) => {
+        match p.get("face") {
+            Some(value) => {
+                let fp = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z]"))?;
                 let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }

@@ -26,7 +26,7 @@ use crate::wire::{Wire, arc_from_3_points, arc_polyline};
 #[path = "wire_dual.rs"]
 mod dual;
 use dual::{Dual, Num, V};
-use solidcore_ops::constraint::{self, circle_points, circumcenter, circumradius, size, unit, weight};
+use solidcraft_kernel::services::constraint::{self, circle_points, circumcenter, circumradius, size, unit, weight};
 
 /// Every residual below this (mm) ends the solve.
 const TOL: f64 = 1e-10;

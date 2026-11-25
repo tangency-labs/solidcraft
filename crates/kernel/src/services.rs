@@ -22,6 +22,7 @@ pub use solidcore_ops::cancel;
 pub use solidcore_ops::cell_grid;
 pub use solidcore_ops::centroid_and_mean_radius;
 pub use solidcore_ops::conic_projection;
+pub use solidcore_ops::constraint;
 pub use solidcore_ops::curve;
 pub use solidcore_ops::curve_fit;
 pub use solidcore_ops::develop;
