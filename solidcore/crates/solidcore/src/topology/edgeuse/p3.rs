@@ -1609,9 +1609,6 @@ fn brute_force(
                 pnt.x, pnt.y
             );
             // save the first sample Point and subsequent ones that are far enough apart
-            if points.last().is_some_and(|l| pnt.distance(*l) <= uv_tol) {
-                eprintln!("L9DBG   dropped near-duplicate at ii={ii} param={param}");
-            }
             if points.last().is_none_or(|l| pnt.distance(*l) > uv_tol) {
                 points.push(pnt);
                 params.push(param);
