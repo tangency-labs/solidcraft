@@ -981,6 +981,28 @@ fn variables_that_never_end_stay_as_written() {
     assert_eq!(footprints, vec![vec!["${Loop}"]]);
 }
 
+/// Fields that each read the next a hundred times, eight deep, would take about 100^8 lookups to
+/// put in. One work budget for the whole text stops it: the import finishes at once, the text
+/// stays within the length limit, and the board says which text was left partly as written.
+#[test]
+fn deeply_nested_fields_stop_at_the_work_budget() {
+    let names = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    let mut fields = String::new();
+    for (i, name) in names.iter().enumerate() {
+        let value = match names.get(i + 1) {
+            Some(next) => format!("${{{next}}}").repeat(100),
+            None => "x".to_string(),
+        };
+        fields.push_str(&format!(r#"(property "{name}" "{value}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) "#));
+    }
+    let footprint = footprint_with_text("${A}").replacen(r#"(property "MPN""#, &format!(r#"{fields}(property "MPN""#), 1);
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {footprint})"#);
+    let board = parse_kicad_board(source.as_bytes(), "vars.kicad_pcb").unwrap();
+    let text = &board.footprints[0].texts[0].text;
+    assert!(text.len() <= 4096 + 8, "{} characters", text.len());
+    assert!(board.warnings.iter().any(|w| w.contains("text variables") && w.contains("R7")), "{:?}", board.warnings);
+}
+
 /// A value that would take a text past the length limit is not put in: the name stays as written,
 /// so a long title read by many texts cannot make each of them long.
 #[test]

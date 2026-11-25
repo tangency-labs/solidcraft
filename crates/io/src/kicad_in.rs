@@ -558,38 +558,88 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
 fn expand_text_variables(board: &mut KicadBoard, root: &Expr<'_>) {
     let title = title_block_variables(root);
     let layers = layer_names(root);
-    let vars = TextVariables { title: &title, layers: &layers, footprints: &board.footprints };
+    // Each reference and id to its footprint, the first one when two share it.
+    let mut by_reference: std::collections::HashMap<&str, &KicadFootprint> = std::collections::HashMap::new();
+    for footprint in &board.footprints {
+        by_reference.entry(footprint.reference.as_str()).or_insert(footprint);
+    }
+    for footprint in board.footprints.iter().filter(|f| !f.uuid.is_empty()) {
+        by_reference.entry(footprint.uuid.as_str()).or_insert(footprint);
+    }
+    let vars = TextVariables { title: &title, layers: &layers, footprints: &by_reference };
+    let stopped = std::cell::RefCell::new(Vec::<String>::new());
     let expand_all = |texts: &[KicadText], footprint: Option<&KicadFootprint>| -> Vec<KicadText> {
         texts
             .iter()
             .filter_map(|text| {
-                let resolve = |name: &str, depth: usize| vars.resolve(name, &text.layer, footprint, depth);
-                let expanded = expand_variables(&text.text, 0, &resolve);
+                let budget = Budget::new();
+                let resolve = |name: &str, depth: usize| vars.resolve(name, &text.layer, footprint, depth, &budget);
+                let expanded = expand_variables(&text.text, 0, &budget, &resolve);
+                if budget.spent() {
+                    stopped.borrow_mut().push(footprint.map_or_else(|| "a board text".to_string(), |f| f.reference.clone()));
+                }
                 (!expanded.trim().is_empty()).then(|| KicadText { text: expanded, ..text.clone() })
             })
             .collect()
     };
     let board_texts = expand_all(&board.texts, None);
     let footprint_texts: Vec<Vec<KicadText>> = board.footprints.iter().map(|footprint| expand_all(&footprint.texts, Some(footprint))).collect();
+    let mut stopped = stopped.into_inner();
     board.texts = board_texts;
     for (footprint, texts) in board.footprints.iter_mut().zip(footprint_texts) {
         footprint.texts = texts;
     }
+    if !stopped.is_empty() {
+        let count = stopped.len();
+        stopped.dedup();
+        stopped.truncate(5);
+        board.warnings.push(format!("text variables nested too deeply in {count} text(s) were left partly as written ({})", stopped.join(", ")));
+    }
 }
 
-/// What a board's text variables read: its title block, its layers' names, its footprints.
+/// The work one text's variables may take: each name looked up and each character a value
+/// holds, values that are then left out included. A text whose budget runs out keeps the rest of
+/// its variables as written.
+const MAX_VARIABLE_WORK: usize = 100_000;
+
+/// What is left of one text's [`MAX_VARIABLE_WORK`].
+struct Budget(std::cell::Cell<usize>);
+
+impl Budget {
+    fn new() -> Budget {
+        Budget(std::cell::Cell::new(MAX_VARIABLE_WORK))
+    }
+
+    /// Take `work` from the budget; `false`, and nothing left, when it does not hold that much.
+    fn spend(&self, work: usize) -> bool {
+        let left = self.0.get();
+        self.0.set(left.saturating_sub(work));
+        work <= left && left > 0
+    }
+
+    fn spent(&self) -> bool {
+        self.0.get() == 0
+    }
+}
+
+/// What a board's text variables read: its title block, its layers' names, its footprints by
+/// reference and by id.
 struct TextVariables<'a> {
     title: &'a [(String, String)],
     layers: &'a std::collections::HashMap<String, String>,
-    footprints: &'a [KicadFootprint],
+    footprints: &'a std::collections::HashMap<&'a str, &'a KicadFootprint>,
 }
 
 impl TextVariables<'_> {
     /// The value of the variable `name` in a text on `layer` (in `footprint`'s text, or the
-    /// board's for `None`), `depth` names deep; `None` when there is no such variable. A cross
-    /// reference (`R7:VALUE`, or the footprint's id in place of `R7`) reads that footprint's;
-    /// qualifiers are followed one after another, at most [`MAX_VARIABLE_DEPTH`] of them.
-    fn resolve(&self, name: &str, layer: &str, footprint: Option<&KicadFootprint>, depth: usize) -> Option<String> {
+    /// board's for `None`), `depth` names deep; `None` when there is no such variable or `budget`
+    /// is spent. A cross reference (`R7:VALUE`, or the footprint's id in place of `R7`) reads that
+    /// footprint's; qualifiers are followed one after another, at most [`MAX_VARIABLE_DEPTH`] of
+    /// them.
+    fn resolve(&self, name: &str, layer: &str, footprint: Option<&KicadFootprint>, depth: usize, budget: &Budget) -> Option<String> {
+        if !budget.spend(1) {
+            return None;
+        }
         let (mut name, mut layer, mut footprint) = (name, layer, footprint);
         let mut hops = 0usize;
         while let Some((reference, rest)) = name.split_once(':') {
@@ -597,7 +647,7 @@ impl TextVariables<'_> {
             if hops > MAX_VARIABLE_DEPTH {
                 return None;
             }
-            let Some(other) = self.footprints.iter().find(|f| f.reference == reference || (!f.uuid.is_empty() && f.uuid == reference)) else {
+            let Some(other) = self.footprints.get(reference).copied() else {
                 return Some(format!("<Unknown reference: {reference}>"));
             };
             (name, layer, footprint) = (rest, other.layer.as_str(), Some(other));
@@ -616,7 +666,10 @@ impl TextVariables<'_> {
                 if depth >= MAX_VARIABLE_DEPTH {
                     return None;
                 }
-                return Some(expand_variables(value, depth + 1, &|inner: &str, d: usize| self.resolve(inner, layer, Some(footprint), d)));
+                let value =
+                    expand_variables(value, depth + 1, budget, &|inner: &str, d: usize| self.resolve(inner, layer, Some(footprint), d, budget));
+                // One field's value is no longer than a whole text may be.
+                return (value.len() <= MAX_EXPANDED_TEXT).then_some(value);
             }
         }
         if name == "LAYER" {
@@ -628,12 +681,13 @@ impl TextVariables<'_> {
 
 /// `text` with each `${NAME}` that `resolve` knows replaced by its value; a name is expanded
 /// first (`${${REFERENCE}}` reads the variable named by the reference), and a `${` that is never
-/// closed runs to the end of the text, as KiCad reads it.
-fn expand_variables(text: &str, depth: usize, resolve: &dyn Fn(&str, usize) -> Option<String>) -> String {
-    let mut out = String::with_capacity(text.len());
+/// closed runs to the end of the text, as KiCad reads it. Once `budget` is spent the rest of the
+/// text stays as written.
+fn expand_variables(text: &str, depth: usize, budget: &Budget, resolve: &dyn Fn(&str, usize) -> Option<String>) -> String {
+    let mut out = String::with_capacity(text.len().min(MAX_EXPANDED_TEXT));
     let mut rest = text;
     while let Some(at) = rest.find("${") {
-        if out.len() > MAX_EXPANDED_TEXT {
+        if out.len() > MAX_EXPANDED_TEXT || budget.spent() {
             break;
         }
         out.push_str(&rest[..at]);
@@ -655,9 +709,10 @@ fn expand_variables(text: &str, depth: usize, resolve: &dyn Fn(&str, usize) -> O
             Some(index) => (&after[..index], &after[index + 1..]),
             None => (after, ""),
         };
-        let name = if depth < MAX_VARIABLE_DEPTH { expand_variables(inner, depth + 1, resolve) } else { inner.to_string() };
-        // A value that would take the text past the limit is left out, its name kept.
-        match resolve(&name, depth).filter(|value| out.len() + value.len() <= MAX_EXPANDED_TEXT) {
+        let name = if depth < MAX_VARIABLE_DEPTH { expand_variables(inner, depth + 1, budget, resolve) } else { inner.to_string() };
+        // A value that would take the text past the limit is left out, its name kept; its
+        // characters count against the budget either way.
+        match resolve(&name, depth).filter(|value| budget.spend(value.len()) && out.len() + value.len() <= MAX_EXPANDED_TEXT) {
             Some(value) => out.push_str(&value),
             None => {
                 out.push_str("${");
