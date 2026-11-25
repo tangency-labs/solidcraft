@@ -91,6 +91,7 @@ pub mod easyprint_ui;
 pub mod edit_clipboard;
 pub mod edit_in_place;
 mod feature_edit;
+mod finish_field;
 #[cfg(test)]
 mod font_literals_tests;
 pub mod fonts;
