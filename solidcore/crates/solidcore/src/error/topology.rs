@@ -2018,7 +2018,10 @@ mod tests {
                 TopologyFailure::RadialFaceWithoutSurface,
                 ErrorKind::InvalidInput,
             ),
-            (TopologyFailure::RadialRimWithoutEdge, ErrorKind::InvalidInput),
+            (
+                TopologyFailure::RadialRimWithoutEdge,
+                ErrorKind::InvalidInput,
+            ),
             (TopologyFailure::RadialRimsNotAnnulus, ErrorKind::Failed),
             (TopologyFailure::RadialRimsNotEllipses, ErrorKind::Failed),
             (TopologyFailure::RadialRimsOffEndPlane, ErrorKind::Failed),

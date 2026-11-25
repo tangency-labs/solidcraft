@@ -2646,14 +2646,21 @@ mod tests {
         assert_cause(singular().inverse(false), &Numerical, Failed);
         // Substitution with a triangular matrix, and with a zero diagonal.
         let pts = [Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0)];
-        let cpts = [CPoint::new(1.0, 2.0, 3.0, 1.0), CPoint::new(4.0, 5.0, 6.0, 2.0)];
+        let cpts = [
+            CPoint::new(1.0, 2.0, 3.0, 1.0),
+            CPoint::new(4.0, 5.0, 6.0, 2.0),
+        ];
         let zero_diagonal = full(&[&[0.0, 0.0], &[0.0, 1.0]]);
         assert_cause(lower().for_back_points(&pts), &Input, InvalidInput);
         assert_cause(zero_diagonal.for_back_points(&pts), &Numerical, Failed);
         assert_cause(lower().for_back_cpoints(&cpts), &Input, InvalidInput);
         assert_cause(zero_diagonal.for_back_cpoints(&cpts), &Numerical, Failed);
         assert_cause(upper().right_for_back(&[1.0, 2.0]), &Input, InvalidInput);
-        assert_cause(zero_diagonal.right_for_back(&[1.0, 2.0]), &Numerical, Failed);
+        assert_cause(
+            zero_diagonal.right_for_back(&[1.0, 2.0]),
+            &Numerical,
+            Failed,
+        );
         // An output smaller than the result.
         let mut a = RealMatrix::from_rows(
             2,
@@ -2670,7 +2677,8 @@ mod tests {
         let mut small =
             RealMatrix::from_rows(1, 2, vec![vec![0.0; 3]; 2], MatrixType::Full, 1).unwrap();
         assert_cause(a.inverse_into(false, &mut small), &Storage, InvalidInput);
-        let mut m = RealMatrix::from_rows(1, 1, vec![vec![0.0; 2]; 2], MatrixType::Full, 1).unwrap();
+        let mut m =
+            RealMatrix::from_rows(1, 1, vec![vec![0.0; 2]; 2], MatrixType::Full, 1).unwrap();
         assert_cause(m.ensure(2, 1, MatrixType::Full, 2), &Storage, InvalidInput);
         // Banded operands are not multiplied.
         let b = RealMatrix::from_rows(
@@ -2686,7 +2694,11 @@ mod tests {
             3,
         )
         .unwrap();
-        assert_cause(b.multiply_into(&b, &mut RealMatrix::null()), &Input, InvalidInput);
+        assert_cause(
+            b.multiply_into(&b, &mut RealMatrix::null()),
+            &Input,
+            InvalidInput,
+        );
         // A rational surface whose weight vanishes at the point.
         let w = |w: f64| CPoint::new(0.0, 0.0, 0.0, w);
         let net = vec![vec![w(1.0), w(0.0)], vec![w(-1.0), w(0.0)]];

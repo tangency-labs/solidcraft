@@ -1096,8 +1096,16 @@ mod tests {
         );
         // Index past the last basis function of a linear knot vector.
         let line = [0.0, 0.0, 84.578_121_761_980_9, 84.578_121_761_980_9];
-        assert_cause(find_global_max(&kv(&line), 2, 1, 1e-12), &Index, InvalidInput);
-        assert_cause(find_all_span_maxima(&kv(&line), 2, 1, 1e-12), &Index, InvalidInput);
+        assert_cause(
+            find_global_max(&kv(&line), 2, 1, 1e-12),
+            &Index,
+            InvalidInput,
+        );
+        assert_cause(
+            find_all_span_maxima(&kv(&line), 2, 1, 1e-12),
+            &Index,
+            InvalidInput,
+        );
         // A support so wide the second derivative underflows to zero.
         let wide = [0.0, 0.0, 0.0, 1e200, 3e200, 3e200, 3e200];
         assert_cause(find_global_max(&kv(&wide), 1, 2, 0.0), &Numerical, Failed);

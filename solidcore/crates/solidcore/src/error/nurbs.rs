@@ -863,9 +863,7 @@ impl NurbsFailure {
             Self::Singular | Self::ZeroDerivative => ErrorKind::Degenerate,
             Self::NotConverged => ErrorKind::NotConverged,
             Self::Parameter | Self::ParameterOutside { .. } => ErrorKind::OutsideDomain,
-            Self::CallFailed | Self::Geometry | Self::Memory | Self::Numerical => {
-                ErrorKind::Failed
-            }
+            Self::CallFailed | Self::Geometry | Self::Memory | Self::Numerical => ErrorKind::Failed,
         }
     }
 }
