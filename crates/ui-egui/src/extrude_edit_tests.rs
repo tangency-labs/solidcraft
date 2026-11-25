@@ -1186,6 +1186,21 @@ fn surface_extrude_dialog_has_the_drag_arrow_on_every_side() {
     }
 }
 
+#[test]
+fn taper_angle_steps_by_one_degree() {
+    let mut h = make(json!({}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    let taper = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        crate::dialogs::Kind::Extrude { taper, .. } => taper.clone(),
+        other => panic!("extrude: {other:?}"),
+    };
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle up"}})).unwrap();
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle down"}})).unwrap();
+    assert_eq!(taper(&h), "0 deg");
+}
+
 /// Surface Extrude's Extent Type takes To Object (#16537): the window adds Extrude's To Object
 /// input, OK makes the surface end at the face picked there, and editing it again shows the
 /// same extent and pick.

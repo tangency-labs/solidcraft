@@ -42,7 +42,11 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 fn valid(k: &mut Kernel, b: &mut Brep) {
     let c = check_brep(k, b, CheckLevel::Level2).unwrap();
-    assert_eq!(c.pointers_status, 1000, "pointers");
+    assert_eq!(
+        c.pointers,
+        solidcore::topology::brep::validation::PointerCheck::Passed,
+        "pointers"
+    );
     assert_eq!(
         c.assert_valid,
         Some(true),
