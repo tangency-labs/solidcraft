@@ -59,17 +59,21 @@ pub(super) fn loop_(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, l: LoopId) ->
         rtn &= base::topology(b, cx, this)?;
     }
 
+    // not upstream: the geometric tests of a loop whose face's neighbourhood passed them on
+    // a body before are skipped ([`crate::geom::check_memo`]); the structural ones run
+    let geo = !crate::geom::check_memo::loop_clean(k, l);
+
     // 0: Loop and the objects it attaches to need to share common contexts
     let primary = b.loop_(l)?.loopuse;
     if let Some(lu) = primary {
         rtn &= cx.rep.this_bool(b, C, this, 0, true)?;
-        let ok = !cx.rep.need(0) || seams::is_loopuse_side_in_surface(k, b, lu)?;
+        let ok = !cx.rep.need(0) || !geo || seams::is_loopuse_side_in_surface(k, b, lu)?;
         rtn &= cx.rep.this_bool(b, C, this, 2, ok)?;
     }
 
     // the trimming checks of the loop on its face's surface (status ignored)
     let face = b.loop_(l)?.face;
-    if let Some(surface) = b.face(face)?.surface.clone() {
+    if let Some(surface) = b.face(face)?.surface.clone().filter(|_| geo) {
         let tol = b.face(face)?.tolerance;
         crate::error::ignored(crate::topology::trimming_tools::check_loop(
             k,
@@ -197,9 +201,10 @@ pub(super) fn loopuse(
     let ok = !cx.rep.need(0) || record.faceuse.is_none() || has_start;
     rtn &= cx.rep.this_bool(b, C, this, 3, ok)?;
 
-    // 5: a Loopuse should form a closed loop in 3d (owned by the primary loopuse)
+    // 5: a Loopuse should form a closed loop in 3d (owned by the primary loopuse); not
+    // upstream: skipped for a loop whose face's neighbourhood passed it on a body before
     if let Some(l) = record.loop_ {
-        if b.loop_(l)?.loopuse == Some(lu) {
+        if b.loop_(l)?.loopuse == Some(lu) && !crate::geom::check_memo::loop_clean(k, l) {
             let closed = tlu::is_closed_3d(k, b, lu, true)?;
             let message = if closed.closed {
                 String::new()

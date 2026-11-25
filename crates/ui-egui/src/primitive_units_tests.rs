@@ -1319,6 +1319,41 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
     }
 }
 
+/// Combine's offset and rounding radius are lengths in the design's unit, as every other
+/// length field: in an inch design they are converted when the dialog applies (a bare 0.1 is
+/// 0.1 in, not 0.1 mm). Left empty, the radius stays empty, so the command leaves it out.
+#[test]
+fn combine_offset_and_radius_follow_the_design_unit() {
+    let h = design("in");
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.combine").unwrap_or_else(|| panic!("no dialog for solid.combine"));
+    if let crate::dialogs::Kind::Combine { operation, offset, radius, round_edges, .. } = &mut d.kind {
+        *operation = 2;
+        *offset = "0.1".into();
+        *round_edges = true;
+        *radius = String::new();
+    }
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values, vec!["0.1".to_string()], "the offset only, the empty radius left out");
+    let mm = crate::length_input::eval(&h.app.session.doc, &values[0], solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((mm - 2.54).abs() < 1e-9, "0.1 in an inch design: {mm} mm");
+    if let crate::dialogs::Kind::Combine { radius, .. } = &mut d.kind {
+        *radius = "0.05".into();
+    }
+    assert_eq!(crate::length_input::fields(&h.app.session.doc, &mut d.kind).len(), 2, "a typed radius is converted too");
+}
+
+/// Only a plain zero stands for no offset: an expression that is zero now, such as a
+/// parameter, is kept so the cut follows it when it changes.
+#[test]
+fn combine_offset_of_a_parameter_at_zero_is_kept() {
+    for zero in ["0", "0 mm", "0.0in", "(0) in", " 0 "] {
+        assert!(crate::dialogs::literal_zero(zero), "{zero}");
+    }
+    for kept in ["gap", "gap * 0", "0.1 mm", "", "1 - 1"] {
+        assert!(!crate::dialogs::literal_zero(kept), "{kept}");
+    }
+}
+
 #[test]
 fn coil_start_angle_steps_by_ten_degrees() {
     let mut h = design("mm");

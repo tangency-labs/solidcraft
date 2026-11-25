@@ -47,5 +47,12 @@
     "document.revert_changes": "{name} 中未保存的更改将丢失,并从其文件重新读取。",
     "ui.revert_question": "还原为已保存的版本?",
     "cmd.file.revert_saved": "还原为已保存的版本"
+  },
+  "fr": {
+    "ui.revert_to_saved": "Revenir à la version enregistrée",
+    "ui.revert": "Rétablir",
+    "document.revert_changes": "Les modifications non enregistrées de {name} seront perdues et le fichier sera relu.",
+    "ui.revert_question": "Revenir à la version enregistrée ?",
+    "cmd.file.revert_saved": "Revenir à la version enregistrée"
   }
 }
