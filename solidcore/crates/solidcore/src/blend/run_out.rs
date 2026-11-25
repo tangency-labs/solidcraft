@@ -126,14 +126,14 @@ pub fn plan(
         return Ok(None);
     }
     let tolerance = (size * 1e-9).max(1e-9);
-    let mut wedges = Vec::with_capacity(edges.len());
+    let mut wedges = Vec::new();
     for &e in edges {
         match straight_wedge(k, b, e)? {
             Some(w) => wedges.push(w),
             None => return Ok(None),
         }
     }
-    let mut plans = Vec::with_capacity(wedges.len());
+    let mut plans = Vec::new();
     for (w, &d) in wedges.iter().zip(each) {
         let Some(p) = one(w, kind, d, size, tolerance) else {
             return Ok(None);
