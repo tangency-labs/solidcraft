@@ -314,29 +314,31 @@ fn operands_stay_as_they_were() {
 #[test]
 fn a_failed_closest_point_counts_as_off_the_piece() {
     use solidcore::query::api_queries::edge_closest_point;
-    use solidcore::topology::edge;
     let body = A.core();
+    let order = body.own_order();
+    let adjacency = body.adjacency(&order).unwrap();
+    let [s, f] = adjacency.edge_vertices[0].expect("an edge with no ends");
+    let (s, f) = (adjacency.vertex_points[s], adjacency.vertex_points[f]);
+    let at = [s, f, [0.5 * (s[0] + f[0]), 0.5 * (s[1] + f[1]), 0.5 * (s[2] + f[2])]];
+    let tol = body.tolerance().unwrap();
+    assert!(!super::history::moved(&body, &order, &adjacency, &[(0, &at)], tol), "still where it lay");
     super::with_body("moved", &body, |k, b| {
         let e = b.edge_list()[0];
-        let (Some(s), Some(f)) = edge::start_end_vertices(b, e)? else { panic!("an edge with no ends") };
-        let (s, f) = (b.vertex(s)?.point, b.vertex(f)?.point);
-        let at = [s, f, s + (f - s) * 0.5];
-        let tol = b.tolerance();
-        assert!(!super::history::moved(k, b, &[(e, &at)], tol)?, "still where it lay");
         b.edge_mut(e)?.curve = None;
-        assert!(edge_closest_point(k, b, e, at[2]).is_err_and(|e| e.sm_status().is_none()), "fails with no status");
-        assert!(super::history::moved(k, b, &[(e, &at)], tol)?, "off the piece");
+        let q = solidcore::geom::vector3d::Point3::new(at[2][0], at[2][1], at[2][2]);
+        assert!(edge_closest_point(k, b, e, q).is_err_and(|e| e.sm_status().is_none()), "fails with no status");
         Ok(())
     })
     .unwrap();
+    assert!(super::history::moved(&body, &order, &adjacency, &[(0, &at)], tol), "off the piece");
 }
 
 /// Rig case booleans/2928, reduced (fork c2e3d9d): a ring, r 3..5 about (0, 10), z 0..2, unioned
 /// with a half annulus prism, r 4..5 about (e, 10), z 2..20, whose cap sits on the ring's top. Two
 /// equal circles a little apart cross; they do not coincide over a tiny edge. The stack's volume
 /// is 113 pi whatever e is.
-/// This path passes with `simple_coincidence_crossing_is_point` off too, so the test holds the
-/// result here and does not single out that flag (solidcore's own test does).
+/// The crossing is decided on the merged range (WR-647); solidcore's own test is
+/// `issue_1979_ring_lip_crossing_not_coincidence`.
 #[test]
 fn a_ring_and_a_lip_with_walls_nearly_together() {
     use super::sweep::extrude;

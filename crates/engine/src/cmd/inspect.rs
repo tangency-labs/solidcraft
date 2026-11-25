@@ -9,7 +9,7 @@ use solidcore_record::Vec3;
 use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list};
+use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::inspect::{
     BodiesDetail, ClassifiedPoint, ClassifyPointsParams, ClassifyPointsResult, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow,
 };
@@ -74,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
-        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); within?: {min:[x,y,z], max:[x,y,z]} (world mm); mode?: intersects|inside (default intersects, includes touching); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
         .noundo().read_only()
@@ -259,7 +259,7 @@ fn measure_sheet(b: &solidcraft_doc::ModelBody, definitions: Option<&solidcraft_
     let name = b.name.clone();
     match measure_body(b, definitions) {
         Ok(m) => {
-            let closed = encloses_volume(&b.body);
+            let closed = b.is_closed();
             let outcome = BodyOutcome::Measured(BodyFigures {
                 closed,
                 volume_mm3: closed.then_some(m.volume),
@@ -305,17 +305,55 @@ impl BodyMeasurement {
     }
 }
 
+/// Parse the region before any measurement; a malformed box must never become an unfiltered query.
+fn measure_region(p: &Value, cmd: &str) -> Result<Option<(solidcraft_geom::Aabb3, bool)>> {
+    let Some(region) = p.get("within") else {
+        if p.get("mode").is_some() {
+            return Err(bad(cmd, "`mode` requires `within`"));
+        }
+        return Ok(None);
+    };
+    let min = region.get("min").and_then(vec3).ok_or_else(|| bad(cmd, "`within.min` must be a point [x, y, z]"))?;
+    let max = region.get("max").and_then(vec3).ok_or_else(|| bad(cmd, "`within.max` must be a point [x, y, z]"))?;
+    let bounds = solidcraft_geom::Aabb3 { min, max };
+    if bounds.is_empty() {
+        return Err(bad(cmd, "`within.min` must not exceed `within.max`"));
+    }
+    let inside = match p.get("mode") {
+        None => false,
+        Some(Value::String(mode)) if mode == "intersects" => false,
+        Some(Value::String(mode)) if mode == "inside" => true,
+        _ => return Err(bad(cmd, "`mode` must be intersects or inside")),
+    };
+    Ok(Some((bounds, inside)))
+}
+
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
     if let Some(items) = p.get("items") {
+        if p.get("within").is_some() || p.get("mode").is_some() {
+            return Err(bad(cmd, "`within` and `mode` cannot be combined with `items`"));
+        }
         return super::measure_sel::measure_items(s, items);
     }
+    let region = measure_region(p, cmd)?;
     let want = string_list(cmd, p, "bodies")?;
     let definitions = s.model.state();
     let st = s.world_state()?;
-    let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
+    let mut selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     if !want.is_empty() && selected.len() != want.len() {
         return Err(bad(cmd, "unknown body name"));
+    }
+    if let Some((region, inside)) = region {
+        let mut matches = Vec::new();
+        for body in selected {
+            let bounds = body.body.exact_bounds().map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
+            let matches_region = if inside { region.contains(bounds.min) && region.contains(bounds.max) } else { region.meets(&bounds) };
+            if !bounds.is_empty() && matches_region {
+                matches.push(body);
+            }
+        }
+        selected = matches;
     }
     if bool_(p, "names_only").unwrap_or(false) {
         let bodies: Vec<_> = selected.iter().map(|b| BodyName { name: b.name.clone(), definition: b.definition_name().to_string() }).collect();
@@ -836,7 +874,7 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
 /// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
 fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::schema::FaceRef;
-    use solidcore_ops::{ClassifiedPoint as KernelPoint, PointNormalFace};
+    use solidcraft_kernel::services::{ClassifiedPoint as KernelPoint, PointNormalFace};
 
     let cmd = "inspect.classify_points";
     let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
