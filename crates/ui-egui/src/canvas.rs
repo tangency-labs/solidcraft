@@ -138,10 +138,10 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // A section's distance runs against the plane's normal, into the part from a face.
         Kind::Section { .. } => (at, normal.map(|n| -n)),
         Kind::OffsetPlane { .. } => (at, normal),
-        // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
-        // on an outside edge, into the open corner on an inside one); shell thickness grows into
-        // the body.
-        // A chamfer of two distances measures Distance 1 along its own face, not along the bisector.
+        // Fillet radii grow the way `blend_grow_dir` gives (into the body on an outside edge,
+        // into the open corner on an inside one); shell thickness grows into the body.
+        // A chamfer's distance is the setback along each of the two faces at the edge, so its
+        // arrow runs along one of those faces, where the edge the distance sets is (#13527).
         Kind::Fillet { .. } if matches!(first, Sel::Edge { .. }) => {
             let Sel::Edge { body, index, .. } = first else { return None };
             let along_face = chamfer_face_dirs(app, d, at).map(|(first_face, _)| first_face);
@@ -298,6 +298,22 @@ fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     edge_sides(m, index, p)?.iter().fold(Vec3::ZERO, |sum, (n, _)| sum + *n).normalized()
 }
 
+/// The directions into the two faces at an edge, at `p`: square to the edge, one along each
+/// face, and into that face's own material. The faces' normals give the directions, and the
+/// triangle beside the edge says which way each one goes, so a round edge (a hole's rim) is
+/// answered as well as a straight one.
+fn edge_face_dirs(sides: &[(Vec3, Vec3)], at: Vec3) -> Option<(Vec3, Vec3)> {
+    let [(n1, c1), (n2, c2)] = sides else { return None };
+    let along = n1.cross(*n2).normalized()?;
+    // Into a face: square to the edge and in the face's plane. The triangle beside the edge
+    // says which way that face's own material lies.
+    let into = |n: Vec3, c: Vec3| {
+        let d = n.cross(along).normalized()?;
+        Some(if d.dot(c - at) >= 0.0 { d } else { -d })
+    };
+    Some((into(*n1, *c1)?, into(*n2, *c2)?))
+}
+
 /// Whether the edge is an inside (concave) one: each face near it lies in front of the other's
 /// plane, where on an outside edge it lies behind. Only the offset across the edge counts, since
 /// each normal is square to the edge.
@@ -414,25 +430,21 @@ fn chamfer_look(d: &Dialog, distance: usize) -> ArrowLook {
     chamfer_arrow_looks(chamfer_editing(d))[distance.min(1)]
 }
 
-/// The directions Distance 1 and Distance 2 of a chamfer of two distances run from its edge at
-/// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
-/// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
+/// The directions Distance 1 and Distance 2 of a chamfer run from its edge at `at`: along the
+/// face that faces up most, or the other one with Flip, and along the remaining face (the
+/// kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
 pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
-    let Kind::Fillet { chamfer: true, ctype: 1, flip, .. } = &d.kind else { return None };
+    let Kind::Fillet { chamfer: true, ctype, flip, .. } = &d.kind else { return None };
     let Some(Sel::Edge { body, index, .. }) = &anchor_item(app, d) else { return None };
     let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body(body)?.mesh();
     let sides = edge_sides(&mesh, *index, at)?;
-    let [(n1, c1), (n2, c2)] = sides.as_slice() else { return None };
-    let along = n1.cross(*n2).normalized()?;
-    // From the edge into each face: the way to its centroid, square to the edge.
-    let into = |c: Vec3| {
-        let v = c - at;
-        (v - along * v.dot(along)).normalized()
-    };
-    let (t1, t2) = (into(*c1)?, into(*c2)?);
+    let [(n1, _), (n2, _)] = sides.as_slice() else { return None };
+    let (t1, t2) = edge_face_dirs(&sides, at)?;
+    // A chamfer with one distance measures it along both faces, so Flip does not move its arrow.
+    let flip = if *ctype == 0 { false } else { *flip };
     let up = Vec3::new(1e-6, 1e-3, 1.0);
-    Some(if (n2.dot(up) > n1.dot(up)) != *flip { (t2, t1) } else { (t1, t2) })
+    Some(if (n2.dot(up) > n1.dot(up)) != flip { (t2, t1) } else { (t1, t2) })
 }
 
 /// Whether a dynamically registered canvas handle owns this point before navigation.
@@ -921,7 +933,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let look2 = chamfer_look(d, 1);
     let mut dragged2 = false;
     let mut tip2 = None;
-    if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
+    if let (Kind::Fillet { chamfer: true, ctype: 1, distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
         let before = distance2.clone();
@@ -1458,7 +1470,16 @@ fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, 
 
 /// [`value_box`] with a note after the field (a pull's step size) and a `hint` for the empty
 /// field (`""` for none).
-fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, hint: &str, note: Option<&str>, place: BoxPlace<'_>) {
+fn value_box_noted(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut String,
+    at: Pos2,
+    select_all: bool,
+    hint: &str,
+    note: Option<&str>,
+    place: BoxPlace<'_>,
+) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
     value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), (hint, note), place);
 }
@@ -1499,10 +1520,7 @@ fn value_box_full(
     // Held in place while the pointer is over it and value stepping is on (see `value_box`): by
     // its pivot, the point of the box that sits at `at`, which is not always its top-left corner.
     let pointer = ui.ctx().pointer_hover_pos();
-    let held = ui
-        .ctx()
-        .memory(|m| m.area_rect(area))
-        .filter(|r| crate::value_step::enabled(ui.ctx()) && pointer.is_some_and(|p| r.contains(p)));
+    let held = ui.ctx().memory(|m| m.area_rect(area)).filter(|r| crate::value_step::enabled(ui.ctx()) && pointer.is_some_and(|p| r.contains(p)));
     let at = held.map_or(at, |r| pivot.pos_in_rect(&r));
     let place = if held.is_some() { BoxPlace { handles: None, handle_obstacles: &[], ..place } } else { place };
     // #6608: the box moves out of the command window it would otherwise cover, and out of the
@@ -1552,9 +1570,9 @@ const DIALOG_GAP: f32 = 4.0;
 /// handles: whole, beside what it would cover (leaving a gap of `DIALOG_GAP`), and inside the
 /// drawing area (`view`), like a box kept in view (#6608). The sides of the command window
 /// are tried first, then the sides of the handles, and the first side that leaves the box
-/// clear of both wins. A box that misses them keeps its place (inside the drawing area), and
-/// one that no side clears keeps it too, unless a side leaves the handles free: a box over a
-/// handle takes the press the user meant for the handle.
+/// clear of both wins. A box that misses them keeps its place (inside the drawing area). If
+/// no side clears them, gaps requiring both axes are tried before the handle-priority fallback:
+/// a box over a handle takes the press the user meant for the handle.
 fn clear_of_dialog(rect: egui::Rect, place: BoxPlace<'_>) -> egui::Rect {
     // A box beyond the drawing area comes back inside it before anything else (#18722).
     let rect = keep_in_view(rect, place.view);
@@ -1597,7 +1615,79 @@ fn clear_of_dialog(rect: egui::Rect, place: BoxPlace<'_>) -> egui::Rect {
             }
         }
     }
-    free.unwrap_or(rect)
+    clear_in_two_axes(rect, &obstacles, place.view).or(free).unwrap_or(rect)
+}
+
+/// A field may need to move both ways: above a window and beside another arrow. Keep the
+/// existing one-axis choices first; only their failure reaches this search. At each obstacle
+/// edge's x, sort the occupied y bands and find the nearest gap. There are O(n) x positions,
+/// each with O(n log n) sorting and a linear scan, rather than testing every x/y pair against
+/// every obstacle. Band endpoints leave `DIALOG_GAP`, so they are legal gap boundaries.
+fn clear_in_two_axes(rect: egui::Rect, obstacles: &[egui::Rect], view: Option<egui::Rect>) -> Option<egui::Rect> {
+    let size = rect.size();
+    if !rect.is_finite() || !size.is_finite() || size.x <= 0.0 || size.y <= 0.0 || obstacles.iter().any(|o| !o.is_finite()) {
+        return None;
+    }
+    if view.is_some_and(|v| !v.is_finite() || size.x > v.width() || size.y > v.height()) {
+        return None;
+    }
+    let (top, bottom) = view.map_or((f32::NEG_INFINITY, f32::INFINITY), |v| (v.top(), (v.bottom() - size.y).max(v.top())));
+    let mut xs = vec![rect.left()];
+    if let Some(v) = view {
+        xs.extend([v.left(), v.right() - size.x]);
+    }
+    for o in obstacles {
+        xs.extend([o.left() - DIALOG_GAP - size.x, o.right() + DIALOG_GAP]);
+    }
+    xs.retain(|x| x.is_finite());
+    if let Some(v) = view {
+        for x in &mut xs {
+            *x = x.clamp(v.left(), (v.right() - size.x).max(v.left()));
+        }
+    }
+    xs.sort_unstable_by(f32::total_cmp);
+    xs.dedup();
+    let mut best: Option<(f64, egui::Rect)> = None;
+    let mut gap = |x: f32, low: f32, high: f32| {
+        if low <= high {
+            let y = rect.top().clamp(low, high);
+            let candidate = egui::Rect::from_min_size(egui::pos2(x, y), size);
+            if candidate.is_finite() {
+                let dx = f64::from(x) - f64::from(rect.left());
+                let dy = f64::from(y) - f64::from(rect.top());
+                let distance = dx * dx + dy * dy;
+                if best.as_ref().is_none_or(|(old, _)| distance < *old) {
+                    best = Some((distance, candidate));
+                }
+            }
+        }
+    };
+    let mut bands = Vec::new();
+    for x in xs {
+        bands.clear();
+        for o in obstacles {
+            if x + size.x > o.left() - DIALOG_GAP && x < o.right() + DIALOG_GAP {
+                bands.push((o.top() - DIALOG_GAP - size.y, o.bottom() + DIALOG_GAP));
+            }
+        }
+        bands.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.total_cmp(&b.1)));
+        let mut low = top;
+        for &(start, end) in &bands {
+            if end < low {
+                continue;
+            }
+            if start > bottom {
+                break;
+            }
+            gap(x, low, start.min(bottom));
+            low = low.max(end);
+            if low > bottom {
+                break;
+            }
+        }
+        gap(x, low, bottom);
+    }
+    best.map(|(_, candidate)| candidate).filter(|candidate| obstacles.iter().all(|o| !candidate.intersects(*o)))
 }
 
 /// A rectangle kept inside the drawing area: one that would leave it moves back to its edge.
@@ -1968,7 +2058,14 @@ fn drag_arrow_to(
 /// share one spline, so every edge's handles edit it. A taper's handles show on a single edge
 /// only: the first edit makes the fillet a spline fillet starting from that edge's taper, which
 /// would put the same radius on every other edge. Whether the handles are shown.
-fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, handles: &mut Vec<egui::Rect>) -> bool {
+fn radius_spline_handles(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    d: &mut Dialog,
+    handles: &mut Vec<egui::Rect>,
+) -> bool {
     use serde_json::{Value, json};
     use solidcraft_engine::doc::kernel::RadiusSpline;
     enum Edit {
@@ -3076,6 +3173,27 @@ mod tests {
         assert!(view.contains_rect(kept), "field remains in the viewport: {kept:?}");
         for handle in handles {
             assert!(!kept.intersects(handle), "field {kept:?} covers actual arrow region {handle:?}");
+        }
+        assert_eq!(kept.size(), field.size());
+    }
+
+    /// Independent Chamfer/Pattern directions can leave space above the window only after
+    /// moving left of the second arrow too. Every one-axis candidate is blocked here, while
+    /// (750, 372)..(890, 396) leaves 4 px to that arrow and to the window. These are not
+    /// opposite sides of one straight Extrude arrow.
+    #[test]
+    fn a_value_box_finds_corner_space_between_the_window_and_independent_arrows() {
+        let view = egui::Rect::from_min_max(egui::pos2(320.0, 200.0), egui::pos2(1000.0, 700.0));
+        let dialog = egui::Rect::from_min_max(egui::pos2(420.0, 400.0), egui::pos2(780.0, 700.0));
+        let base = egui::pos2(900.0, 350.0);
+        let tips = [egui::pos2(350.0, 205.0), egui::pos2(990.0, 695.0)];
+        let handles = tips.map(|tip| arrow_grab(base, tip));
+        let field = egui::Rect::from_min_size(tips[1] + egui::vec2(14.0, -12.0), egui::vec2(140.0, 24.0));
+        let kept = clear_of_dialog(field, BoxPlace { dialog: Some(dialog), view: Some(view), handle_obstacles: &handles, ..Default::default() });
+        assert!(view.contains_rect(kept), "field remains in the viewport: {kept:?}");
+        assert!(!kept.intersects(dialog), "field {kept:?} is hidden by the window {dialog:?}");
+        for handle in handles {
+            assert!(!kept.intersects(handle), "field {kept:?} covers an actual arrow region {handle:?}");
         }
         assert_eq!(kept.size(), field.size());
     }

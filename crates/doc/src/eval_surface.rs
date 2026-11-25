@@ -324,7 +324,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
-        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
+        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
@@ -357,7 +357,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 (None, false) => (0.0, a),
             };
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
-            let body = kernel::revolve_sheet(&ss.plane, &chains, o, d, start, sweep)?;
+            let body = if *faced {
+                kernel::revolve_sheet(&ss.plane, &chains, o, d, start, sweep)?
+            } else {
+                kernel::revolve_sheet_legacy_sides(&ss.plane, &chains, o, d, start, sweep)?
+            };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
@@ -462,7 +466,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             push_sheet(st, f, traced);
             Ok(())
         }
-        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit } => {
+        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced } => {
             // A loft with edge chains or 3D sketch curves for sections, or one that has to leave its
             // ends a particular way, is built through `loft_blend` from the frames of every
             // section; the plain one (planar sketch chains only, both ends G0) is the loft of old.
@@ -499,13 +503,18 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 secs.push((ss.plane, chain));
                 sketches.push(ss);
             }
-            let body = if rails.is_empty() {
-                kernel::loft_sheet(&secs)?
+            let rails = if rails.is_empty() {
+                Vec::new()
             } else {
                 // The rails run from the end at the first section.
                 let start = secs.first().and_then(|(p, c)| c.first().map(|seg| p.to_world(seg.start()))).unwrap_or_default();
-                let rails = crate::eval::rail_polylines(doc, st, rails, f.component, start)?;
-                kernel::loft_sheet_with_rails(&secs, &rails, crate::eval::kernel_rail_fit(*rail_fit))?
+                crate::eval::rail_polylines(doc, st, rails, f.component, start)?
+            };
+            let fit = crate::eval::kernel_rail_fit(*rail_fit);
+            let body = if *faced {
+                kernel::loft_sheet_with_rails(&secs, &rails, fit)?
+            } else {
+                kernel::loft_sheet_with_rails_legacy_sides(&secs, &rails, fit)?
             };
             // Each wall named by the section curves it runs between, as a loft's sides are.
             let loops: Vec<solidcore_record::Loop2> = secs.iter().map(|(_, c)| solidcore_record::Loop2 { segs: c.clone() }).collect();

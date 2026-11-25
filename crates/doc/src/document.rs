@@ -1959,6 +1959,46 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
+    /// Formed beads (stiffening ribs): a bead pressed into a planar panel of a sheet along each of
+    /// `curves` (straight sketch lines on one of its faces), standing out of that face (the other
+    /// one with `flip`). Across, a trapezoid: `width` and `depth` on the side it stands out of, at
+    /// the virtual sharps, flanks at `angle` (or the angle that leaves `crown_width`), bends of
+    /// inner radius `base_radius` and `crown_radius` (default: the rule's bend radius); along, each
+    /// end ramps up over `end_length` (default: 3 × the depth). `margin` (default: 3 × the
+    /// thickness) is how near the bead may come to edges, cut-outs, bends and other beads before a
+    /// warning.
+    SheetBead {
+        sketch: SketchId,
+        curves: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<String>,
+        #[walk(length = "Depth")]
+        depth: Expr,
+        #[walk(length = "Width")]
+        width: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Crown width")]
+        crown_width: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Base radius")]
+        base_radius: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Crown radius")]
+        crown_radius: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End length")]
+        end_length: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Margin")]
+        margin: Option<Expr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+    },
     /// Unfold a sheet body flat (all bends), or refold it.
     SheetUnfold {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2281,6 +2321,11 @@ pub enum FeatureKind {
         /// Symmetric: `angle` split evenly either side of the sketch.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         symmetric: bool,
+        /// The faces face the side the curves give them, as Surface Extrude's do: the curve's
+        /// direction crossed with the sketch normal, so out of a profile. New surface revolves
+        /// save it; designs saved before it keep each face along its surface's own normal.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        faced: bool,
     },
     /// A surface body swept along a chain of sketch curves from open curve chains and the
     /// boundaries of profiles: walls only, no caps.
@@ -2337,6 +2382,12 @@ pub enum FeatureKind {
         /// How the rails reshape the sections between.
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
+        /// The walls through planar sketch sections face the side Surface Extrude's would at the
+        /// first section: out of the region closed sections bound, as a solid loft's faces do,
+        /// and along an open section's direction crossed with its sketch normal. New surface
+        /// lofts save it; designs saved before it keep each wall along its skinned surface's normal.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        faced: bool,
     },
     /// The faces at `faces` copied out at a signed `distance` along their normals as a new
     /// surface body (0 copies them); `chain` takes each pick's whole smooth chain of faces;
@@ -3008,6 +3059,10 @@ pub struct SketchPoints {
     /// the hole's `direction` (into the face it was placed on) rather than across the sketch.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub single: bool,
+    /// Keep the old position-numbered face names while the original selection is intact.
+    /// Once a point is gone, those names would refer to other holes, so use point names.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub legacy_face_roles: bool,
 }
 
 /// A component: a node of the design tree that owns sketches, features and bodies. The root
@@ -3515,6 +3570,7 @@ impl FeatureKind {
                 | FeatureKind::SheetFold { .. }
                 | FeatureKind::SheetPath { .. }
                 | FeatureKind::SheetTab { .. }
+                | FeatureKind::SheetBead { .. }
                 | FeatureKind::SheetUnfold { .. }
                 | FeatureKind::SheetConvert { .. }
                 | FeatureKind::SheetSurfaceConvert { .. }
@@ -3593,6 +3649,7 @@ impl FeatureKind {
             FeatureKind::SheetFold { .. } => "FoldFeature",
             FeatureKind::SheetPath { .. } => "PathFlangeFeature",
             FeatureKind::SheetTab { .. } => "TabFeature",
+            FeatureKind::SheetBead { .. } => "BeadFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
@@ -3684,6 +3741,7 @@ impl FeatureKind {
             FeatureKind::SheetFold { .. } => "sheet_fold",
             FeatureKind::SheetPath { .. } => "sheet_path",
             FeatureKind::SheetTab { .. } => "sheet_tab",
+            FeatureKind::SheetBead { .. } => "sheet_bead",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
             FeatureKind::SheetConvert { .. } => "sheet_convert",
             FeatureKind::SheetSurfaceConvert { .. } => "sheet_surface_convert",
@@ -3778,6 +3836,7 @@ impl FeatureKind {
             "FoldFeature" => "sheet_fold",
             "PathFlangeFeature" => "sheet_path",
             "TabFeature" => "sheet_tab",
+            "BeadFeature" => "sheet_bead",
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
             "ConvertBodyToSheetMetalFeature" => "sheet_surface_convert",
@@ -3872,6 +3931,7 @@ impl FeatureKind {
             FeatureKind::SheetFold { .. } => "Fold",
             FeatureKind::SheetPath { .. } => "PathFlange",
             FeatureKind::SheetTab { .. } => "Tab",
+            FeatureKind::SheetBead { .. } => "Bead",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
             FeatureKind::SheetUnfold { .. } => "Refold",
             FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetal",
@@ -4263,9 +4323,10 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
-    /// Set in a file saved without the bodies of its linked designs (`file.save`'s
-    /// `linked_bodies: false`): the Import feature of each link is saved with no STEP text and no
-    /// records, and opening the design reads those bodies from the linked files again. Only the
+    /// Set in a file saved without the bodies of its linked designs and linked STEP files
+    /// (`file.save`'s `linked_bodies: false`): the Import feature of each link is saved with no
+    /// STEP text and no records, the Mesh Import feature beside a linked design's link with no
+    /// meshes, and opening the design reads those bodies from the linked files again. Only the
     /// file carries it: the session keeps the choice, and a design in memory always holds the
     /// bodies it could read.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

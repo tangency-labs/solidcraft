@@ -447,7 +447,10 @@ impl Model {
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
         // An import its checks healed is fingerprinted with its heals, which a model read back
         // does not have: it would never be taken.
+        // Nor while the SMLib checks of features still run ([`Model::set_background_checks`]): a
+        // model kept before they pass would open with results no check has passed.
         if self.results.is_empty()
+            || self.checking_features()
             || self.results.iter().any(|r| r.error.is_some())
             || !self.is_current(doc)
             || has_legacy_names(doc)
@@ -1130,6 +1133,7 @@ impl Model {
         let import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
+        let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let mut before = Arc::new(ModelState::default());
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;
@@ -1246,7 +1250,7 @@ impl Model {
                     before = r.state.clone();
                     continue;
                 }
-                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, &before, &model.import_digests, 0);
+                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests, 0);
                 let whole = CachedEval {
                     error: None,
                     error_code: None,
@@ -1268,14 +1272,21 @@ impl Model {
                 if let Some((k, read)) = &key.reads
                     && !matches!(f.kind, FeatureKind::Import { .. })
                     && !f.shell_piece_order
-                    && let Some(change) = r.state.change_from(&before, f.id, read)
-                    && change.bodies.iter().all(|b| match b {
-                        Changed::Made(b) => b.key == made_body_key(*k, &b.name),
-                        Changed::Kept(_) => true,
-                    })
+                    && let Some(change) = r.state.change_from(&before, f, read)
                 {
-                    let bytes = change.retained_bytes();
-                    cache.changes.put(*k, whole.with(change), bytes, r.ms);
+                    // A change that holds whatever the bodies it did not read was stamped with the
+                    // key without them; one saved before that key, with the other.
+                    let stamped = |k: &u64| {
+                        change.bodies.iter().all(|b| match b {
+                            Changed::Made(b) => b.key == made_body_key(*k, &b.name),
+                            Changed::Kept(_) => true,
+                        })
+                    };
+                    let relative = key.relative.filter(|_| change.relative.is_some());
+                    if let Some(k) = relative.into_iter().chain([*k]).find(stamped) {
+                        let bytes = change.retained_bytes();
+                        cache.changes.put(k, whole.with(change), bytes, r.ms);
+                    }
                 }
                 cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
                 before = r.state.clone();
