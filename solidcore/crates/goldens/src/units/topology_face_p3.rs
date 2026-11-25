@@ -931,24 +931,6 @@ fn analytic_face(
     Ok((s, [d0[0], d0[1], d1[0], d1[1]]))
 }
 
-/// The case's B-rep as [`run_rust_case`] builds it before the operation, and the face the
-/// operation is on (`None`: the build or the face selection fails). For tests that check
-/// a premise on the model a golden row was computed from (#18325).
-///
-/// # Errors
-///
-/// A case that does not parse, or the build's harness error.
-pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId)>, HarnessError> {
-    let i = case.parse::<Inputs>()?;
-    let Ok((b, counts)) = own_brep(&i)? else {
-        return Ok(None);
-    };
-    let Some(a) = args(&i.op, counts, |f| first_loop(&b, f)) else {
-        return Ok(None);
-    };
-    Ok(Some((b, FaceId::from_index(a[0] as u32))))
-}
-
 #[allow(clippy::too_many_lines)] // one arm per op
 fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
     // a B-rep value above 1e150 is refused (HANG-29, fuzz case fuzz00127): building a face on such a

@@ -99,9 +99,6 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         // (the test seam is shared: the copy's drops are the operation's)
         #[cfg(test)]
         strip_probe: k.strip_probe.clone(),
-        // (the caller's replay seam, test only: the copy calls through it)
-        #[cfg(feature = "wr57-replay")]
-        replay: k.replay.clone(),
     }
 }
 

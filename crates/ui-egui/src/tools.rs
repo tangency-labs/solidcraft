@@ -126,6 +126,10 @@ pub struct Tool {
     /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
     /// makes a segment. Kept in step with the preference while the tool runs.
     pub classic: bool,
+    /// The 3-Point Arc's tangent mode is on (`sketch_arc_tangent_snap`, #20719): its third point
+    /// has Radius and Sweep boxes and a centre cross. Kept in step with the preference while the
+    /// tool runs; off, the tool shows only the pointer's coordinates, as before.
+    pub arc_modes: bool,
     /// True when the constraint/dimension tool was entered from a valid preselection: once that
     /// single operation commits, the tool unselects itself (`app.tool = None`).
     pub preselected: bool,
@@ -188,6 +192,7 @@ impl Tool {
             chain: Default::default(),
             line_type: 3,
             classic: false,
+            arc_modes: false,
             preselected: false,
             finished: false,
         })
@@ -838,6 +843,14 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     }
                 }
                 let placed: Vec<Vec2> = tool.pts.iter().map(|p| p.0).collect();
+                // A 3-Point Arc whose third point was the tangent snap is tangent to the curves it
+                // starts and ends on (#20719).
+                if tool.cmd == "sketch.arc.three_point"
+                    && let [start, end, through] = placed[..]
+                    && let Some(arc) = curves.first()
+                {
+                    crate::inference::commit_arc(app, arc, start, end, through);
+                }
                 crate::sketch_tools::constrain_lined(app, &mut tool, &placed, &before);
                 tool.pts.clear();
                 crate::sketch_dims::reset(&mut tool);
@@ -1587,15 +1600,8 @@ pub(crate) fn preview_curve(
     Some(sk)
 }
 
-fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
-    let ab = b - a;
-    let ac = c - a;
-    let d = 2.0 * ab.cross(ac);
-    if !d.is_finite() || d.abs() < 1e-12 {
-        return None;
-    }
-    let centre = a + Vec2::new(ac.y * ab.len2() - ab.y * ac.len2(), ab.x * ac.len2() - ac.x * ab.len2()) / d;
-    centre.is_finite().then_some(centre)
+pub(crate) fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
+    solidcraft_kernel::services::sketch_arc::circumcentre(a.into(), b.into(), c.into()).map(Vec2::from)
 }
 
 /// The polygon's actual straight edges, in the same orientation as the eventual command.

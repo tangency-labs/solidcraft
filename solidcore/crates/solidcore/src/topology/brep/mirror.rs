@@ -350,9 +350,6 @@ fn degenerate_low_work_transform(
         fixes: k.fixes,
         memoize_curve_caches: k.memoize_curve_caches,
         cancel: k.cancel.clone(),
-        // (the caller's replay seam, test only: the trial calls through it)
-        #[cfg(feature = "wr57-replay")]
-        replay: k.replay.clone(),
         ..Kernel::default()
     };
     let mut copy = b.clone_standing_for_self()?;
