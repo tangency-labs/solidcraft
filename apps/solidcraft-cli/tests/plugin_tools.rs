@@ -226,6 +226,23 @@ fn test_runs_the_packages_cases_on_the_real_host() {
     assert!(!output.status.success() && text(&output.stderr).contains("does not pass plugin check"), "{}", text(&output.stderr));
 }
 
+/// The plugin guide keeps a case's design in the tests folder. A design saved there as JSON is that
+/// case's input, not a case of its own: it is not read as a case, and the case runs on it.
+#[test]
+fn a_json_design_a_case_runs_on_is_not_read_as_a_case() {
+    let scratch = Scratch::new();
+    let on_plate = json!({"entry":"make","design":"plate.json","expect":{"model":{"body_count":2,"total":{"volume_mm3":1024}}}});
+    let path = package(&scratch.0, &command_manifest(), &command_component("call $box"), &[("on-plate", on_plate)]);
+    let mut made = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::new("Plate"));
+    made.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    std::fs::write(Path::new(&path).join("tests/plate.json"), serde_json::to_vec(&*made.doc).unwrap()).unwrap();
+    let output = cli(&["plugin", "test", &path, "--json"]);
+    assert!(output.status.success(), "{}{}", text(&output.stdout), text(&output.stderr));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!((report["passed"].as_u64(), report["failed"].as_u64(), report["skipped"].as_u64()), (Some(1), Some(0), Some(0)), "{report}");
+    assert_eq!(report["cases"][0]["name"], "on-plate", "{report}");
+}
+
 #[test]
 fn an_exporter_without_folder_grants_runs_default_and_explicit_cases() {
     let scratch = Scratch::new();
@@ -363,4 +380,20 @@ fn a_cases_grants_and_fixtures_stay_inside_its_tests_and_scratch_folders() {
             assert!(!output.status.success() && text(&output.stderr).contains("could not read the tests folder"), "{}", text(&output.stderr));
         }
     }
+}
+
+#[test]
+fn plugin_test_approves_requested_fuel_by_default_and_accepts_explicit_fuel_grants() {
+    let scratch = Scratch::new();
+    let fuel = 10_000_000_000_000_u64;
+    let mut manifest = command_manifest();
+    manifest["runtime"]["limits"]["fuel"] = json!(fuel);
+    let path = package(
+        &scratch.0,
+        &manifest,
+        &command_component("call $box"),
+        &[("default", json!({"entry":"make"})), ("explicit", json!({"entry":"make","grants":{"fuel":fuel}}))],
+    );
+    let output = cli(&["plugin", "test", &path]);
+    assert!(output.status.success(), "{}\n{}", text(&output.stdout), text(&output.stderr));
 }

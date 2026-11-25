@@ -111,6 +111,7 @@ fn selection_alternatives_preserve_strict_schema_parity() {
             let schema = json!({"type":"object","properties":{key:property}});
             let value = json!({key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
             assert_eq!(check_input(&schema, &value).is_ok(), selection, "{key}/{alternative}");
+            assert_eq!(check_input_field(key, &schema["properties"][key], &value[key]).is_ok(), selection, "{key}/{alternative}");
             if selection {
                 assert_eq!(prepare_input(&schema, &value).unwrap(), value);
             }
@@ -119,6 +120,21 @@ fn selection_alternatives_preserve_strict_schema_parity() {
             assert_eq!(strict["properties"][key][alternative][0]["items"].get("additionalProperties").is_none(), selection);
         }
     }
+}
+
+#[test]
+fn filtered_selection_options_keep_the_enclosing_annotation() {
+    let schema = json!({"type":"object","properties":{
+        "enabled":{"type":"boolean"},
+        "picks":{"x-solidcraft-selection":{"version":1,"accept":["body"]},"oneOf":[{
+            "type":"array","items":{"type":"object"},"x-solidcraft-when":{"field":"enabled","eq":true}
+        }]}
+    }});
+    assert!(check_input(&schema, &json!({"enabled":true,"picks":[{"type":"body","name":"Box"}]})).is_ok());
+    assert!(matches!(
+        check_input(&schema, &json!({"enabled":false,"picks":[{"type":"body","name":"Box"}]})),
+        Err(HostError::InvalidInput { field, .. }) if field == "params.picks"
+    ));
 }
 
 #[test]
@@ -423,6 +439,36 @@ fn hostile_manifest_fields_return_errors() {
     assert!(parse_manifest(br#"{}"#, "sample").is_err());
 }
 
+/// A refused entry list says which entry is wrong and why: a bad name (an underscore, which
+/// command ids allow but entry names don't), a repeated name, or too many or no entries.
+#[test]
+fn a_refused_entry_list_names_the_entry_and_the_rule() {
+    let refusal = |entries: Value| {
+        let mut value = manifest();
+        value["runtime"]["entries"] = entries;
+        match parse(&value) {
+            Err(HostError::InvalidManifest { field, reason }) => (field, reason),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    };
+    let (field, reason) = refusal(json!(["make", "op_add"]));
+    assert_eq!(field, "runtime.entries");
+    assert!(reason.contains("\"op_add\"") && reason.contains("dashes") && reason.contains("no underscores"), "{reason}");
+    let (_, reason) = refusal(json!(["make", "make"]));
+    assert!(reason.contains("\"make\" is declared more than once"), "{reason}");
+    let (_, reason) = refusal(json!([]));
+    assert!(reason.contains("declares 0 entries"), "{reason}");
+    let many: Vec<String> = (0..33).map(|i| format!("e{i}")).collect();
+    let (_, reason) = refusal(json!(many));
+    assert!(reason.contains("declares 33 entries"), "{reason}");
+    // A hostile name is quoted and cut short, never echoed raw.
+    let (_, reason) = refusal(json!([format!("bad\nname{}", "x".repeat(500))]));
+    assert!(reason.contains("\\n") && !reason.contains('\n') && reason.len() < 400, "{reason}");
+    // A cut name says it was cut and how long it is: its first 64 characters may be valid alone.
+    let (_, reason) = refusal(json!([format!("{}_", "a".repeat(64))]));
+    assert!(reason.contains(&format!("\"{}\"… (65 characters)", "a".repeat(64))), "{reason}");
+}
+
 #[test]
 fn larger_manifests_fit_without_removing_input_descriptions() {
     let serialized = serde_json::to_vec(&manifest()).unwrap();
@@ -495,6 +541,12 @@ fn host_limits_have_typed_failures() {
     assert!(limits.check(&Limits::default()).is_ok());
     let fuel = limits.check(&Limits { fuel: limits.max_fuel + 1, ..Limits::default() }).unwrap_err();
     assert_eq!(fuel, HostError::OverCeiling { limit: "fuel".into(), requested: limits.max_fuel + 1, allowed: limits.max_fuel });
+    assert!(fuel.to_string().contains("allow its fuel request when you install it"));
+    // Approved per-package fuel reaches HostLimits::check just as approved memory does.
+    let approved = HostLimits { max_fuel: MAX_APPROVED_FUEL, ..limits };
+    assert!(approved.check(&Limits { fuel: MAX_APPROVED_FUEL, ..Limits::default() }).is_ok());
+    let hard = HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL + 1, allowed: MAX_APPROVED_FUEL };
+    assert!(hard.to_string().contains("hard host ceiling of 10000000000000"));
     // A refusal gives both numbers and what to change.
     let memory = limits.check(&Limits { memory_mib: 2048, ..Limits::default() }).unwrap_err();
     assert_eq!(memory, HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 });
@@ -567,6 +619,191 @@ fn explicit_folder_grants_allow_hidden_ancestors_but_refuse_hidden_children() {
 }
 
 #[test]
+fn ui_panels_are_a_supported_capability() {
+    assert_eq!(check_capabilities(&["ui@0.1".into()], "Craft"), Ok(()));
+}
+
+fn panel_manifest() -> Value {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "ui@0.1"]);
+    value["runtime"]["ui"] = json!({"ui_version":1,"panels":[{
+        "id":"tools","title":"Tools","zones":["right"],"layout":{"root":0,"nodes":[
+            {"widget":{"button":{"label":"Make","icon":null,"entry":"make"}}}
+        ]}
+    }],"workspaces":[]});
+    value
+}
+
+#[test]
+fn panel_layouts_are_bounded_trees_with_declared_actions() {
+    let valid = panel_manifest();
+    let parsed = parse(&valid).unwrap();
+    let runtime = parsed.runtime.as_ref().unwrap();
+    let declarations = runtime.ui.as_ref().unwrap();
+    let mut event = ui::UiEvent { panel: "tools".into(), event: ui::EventKind::Press, path: "make".into(), row: None, value: None };
+    assert_eq!(declarations.action_command("sample", 0, &event).unwrap(), "sample.make");
+    event.path = "other".into();
+    assert!(declarations.action_command("sample", 0, &event).is_err());
+    assert!(declarations.action_command("sample", u32::MAX, &event).is_err());
+    for malformed in [
+        json!({"root":1,"nodes":[{"widget":{"text":"x"}}]}),
+        json!({"root":0,"nodes":[{"widget":{"group":[0]}}]}),
+        json!({"root":0,"nodes":[{"widget":{"group":[1,1]}},{"widget":{"text":"x"}}]}),
+        json!({"root":0,"nodes":[{"widget":{"text":"x"}},{"widget":{"text":"unused"}}]}),
+        json!({"root":0,"nodes":[{"widget":{"button":{"label":"No","entry":"undeclared"}}}]}),
+    ] {
+        let mut value = valid.clone();
+        value["runtime"]["ui"]["panels"][0]["layout"] = malformed;
+        assert!(parse(&value).is_err(), "{value}");
+    }
+    let mut large = valid.clone();
+    large["runtime"]["ui"]["panels"][0]["layout"]["nodes"] = json!(vec![json!({"widget":{"text":"x"}}); ui::MAX_WIDGETS + 1]);
+    assert!(matches!(parse(&large), Err(HostError::LimitExceeded { .. })));
+    let mut too_many = valid.clone();
+    let panel = too_many["runtime"]["ui"]["panels"][0].clone();
+    too_many["runtime"]["ui"]["panels"] = json!(
+        (0..=ui::MAX_PANELS)
+            .map(|index| {
+                let mut panel = panel.clone();
+                panel["id"] = json!(format!("panel-{index}"));
+                panel
+            })
+            .collect::<Vec<_>>()
+    );
+    assert!(matches!(parse(&too_many), Err(HostError::LimitExceeded { .. })));
+    let mut bad_zones = valid.clone();
+    bad_zones["runtime"]["ui"]["panels"][0]["zones"] = json!(["left", "left"]);
+    assert!(parse(&bad_zones).is_err());
+    let mut importing = importer();
+    importing["capabilities"] = json!(["formats@0.2", "ui@0.1"]);
+    importing["runtime"]["ui"] = json!({"ui_version":1,"panels":[],"workspaces":[]});
+    assert!(parse(&importing).is_err());
+    let mut missing_capability = valid.clone();
+    missing_capability["capabilities"] = json!(["commands@0.2"]);
+    assert!(parse(&missing_capability).is_err());
+    let mut future = valid.clone();
+    future["runtime"]["ui"]["ui_version"] = json!(2);
+    future["runtime"]["ui"]["panels"][0]["layout"]["nodes"][0]["widget"] = json!({"future-widget":{"unfamiliar":"data"}});
+    assert!(matches!(parse(&future).unwrap().runtime.unwrap().ui.unwrap().panels[0].layout.nodes[0].widget, ui::Widget::Unknown));
+}
+
+#[test]
+fn panel_row_actions_preserve_opaque_ids_with_slashes() {
+    let mut value = panel_manifest();
+    value["runtime"]["ui"]["panels"][0]["layout"]["nodes"][0]["widget"] = json!({"table":{
+        "bind":"/jobs", "row_id":"id", "columns":[{"key":"id","label":"Operation","unit":null}],
+        "select":"single", "on_select":"make", "on_edit":"make"
+    }});
+    let runtime = parse(&value).unwrap().runtime.unwrap();
+    let declarations = runtime.ui.as_ref().unwrap();
+    let layout = &declarations.panels[0].layout;
+    let mut data = ui::PanelData::default();
+    data.set_data_for(layout, &[ui::Datum { path: "/jobs/0/id".into(), value: ui::UiValue::Text("setup/op1".into()) }]).unwrap();
+    assert!(data.merge_frame());
+    assert_eq!(data.rows("/jobs")[0].0, "0", "the data index stays separate from the opaque row id");
+    assert_eq!(data.get("/jobs/0/id"), Some(&ui::UiValue::Text("setup/op1".into())));
+    for event in [ui::EventKind::Select, ui::EventKind::Edit] {
+        let event = ui::UiEvent { panel: "tools".into(), event, path: "/jobs".into(), row: Some("setup/op1".into()), value: None };
+        assert_eq!(declarations.action_command("sample", 0, &event), Ok("sample.make".into()), "{event:?}");
+        let encoded = serde_json::to_value(&event).unwrap();
+        assert_eq!(encoded["path"], "/jobs");
+        assert_eq!(encoded["row"], "setup/op1");
+        let mut wrong_binding = event.clone();
+        wrong_binding.path = "/jobs/0".into();
+        assert!(declarations.action_command("sample", 0, &wrong_binding).is_err());
+        for row in ["".to_owned(), "setup/\nop1".to_owned(), "x".repeat(1025)] {
+            let mut hostile = event.clone();
+            hostile.row = Some(row);
+            assert!(declarations.action_command("sample", 0, &hostile).is_err());
+        }
+    }
+}
+
+#[test]
+fn panel_data_updates_are_atomic_and_merged_once_per_frame() {
+    let mut data = ui::PanelData::default();
+    let datum = |path: &str, value| ui::Datum { path: path.into(), value };
+    data.set_data(&[datum("/tools/10/dia", ui::UiValue::Number(10.0))]).unwrap();
+    assert_eq!(data.get("/tools/10/dia"), None);
+    data.set_data(&[datum("/tools/2/dia", ui::UiValue::Number(2.0))]).unwrap();
+    assert!(data.merge_frame());
+    assert!(!data.merge_frame());
+    assert_eq!(data.rows("/tools").into_iter().map(|(row, _)| row).collect::<Vec<_>>(), ["2", "10"]);
+    data.set_data(&[datum("/tools/15x/dia", ui::UiValue::Number(15.0))]).unwrap();
+    data.merge_frame();
+    assert_eq!(data.rows("/tools").into_iter().map(|(row, _)| row).collect::<Vec<_>>(), ["2", "10", "15x"]);
+    let original = data.clone();
+    assert!(data.set_data(&[datum("/tools/2/dia", ui::UiValue::Number(3.0)), datum("bad", ui::UiValue::Flag(true))]).is_err());
+    assert!(data.set_data(&[datum("/tools/2/dia", ui::UiValue::Number(f64::NAN))]).is_err());
+    assert!(data.set_data(&[datum("/oversize", ui::UiValue::Text("x".repeat(ui::MAX_PANEL_BYTES)))]).is_err());
+    assert_eq!(data, original);
+    assert!(!data.merge_frame());
+    data.clear_data();
+    assert_eq!(data.get("/tools/2/dia"), Some(&ui::UiValue::Number(2.0)));
+    data.set_data(&[datum("/replacement", ui::UiValue::Text("value".into()))]).unwrap();
+    assert!(data.merge_frame());
+    assert_eq!(data.values().len(), 1);
+    assert_eq!(data.get("/replacement"), Some(&ui::UiValue::Text("value".into())));
+}
+
+#[test]
+fn panel_frame_adoption_keeps_the_same_logical_state() {
+    let empty = ui::PanelData::default();
+    let mut data = empty.clone();
+    data.set_data(&[ui::Datum { path: "/value".into(), value: ui::UiValue::Integer(4) }]).unwrap();
+    let pending = data.clone();
+    assert_ne!(pending, empty);
+    assert_eq!(pending.get("/value"), None);
+    assert!(data.merge_frame());
+    assert_eq!(data, pending, "rendering a frame must not make a worker's snapshot stale");
+    assert_eq!(data.get("/value"), Some(&ui::UiValue::Integer(4)));
+    data.clear_data();
+    assert_eq!(data, empty);
+    assert!(data.merge_frame());
+    assert_eq!(data, empty);
+}
+
+#[test]
+fn chart_data_point_limits_reject_whole_updates() {
+    let layout = ui::Layout {
+        root: 0,
+        nodes: vec![ui::Node {
+            widget: ui::Widget::Chart(ui::ChartSpec {
+                kind: ui::ChartKind::Line,
+                series: vec![ui::ChartSeries { label: "Load".into(), role: ui::ColorRole::Series1, x: "/x".into(), y: "/y".into() }],
+            }),
+        }],
+    };
+    let mut data = ui::PanelData::default();
+    let updates: Vec<_> = (0..=ui::MAX_CHART_POINTS).map(|index| ui::Datum { path: format!("/x/{index}"), value: ui::UiValue::None }).collect();
+    assert!(matches!(data.set_data_for(&layout,&updates),Err(HostError::LimitExceeded {limit}) if limit.contains("20000")));
+    assert_eq!(data, ui::PanelData::default());
+    data.set_data_for(&layout, &updates[..ui::MAX_CHART_POINTS]).unwrap();
+    assert!(data.merge_frame());
+}
+
+#[test]
+fn panel_wit_preserves_the_reviewed_interfaces() {
+    // Keep this shared crate movable: the normative RFC is outside the extracted crate.
+    for signature in [
+        "interface ui {",
+        "interface ui-provider {",
+        "set-data: func(panel: string, updates: list<datum>) -> result<_, plugin-error>;",
+        "clear-data: func(panel: string) -> result<_, plugin-error>;",
+        "show-panel: func(panel: string, visible: bool) -> result<_, plugin-error>;",
+        "describe: func() -> declarations;",
+        "on-event: func(event: ui-event) -> result<_, plugin-error>;",
+        "on-enter: func(workspace: string) -> result<_, plugin-error>;",
+        "on-exit: func(workspace: string) -> result<_, plugin-error>;",
+    ] {
+        assert!(WIT.contains(signature), "{signature}");
+    }
+    assert!(WIT.contains("world panel-plugin"));
+    assert!(WIT.contains("world panel-dialog-plugin"));
+    assert_eq!(serde_json::to_value(ui::ColorRole::Series1).unwrap(), "series-1");
+}
+
+#[test]
 fn capabilities_are_checked_at_load_with_plain_refusals() {
     assert!(WIT.starts_with("package craft:plugin@0.2.0;") && API == "craft:plugin@0.2.0");
     // The frozen 0.1 WIT is 0.1.0 without `unsupported`, and the host still serves its capabilities.
@@ -589,7 +826,7 @@ fn capabilities_are_checked_at_load_with_plain_refusals() {
     assert_eq!(refused(&["commands@0.3"]), "needs commands 0.3; update Craft or the plugin");
     assert_eq!(refused(&["commands@1.0"]), "needs commands 1.0; update Craft or the plugin");
     assert!(refused(&["commands@0.0"]).contains("was built for commands 0.0") && refused(&["commands@0.0"]).ends_with("update the plugin"));
-    assert!(refused(&["ui@0.1"]).starts_with("needs ui 0.1, which this version of Craft does not have"));
+    assert!(refused(&["viewport@0.1"]).starts_with("needs viewport 0.1, which this version of Craft does not have"));
     for bad in [&["commands"][..], &["commands@x"], &["commands@0.1", "commands@0.1"], &["Commands@0.1"], &["commands@0.1.2.3"]] {
         assert!(matches!(check_capabilities(&caps(bad), "Craft"), Err(HostError::InvalidManifest { .. })), "{bad:?}");
     }
@@ -713,6 +950,17 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     newer["capabilities"] = json!(["formats@0.3"]);
     newer["runtime"]["entries"][0]["kind"] = json!("printer");
     assert!(matches!(parse(&newer), Err(HostError::UnsupportedCapability { .. })));
+}
+
+#[test]
+fn a_command_may_be_a_long_job_and_an_importer_may_not() {
+    let mut long = manifest();
+    long["runtime"]["entries"] = json!([{"name":"make","job":true}, "other"]);
+    let entries = parse(&long).unwrap().runtime.unwrap().entries;
+    assert_eq!((entries[0].job, entries[1].job), (true, false));
+    let mut importing = importer();
+    importing["runtime"]["entries"][0]["job"] = json!(true);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".job")));
 }
 
 #[test]

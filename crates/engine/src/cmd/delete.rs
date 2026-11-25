@@ -54,7 +54,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return apply(&mut t, p);
     }
     let r = apply(s, p)?;
-    s.selection.clear();
+    s.clear_selection();
     Ok(r)
 }
 
@@ -90,6 +90,12 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
             bodies: Vec::new(),
             would_fail: Vec::new(),
             skipped: Vec::new(),
+            views: None,
+            dimensions: None,
+            balloons: None,
+            notes: None,
+            sketches: None,
+            fills: None,
             param_warnings: Vec::new(),
         })
         .map_err(|error| bad(cmd, error.to_string()));
@@ -155,12 +161,21 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
         Ok(())
     })?;
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
-    let (views, dimensions, balloons) = (listed(&gone.views), listed(&gone.dimensions), listed(&gone.balloons));
-    let (notes, sketches, fills) = (listed(&gone.notes), listed(&gone.sketches), listed(&gone.fills));
-    Ok(json!({
-        "deleted": also, "deleted_joints": [], "would_fail": [], "skipped": [],
-        "views": views, "dimensions": dimensions, "balloons": balloons, "notes": notes, "sketches": sketches, "fills": fills,
-    }))
+    let reply = SelectionDeleteResult {
+        deleted: also,
+        deleted_joints: Vec::new(),
+        bodies: Vec::new(),
+        would_fail: Vec::new(),
+        skipped: Vec::new(),
+        views: Some(listed(&gone.views)),
+        dimensions: Some(listed(&gone.dimensions)),
+        balloons: Some(listed(&gone.balloons)),
+        notes: Some(listed(&gone.notes)),
+        sketches: Some(listed(&gone.sketches)),
+        fills: Some(listed(&gone.fills)),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// The delete `p` asks for is of the open drawing's objects (its undo step is the drawing's): it
@@ -176,12 +191,32 @@ pub(crate) fn in_drawing(s: &Session, p: &Value) -> bool {
 
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
-    let items: Vec<Sel> = match p.get("items") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 10_000 => {
-            a.iter().map(|v| serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))).collect::<Result<_>>()?
+    let items: Vec<Sel> = if p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false) {
+        // A whole-body selection is a scope: resolve it once, here, into the bodies it covers,
+        // however many (the 10000-item cap is for lists a caller sends). A locked body stays, as
+        // it does when the selection names it (the app leaves it out).
+        // The scope itself, not whatever the session has selected now.
+        let locked: std::collections::HashSet<&str> = s.visibility.locked_bodies.iter().map(String::as_str).collect();
+        let mut items: Vec<Sel> =
+            s.shown_body_names()?.into_iter().filter(|name| !locked.contains(name.as_str())).map(|name| Sel::Body { name }).collect();
+        // Any items named beside the scope go too.
+        if let Some(Value::Array(a)) = p.get("items") {
+            for v in a.iter().take(10_000) {
+                let x: Sel = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))?;
+                if !items.contains(&x) {
+                    items.push(x);
+                }
+            }
         }
-        Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
+        items
+    } else {
+        match p.get("items") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(a)) if a.len() <= 10_000 => {
+                a.iter().map(|v| serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))).collect::<Result<_>>()?
+            }
+            Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
+        }
     };
     if items.iter().any(|x| matches!(x, Sel::Drawing { .. })) || s.sheet_sketching() {
         return delete_in_drawing(s, p, &items);
@@ -308,8 +343,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     bodies.retain(|b| st.body(b).is_some());
     bodies.dedup();
-    if !bodies.is_empty() {
-        sub(s, "solid.remove", json!({ "bodies": bodies }))?;
+    // A Remove takes at most 10000 names; a whole-body delete of more is several, in one step.
+    for chunk in bodies.chunks(crate::params::MAX_STRING_LIST) {
+        sub(s, "solid.remove", json!({ "bodies": chunk }))?;
         done = true;
     }
     // An occurrence goes alone while its component has others; the last one takes the component.
@@ -369,7 +405,20 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     // Features after a rolled-back marker count too (#3471).
     let would_fail: Vec<String> =
         super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
-    let reply = SelectionDeleteResult { deleted, deleted_joints: joints, bodies, would_fail, skipped, param_warnings: Vec::new() };
+    let reply = SelectionDeleteResult {
+        deleted,
+        deleted_joints: joints,
+        bodies,
+        would_fail,
+        skipped,
+        views: None,
+        dimensions: None,
+        balloons: None,
+        notes: None,
+        sketches: None,
+        fills: None,
+        param_warnings: Vec::new(),
+    };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
@@ -660,6 +709,29 @@ mod tests {
         );
         assert_eq!(gone["views"], json!([ids::encode(top)]), "{gone}");
         assert!(s.drawing("test").unwrap().dimension(dimension).is_none());
+    }
+
+    #[test]
+    fn a_drawing_delete_matches_its_schemas_at_every_check_level() {
+        use crate::schema::delete::{SelectionDeleteParams, SelectionDeleteResult};
+        use crate::schema::tests::conforms;
+        use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+        let (input, output) = (input_schema_for::<SelectionDeleteParams>(), output_schema_for::<SelectionDeleteResult>());
+        let (input, output) = (input.as_value(), output.as_value());
+        for level in [ParamCheck::Warn, ParamCheck::Strict] {
+            let (mut s, [_, right, top], dimension, balloon, drawing) = sheet_objects();
+            s.param_check = level;
+            let p = json!({"items": [item(drawing, right), item(drawing, dimension), item(drawing, balloon)], "contents": "delete"});
+            assert!(conforms(input, input, &p), "{level:?}: {p} doesn't match {input}");
+            let gone = s.execute("selection.delete", &p).unwrap_or_else(|e| panic!("{level:?}: {e}"));
+            assert!(gone.get("param_warnings").is_none(), "{level:?}: {gone}");
+            assert!(conforms(output, output, &gone), "{level:?}: {gone} doesn't match {output}");
+            let mut views = vec![ids::encode(right), ids::encode(top)];
+            views.sort();
+            assert_eq!(gone["views"], json!(views), "{gone}");
+            assert_eq!((&gone["dimensions"], &gone["balloons"]), (&json!([ids::encode(dimension)]), &json!([ids::encode(balloon)])), "{gone}");
+            assert_eq!((&gone["sketches"], &gone["fills"]), (&json!([]), &json!([])), "{gone}");
+        }
     }
 
     /// A view, a dimension and a balloon are selected by their ids, as a view's own id reads in every

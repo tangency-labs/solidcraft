@@ -1351,22 +1351,31 @@ fn expressed_plane(s: &Session, v: &Value, cmd: &str) -> Result<PlaneRef> {
 /// [`plane_ref`] for the commands whose explicit plane has an origin of numbers only
 /// (`canvas.insert`, `canvas.decal`, the browser's): length expressions are refused as before.
 pub(super) fn plane_ref_numbers(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
+    plane_ref_numbers_with(s, p, cmd, face::IndexMode::Exact)
+}
+
+/// [`plane_ref_numbers`], with how a face pick's index is read ([`face::IndexMode`]).
+pub(super) fn plane_ref_numbers_with(s: &Session, p: &Value, cmd: &str, index: face::IndexMode) -> Result<PlaneRef> {
     if let Some(v @ Value::Object(o)) = p.get("plane")
         && !o.contains_key("face")
     {
         custom_plane_form(v).map_err(|why| bad(cmd, why))?;
     }
-    plane_ref(s, p, cmd)
+    plane_ref_with(s, p, cmd, index)
 }
 
 pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
+    plane_ref_with(s, p, cmd, face::IndexMode::Exact)
+}
+
+fn plane_ref_with(s: &Session, p: &Value, cmd: &str, index: face::IndexMode) -> Result<PlaneRef> {
     let base = match p.get("plane") {
         None => PlaneRef::Origin { name: "XY".into() },
         // An origin plane, or a construction plane by name or id.
         Some(v @ (Value::String(_) | Value::Number(_))) => super::features::plane_param(s, Some(v), cmd)?,
         Some(v @ Value::Object(o)) => {
             if o.contains_key("face") {
-                face::capture(s, v, cmd)?
+                face::capture_with(s, v, cmd, index)?
             } else if o.get("origin").is_some_and(|origin| origin.as_array().is_some_and(|a| a.iter().any(Value::is_string))) {
                 expressed_plane(s, v, cmd)?
             } else {
@@ -1416,38 +1425,6 @@ fn frame_reply(out: &mut CreateResult, frame: Option<&str>, placement: &solidcra
     let Some(frame) = frame else { return };
     out.frame = Frame::named(frame);
     out.note = frame_note(Some(frame), placement).map(str::to_string);
-}
-
-/// The indices of `m`'s triangles by face, for `faces` faces (triangles of a face past that
-/// are left out): one pass, so testing every face costs the triangle count once, not per face.
-pub(super) fn face_triangles(m: &solidcraft_geom::Mesh, faces: usize) -> Vec<Vec<usize>> {
-    let mut by_face = vec![Vec::new(); faces];
-    for (i, f) in m.tri_face.iter().enumerate().take(m.triangles.len()) {
-        if let Some(tris) = by_face.get_mut(*f as usize) {
-            tris.push(i);
-        }
-    }
-    by_face
-}
-
-/// Does a face, the triangles `tris` of `m` (from [`face_triangles`]), contain point `p` (within
-/// `tol` of the face plane)?
-pub(super) fn face_contains(m: &solidcraft_geom::Mesh, tris: &[usize], p: Vec3, tol: f64) -> bool {
-    tris.iter().filter_map(|i| m.triangles.get(*i)).any(|t| {
-        let Some([a, b, c]) = m.tri(t) else { return false };
-        let n = (b - a).cross(c - a);
-        let Some(nn) = n.normalized() else { return false };
-        if (p - a).dot(nn).abs() > tol {
-            return false;
-        }
-        let s1 = (b - a).cross(p - a).dot(n);
-        let s2 = (c - b).cross(p - b).dot(n);
-        let s3 = (a - c).cross(p - c).dot(n);
-        (s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0)
-            || (s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)
-            // Exact curved boundaries can sit just outside their tessellated chords.
-            || p.dist_to_segment(a, b).min(p.dist_to_segment(b, c)).min(p.dist_to_segment(c, a)) <= tol * 0.1
-    })
 }
 
 fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1762,18 +1739,25 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if s.sheet_sketching() {
         return super::drawing_sketch::finish(s, p);
     }
-    finish_model_edit(s, restore)
+    finish_model_edit(s, restore, true)
 }
 
-/// Finish the model receiver even when another window has a drawing open.
-pub(crate) fn finish_model_edit(s: &mut Session, restore: bool) -> Result<Value> {
+/// Finish the model receiver even when another window has a drawing open. `fold` groups the
+/// sketch's own steps into one undo step, as Finish Sketch does. Another edit that finishes
+/// the sketch leaves them apart (#15414): one Undo then takes back one change of the sketch,
+/// not the whole session the person had drawn.
+pub(crate) fn finish_model_edit(s: &mut Session, restore: bool, fold: bool) -> Result<Value> {
     let id = s.active_sketch.take();
     s.sketching_view = None;
     let profiles = id.and_then(|i| s.model.state().sketch(i).map(|ss| ss.profiles.len())).unwrap_or(0);
     if let Some(entry) = s.sketch_entry.take().filter(|entry| Some(entry.sketch) == id)
         && let Some(marker) = entry.restore_marker
     {
-        finish_edit_history(s, &entry, marker);
+        if fold {
+            finish_edit_history(s, &entry, marker);
+        } else {
+            keep_edit_history(s, &entry, marker);
+        }
         if restore {
             let marker = marker.filter(|m| *m < s.doc.features.len());
             if s.doc.marker != marker {
@@ -1795,19 +1779,53 @@ pub(crate) fn finish_model_edit(s: &mut Session, restore: bool) -> Result<Value>
     Ok(json!({"sketch": id, "profiles": profiles}))
 }
 
+/// Where the steps of this sketch's edit begin in the history: the step after the one that held
+/// the design as it was when the sketch was opened. The anchor may have moved when the undo
+/// limit trimmed older steps; if it is gone, only a stack entirely from this sketch counts.
+fn edit_history_start(s: &Session, entry: &SketchEntry) -> Option<usize> {
+    use std::sync::Arc;
+    match &entry.undo_top {
+        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
+        None => Some(0),
+    }
+    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0))
+    .filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
+}
+
+/// Another edit finished the sketch (#15414): the steps of its edit stay in the history, one
+/// change each, and each of them describes the complete design, with the temporary rollback
+/// undone with it. One Undo then takes back one change of the sketch, not the whole session.
+fn keep_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
+    let Some(start) = edit_history_start(s, entry) else { return };
+    for step in s.undo.get_mut(start..).unwrap_or_default() {
+        if step.active_sketch == Some(entry.sketch) {
+            complete_edit_step(step, marker);
+        }
+    }
+    for step in &mut s.redo {
+        if step.active_sketch == Some(entry.sketch) {
+            complete_edit_step(step, marker);
+        }
+    }
+}
+
+/// A step of a finished sketch's edit describes the whole design: the temporary rollback the
+/// edit used is undone with it, and the sketch is closed, as another edit left it.
+fn complete_edit_step(step: &mut crate::Snapshot, marker: Option<usize>) {
+    use std::sync::Arc;
+    let doc = Arc::make_mut(&mut step.doc);
+    doc.marker = marker.filter(|m| *m < doc.features.len());
+    step.active_sketch = None;
+    step.sketching_view = None;
+    step.sketch_restore_marker = None;
+}
+
 /// Fold only the steps still belonging to this edit. Its snapshots describe the complete
 /// design, never the temporary marker. The anchor may have moved when the undo limit trimmed
 /// older steps; if it is gone, only a stack entirely from this sketch can be folded safely.
 fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
     use std::sync::Arc;
-    let start = match &entry.undo_top {
-        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
-        None => Some(0),
-    }
-    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0));
-    let Some(start) =
-        start.filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
-    else {
+    let Some(start) = edit_history_start(s, entry) else {
         return;
     };
     let mut before = (*entry.doc).clone();
@@ -5239,18 +5257,23 @@ fn line_ends(sk: &Sketch, l: usize) -> (usize, usize) {
 
 fn construction(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.construction";
-    let ids = string_list(cmd, p, "curves")?;
-    if ids.is_empty() {
+    let ids = if p.get("curves").is_some_and(|v| !v.is_null()) { string_list(cmd, p, "curves")? } else { Vec::new() };
+    let point_ids = if p.get("points").is_some_and(|v| !v.is_null()) { string_list(cmd, p, "points")? } else { Vec::new() };
+    if ids.is_empty() && point_ids.is_empty() {
         return Err(bad(cmd, "`curves` must list curve ids"));
     }
     let want = bool_(p, "value");
     let (n, info) = edit_solve(s, p, cmd, false, |sk, _| {
         let cs: Vec<usize> =
             ids.iter().map(|id| sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))).collect::<Result<_>>()?;
+        let ps: Vec<usize> =
+            point_ids.iter().map(|id| sk.point_index(id).ok_or_else(|| bad(cmd, format!("unknown point `{id}`")))).collect::<Result<_>>()?;
         // The selection switches together (a slot or polygon as a whole): to construction
-        // unless all of it already is. Projected curves may switch too. A centerline that
+        // unless all of it already is (the origin never counts: it stays as it is). Projected curves may switch too. A centerline that
         // becomes construction stops being a centerline (one line type at a time).
-        let to = want.unwrap_or_else(|| !cs.iter().all(|c| sk.curves.get(*c).is_some_and(|c| c.construction)));
+        let all_construction = cs.iter().all(|c| sk.curves.get(*c).is_some_and(|c| c.construction))
+            && ps.iter().all(|q| *q == 0 || sk.points.get(*q).is_some_and(|q| q.construction));
+        let to = want.unwrap_or(!all_construction);
         let mut n = 0;
         for c in cs {
             if let Some(cu) = sk.curves.get_mut(c)
@@ -5263,6 +5286,16 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
                     // A normal line is a finite one.
                     cu.infinite = false;
                 }
+                n += 1;
+            }
+        }
+        for q in ps {
+            // The origin is the sketch's own reference: it is never a hole site, and stays as it is.
+            if q != 0
+                && let Some(pt) = sk.points.get_mut(q)
+                && pt.construction != to
+            {
+                pt.construction = to;
                 n += 1;
             }
         }

@@ -49,6 +49,7 @@ pub use design::file_kind;
 pub use design::has_design_provenance;
 pub use design::is_design_container;
 pub use design::large_file_text;
+pub use design::read_container_bytes;
 pub use design::read_design_file;
 pub use design::read_design_file_once;
 pub use design::read_design_geometry;
@@ -64,26 +65,39 @@ pub use design::read_design_thumbnail_file;
 pub use design::read_design_with_model;
 pub use design::read_drawing;
 pub use design::read_drawing_file;
+pub use design::take_last_cache_refusal;
 pub use design::write_design_container;
+pub use design::write_design_container_reusing;
 pub use design::write_design_container_with_cache;
 pub use design::write_design_container_with_compression;
 pub use design::write_design_container_with_preview;
 pub use design::write_design_container_with_provenance;
 pub use design::write_design_container_with_thumbnail;
 pub use design::write_drawing_container;
+pub use design::written_design_provenance_chain;
 pub use glb::DEFAULT_COLOR as GLB_DEFAULT_COLOR;
 pub use glb::GlbOptions;
 pub use glb::MAX_GLB_BYTES;
 pub use glb::export_glb;
 mod legacy_dir;
+pub mod library;
 pub mod library_files;
 pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
+pub use native_cad::CadmpegOptions;
+pub use native_cad::DecalPlan;
+pub use native_cad::Hidden;
 pub use native_cad::NATIVE_CAD_EXTS;
 pub use native_cad::NativeDesign;
+pub use native_cad::OpticsPlan;
+pub use native_cad::RecordsRead;
+pub use native_cad::SurfaceMap;
+pub use native_cad::SurfacePlan;
 pub use native_cad::USD_EXTS;
+pub use native_cad::cadmpeg_export;
+pub use native_cad::cadmpeg_iges_records;
 pub use native_cad::cadmpeg_step_records;
 pub use native_cad::detects_freecad;
 pub use native_cad::is_freecad_path;
@@ -93,7 +107,7 @@ pub use native_cad::native_cad_design;
 pub use native_cad::native_cad_records;
 pub use native_cad::native_cad_to_step;
 pub use native_cad::read_usd;
-pub use native_cad::usd_from_step;
+pub use native_cad::usd_from_design;
 pub use native_cad::usd_records;
 pub mod paper;
 mod pat;
@@ -114,6 +128,7 @@ pub mod safe_zip;
 pub mod sdf;
 mod sketch2d;
 mod svg;
+mod svg_out;
 /// Explicit development-test seams; absent from ordinary production builds.
 #[cfg(any(test, feature = "dxf-legacy-baseline-tests"))]
 pub mod test_support {
@@ -208,6 +223,9 @@ pub use svg::read_svg;
 pub use svg::read_svg_drawing;
 pub use svg::svg_nothing_to_import;
 pub use svg::svg_sheet;
+pub use svg_out::SvgShape;
+pub use svg_out::svg_unit;
+pub use svg_out::write_svg;
 mod gltf_in;
 pub use gltf_in::GltfImport;
 pub use gltf_in::Loader;
@@ -238,6 +256,7 @@ pub use kicad_in::is_kicad_path;
 pub use kicad_in::kicad_board_mesh;
 pub use kicad_in::kicad_board_path;
 pub use kicad_in::kicad_board_thickness;
+pub use kicad_in::kicad_file_thickness;
 pub use kicad_in::parse_kicad_board;
 pub use kicad_in::parse_kicad_board_with;
 pub use kicad_in::read_kicad;
@@ -588,11 +607,14 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     step_import_feature_read(bytes, file, names, StepReader::SolidCraft)
 }
 
-/// [`step_import_feature_named`], a STEP, FreeCAD or Rhino file read by `reader`.
+/// [`step_import_feature_named`], a STEP, IGES, FreeCAD or Rhino file read by `reader`.
 pub fn step_import_feature_read(bytes: &[u8], file: &str, names: StepNames, reader: StepReader) -> Result<StepFeature> {
     let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
-    if reader == StepReader::Cadmpeg && is_step_path(file) && !is_iges_path(file) && !is_native_cad_path(file) {
+    if reader == StepReader::Cadmpeg && is_iges_path(file) {
+        return records_import_feature(cadmpeg_iges_records(bytes, file).map_err(IoError::Invalid)?, file, names);
+    }
+    if reader == StepReader::Cadmpeg && is_step_path(file) && !is_native_cad_path(file) {
         return records_import_feature(cadmpeg_step_records(bytes, file).map_err(IoError::Invalid)?, file, names);
     }
     if reader == StepReader::Cadmpeg && is_native_cad_path(file) {
@@ -671,7 +693,8 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
     let _span = solidcraft_profile::span("import", "usd_import_feature");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     let (records, warnings, y_up) = usd_records(bytes, file).map_err(IoError::Invalid)?;
-    Ok((records_import_feature((records, warnings, false), file, names)?, y_up))
+    let read = RecordsRead { records, warnings, freecad: false, preprocessor: String::new(), description: String::new() };
+    Ok((records_import_feature(read, file, names)?, y_up))
 }
 
 /// A file read with [`StepReader::Cadmpeg`] (FreeCAD, Rhino or STEP) into an Import feature that
@@ -680,11 +703,19 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
 /// shows only through its body's own shape) are not built, unless nothing else is; a Rhino file's
 /// hidden objects are its user's own choice, so they are built and start hidden. The format is
 /// the one cadmpeg detects in the contents, not the file's name.
-fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, bool), file: &str, names: StepNames) -> Result<StepFeature> {
-    let (records, decode_warnings, freecad) = read;
+fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Result<StepFeature> {
+    let RecordsRead { records, warnings: decode_warnings, freecad, preprocessor, description } = read;
     let text = solidcraft_kernel::records_text(&records)?;
     design::check_step_importable(&text)?;
-    let imp = solidcraft_kernel::records_import_shared(&records)?;
+    let mut imp = solidcraft_kernel::records_import_shared(&records)?;
+    // The rest of a STEP header, which the records do not keep, as a STEP import has it: with the
+    // program (the records' `system`) it says whether the file has Y up. A copy, so the shared
+    // import other reads of the same records find is not changed.
+    if imp.preprocessor != preprocessor || imp.description != description {
+        let mut own = (*imp).clone();
+        (own.preprocessor, own.description) = (preprocessor, description);
+        imp = std::sync::Arc::new(own);
+    }
     // Not one body made of the records: no feature, as a STEP file with no solids is refused.
     if imp.bodies.is_empty() {
         let why = imp.warnings.last().map(|w| format!(" ({w})")).unwrap_or_default();
@@ -876,8 +907,15 @@ pub enum Format {
     /// and decal images; written by the engine, since it is several files.
     Sdf,
     /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
-    /// file's extension ([`usd_from_step`]); written by the engine from the STEP it writes.
+    /// file's extension ([`usd_from_design`]); written from the design, which holds the
+    /// components and looks.
     Usd,
+    /// Rhino `.3dm`, written by cadmpeg from the design ([`cadmpeg_export`]): each body's exact
+    /// shape where cadmpeg's Rhino writer can write it, else its mesh.
+    Rhino,
+    /// FreeCAD `.FCStd`: named so that `file.export` can say why it is not written yet (cadmpeg
+    /// cannot write a new FreeCAD file; [`cadmpeg_export`] refuses it).
+    FreeCad,
 }
 
 impl Format {
@@ -896,6 +934,8 @@ impl Format {
             "glb" => Format::Glb,
             "sdf" => Format::Sdf,
             "usd" | "usda" | "usdc" | "usdz" => Format::Usd,
+            "3dm" => Format::Rhino,
+            "fcstd" => Format::FreeCad,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -1446,6 +1486,10 @@ fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQ
 /// chord from `size`, with its notes, each led by the body's name. A mesh it cannot make is an
 /// error led by the body's name too, so an export of several bodies says whose face it is.
 fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size, part): &Placed, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    #[cfg(test)]
+    if test_unmeshable::is(&b.name) {
+        return Err(IoError::Invalid(format!("{}: tessellation: face 7 (cylinder): boundary crosses itself", b.name)));
+    }
     let named = |e: IoError| match e {
         IoError::Kernel(k) => IoError::Invalid(format!("{}: {k}", b.name)),
         other => other,
@@ -1775,6 +1819,8 @@ pub fn export_with_parts_noted(
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
         Format::Sdf => return Err(IoError::Format("sdf (a model folder; use file.export)".into())),
         Format::Usd => return Err(IoError::Format("usd (the file's extension picks its encoding; use file.export)".into())),
+        Format::Rhino => return Err(IoError::Format("3dm (written from the design by cadmpeg; use file.export)".into())),
+        Format::FreeCad => return Err(IoError::Invalid(native_cad::FREECAD_REFUSED.into())),
     };
     Ok((bytes, notes))
 }
@@ -1857,7 +1903,7 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
         let Some(p) = index.get(&comp).and_then(|i| products.get_mut(*i)) else { continue };
         p.bodies.push(ExportBody { name: b.name.clone(), body: framed.as_ref().unwrap_or(&b.body), color: b.body.color() });
     }
-    for o in &doc.occurrences {
+    for o in doc.active_occurrences() {
         let (Some(&parent), Some(&child)) = (index.get(&o.parent), index.get(&o.component)) else { continue };
         if let Some(p) = products.get_mut(parent) {
             p.children.push((child, o.transform, o.name.clone()));
@@ -1906,7 +1952,7 @@ pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
             binary.join(" and ")
         )));
     }
-    Ok(doc.to_json().into_bytes())
+    Ok(doc.to_json_checked()?.into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.
@@ -1989,6 +2035,22 @@ pub fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (yoe + era * 400 + i64::from(m <= 2), m, d, rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+/// Tests: the name of a body that [`body_mesh`] fails on, as a body the kernel cannot tessellate does.
+#[cfg(test)]
+mod test_unmeshable {
+    static NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    pub(super) fn set(name: Option<&str>) {
+        if let Ok(mut n) = NAME.lock() {
+            *n = name.map(str::to_string);
+        }
+    }
+
+    pub(super) fn is(name: &str) -> bool {
+        NAME.lock().is_ok_and(|n| n.as_deref() == Some(name))
+    }
 }
 
 #[cfg(test)]
@@ -2342,6 +2404,28 @@ mod tests {
         Ok(())
     }
 
+    /// A body that cannot be meshed does not stop the export: the file is written with the other
+    /// bodies and the note names the one left out (#19215), in each mesh format.
+    #[test]
+    fn an_unmeshable_body_is_named_and_the_rest_is_still_written() {
+        let (_, m) = model();
+        let mut state = (*m.state()).clone();
+        let mut broken = state.bodies[0].clone();
+        broken.name = "BrokenSliver".into();
+        state.bodies.push(broken);
+        let alone = export(&m.state(), &[], Format::StlBinary, "t").unwrap();
+        test_unmeshable::set(Some("BrokenSliver"));
+        for format in [Format::StlBinary, Format::StlAscii, Format::Obj, Format::ThreeMf, Format::ThreeMfTagged] {
+            let (bytes, notes) = export_with_parts_noted(&state, &[], &[], format, "t", &Metadata::default(), MeshQuality::default(), None)
+                .unwrap_or_else(|e| panic!("{format:?}: {e}"));
+            assert!(!bytes.is_empty(), "{format:?}");
+            assert!(notes.iter().any(|n| n.starts_with("BrokenSliver: skipped: meshing failed") && n.contains("face 7")), "{format:?}: {notes:?}");
+        }
+        let (stl, _) = export_with_parts_noted(&state, &[], &[], Format::StlBinary, "t", &Metadata::default(), MeshQuality::default(), None).unwrap();
+        assert_eq!(read_stl(&stl).unwrap().len(), read_stl(&alone).unwrap().len(), "only the body that meshed is in the file");
+        test_unmeshable::set(None);
+    }
+
     #[test]
     fn step_names_in_a_legacy_encoding() {
         // Exporters that write names in the system encoding instead of Part 21 escapes (#2344).
@@ -2595,7 +2679,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::new(80.0, 0.0, 0.0)),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
@@ -2689,8 +2773,11 @@ mod tests {
     fn notes_say_short_only_for_a_face_under_the_angle() {
         let spec = solidcraft_kernel::MeshSpec::chord(0.01);
         assert!(mesh_notes(&solidcraft_kernel::PlanStats::default(), &spec).is_empty());
-        let unshaped =
-            |face: usize, smallest_angle: f64| solidcore_tess::Unshaped { face, smallest_angle, limits: vec![solidcore_tess::ShapeLimit::Rounds] };
+        let unshaped = |face: usize, smallest_angle: f64| solidcraft_kernel::services::tess::Unshaped {
+            face,
+            smallest_angle,
+            limits: vec![solidcraft_kernel::services::tess::ShapeLimit::Rounds],
+        };
         let stats = solidcraft_kernel::PlanStats { unshaped: vec![unshaped(3, 18.5), unshaped(7, 27.25)], ..Default::default() };
         let notes = mesh_notes(&stats, &spec);
         assert_eq!(notes.len(), 2);
@@ -2740,7 +2827,7 @@ mod tests {
         });
         add(FeatureKind::Cylinder {
             base: point_expr(Vec3::new(40.0, 0.0, 0.0)),
-            axis: solidcraft_doc::Dir(Vec3::Z),
+            axis: solidcraft_doc::dir_expr(Vec3::Z),
             radius: "6".into(),
             height: "15".into(),
             operation: Operation::NewBody,
@@ -2757,7 +2844,7 @@ mod tests {
     }
 
     /// A 10 × 20 × 30 box exported as STL has no triangle sharper than the mesh export's smallest
-    /// angle: every face goes through the mesh path (`solidcore_tess::mesh`), planar ones too.
+    /// angle: every face goes through the mesh path (`solidcraft_kernel::services::tess::mesh`), planar ones too.
     /// On the display path (`Body::mesh`, before #15622) it was 12 triangles, two per face, 4 of
     /// them under 25° (the 10 × 30 faces' halves), the smallest 18.43° (atan(10/30)).
     #[test]
@@ -2780,7 +2867,7 @@ mod tests {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::ZERO),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,

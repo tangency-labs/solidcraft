@@ -129,6 +129,10 @@ fn curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error
     entity_ids(d, "curves", "`curves` must list curve ids")
 }
 
+fn construction_points<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
+    entity_ids(d, "points", "`points` must list point ids")
+}
+
 fn entities<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
     entity_ids(d, "entities", "`entities` must list sketch entity ids")
 }
@@ -505,26 +509,32 @@ pub struct CreateResult {
 // ---------------------------------------------------------------------------------------------
 // sketch.construction, sketch.delete
 
-fn curves_required(schema: &mut Schema) {
-    require(schema, "curves");
+/// `sketch.construction` takes curves, points or both: the handler refuses a call with neither.
+fn curves_or_points(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["curves"]}, {"required": ["points"]}]));
 }
 
 fn entities_required(schema: &mut Schema) {
     require(schema, "entities");
 }
 
-/// Switch curves between normal and construction. The selection switches together (a slot or
-/// polygon as a whole): to construction unless all of it already is. Projected curves may
-/// switch too. A centerline that becomes construction stops being a centerline, and a normal
-/// line is a finite one. One undo step.
+/// Switch curves and points between normal and construction. The selection switches together
+/// (a slot or polygon as a whole): to construction unless all of it already is. Projected
+/// curves may switch too. A centerline that becomes construction stops being a centerline, and
+/// a normal line is a finite one. A construction point is reference geometry that features
+/// reading a sketch's points (a Hole from the whole sketch) leave out. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = curves_required)]
+#[schemars(deny_unknown_fields, transform = curves_or_points)]
 pub struct ConstructionParams {
-    // Optional in the type and required in the schema (`curves_required`).
+    // Optional in the type; the schema asks for curves, points or both (`curves_or_points`).
     /// The curves, by id.
     #[serde(default, deserialize_with = "curves", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "EntityIds")]
+    #[schemars(with = "Option<EntityIds>")]
     pub curves: Option<EntityIds>,
+    /// The points, by id (`p3`, `l1.end`).
+    #[serde(default, deserialize_with = "construction_points", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<EntityIds>")]
+    pub points: Option<EntityIds>,
     /// True makes them construction, false makes them normal. Default: construction unless all of
     /// them already are.
     #[serde(default, deserialize_with = "value", skip_serializing_if = "Option::is_none")]

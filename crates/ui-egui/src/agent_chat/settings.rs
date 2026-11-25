@@ -33,6 +33,7 @@ pub struct AddState {
     pub request_timeout_s: u64,
     /// Optional reasoning effort sent as `reasoning_effort`; empty sends nothing.
     pub reasoning_effort: String,
+    pub openai_responses: bool,
     pub error: Option<String>,
     /// What the fields said when Add was refused: `error` stays only while they still say it.
     refused: Option<AddInputs>,
@@ -52,7 +53,7 @@ pub struct AddState {
 
 /// What the Add dialog's fields say, as far as a refusal can be about them: of the key only
 /// whether one is typed (`add_agent` reads nothing else of it, and no second copy is kept).
-type AddInputs = (AddKind, Protocol, usize, String, String, String, String, bool, u64, String);
+type AddInputs = (AddKind, Protocol, usize, String, String, String, String, bool, u64, String, bool);
 
 impl AddState {
     fn inputs(&self) -> AddInputs {
@@ -67,6 +68,7 @@ impl AddState {
             !self.key.trim().is_empty(),
             self.request_timeout_s,
             self.reasoning_effort.clone(),
+            self.openai_responses,
         )
     }
 
@@ -381,6 +383,7 @@ pub fn open_edit(app: &mut SolveApp, id: &str) -> bool {
         name: c.name.clone(),
         request_timeout_s: c.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S),
         reasoning_effort: c.reasoning_effort.clone(),
+        openai_responses: c.kind == Kind::Api && c.openai_responses,
         editing: Some(c.id.clone()),
         list_again: true,
         ..Default::default()
@@ -413,6 +416,7 @@ pub fn open_edit(app: &mut SolveApp, id: &str) -> bool {
 pub(super) fn choose_preset(s: &mut AddState, protocol: Protocol, index: usize) {
     s.protocol = protocol;
     s.preset = index;
+    s.openai_responses = false;
     if let Some(preset) = agents::presets(protocol).get(index) {
         s.base_url = preset.base_url.to_string();
         s.name = preset.name.to_string();
@@ -442,8 +446,15 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
             let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr("ui.ai_no_http").to_string()))) };
             let (url, model) = (e.base_url.clone(), e.model.clone());
             let allow_insecure_http = e.allow_insecure_http;
+            let responses = e.openai_responses;
+            let effort = e.reasoning_effort.clone();
             std::thread::spawn(move || {
-                let _ = tx.send(super::api_client::test_endpoint(&http, &url, key.as_deref(), &model, allow_insecure_http).map_err(TestError::Other));
+                let result = if responses {
+                    super::api_client::test_responses_endpoint(&http, &url, key.as_deref(), &model, allow_insecure_http, &effort)
+                } else {
+                    super::api_client::test_endpoint(&http, &url, key.as_deref(), &model, allow_insecure_http)
+                };
+                let _ = tx.send(result.map_err(TestError::Other));
             });
         }
         Kind::Anthropic => {
@@ -472,9 +483,10 @@ fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
 }
 
 /// The free-text reasoning effort field with its hover hint; true when the text changed.
-fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str) -> bool {
+fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str, responses: bool) -> bool {
+    let hint = if responses { "ui.ai_responses_reasoning_effort_hint" } else { "ui.ai_reasoning_effort_hint" };
     let response = ui_kit::cell_editor(ui, ui.scope_id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
-        .backing_on_hover_text(tr("ui.ai_reasoning_effort_hint"));
+        .backing_on_hover_text(tr(hint));
     solidcraft_ui_registry::publish_target(handle, response.rect);
     response.changed()
 }
@@ -966,7 +978,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     });
                                     ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
                                         let mut effort = c.reasoning_effort.clone();
-                                        if effort_field(ui, &mut effort, &format!("prefs:ai_reasoning:{}", entry.id)) {
+                                        if effort_field(ui, &mut effort, &format!("prefs:ai_reasoning:{}", entry.id), entry.openai_responses) {
                                             let effort = agents::reasoning_effort(&effort);
                                             c.reasoning_effort = effort.clone();
                                             reeffort = Some((entry.id.clone(), effort));
@@ -1316,8 +1328,16 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         timeout_field(ui, &mut s.request_timeout_s, "ai_add:request_timeout");
                     });
                     ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
-                        effort_field(ui, &mut s.reasoning_effort, "ai_add:reasoning_effort");
+                        effort_field(ui, &mut s.reasoning_effort, "ai_add:reasoning_effort", s.openai_responses);
                     });
+                    if s.protocol == Protocol::OpenAi && !agents::is_opencode_go(&s.base_url) {
+                        let response = ui_kit::checkbox(ui, tr("ui.ai_openai_responses"), &mut s.openai_responses)
+                            .backing_on_hover_text(tr("ui.ai_openai_responses_hint"));
+                        solidcraft_ui_registry::publish_target("ai_add:openai_responses", response.rect);
+                        if response.changed() {
+                            s.test = None;
+                        }
+                    }
                     ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
                             let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
@@ -1379,6 +1399,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                 allow_insecure_http: s.allow_insecure_http(),
                 request_timeout_s: s.request_timeout_s,
                 reasoning_effort: agents::reasoning_effort(&s.reasoning_effort),
+                openai_responses: s.protocol == Protocol::OpenAi && s.openai_responses && !agents::is_opencode_go(&s.base_url),
                 problem: None,
                 install: "",
             };
@@ -1447,6 +1468,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             c.model = s.model.trim().to_string();
             c.request_timeout_s = s.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S);
             c.reasoning_effort = agents::reasoning_effort(&s.reasoning_effort);
+            c.openai_responses = c.kind == Kind::Api && s.openai_responses && !agents::is_opencode_go(&c.base_url);
             if c.model.is_empty() {
                 return Err(tr("ui.ai_need_model").to_string());
             }
@@ -1482,6 +1504,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
         None => return Err(tr("ui.ai_edit_gone").to_string()),
         Some(old) => {
             let revoked = old.allow_insecure_http && !c.allow_insecure_http;
+            let changed_protocol = old.openai_responses != c.openai_responses;
             // An endpoint edited into a program (or one whose key was dropped) leaves no key behind.
             if old.key
                 && !c.key
@@ -1498,7 +1521,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             app.agent_chat.login_results.remove(&id);
             // The running conversation takes a new timeout from its next request on; the rest
             // applies the next time the agent connects.
-            if revoked {
+            if revoked || changed_protocol {
                 super::disconnect_endpoint(app, &id);
             } else if app.agent_chat.running_id == id
                 && let Some(b) = app.agent_chat.backend.as_mut()
@@ -2239,6 +2262,8 @@ mod card_tests {
     #[test]
     fn edit_keeps_or_replaces_a_stored_key_without_showing_it() {
         let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1280.0, "height": 720.0}));
+        h.call("ui.prefs", json!({"open": "AI"}));
         let keys = std::sync::Arc::new(MemoryKeys::default());
         h.app.services.secrets = Some(keys.clone());
         keys.set("api-1", "test-key-1").unwrap();
@@ -2262,16 +2287,25 @@ mod card_tests {
             assert_eq!(agents::presets(Protocol::OpenAi).get(s.preset).map(|p| p.name), Some("OpenAI"));
             assert_eq!((s.base_url.as_str(), s.model.as_str(), s.request_timeout_s), ("https://api.openai.com/v1", "model-a", 600));
             assert_eq!(s.reasoning_effort, "high", "the chosen effort comes back into the dialog");
+            assert!(!s.openai_responses, "existing agents keep Chat Completions");
         }
-        h.app.agent_chat.settings.add.as_mut().unwrap().model = "model-b".into();
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "ai_add:openai_responses"}})).unwrap();
+        let draft = h.app.agent_chat.settings.add.as_mut().unwrap();
+        assert!(draft.openai_responses);
+        draft.model = "model-b".into();
         add_agent(&mut h.app).unwrap();
         let saved = &h.app.preferences.agents[0];
         assert_eq!((saved.id.as_str(), saved.model.as_str(), saved.key, saved.request_timeout_s), ("api-1", "model-b", true, 600));
         assert_eq!(saved.reasoning_effort, "high", "the effort survives an edit");
+        assert!(saved.openai_responses);
+        assert!(agents::entries(&h.app).iter().any(|e| e.id == "api-1" && e.openai_responses));
         assert_eq!(keys.get("api-1").unwrap().as_deref(), Some("test-key-1"), "an empty field keeps the key");
         // A kept key does not go to a plain-HTTP address elsewhere.
         assert!(open_edit(&mut h.app, "api-1"));
-        h.app.agent_chat.settings.add.as_mut().unwrap().base_url = "http://example.com/v1".into();
+        let draft = h.app.agent_chat.settings.add.as_mut().unwrap();
+        assert!(draft.openai_responses);
+        draft.base_url = "http://example.com/v1".into();
         assert_eq!(add_agent(&mut h.app), Err(tr("ui.ai_key_needs_https").to_string()));
         assert_eq!(h.app.preferences.agents[0].base_url, "https://api.openai.com/v1");
         // A new key replaces the stored one.
