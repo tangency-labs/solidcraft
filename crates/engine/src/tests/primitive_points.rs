@@ -357,7 +357,7 @@ fn hostile_cone_sizes_are_refused() {
         json!({"radius": 5, "top_radius": "nope", "height": 10}),
         json!({"radius": 5, "height": "5 deg"}),
         json!({"radius": 5, "height": 10, "axis": [0, 0, 0]}),
-        json!({"radius": 5, "height": 10, "axis": [1e-320, 0, 0]}),
+        json!({"radius": 5, "height": 10, "axis": [0, 0, "0/0"]}),
         json!({"radius": 5, "height": 10, "axis": "W"}),
         json!({"radius": 5, "height": 10, "base": [1e300, 0, 0]}),
         json!({"radius": 5, "height": 10, "base": [0, "x +", 0]}),
@@ -422,4 +422,167 @@ fn cone_saves_reopens_and_edits() {
     let mut s3 = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
     run(&mut s3, "parameters.change", json!({"name": "tip", "expression": "5 mm"}));
     assert!(rel(measured(&s3, "N").volume, cone_volume(8.0, 5.0, 12.0)) < 2e-3);
+}
+
+/// `params` with `axis`, `base` and `body_name` set.
+fn with_axis(params: &Value, axis: Value, base: [f64; 3], name: &str) -> Value {
+    let mut p = params.clone();
+    p["axis"] = axis;
+    p["base"] = json!(base);
+    p["body_name"] = json!(name);
+    p
+}
+
+/// Two boxes alike once the second is moved back by `dx` along X.
+fn same_box_shifted(a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3]), dx: f64) -> bool {
+    near(a.0, [b.0[0] - dx, b.0[1], b.0[2]]) && near(a.1, [b.1[0] - dx, b.1[1], b.1[2]])
+}
+
+const CONE: (&str, &str) = ("solid.cone", r#"{"radius": 2, "top_radius": 1, "height": 10}"#);
+const COIL: (&str, &str) = ("solid.coil", r#"{"diameter": 10, "revolutions": 2, "pitch": 5, "section_size": 1}"#);
+
+/// A cone's and a coil's axis take unitless expressions, as the cylinder's does (#21932): the
+/// same body as that direction in numbers, turned when the parameter changes, and kept as
+/// expressions through a save and reopen.
+#[test]
+fn cone_and_coil_axis_expressions_follow_parameters() {
+    for (cmd, size) in [CONE, COIL] {
+        let size: Value = serde_json::from_str(size).unwrap();
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+        run(&mut s, cmd, with_axis(&size, json!(["0", "-sin(t)", "-cos(t)"]), [0.0; 3], "Slant"));
+        run(&mut s, cmd, with_axis(&size, json!([0, -1, -1]), [100.0, 0.0, 0.0], "Fixed"));
+        let slant = bbox(&s, "Slant");
+        assert!(same_box_shifted(slant, bbox(&s, "Fixed"), 100.0), "{cmd}: {slant:?} vs {:?}", bbox(&s, "Fixed"));
+        assert!(slant.0[1] < -6.0 && slant.0[2] < -6.0, "{cmd}: {slant:?}");
+        // Turned to lie along -Y when the parameter changes.
+        run(&mut s, "parameters.change", json!({"name": "t", "expression": "90 deg"}));
+        run(&mut s, cmd, with_axis(&size, json!([0, -1, 0]), [200.0, 0.0, 0.0], "AlongY"));
+        let slant = bbox(&s, "Slant");
+        assert!(same_box_shifted(slant, bbox(&s, "AlongY"), 200.0), "{cmd}: {slant:?} vs {:?}", bbox(&s, "AlongY"));
+        // Saved as expressions; reopened, it still follows the parameter.
+        let text = s.doc.to_json();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["features"][0]["axis"], json!([0.0, "-sin(t)", "-cos(t)"]), "{cmd}: {v}");
+        let mut s2 = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
+        assert!(same_box_shifted(bbox(&s2, "Slant"), bbox(&s2, "AlongY"), 200.0), "{cmd}");
+        run(&mut s2, "parameters.change", json!({"name": "t", "expression": "45 deg"}));
+        assert!(same_box_shifted(bbox(&s2, "Slant"), bbox(&s2, "Fixed"), 100.0), "{cmd}");
+    }
+}
+
+/// A cone's and a coil's axis of plain numbers is a direction however long or short (#21932),
+/// as the cylinder's is, saved normalized as numbers. A saved axis of numbers, as older designs
+/// hold, reads back to the same body.
+#[test]
+fn cone_and_coil_take_long_and_short_plain_axes() {
+    for (cmd, size) in [CONE, COIL] {
+        let size: Value = serde_json::from_str(size).unwrap();
+        let mut s = Session::default();
+        run(&mut s, cmd, with_axis(&size, json!([1, 0, 0]), [0.0; 3], "Unit"));
+        run(&mut s, cmd, with_axis(&size, json!([1e9, 0, 0]), [100.0, 0.0, 0.0], "Long"));
+        run(&mut s, cmd, with_axis(&size, json!([1e-12, 0, 0]), [200.0, 0.0, 0.0], "Short"));
+        run(&mut s, cmd, with_axis(&size, json!([0, -1, -1]), [300.0, 0.0, 0.0], "Slant"));
+        let unit = bbox(&s, "Unit");
+        assert!(same_box_shifted(unit, bbox(&s, "Long"), 100.0), "{cmd}: {unit:?} vs {:?}", bbox(&s, "Long"));
+        assert!(same_box_shifted(unit, bbox(&s, "Short"), 200.0), "{cmd}: {unit:?} vs {:?}", bbox(&s, "Short"));
+        let text = s.doc.to_json();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        for i in 0..3 {
+            assert_eq!(v["features"][i]["axis"], json!([1.0, 0.0, 0.0]), "{cmd}: {v}");
+        }
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        let slant: Vec<f64> = v["features"][3]["axis"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+        assert!(slant.len() == 3 && slant[0] == 0.0 && (slant[1] + h).abs() < 1e-12 && (slant[2] + h).abs() < 1e-12, "{cmd}: {v}");
+        let s2 = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
+        assert!(near(bbox(&s2, "Slant").0, bbox(&s, "Slant").0) && near(bbox(&s2, "Slant").1, bbox(&s, "Slant").1), "{cmd}");
+    }
+}
+
+/// A cone's or a coil's axis that is zero, or not a finite number, is refused with what is
+/// wrong, and adds no feature (#21932).
+#[test]
+fn cone_and_coil_refuse_zero_and_non_finite_axes() {
+    for (cmd, size) in [CONE, COIL] {
+        let size: Value = serde_json::from_str(size).unwrap();
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "t", "expression": "0 deg"}));
+        for (axis, says) in [
+            (json!([0, 0, 0]), "non-zero"),
+            (json!(["sin(t)", 0, 0]), "[0, 0, 0] with these parameter values"),
+            (json!(["1/0", 0, 1]), "axis x"),
+            (json!(["nope", 0, 1]), "axis x"),
+        ] {
+            let before = s.doc.features.len();
+            let err = s.execute(cmd, &with_axis(&size, axis.clone(), [0.0; 3], "Z")).unwrap_err().to_string();
+            assert!(err.contains(says), "{cmd} {axis}: {err}");
+            assert_eq!(s.doc.features.len(), before, "{cmd} {axis} added a feature");
+        }
+    }
+}
+
+/// A block 20 x 20 x 10 at `x` with a through hole of diameter 4 drilled from its top face
+/// along `direction`; the block's volume after the hole.
+fn drilled_block(s: &mut Session, name: &str, x: f64, direction: Value) -> f64 {
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "body_name": name}));
+    run(s, "solid.hole", json!({"position": [x + 10.0, 14, 10], "diameter": 4, "direction": direction}));
+    volume(s, name)
+}
+
+fn volume(s: &Session, body: &str) -> f64 {
+    let b = s.model.state().body(body).map(|b| b.body.clone()).unwrap();
+    solidcraft_kernel::measure(&b).unwrap().volume
+}
+
+/// A hole's `direction` takes unitless expressions, as a cylinder's axis does (#21932): the same
+/// cut as that direction in numbers, turned when the parameter changes, kept through a save and
+/// reopen. A direction of numbers is saved as numbers, normalized, as before.
+#[test]
+fn hole_direction_expressions_follow_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+    let slant = drilled_block(&mut s, "A", 0.0, json!(["0", "-sin(t)", "-cos(t)"]));
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let fixed = drilled_block(&mut s, "B", 100.0, json!([0, -h, -h]));
+    // Through 10 mm of block at 45 degrees: about pi * 2^2 * 10 * sqrt(2) cut away.
+    assert!((slant - fixed).abs() < 1e-6 * fixed, "{slant} vs {fixed}");
+    assert!((4000.0 - slant - 40.0 * std::f64::consts::PI * 2f64.sqrt()).abs() < 2.0, "{slant}");
+    // Turned to 20 degrees off vertical when the parameter changes: a shorter cut.
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "20 deg"}));
+    let (sin, cos) = 20f64.to_radians().sin_cos();
+    let twenty = drilled_block(&mut s, "C", 200.0, json!([0, -sin, -cos]));
+    let turned = volume(&s, "A");
+    assert!((turned - twenty).abs() < 1e-6 * twenty && turned > slant + 10.0, "{turned} vs {twenty}, was {slant}");
+    // Saved as expressions; a direction of numbers stays numbers.
+    let text = s.doc.to_json();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let holes: Vec<&Value> = v["features"].as_array().unwrap().iter().filter(|f| f.get("diameter").is_some()).collect();
+    assert_eq!(holes[0]["direction"], json!([0.0, "-sin(t)", "-cos(t)"]), "{v}");
+    assert!(holes[1]["direction"].as_array().unwrap().iter().all(Value::is_number), "{v}");
+    let mut s2 = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
+    assert!((volume(&s2, "A") - twenty).abs() < 1e-6 * twenty);
+    assert!((volume(&s2, "B") - fixed).abs() < 1e-6 * fixed);
+    run(&mut s2, "parameters.change", json!({"name": "t", "expression": "45 deg"}));
+    assert!((volume(&s2, "A") - fixed).abs() < 1e-6 * fixed);
+}
+
+/// A hole's `direction` that is zero, not a finite number, or an axis named by letter is
+/// refused with what is wrong, and adds no feature (#21932).
+#[test]
+fn hole_refuses_zero_and_non_finite_directions() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "0 deg"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "A"}));
+    for (direction, says) in [
+        (json!([0, 0, 0]), "non-zero"),
+        (json!("Z"), "non-zero"),
+        (json!(["sin(t)", 0, 0]), "`direction` is [0, 0, 0] with these parameter values"),
+        (json!(["1/0", 0, -1]), "direction x"),
+        (json!(["nope", 0, -1]), "direction x"),
+    ] {
+        let before = s.doc.features.len();
+        let err = s.execute("solid.hole", &json!({"position": [10, 10, 10], "diameter": 4, "direction": direction})).unwrap_err().to_string();
+        assert!(err.contains(says), "{direction}: {err}");
+        assert_eq!(s.doc.features.len(), before, "{direction} added a feature");
+    }
 }

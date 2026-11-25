@@ -256,7 +256,7 @@ impl JsonSchema for FacesParam {
     }
 }
 
-/// A direction given as an axis, as `features::axis_dir_param` reads it: X, Y or Z (trimmed, any
+/// A direction given as an axis, as `features::axis_dir_form` reads it: X, Y or Z (trimmed, any
 /// case) or a non-zero `[x, y, z]` (or `{x, y, z}`), with its messages.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisDir(pub Vec3);
@@ -340,7 +340,7 @@ impl JsonSchema for Point2 {
     }
 }
 
-/// A cylinder's axis (#18822), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
+/// A cylinder's, a cone's or a coil's axis (#18822, #21932), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
 /// non-zero `[x, y, z]` of numbers, or `[x, y, z]` (or `{x, y, z}`) whose components are
 /// numbers or unitless expressions. Whether the expressions evaluate, and to a direction that
 /// isn't zero, is checked by the handler, which has the design.

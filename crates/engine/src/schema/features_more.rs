@@ -19,7 +19,7 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
+    AngleExpr, AxisDirExpr, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
     IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList,
     TouchingParam, feature_common, present,
 };
@@ -303,10 +303,13 @@ pub struct CoilParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction the helix climbs. Default: Z.
+    /// The direction the helix climbs: X, Y, Z or `[x, y, z]`, each a number or an expression
+    /// with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the coil follows as the parameters
+    /// change. A parameter added as a plain number is a length: divide it by its unit
+    /// (`"n / 1 mm"`). Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "AxisDirExpr")]
+    pub axis: Option<AxisDirExpr>,
     /// Where around the axis the section starts. Default: 0. Refused with `sketch`.
     #[serde(default)]
     pub start_angle: Option<AngleExpr>,

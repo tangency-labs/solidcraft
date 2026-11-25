@@ -8497,7 +8497,7 @@ fn cylinder_references_now(s: &Session, id: u64) -> Option<Vec<Value>> {
 
 /// The direction an axis saved as `[x, y, z]` of numbers or unitless expressions (#18822) has
 /// with the parameters as they are now.
-fn axis_now(s: &Session, axis: &Value) -> Option<Vec3> {
+pub(crate) fn axis_now(s: &Session, axis: &Value) -> Option<Vec3> {
     let c = axis.as_array().filter(|a| a.len() == 3)?;
     let v = |i: usize| match c.get(i)? {
         Value::Number(n) => n.as_f64(),
@@ -8876,7 +8876,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         inp.multi = false;
                         inp.items = vec![face_sel(s, at).unwrap_or(Sel::Face { body: String::new(), index: 0, point: at })];
                     }
-                    d.extra.insert("direction".into(), pt3(direction.0));
+                    d.extra.insert("direction".into(), pt_expr(direction));
                     d.extra.insert("single_point".into(), json!({"point": pt3(at), "sketch": sp.sketch.0, "id": id}));
                 }
                 Some(sp) => {
@@ -8896,13 +8896,18 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     // direction when the body moves; seed the Face pick there too (#10689).
                     // Keep `position_exprs.point` as the stored value so expressions stay only
                     // when the pick is still that point (a moved face drops them for numbers).
-                    let on_face = solidcraft_engine::doc::hole_start(&crate::open_meshing::session_world(s), &f, position.0, direction.0);
+                    let on_face = solidcraft_engine::doc::hole_start(
+                        &crate::open_meshing::session_world(s),
+                        &f,
+                        position.0,
+                        axis_now(s, &pt_expr(direction)).unwrap_or(-Vec3::Z),
+                    );
                     if let Some(inp) = d.inputs.first_mut() {
                         // Editing a Single hole places it at exactly one point: a pick replaces.
                         inp.multi = false;
                         inp.items = vec![face_sel(s, on_face).unwrap_or(Sel::Face { body: String::new(), index: 0, point: on_face })];
                     }
-                    d.extra.insert("direction".into(), pt3(direction.0));
+                    d.extra.insert("direction".into(), pt_expr(direction));
                     // A position given as expressions (#1678) is sent again while the pick
                     // stays where the hole is; a new pick places it by the point picked.
                     if let Some(exprs) = at {
@@ -9029,7 +9034,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
             }
             d.extra.insert("base".into(), pt_expr(base));
-            d.extra.insert("axis".into(), pt3(axis.0));
+            d.extra.insert("axis".into(), pt_expr(axis));
             if *section == solidcraft_engine::doc::CoilSection::Square {
                 d.extra.insert("section".into(), json!("square"));
             }
@@ -9066,7 +9071,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 refs: Default::default(),
             };
             d.extra.insert("base".into(), pt_expr(base));
-            d.extra.insert("axis".into(), pt3(axis.0));
+            d.extra.insert("axis".into(), pt_expr(axis));
             d
         }
         FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {

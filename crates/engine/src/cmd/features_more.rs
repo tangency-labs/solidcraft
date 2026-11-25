@@ -10,7 +10,7 @@ use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{
-    add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
+    add_feature, axis_expr_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
 };
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::schema::align::AlignParams;
@@ -96,7 +96,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = if profile_mode { Some(solidcraft_doc::SketchId(super::features::sketch_id(s, p.get("sketch"), cmd, "sketch")?)) } else { None };
     let profiles = if profile_mode { super::features::profiles(p, cmd)? } else { solidcraft_doc::ProfileSel::All };
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
-    let axis = axis_dir_param(p, cmd)?;
+    let (axis, _) = axis_expr_param(s, p, cmd)?;
     let diameter = if profile_mode {
         None
     } else {
@@ -156,7 +156,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::Coil {
             base,
-            axis: Dir(axis),
+            axis,
             sketch,
             profiles,
             diameter,

@@ -43,7 +43,7 @@ fn expressions_accept_what_params_expr_accepts() {
     }
 }
 
-/// `AxisDir` accepts what `features::axis_dir_param` reads (X, Y or Z trimmed of what Rust's
+/// `AxisDir` accepts what `features::axis_dir_form` reads (X, Y or Z trimmed of what Rust's
 /// `trim` removes, in any case, or a non-zero vector), and its schema agrees: its string pattern
 /// allows exactly that whitespace (`conforms` doesn't read patterns), and a schema can't refuse
 /// the zero vector. `ScaleFactors` takes exactly three numbers or expressions.

@@ -292,7 +292,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
             "flip?: bool (sketch points: drill to the other side); ",
             "single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); ",
-            "direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); ",
+            "direction?: [x,y,z], each a number or an expression with no unit (\"-sin(t)\") the hole follows as the parameters change (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); ",
             "diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); ",
             "head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) | \"ISO 10642\" (countersunk head) (with clearance: the recess the screw's head sits in. A cap screw's: a counterbore, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value. A countersunk head's: a countersink, so type defaults to countersink; 90° unless cs_angle is given, its diameter the head's dk plus head_gap each side, so the head sits head_gap below the face; a cs_diameter given keeps its value); ",
             "head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); ",
@@ -2043,16 +2043,8 @@ pub(super) fn point_param(s: &Session, p: &Value, key: &str, cmd: &str) -> Resul
     Ok(Some(out))
 }
 
-/// An axis direction: X|Y|Z or a non-zero `[x, y, z]`; `Z` when it is not given.
-pub(super) fn axis_dir_param(p: &Value, cmd: &str) -> Result<Vec3> {
-    match p.get("axis") {
-        None => Ok(Vec3::Z),
-        Some(v) => axis_dir_form(v).map_err(|why| bad(cmd, why)),
-    }
-}
-
-/// What [`axis_dir_param`] reads a given `axis` as, without the design: X, Y or Z (trimmed, any
-/// case), else a non-zero `[x, y, z]`, normalized.
+/// A given `axis` read without the design as X, Y or Z (trimmed, any case), else a non-zero
+/// `[x, y, z]`, normalized.
 pub(crate) fn axis_dir_form(v: &Value) -> std::result::Result<Vec3, &'static str> {
     match v {
         Value::String(a) => match a.trim().to_ascii_uppercase().as_str() {
@@ -2096,26 +2088,45 @@ pub(crate) fn axis_expr_form(v: &Value) -> std::result::Result<solidcraft_doc::D
         .ok_or("`axis` must be X, Y, Z or [x, y, z] of numbers or unitless expressions such as \"-sin(t)\"")
 }
 
-/// A cylinder's `axis` (#18822): what [`axis_expr_form`] reads, each component evaluated now
-/// as a number without a unit. Returns the expressions to keep and the direction they give now.
-fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
+/// A primitive's `axis`, as the cylinder, the cone and the coil read it (#18822, #21932): what
+/// [`axis_expr_form`] reads, each component evaluated now as a number without a unit. Returns
+/// the expressions to keep and the direction they give now.
+pub(super) fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
     let Some(v) = p.get("axis") else { return Ok((solidcraft_doc::dir_expr(Vec3::Z), Vec3::Z)) };
     let d = axis_expr_form(v).map_err(|why| bad(cmd, why))?;
+    dir_expr_now(s, d, "axis", cmd)
+}
+
+/// A hole's `direction` (#21932): `[x, y, z]` (or `{x, y, z}`) of numbers or unitless
+/// expressions, read as an axis is but without X, Y or Z by name, evaluated now.
+fn hole_direction_param(s: &Session, v: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
+    let d = if v.is_string() { None } else { axis_expr_form(v).ok() };
+    let d = d.ok_or_else(|| bad(cmd, "`direction` must be a non-zero [x, y, z] of numbers or unitless expressions such as \"-sin(t)\""))?;
+    dir_expr_now(s, d, "direction", cmd)
+}
+
+/// The direction `d` gives with the parameters now, each component a number without a unit;
+/// `key` names it in a refusal. One that uses no parameter is kept as numbers, normalized.
+fn dir_expr_now(s: &Session, d: solidcraft_doc::DirExpr, key: &str, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
     let mut now = [0.0; 3];
     for ((slot, e), axis) in now.iter_mut().zip(&d).zip(["x", "y", "z"]) {
-        // A parameter added as a plain number is a length, which an axis can't take as it is.
+        // A parameter added as a plain number is a length, which a direction can't take as it is.
         let x = s.doc.eval(e, Kind::Unitless).map_err(|err| {
-            let hint = if s.doc.eval(e, Kind::Length).is_ok() { " (an axis has no unit: divide a length by its unit, as in `n / 1 mm`)" } else { "" };
-            bad(cmd, format!("axis {axis}: {err}{hint}"))
+            let hint = if s.doc.eval(e, Kind::Length).is_ok() {
+                format!(" ({key} has no unit: divide a length by its unit, as in `n / 1 mm`)")
+            } else {
+                String::new()
+            };
+            bad(cmd, format!("{key} {axis}: {err}{hint}"))
         })?;
         if !x.is_finite() {
-            return Err(bad(cmd, format!("axis {axis} is not a finite number")));
+            return Err(bad(cmd, format!("{key} {axis} is not a finite number")));
         }
         *slot = x;
     }
     let [x, y, z] = now;
     let dir = solidcraft_doc::unit_direction(Vec3::new(x, y, z))
-        .ok_or_else(|| bad(cmd, "`axis` is [0, 0, 0] with these parameter values: give a direction that isn't zero"))?;
+        .ok_or_else(|| bad(cmd, format!("`{key}` is [0, 0, 0] with these parameter values: give a direction that isn't zero")))?;
     // An axis that uses no parameter is a fixed direction: saved normalized, as numbers, the
     // way an axis given as numbers is.
     if d.iter().all(|e| solidcraft_doc::expr::references(e).is_empty()) {
@@ -2202,8 +2213,8 @@ fn prim_cone(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, e, Kind::Length, cmd, n)?;
     }
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
-    let axis = axis_dir_param(p, cmd)?;
-    add_feature(s, p, FeatureKind::Cone { base, axis: Dir(axis), radius, top_radius, height, operation: operation(p, cmd)? })
+    let (axis, _) = axis_expr_param(s, p, cmd)?;
+    add_feature(s, p, FeatureKind::Cone { base, axis, radius, top_radius, height, operation: operation(p, cmd)? })
 }
 
 /// What [`edge_points`] found: a point on each edge, in its body's frame, and the body the
@@ -4500,15 +4511,19 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     // point in its own frame only (two leaves of a hinge, one turned) is not the one picked, so
     // neither its face nor its body is taken. Read before reference edges move the position.
     let picked = if points.is_none() { picked_bodies(s, position) } else { None };
-    let supplied_direction = p.get("direction").and_then(vec3);
     // Ordinary sketch-point holes use the sketch normal and ignore this input.
-    if supplied_direction.is_none() && p.get("direction").is_some_and(|v| !v.is_null()) && points.as_ref().is_none_or(|(sp, _, _)| sp.single) {
-        return Err(bad(cmd, "`direction` must be a non-zero [x, y, z]"));
-    }
-    let direction = match (supplied_direction, &points) {
-        (None, Some((sp, _, d))) if !sp.single => *d,
+    let supplied_direction = match p.get("direction").filter(|v| !v.is_null()) {
+        Some(v) => match hole_direction_param(s, v, cmd) {
+            Ok(d) => Some(d),
+            Err(e) if points.as_ref().is_none_or(|(sp, _, _)| sp.single) => return Err(e),
+            Err(_) => None,
+        },
+        None => None,
+    };
+    let (direction_exprs, direction) = match (supplied_direction, &points) {
+        (None, Some((sp, _, d))) if !sp.single => (solidcraft_doc::dir_expr(*d), *d),
         (d, _) => match d {
-            Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
+            Some(d) => d,
             None => {
                 // Into the face the position lies on: against the outward normal of the face
                 // nearest it (planar or curved), as it faces out of its own body. A hole that
@@ -4524,7 +4539,8 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
                     _ => &named,
                 };
                 let st = s.model.state();
-                solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
+                let d = solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?;
+                (solidcraft_doc::dir_expr(d), d)
             }
         },
     };
@@ -4676,7 +4692,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Hole {
             position: FacePick(position),
             at,
-            direction: Dir(direction),
+            direction: direction_exprs,
             diameter,
             depth,
             hole: kind,

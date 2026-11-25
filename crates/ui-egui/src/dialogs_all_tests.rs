@@ -1815,7 +1815,7 @@ fn coil_flip_winds_the_coil_down_its_axis() {
     let (id, p) = apply_commands(&h.app, &d).unwrap().remove(0);
     h.app.run(&id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
     let axis = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
-        FeatureKind::Coil { axis, .. } => Some(axis.0),
+        FeatureKind::Coil { axis, .. } => solidcraft_engine::doc::literal_dir(axis),
         _ => None,
     });
     assert!(axis.is_some_and(|a| a.z < -0.99), "the coil winds down: {axis:?}");
