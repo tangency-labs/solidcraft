@@ -2367,3 +2367,31 @@ fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
     let (v, w) = (body.volume(1e-9).unwrap(), old.volume(1e-9).unwrap());
     assert!((v - w).abs() <= 1e-9 * v, "volume {w} vs {v}");
 }
+
+/// brett19 on #22066 (review of 84964e53): an ops answer of undecided. Sixty 10 mm plates with
+/// their tops spread round y, each tilted off square to y by 0.9 of what the zone allows: y
+/// proves every one, the cross product of the two furthest from parallel does not, and past the
+/// search's budget of constraints the answer is `Undecided`, not `NotStraight`.
+#[test]
+fn faces_past_the_search_s_budget_are_undecided_not_refused() {
+    use solidcore_ops::measure::{straight_direction, Straight};
+    all_fixes();
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let alpha = 0.9 * zone / (2.0 * 10.0 * 2.0_f64.sqrt());
+    let plates: Vec<_> = (0..60)
+        .map(|k| {
+            let (sin, cos) = (TAU * f64::from(k) / 60.0).sin_cos();
+            plate_facing([cos, alpha, sin], [-sin, 0.0, cos])
+        })
+        .collect();
+    let faces: Vec<_> = plates.iter().map(|(b, o, f)| (b, o, *f)).collect();
+    for &(body, order, face) in &faces {
+        let e = body
+            .face_straying(order, face, [0.0, 1.0, 0.0])
+            .unwrap()
+            .unwrap();
+        assert!(e <= zone, "{e}");
+    }
+    let got = straight_direction(&faces).unwrap();
+    assert_eq!(got, Straight::Undecided, "{got:?}");
+}

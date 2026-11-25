@@ -701,10 +701,12 @@ impl Transform {
 const OP_MAPS: &str = "math::Transform";
 
 /// The remainder [`Transform::frame_axes`] refuses: taking the unit `v`'s part along the unit `d`
-/// out leaves a remainder of length `sin` (the sine of the angle between them) off by a few ulps
-/// of 1 (`v · d` and the product and difference after it, each within an ulp), so a remainder no
-/// longer than 8 ulps is rounding, not `v`, and gives no direction.
-pub const FRAME_LEAN: f64 = 8.0 * f64::EPSILON;
+/// out leaves a remainder of length `sin` (the sine of the angle between them) but for its
+/// rounding. For a `v` along `d` (or against it) the computed remainder is at most about 10 ulps:
+/// `|1 - |d|²|` for `d` unit within 2 ulps (4), the three-term `v · d` (`γ₃`, 3), and the product,
+/// the difference and the length (an ulp each). So a remainder no longer than 16 ulps is
+/// rounding, not `v`, and gives no direction (brett19 on #22066).
+pub const FRAME_LEAN: f64 = 16.0 * f64::EPSILON;
 
 /// Whether every coordinate of `v` is finite.
 fn finite3(v: Vec3) -> bool {

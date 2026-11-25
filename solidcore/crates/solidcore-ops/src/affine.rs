@@ -101,7 +101,7 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
 ///
 /// # Errors
 /// [`Error::Argument`] for a number not finite, a `d` or `v` of no length, or a `v` whose part
-/// square to `d` is no longer than its own rounding ([`solidcore::math::FRAME_LEAN`], 8 ulps):
+/// square to `d` is no longer than its own rounding ([`solidcore::math::FRAME_LEAN`], 16 ulps):
 /// `y` would follow the rounding and not `v`. Past that, `y`'s direction is off `v`'s part square
 /// to `d` by about `4ε / sin`; a caller that needs it closer compares that sine itself.
 pub fn frame_axes(d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2]> {

@@ -2599,8 +2599,8 @@ pub enum Straight {
     Undetermined,
     /// Face `face` (an index into the faces passed) strays across the first direction tried by
     /// more than the zone tolerance, and no other candidate proves every face straight. When the
-    /// faces are planes and cylinders, no direction is inside every band
-    /// ([`solidcore::prism::measure::straight_candidates`] proved it).
+    /// faces are planes and cylinders, no direction is one [`Body::face_straying`] accepts for
+    /// every face ([`solidcore::prism::measure::straight_candidates`] proved it).
     NotStraight {
         /// The face, as an index into the faces passed.
         face: usize,
