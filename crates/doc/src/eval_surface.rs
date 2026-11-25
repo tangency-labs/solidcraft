@@ -578,6 +578,66 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             stays_a_surface(st, *stays_surface);
             Ok(())
         }
+        FeatureKind::SurfaceMidsurface {
+            body,
+            faces,
+            max_thickness,
+            min_thickness,
+            min_aspect,
+            carry_holes,
+            suppress_holes_below,
+            stitch,
+            remove_original,
+        } => {
+            use crate::midsurface as mid;
+            let max = val(vals, max_thickness, Kind::Length)?;
+            let min = match min_thickness {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
+            };
+            let below = match suppress_holes_below {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
+            };
+            let picks: Vec<Vec3> = crate::plain(faces);
+            let (pairs, rest) = picks.as_chunks::<2>();
+            if picks.is_empty() || !rest.is_empty() {
+                return Err(DocError::Invalid("Midsurface: `faces` must hold two points for each pair of faces".into()));
+            }
+            let points: Vec<[[f64; 3]; 2]> = pairs.iter().map(|[a, b]| [[a.x, a.y, a.z], [b.x, b.y, b.z]]).collect();
+            let i = body_at(st, body, &picks)?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let defaults = mid::Options::default();
+            let opts = mid::Options { min_thickness: min, max_thickness: max, min_aspect: min_aspect.unwrap_or(defaults.min_aspect), ..defaults };
+            let analysis = mid::analyze(&mb.body, &opts)?;
+            let chosen = mid::pairs_at(&mb.body, &analysis, &points)?;
+            let sheets = mid::sheets_with(&mb.body, &chosen, &mid::Build { carry_holes: *carry_holes, suppress_holes_below: below })?;
+            let notes = mid::report_chosen(&analysis, &chosen, &sheets);
+            mid::something_built(&sheets, &notes)?;
+            // The sheets are read in the solid's own frame: a placement the solid has (a body
+            // offset) goes with them, as a reduced mesh's does, unless the new body has its own.
+            let source_offset = doc.model_body_offset(&mb).copied();
+            for (k, made) in mid::surface_bodies(&sheets, *stitch)?.into_iter().enumerate() {
+                let name = new_name(st, f, k);
+                let made = match source_offset.filter(|_| !doc.body_offsets.contains_key(&name)) {
+                    Some(offset) => kernel::transform_matrix(&made, offset)?,
+                    None => made,
+                };
+                let made = Traced::step(made, &[&mb.traced()]);
+                st.bodies.push(ModelBody::traced_new(name, made, f.id));
+            }
+            if *remove_original {
+                // The records tied to the solid go with it, as a boolean's do.
+                st.bodies.retain(|b| b.name != mb.name);
+                st.threads.retain(|t| t.body != mb.name);
+                st.surface_sheets.retain(|s| s.body != mb.name);
+            }
+            // Never silent: what the sheets leave out is the feature's warning.
+            if !notes.is_empty() {
+                *warning = Some(format!("Midsurface: {}", notes.join("; ")));
+            }
+            Ok(())
+        }
         FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far, stays_surface } => {
             let d = val(vals, distance, Kind::Length)?;
             let mode = match mode {

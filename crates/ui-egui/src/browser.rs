@@ -1325,6 +1325,8 @@ enum Thing {
     Body(String),
     /// A sketch, by feature id.
     Sketch(u64),
+    /// A feature, by feature id.
+    Feature(u64),
     /// An origin or construction plane, by name.
     Plane(String),
     /// An origin or construction axis.
@@ -1392,7 +1394,13 @@ impl Lit {
                     }
                     continue;
                 }
-                Sel::Feature { id } => Thing::Sketch(*id),
+                Sel::Feature { id } => {
+                    if app.session.doc.features.iter().any(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })) {
+                        Thing::Sketch(*id)
+                    } else {
+                        Thing::Feature(*id)
+                    }
+                }
                 Sel::Profile { sketch, .. }
                 | Sel::ExternalSketchCurve { sketch, .. }
                 | Sel::ExternalSketchPoint { sketch, .. }
@@ -1425,15 +1433,23 @@ impl Lit {
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
             Some(Hit::PointCloudPoint { .. }) => None,
             Some(Hit::MemberEnd { .. } | Hit::Centreline { .. }) => None,
-            None => app.viewport.hover_feature.and_then(|id| {
-                app.session.doc.feature(id).and_then(|f| match &f.kind {
-                    FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),
-                    FeatureKind::ConstructionPlane { .. } => Some(Thing::Plane(f.name.clone())),
-                    FeatureKind::ConstructionAxis { .. } => Some(Thing::Axis(f.name.clone())),
-                    FeatureKind::ConstructionPoint { .. } => Some(Thing::Point(f.name.clone())),
-                    _ => None,
-                })
-            }),
+            None => {
+                app.viewport
+                    .hover_feature
+                    .and_then(|id| {
+                        app.session.doc.feature(id).map(|f| match &f.kind {
+                            FeatureKind::Sketch { .. } => Thing::Sketch(id),
+                            FeatureKind::ConstructionPlane { .. } => Thing::Plane(f.name.clone()),
+                            FeatureKind::ConstructionAxis { .. } => Thing::Axis(f.name.clone()),
+                            FeatureKind::ConstructionPoint { .. } => Thing::Point(f.name.clone()),
+                            _ => Thing::Feature(id),
+                        })
+                    })
+                    .or_else(|| {
+                        if app.viewport.hover_bodies.len() == 1 { app.viewport.hover_bodies.first().map(|b| Thing::Body(b.clone())) } else { None }
+                    })
+                    .or_else(|| app.viewport.hover_plane.as_ref().map(|p| Thing::Plane(p.clone())))
+            }
         };
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
@@ -1454,9 +1470,7 @@ impl Lit {
                 Thing::Body(b) => {
                     paths.extend(app.tree.found.as_ref().filter(|found| found.body == *b && !found.path.is_empty()).map(|found| found.path.clone()));
                 }
-                Thing::Sketch(id) => {
-                    components.extend(doc.features.iter().find(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.component))
-                }
+                Thing::Sketch(id) | Thing::Feature(id) => components.extend(doc.features.iter().find(|f| f.id == *id).map(|f| f.component)),
                 Thing::Plane(name) | Thing::Axis(name) | Thing::Point(name) => components.extend(
                     doc.features
                         .iter()
@@ -1963,8 +1977,14 @@ fn component_rows_inner(
     // With a dialog open a second click picks again: the dialog takes the component's bodies.
     let rename_here = r.slow_rename && app.dialog.is_none();
     if r.clicked && !r.double && !rename_here {
-        let names = bodies_of_component(app, id);
-        if !offer_bodies(app, &names, Take::Toggle) {
+        // The dialog's pick is offered only when it can take bodies: building the component's body
+        // list is every body of the design for the design row, which stalled the click on a large
+        // assembly (56,100 names, and a world lookup each, for nothing).
+        let took = dialog_takes_bodies(app) && {
+            let names = bodies_of_component(app, id);
+            offer_bodies(app, &names, Take::Toggle)
+        };
+        if !took {
             let ctrl = rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl);
             if !ctrl {
                 app.tree.picked_components.clear();
@@ -2192,6 +2212,8 @@ fn occurrence_rows_inner(
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
         if !offer_bodies(app, &names, Take::Toggle) {
             click_select(app, r.how.as_ref(), Some(Sel::Occurrence { path: path.to_vec() }));
+        } else if let Some(d) = app.dialog.as_mut() {
+            crate::dialogs_assembly::picked_whole_component(d, &names);
         }
     }
     if rename_here {
@@ -2864,6 +2886,13 @@ impl CanvasPanel {
             _ => self.angle,
         }
     }
+}
+
+/// Whether an open dialog has an input that takes bodies, i.e. whether clicking a component row
+/// could pick into it. Asked *before* building a component's body list: for the design that list
+/// is every body of the design (56,100 names on a large assembly), and nothing uses it otherwise.
+fn dialog_takes_bodies(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| d.inputs.iter().any(|i| i.accept & crate::selection::BODIES != 0))
 }
 
 /// Does the open dialog's active input take bodies (Combine's target and tools, #4452;
@@ -3741,6 +3770,19 @@ fn entry_row(
         acts.hover_feature = Some(*id);
         acts.hovered = true;
     }
+    if r.hovered
+        && matches!(&e.thing, Thing::Axis(_) | Thing::Point(_))
+        && let Ok(id) = e.key.parse()
+    {
+        acts.hover_feature = Some(id);
+        acts.hovered = true;
+    }
+    if r.hovered
+        && let Thing::Feature(id) = &e.thing
+    {
+        acts.hover_feature = Some(*id);
+        acts.hovered = true;
+    }
     if let Some(p) = r.secondary
         && let Some(t) = e.target.clone()
     {
@@ -3914,21 +3956,24 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
     use solidcore_record::Vec2;
     use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
-    if app.session.visibility.shown_dimensions.is_empty() {
+    let shown = &app.session.visibility.shown_dimensions;
+    // Edit Dimensions' sketch is usually one a feature used up, so hidden: its dimensions show anyway.
+    let edit = app.viewport.edit_dimensions.filter(|id| !shown.contains(id));
+    if shown.is_empty() && edit.is_none() {
         return;
     }
     let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
     let st = crate::open_meshing::still_world(app);
-    for id in app
-        .session
-        .visibility
-        .shown_dimensions
+    for id in shown
         .iter()
-        .filter(|id| app.session.active_sketch != Some(**id) && solidcraft_engine::view::sketch_shown(&app.session, **id))
+        .copied()
+        .filter(|id| solidcraft_engine::view::sketch_shown(&app.session, *id))
+        .chain(edit)
+        .filter(|id| app.session.active_sketch != Some(*id))
     {
-        let Some(ss) = st.sketch(*id) else { continue };
+        let Some(ss) = st.sketch(id) else { continue };
         let sk = &ss.sketch;
         let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
         // Unplaced dimensions sit away from the middle of the sketch.
@@ -3978,7 +4023,7 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
             painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
             painter.galley(r.min + vec2(3.0, 1.0), galley, col);
             if rect.contains(tc) {
-                drawn.push(crate::dim_view::ModelDim { sketch: *id, id: c.id.clone(), param: c.param.clone(), text: r });
+                drawn.push(crate::dim_view::ModelDim { sketch: id, id: c.id.clone(), param: c.param.clone(), text: r });
             }
         }
     }
@@ -4004,7 +4049,7 @@ pub fn save_as_question(name: &str, extension: &str) -> String {
 /// Yes while components were moved without capturing their positions, except for the commands
 /// that capture, revert or keep moving.
 pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
-    !app.session.pending_moves.is_empty()
+    app.session.has_uncaptured_positions()
         && !matches!(
             what,
             "component.capture_position"
@@ -4012,6 +4057,12 @@ pub fn needs_capture(app: &SolveApp, what: &str) -> bool {
                 | "occurrence.move"
                 | "occurrence.align"
                 | "occurrence.drag"
+                | "joint.drive"
+                | "joint.reach"
+                | "joint.gear"
+                | "joint.screw"
+                | "joint.rack_pinion"
+                | "motion.study"
                 | "edit.undo"
                 | "edit.redo"
         )

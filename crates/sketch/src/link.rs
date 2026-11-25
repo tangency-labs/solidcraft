@@ -1029,6 +1029,7 @@ impl Sketch {
                 fixed: false,
                 infinite: false,
                 spline_handle_of: None,
+                spline_control_polygon_of: None,
             });
         }
         for li in &lay.lone {

@@ -296,3 +296,117 @@ fn an_edited_feature_keeps_its_operation() {
     checked(&mut h);
     assert_eq!(op(&mut h), JOIN, "the saved Join stays");
 }
+
+/// Two 10 mm cubes that a 4 mm box window set to Cut reaches: `A` in the root component and `B` in
+/// `Plate` (#20647). With `plate` false both are in the root.
+fn two_cubes(plate: bool) -> Harness {
+    let mut h = Harness::new();
+    if plate {
+        h.app.run("component.create", json!({"name": "Plate"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [1, 1, -5], "body_name": "B", "operation": "new"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+    } else {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [1, 1, -5], "body_name": "B", "operation": "new"})).unwrap();
+    }
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [1, 1, 1], "body_name": "A", "operation": "new"})).unwrap();
+    h.app.start("solid.box");
+    h.frames(2);
+    if let Some(d) = h.app.dialog.as_mut()
+        && let Kind::Primitive { fields, operation, .. } = &mut d.kind
+    {
+        for (_, value) in fields.iter_mut() {
+            *value = "4".into();
+        }
+        *operation = CUT;
+        d.op_auto.manual = true;
+    }
+    h.frames(2);
+    h
+}
+
+fn cut_volume(h: &Harness, body: &str) -> f64 {
+    h.app.session.world_state().unwrap().body(body).unwrap().measure().unwrap().volume
+}
+
+/// Runs the window's commands and returns the first one's parameters.
+fn run_window(h: &mut Harness) -> serde_json::Value {
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let (cmd, p) = commands.first().cloned().unwrap();
+    h.app.run(&cmd, p.clone()).unwrap();
+    p
+}
+
+#[test]
+fn a_cut_across_two_components_cuts_every_ticked_body() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["A", "B"]));
+    }
+    let p = run_window(&mut h);
+    let mut targets: Vec<&str> = p["targets"].as_array().unwrap().iter().filter_map(|t| t.as_str()).collect();
+    targets.sort();
+    assert_eq!(targets, ["A", "B"], "{p}");
+    assert!((cut_volume(&h, "A") - 973.0).abs() < 0.5, "A lost the 3x3x3 the box reaches: {}", cut_volume(&h, "A"));
+    assert!((cut_volume(&h, "B") - 964.0).abs() < 0.5, "B lost the 3x3x4 the box reaches: {}", cut_volume(&h, "B"));
+}
+
+#[test]
+fn a_cut_across_two_components_leaves_an_unticked_body_alone() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["A"]));
+    }
+    let p = run_window(&mut h);
+    assert_eq!(p["targets"], json!(["A"]), "{p}");
+    assert!(p.get(crate::cut_bodies::SKIPPED).is_none(), "the list is not a command parameter: {p}");
+    assert!((cut_volume(&h, "A") - 973.0).abs() < 0.5);
+    assert!((cut_volume(&h, "B") - 1000.0).abs() < 0.5, "B was not ticked: {}", cut_volume(&h, "B"));
+}
+
+#[test]
+fn a_cut_with_every_body_in_one_component_sends_no_list() {
+    let mut h = two_cubes(false);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(commands.iter().all(|(_, p)| p.get("targets").is_none()), "{commands:?}");
+    h.frames(1);
+}
+
+/// An untouched list sends nothing of its own: the Cut takes the bodies it took before the list,
+/// the shown scope or, without one, what the command does by itself (#20647).
+#[test]
+fn an_untouched_list_leaves_the_cut_as_it_was() {
+    let h = two_cubes(true);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let (_, p) = commands.first().cloned().unwrap();
+    match solidcraft_engine::shown_scope(&h.app.session) {
+        Some(shown) => assert_eq!(p["targets"], json!(shown), "{p}"),
+        None => assert!(p.get("targets").is_none(), "{p}"),
+    }
+}
+
+/// A changed list holds when its only ticked body is hidden while the window is open: the Cut is
+/// refused rather than run on the bodies the user did not tick (#20647).
+#[test]
+fn hiding_the_only_ticked_body_refuses_the_cut() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["B"]));
+    }
+    h.app.session.visibility.hidden_bodies.push("B".into());
+    h.frames(1);
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+}
+
+/// Hiding an unticked body keeps the ticked one cut, even when that leaves one component shown and
+/// the list with it (#20647).
+#[test]
+fn hiding_an_unticked_body_still_cuts_the_ticked_one() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["A"]));
+    }
+    h.app.session.visibility.hidden_bodies.push("B".into());
+    h.frames(1);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands.first().map(|(_, p)| p["targets"].clone()), Some(json!(["A"])), "{commands:?}");
+}

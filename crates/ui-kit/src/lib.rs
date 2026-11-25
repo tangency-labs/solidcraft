@@ -271,6 +271,7 @@ pub use toast::measure_inline_notice;
 pub use tree::*;
 pub use value_focus::*;
 pub use viewport_status::*;
+pub use wheel::panel_scroll_offset;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod blur_plan_tests;

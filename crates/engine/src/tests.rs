@@ -1405,6 +1405,7 @@ fn hostile_params_never_panic() {
                                         || matches!(
                                             id,
                                             "file.export_3mf"
+                                                | "file.export_mjcf"
                                                 | "file.export_obj"
                                                 | "file.export_sdf"
                                                 | "file.export_step"
@@ -2340,7 +2341,7 @@ fn hole_direction_rejects_malformed_vectors_without_changing_the_design() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
     let before = (*s.doc).clone();
-    for direction in [json!("sideways"), json!([0, -1]), json!([0, 0, -1, 0]), json!(["1", "0", "0"]), json!({"x": 1}), json!(false), json!(2)] {
+    for direction in [json!("sideways"), json!([0, -1]), json!([0, 0, -1, 0]), json!({"x": 1}), json!(false), json!(2)] {
         let err =
             s.execute("solid.hole", &json!({"position": [10, 10, 10], "diameter": 5, "depth": 5, "direction": direction})).unwrap_err().to_string();
         assert!(err.contains("`direction`"), "{direction}: {err}");
@@ -2903,6 +2904,92 @@ fn section_planes_hide_and_show() {
     assert!(s.section.is_empty() && s.section_hidden.is_empty());
 }
 
+/// A design keeps several named sections and switches between them; they are saved with the
+/// design, and a design without any saves nothing for them (#20649).
+#[test]
+fn saved_sections_are_kept_switched_and_saved_with_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    assert!(s.execute("inspect.section.save", &json!({"name": "Nothing yet"})).is_err(), "no section to keep");
+    assert!(!serde_json::to_string(&*s.doc).unwrap().contains("saved_sections"), "nothing saved, nothing written");
+    run(&mut s, "inspect.section", json!({"plane": "XZ", "at": 15}));
+    assert_eq!(run(&mut s, "inspect.section.save", json!({"name": " Wall "}))["section"], "Wall");
+    run(&mut s, "inspect.section", json!({"plane": "YZ", "at": 20, "hatch": false}));
+    run(&mut s, "inspect.section.save", json!({"name": "End"}));
+    let listed = run(&mut s, "inspect.section.list", json!({}));
+    assert_eq!(listed["sections"].as_array().map(Vec::len), Some(2));
+    assert_eq!(listed["shown"], "End");
+
+    // Showing one puts its plane on show; undo brings the other back.
+    let shown = run(&mut s, "inspect.section.show", json!({"section": "Wall"}));
+    assert_eq!(shown["section"], "Wall");
+    assert!(s.section.len() == 1 && (s.section[0].origin.y - 15.0).abs() < 1e-9 && s.section_hatch);
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "Wall");
+    run(&mut s, "inspect.section.show", json!({"section": "End"}));
+    assert!(s.section.len() == 1 && (s.section[0].origin.x - 20.0).abs() < 1e-9 && !s.section_hatch);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((s.section[0].origin.y - 15.0).abs() < 1e-9, "undo shows the earlier section again");
+
+    // Bad names and unknown sections are refused and change nothing.
+    assert!(s.execute("inspect.section.show", &json!({"section": "Missing"})).is_err());
+    assert!(s.execute("inspect.section.save", &json!({"name": "  "})).is_err());
+    assert!(s.execute("inspect.section.rename", &json!({"section": "Wall", "name": "End"})).is_err());
+    run(&mut s, "inspect.section.rename", json!({"section": "Wall", "name": "Inner wall"}));
+
+    // Saved and reopened, both are there and still show.
+    let reopened: solidcraft_doc::Document = serde_json::from_str(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+    assert_eq!(reopened.saved_sections.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), ["Inner wall", "End"]);
+    let mut again = Session::new(reopened);
+    assert_eq!(run(&mut again, "inspect.section.list", json!({}))["shown"], Value::Null);
+    run(&mut again, "inspect.section.show", json!({"section": "End"}));
+    assert!((again.section[0].origin.x - 20.0).abs() < 1e-9);
+    run(&mut again, "inspect.section.delete", json!({"section": "End"}));
+    run(&mut again, "inspect.section.delete", json!({"section": "Inner wall"}));
+    assert!(again.doc.saved_sections.is_empty());
+    assert!(!serde_json::to_string(&*again.doc).unwrap().contains("saved_sections"));
+}
+
+/// Two cuts far from the origin that differ by 0.05 are told apart: only the one on show is shown.
+#[test]
+fn saved_sections_far_from_the_origin_are_told_apart() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [100000000.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0]}}));
+    run(&mut s, "inspect.section.save", json!({"name": "A"}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [100000000.0, 0.0, 0.05], "normal": [0.0, 0.0, 1.0]}}));
+    run(&mut s, "inspect.section.save", json!({"name": "B"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "B");
+    run(&mut s, "inspect.section.show", json!({"section": "A"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "A");
+    run(&mut s, "inspect.section.show", json!({"section": "B"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "B");
+}
+
+/// A saved section from a damaged file is refused rather than shown.
+#[test]
+fn saved_section_with_a_bad_plane_is_not_shown() {
+    let mut doc = solidcraft_doc::Document::new("Damaged");
+    let plane = |id: u64, normal: solidcore_record::Vec3| solidcraft_doc::SavedSectionPlane {
+        id,
+        origin: solidcore_record::Vec3::ZERO,
+        normal,
+        hidden: false,
+    };
+    for (name, planes) in [
+        ("zero normal", vec![plane(1, solidcore_record::Vec3::ZERO)]),
+        ("id zero", vec![plane(0, solidcore_record::Vec3::X)]),
+        ("same id twice", vec![plane(1, solidcore_record::Vec3::X), plane(1, solidcore_record::Vec3::Y)]),
+        ("too many", (1..=9).map(|i| plane(i, solidcore_record::Vec3::X)).collect()),
+    ] {
+        doc.saved_sections.push(solidcraft_doc::SavedSection { name: name.into(), planes, hatch: true });
+    }
+    let mut s = Session::new(doc);
+    for name in ["zero normal", "id zero", "same id twice", "too many"] {
+        assert!(s.execute("inspect.section.show", &json!({"section": name})).is_err(), "{name}");
+        assert!(s.section.is_empty(), "{name}");
+    }
+}
+
 /// The Analysis folder's eye: hiding it hides the planes on show and remembers them; a plane's
 /// own eye meanwhile changes only whether it comes back; showing it, or a plane added or moved,
 /// brings them back.
@@ -3397,6 +3484,19 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!((m["bodies"][0]["mass_g"].as_f64().unwrap() - 10_000.0 * 2.7 / 1000.0).abs() < 1e-6, "{m}");
     assert_eq!(m["bodies"][0]["material"], "Aluminum");
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
+}
+
+/// #18344: a wall is a thickness. A user who wants a hollow pipe typed "hollow" into the Wall
+/// field, and the refusal says what a wall is.
+#[test]
+fn a_pipe_wall_that_is_not_a_thickness_says_what_a_wall_is() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("solid.pipe", &json!({"path_sketch": "Path", "path": ["l1"], "diameter": 8, "wall": "hollow"})).unwrap_err().to_string();
+    assert!(e.contains("must be a thickness"), "{e}");
+    assert!(!e.contains("unknown parameter"), "{e}");
 }
 
 /// A Bounding Solid of listed bodies (no `contents`), as every saved design has it, keeps the box
@@ -4826,7 +4926,8 @@ fn countersink_for_a_countersunk_screw_head() {
 fn head_countersink_is_the_head_plus_the_default_gap() {
     assert_eq!(cmd::head_countersink("ISO 10642", "M6"), Some(14.44), "dk 13.44");
     assert_eq!(cmd::head_countersink("countersunk_socket_screw", "M4x0.7"), Some(9.96), "dk 8.96, the pitch written out");
-    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), None, "the table starts at M3");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), Some(5.7), "dk 4.7");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M1.6"), None, "the table starts at M2");
     assert_eq!(cmd::head_countersink("ISO 4762", "M6"), None, "a socket head is no countersunk head");
     assert_eq!(cmd::head_counterbore("ISO 10642", "M6"), None, "nor a counterbore's");
 }
@@ -8734,6 +8835,187 @@ fn cheap_commands_on_thousands_of_bodies_evaluate_nothing() {
     assert_eq!(meshes(&s), shown, "every body keeps its mesh");
 }
 
+/// #611: renaming a parameter changes no value, so it recomputes no feature, and nor do its
+/// undo and redo: the design is the one evaluating the renamed design gives, with the same
+/// bodies and volume. A parameter another parameter is worked out from is renamed the same way.
+/// A rename that also changes a value is evaluated.
+#[test]
+fn renaming_a_parameter_recomputes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "40", "unit": "mm"}));
+    run(&mut s, "parameters.add", json!({"name": "hole", "expression": "w / 10"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": "w", "width": 20, "height": 5, "body_name": "Plate"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"diameter": "hole", "height": 7, "base": [4, 4, -1], "operation": "cut", "targets": ["Plate"], "name": "Hole"}),
+    );
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole"], "dir1": [1, 0, 0], "count1": 4, "spacing1": "w / 4", "name": "Holes"}));
+    let fresh = |s: &Session| {
+        let mut f = Session::new((*s.doc).clone());
+        (volume(&mut f), f.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>())
+    };
+    let bodies = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let shown = (volume(&mut s), bodies(&s));
+    let length = |s: &Session| {
+        let f = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).unwrap();
+        serde_json::to_value(&f.kind).unwrap()["length"].clone()
+    };
+    for (command, params) in [
+        ("parameters.rename", json!({"name": "w", "new_name": "plate_w"})),
+        ("parameters.rename", json!({"name": "hole", "new_name": "hole_d"})),
+        ("edit.undo", json!({})),
+        ("edit.undo", json!({})),
+        ("edit.redo", json!({})),
+    ] {
+        s.evaluations = 0;
+        run(&mut s, command, params);
+        assert_eq!(s.model.last_recomputed, 0, "{command} recomputed a feature");
+        assert_eq!(s.evaluations, 0, "{command} evaluated the design");
+        assert_eq!((volume(&mut s), bodies(&s)), shown, "{command} kept the design");
+        assert_eq!(fresh(&s), shown, "{command}: evaluating the design gives the same");
+    }
+    assert_eq!(length(&s), json!("plate_w"));
+    assert_eq!(s.doc.param("hole").map(|p| p.expr.as_str()), Some("plate_w / 10"));
+
+    // A rename that also changes a value builds the design again.
+    let before = s.doc.clone();
+    let mut changed = (*before).clone();
+    changed.rename_param("plate_w", "w").unwrap();
+    changed.set_param("w", "60 mm", None, None).unwrap();
+    s.doc = std::sync::Arc::new(changed);
+    s.refresh_from(&before, false);
+    assert!(s.model.last_recomputed > 0, "a changed value is evaluated");
+    let moved = (volume(&mut s), bodies(&s));
+    assert_eq!(fresh(&s), moved);
+    assert!(rel(moved.0, shown.0) > 0.1, "{} vs {}", moved.0, shown.0);
+}
+
+/// #611: a rename that reaches a sketch (the parameter a dimension or a point reads, a
+/// dimension's own parameter) keeps every result too: the solved sketches the model keeps take
+/// the new name as evaluating the renamed design solves them, and the next value change builds
+/// what evaluating it builds.
+#[test]
+fn renaming_a_parameter_a_sketch_reads_recomputes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "40", "unit": "mm"}));
+    run(&mut s, "parameters.add", json!({"name": "hole", "expression": "w / 10"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command": "sketch.rectangle.center", "params": {"center": [0, 0], "corner": [20, 10]}, "dimensions": {"width": "w", "height": 20}}),
+    );
+    let width = out["dimensions"]["width"]["param"].as_str().unwrap_or_default().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 5, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "sketch.line", json!({"points": [[-2, -2], ["hole", -2], ["hole", 2], [-2, 2]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "distance": 10, "operation": "cut", "name": "Cut"}));
+    let sketches = |s: &Session| {
+        let drawn = s.doc.features.iter().filter_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Sketch { sketch, .. } => Some(serde_json::to_string(sketch).unwrap()),
+            _ => None,
+        });
+        drawn.collect::<Vec<_>>()
+    };
+    // What each result keeps that evaluating the design again gives, to the bit: its outcome, and
+    // the bodies, solved sketches and construction geometry after it.
+    let model = |m: &solidcraft_doc::Model| {
+        let result = |r: &solidcraft_doc::FeatureResult| {
+            let st = &r.state;
+            let bodies = st.bodies.iter().map(|b| (&b.name, b.feature, b.component)).collect::<Vec<_>>();
+            let outcome = format!("{} {} {:?} {:?} {}", r.id, r.name, r.error, r.warning, r.skipped);
+            format!("{outcome} {bodies:?} {:?} {:?} {:?}", st.sketches, st.sketch_copies, st.construct)
+        };
+        m.results.iter().map(result).collect::<Vec<_>>()
+    };
+    let fresh = |s: &Session| {
+        let mut f = Session::new((*s.doc).clone());
+        (volume(&mut f), model(&f.model))
+    };
+    // Where the model a design file keeps differs from a fresh session's, less the times and the
+    // bodies' cache keys (a key digests the definition that made the body, names included).
+    let saved_differences = |s: &Session| {
+        fn walk(a: &Value, b: &Value, at: String, out: &mut Vec<String>) {
+            match (a, b) {
+                (Value::Object(x), Value::Object(y)) => {
+                    let keys = x.keys().chain(y.keys()).filter(|k| !matches!(k.as_str(), "ms" | "key"));
+                    for k in keys.collect::<std::collections::BTreeSet<_>>() {
+                        walk(x.get(k).unwrap_or(&Value::Null), y.get(k).unwrap_or(&Value::Null), format!("{at}.{k}"), out);
+                    }
+                }
+                (Value::Array(x), Value::Array(y)) if x.len() == y.len() => {
+                    for (i, (p, q)) in x.iter().zip(y).enumerate() {
+                        walk(p, q, format!("{at}[{i}]"), out);
+                    }
+                }
+                _ if a != b => out.push(format!("{at}: {a} vs {b}")),
+                _ => {}
+            }
+        }
+        let records = |s: &Session| s.model.saved(&s.doc).map(|m| m.records).unwrap_or(Value::Null);
+        let mut out = Vec::new();
+        walk(&records(s), &records(&Session::new((*s.doc).clone())), String::new(), &mut out);
+        out
+    };
+    // A design built command by command already keeps a little apart from a fresh evaluation of
+    // it (which body names are reserved): a rename adds no difference.
+    let apart = saved_differences(&s);
+    for (command, params, sketch_renamed) in [
+        ("parameters.rename", json!({"name": "w", "new_name": "plate_w"}), false),
+        ("parameters.rename", json!({"name": "hole", "new_name": "hole_d"}), true),
+        ("parameters.rename", json!({"name": width, "new_name": "base_w"}), true),
+        ("edit.undo", json!({}), true),
+        ("edit.undo", json!({}), true),
+        ("edit.redo", json!({}), true),
+        ("edit.redo", json!({}), true),
+    ] {
+        let drawn = sketches(&s);
+        s.evaluations = 0;
+        run(&mut s, command, params);
+        assert_eq!(drawn != sketches(&s), sketch_renamed, "{command} renamed in a sketch");
+        assert_eq!(s.model.last_recomputed, 0, "{command} recomputed a feature");
+        assert_eq!(s.evaluations, 0, "{command} evaluated the design");
+        assert_eq!((volume(&mut s), model(&s.model)), fresh(&s), "{command}: the model is the renamed design's");
+        assert_eq!(saved_differences(&s), apart, "{command}: the saved model is the renamed design's");
+        // Evaluating the design again reuses every result: each fingerprint is the renamed design's.
+        s.refresh();
+        assert_eq!(s.model.last_recomputed, 0, "{command}: a result kept an old fingerprint");
+    }
+    assert_eq!(s.doc.param("hole_d").map(|p| p.expr.as_str()), Some("plate_w / 10"));
+    assert_eq!(s.doc.param("base_w").map(|p| p.expr.as_str()), Some("plate_w"));
+
+    // The next value change builds what evaluating the design builds, from the renamed sketches.
+    let shown = volume(&mut s);
+    let r = run(&mut s, "parameters.change", json!({"name": "plate_w", "expression": "60 mm"}));
+    assert!(r["recomputed"].as_u64().is_some_and(|n| n > 0), "a changed value is evaluated: {r}");
+    let moved = (volume(&mut s), model(&s.model));
+    assert_eq!(moved, fresh(&s));
+    assert!(rel(moved.0, shown) > 0.1, "{} vs {shown}", moved.0);
+}
+
+/// #611: an equation curve's variable hides a parameter of its name, so renaming the parameter a
+/// formula reads to the variable's name changes what the formula reads (`y = a * t` becomes
+/// `y = t * t`): the curve is placed where evaluating the renamed design places it.
+#[test]
+fn renaming_a_parameter_to_an_equation_curves_variable_places_the_curve_again() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "2"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "a * t", "start": 0, "end": 4}));
+    let curve = r["curve"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let solved = |s: &Session| format!("{:?}", s.model.state().sketches);
+    let shown = solved(&s);
+    run(&mut s, "parameters.rename", json!({"name": "a", "new_name": "t"}));
+    let f = s.doc.find_feature("S").unwrap().id;
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&curve).unwrap().y, "t * t");
+    assert_eq!(solved(&s), solved(&Session::new((*s.doc).clone())), "the curve is the renamed design's");
+    assert_ne!(solved(&s), shown, "y = t * t is not y = 2 * t");
+}
+
 /// #3397: a new, empty component changes nothing a feature reads, so creating one recomputes
 /// nothing, the first component of a design included: not a targeted cut, a Combine, a To
 /// Object extrude or a sketch on a face without a construction certificate (a legacy face
@@ -8971,7 +9253,7 @@ fn head_counterbore_is_the_head_plus_the_default_gap() {
     assert_eq!(cmd::head_counterbore("ISO 4762", "M4"), Some((8.0, 4.5)), "socket head dk 7, k 4");
     assert_eq!(cmd::head_counterbore("ISO 7380-1", "M4x0.7"), Some((8.6, 2.7)), "button head dk 7.6, k 2.2");
     assert_eq!(cmd::head_counterbore("socket_head_cap_screw", "M4"), Some((8.0, 4.5)), "the family name parts.insert takes");
-    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M2"), None, "ISO 7380-1 has no M2");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M14"), None, "the button head table has no M14");
     assert_eq!(cmd::head_counterbore("DIN 912", "M4"), None);
 }
 

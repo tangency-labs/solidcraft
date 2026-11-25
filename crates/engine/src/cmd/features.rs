@@ -293,18 +293,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("hole")
         .key("H")
         .params(concat!(
-            "position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
+            "position: [x,y,z] on a face of a body (numbers, or length expressions the hole follows; a position on no face is refused: the hole starts at that face, its depths are measured from it, and material above it (a body over it, a taller wall beside it) is left standing) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
             "flip?: bool (sketch points: drill to the other side); ",
             "single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); ",
-            "direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); ",
+            "direction?: [x,y,z], each a number or an expression with no unit (\"-sin(t)\") the hole follows as the parameters change (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); ",
             "diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); ",
             "head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) | \"ISO 10642\" (countersunk head) (with clearance: the recess the screw's head sits in. A cap screw's: a counterbore, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value. A countersunk head's: a countersink, so type defaults to countersink; 90° unless cs_angle is given, its diameter the head's dk plus head_gap each side, so the head sits head_gap below the face; a cs_diameter given keeps its value); ",
             "head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); ",
-            "depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); ",
+            "depth? (default through all; from where the hole starts, not from `position`: the face it enters, or for a sketch point inside a body the sketch plane) | to?: [x,y,z] (To Object: drill to that face or point); ",
             "references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); ",
             "type?: simple|drilled|counterbore|countersink; ",
             "tip_angle?; ",
-            "cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); ",
+            "cb_diameter?, cb_depth? (from where the hole starts, as depth), bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); ",
             "cs_diameter?, cs_angle?; ",
             "thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); ",
             "hand?: right|left (the tapped thread's hand; default right; needs thread); ",
@@ -362,8 +362,9 @@ pub static COMMANDS: &[CommandSpec] = &[
             "single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); ",
             "shared options apply to every face, automatic size fits each independently; ",
             "cosmetic replies include threads for faces and retain thread as the first; ",
-            "form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
+            "form?: metric|unified|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
             "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); ",
+            "unified \"1/4-20 UNC-2A\", \"#10-32 UNF\" (ASME B1.1, 60 degrees; <size>-<TPI> UNC|UNF|UNEF|UN, optional -1A/-2A/-3A external or -1B/-2B/-3B internal, class retained; size #0..#12 or fractional/decimal inches, major from size, pitch exactly 25.4/TPI; automatic unified uses nearest catalogued UNC, default automatic remains metric); ",
             "trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); ",
             "buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); ",
             "acme \"1/2-10 ACME\" (ASME B1.5); ",
@@ -1606,7 +1607,7 @@ fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
         }
         // STEP links remain editable import bases: downstream features rebuild when their
         // source updates. Linked designs keep their own editable history in the source file.
-        if s.doc.links.get(&c).is_some_and(|link| link.step_names.is_none()) {
+        if s.doc.links.get(&c).is_some_and(|link| link.is_design()) {
             return Err(EngineError::Other(format!(
                 "`{}` is in {}, which is linked to a design file: open that design to change it, or break the link first",
                 body.name,
@@ -2052,16 +2053,8 @@ pub(super) fn point_param(s: &Session, p: &Value, key: &str, cmd: &str) -> Resul
     Ok(Some(out))
 }
 
-/// An axis direction: X|Y|Z or a non-zero `[x, y, z]`; `Z` when it is not given.
-pub(super) fn axis_dir_param(p: &Value, cmd: &str) -> Result<Vec3> {
-    match p.get("axis") {
-        None => Ok(Vec3::Z),
-        Some(v) => axis_dir_form(v).map_err(|why| bad(cmd, why)),
-    }
-}
-
-/// What [`axis_dir_param`] reads a given `axis` as, without the design: X, Y or Z (trimmed, any
-/// case), else a non-zero `[x, y, z]`, normalized.
+/// A given `axis` read without the design as X, Y or Z (trimmed, any case), else a non-zero
+/// `[x, y, z]`, normalized.
 pub(crate) fn axis_dir_form(v: &Value) -> std::result::Result<Vec3, &'static str> {
     match v {
         Value::String(a) => match a.trim().to_ascii_uppercase().as_str() {
@@ -2105,26 +2098,46 @@ pub(crate) fn axis_expr_form(v: &Value) -> std::result::Result<solidcraft_doc::D
         .ok_or("`axis` must be X, Y, Z or [x, y, z] of numbers or unitless expressions such as \"-sin(t)\"")
 }
 
-/// A cylinder's `axis` (#18822): what [`axis_expr_form`] reads, each component evaluated now
-/// as a number without a unit. Returns the expressions to keep and the direction they give now.
-fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
+/// A primitive's `axis`, as the cylinder, the cone and the coil read it (#18822, #21932): what
+/// [`axis_expr_form`] reads, each component evaluated now as a number without a unit. Returns
+/// the expressions to keep and the direction they give now.
+pub(super) fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
     let Some(v) = p.get("axis") else { return Ok((solidcraft_doc::dir_expr(Vec3::Z), Vec3::Z)) };
     let d = axis_expr_form(v).map_err(|why| bad(cmd, why))?;
+    dir_expr_now(s, d, "axis", cmd)
+}
+
+/// A hole's `direction` (#21932): `[x, y, z]` (or `{x, y, z}`) of numbers or unitless
+/// expressions, read as an axis is but without X, Y or Z by name, evaluated now.
+fn hole_direction_param(s: &Session, v: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
+    let d = if v.is_string() { None } else { axis_expr_form(v).ok() };
+    let d = d.ok_or_else(|| bad(cmd, "`direction` must be a non-zero [x, y, z] of numbers or unitless expressions such as \"-sin(t)\""))?;
+    dir_expr_now(s, d, "direction", cmd)
+}
+
+/// The direction `d` gives with the parameters now, each component a number without a unit;
+/// `key` names it in a refusal. One that uses no parameter is kept as numbers, normalized.
+fn dir_expr_now(s: &Session, d: solidcraft_doc::DirExpr, key: &str, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
     let mut now = [0.0; 3];
     for ((slot, e), axis) in now.iter_mut().zip(&d).zip(["x", "y", "z"]) {
-        // A parameter added as a plain number is a length, which an axis can't take as it is.
+        // A parameter added as a plain number is a length, which a direction can't take as it is.
         let x = s.doc.eval(e, Kind::Unitless).map_err(|err| {
-            let hint = if s.doc.eval(e, Kind::Length).is_ok() { " (an axis has no unit: divide a length by its unit, as in `n / 1 mm`)" } else { "" };
-            bad(cmd, format!("axis {axis}: {err}{hint}"))
+            let hint = if s.doc.eval(e, Kind::Length).is_ok() {
+                let noun = if key == "axis" { "an axis" } else { "a direction" };
+                format!(" ({noun} has no unit: divide a length by its unit, as in `n / 1 mm`)")
+            } else {
+                String::new()
+            };
+            bad(cmd, format!("{key} {axis}: {err}{hint}"))
         })?;
         if !x.is_finite() {
-            return Err(bad(cmd, format!("axis {axis} is not a finite number")));
+            return Err(bad(cmd, format!("{key} {axis} is not a finite number")));
         }
         *slot = x;
     }
     let [x, y, z] = now;
     let dir = solidcraft_doc::unit_direction(Vec3::new(x, y, z))
-        .ok_or_else(|| bad(cmd, "`axis` is [0, 0, 0] with these parameter values: give a direction that isn't zero"))?;
+        .ok_or_else(|| bad(cmd, format!("`{key}` is [0, 0, 0] with these parameter values: give a direction that isn't zero")))?;
     // An axis that uses no parameter is a fixed direction: saved normalized, as numbers, the
     // way an axis given as numbers is.
     if d.iter().all(|e| solidcraft_doc::expr::references(e).is_empty()) {
@@ -2211,8 +2224,8 @@ fn prim_cone(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, e, Kind::Length, cmd, n)?;
     }
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
-    let axis = axis_dir_param(p, cmd)?;
-    add_feature(s, p, FeatureKind::Cone { base, axis: Dir(axis), radius, top_radius, height, operation: operation(p, cmd)? })
+    let (axis, _) = axis_expr_param(s, p, cmd)?;
+    add_feature(s, p, FeatureKind::Cone { base, axis, radius, top_radius, height, operation: operation(p, cmd)? })
 }
 
 /// What [`edge_points`] found: a point on each edge, in its body's frame, and the body the
@@ -4148,8 +4161,15 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
+    // More surface bodies cut only with a face tool's whole surface body (#13303): a plane or a
+    // sketch line would drop them.
+    let face_tool = p.get("tool").is_some_and(|t| !t.is_null());
+    let lines = p.get("sketch").is_some_and(|v| !v.is_null()) || p.get("line").is_some_and(|v| !v.is_null());
+    if p.get("tool_bodies").is_some_and(|v| !v.is_null()) && (!face_tool || lines) {
+        return Err(bad(cmd, "`tool_bodies` needs a face `tool` with `tool_sheet` \"body\""));
+    }
     // A straight sketch line as the tool: `sketch` and `line` (#1552).
-    if p.get("sketch").is_some_and(|v| !v.is_null()) || p.get("line").is_some_and(|v| !v.is_null()) {
+    if lines {
         let sketch = p.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`sketch` must be a sketch feature id"))?;
         let line = str_(p, "line").ok_or_else(|| bad(cmd, "`line` must name a line of the sketch"))?.to_string();
         let st = s.model.state();
@@ -4167,6 +4187,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_plane: false,
                 tool_sheet: SplitSheet::Extended,
                 tool_faces: Vec::new(),
+                tool_bodies: Vec::new(),
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
                 line: Some(line),
             },
@@ -4219,6 +4240,41 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
         if tool_sheet == SplitSheet::Body && !tbody.body.is_surface() {
             return Err(bad(cmd, format!("`{tb}` is not a surface body, so it cannot split as a whole")));
         }
+        // More surface bodies that cut with the tool's, each whole (#13303).
+        let tool_bodies = match p.get("tool_bodies").filter(|v| !v.is_null()) {
+            None => Vec::new(),
+            Some(v) => {
+                let names = v.as_array().ok_or_else(|| bad(cmd, "`tool_bodies` must be a list of body names"))?;
+                if names.len() > MAX_SPLIT_TOOL_BODIES {
+                    return Err(bad(cmd, format!("`tool_bodies` takes at most {MAX_SPLIT_TOOL_BODIES} bodies")));
+                }
+                let mut bodies: Vec<BodyName> = Vec::with_capacity(names.len());
+                // A further placement's body (`Sheet (Part:2)`) keeps its name and cuts where its
+                // occurrence puts it, as a combine's tool does (#20040); the model holds only a
+                // component's first placement, the placed model the others.
+                let further = names.iter().any(|n| n.as_str().is_some_and(|n| st.body(n).is_none()));
+                let world = if further { Some(s.world_state()?) } else { None };
+                for name in names {
+                    let name = name.as_str().ok_or_else(|| bad(cmd, "`tool_bodies` must be a list of body names"))?;
+                    let other =
+                        st.body(name).or_else(|| world.as_ref().and_then(|w| w.body(name))).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+                    if !other.body.is_surface() {
+                        return Err(bad(cmd, format!("`{name}` is not a surface body, so it cannot split as a whole")));
+                    }
+                    if name == body {
+                        return Err(bad(cmd, format!("`{body}` cannot split itself")));
+                    }
+                    if name == tb || bodies.iter().any(|b| b.as_ref() == name) {
+                        return Err(bad(cmd, format!("`{name}` is a splitting tool twice")));
+                    }
+                    bodies.push(BodyName(name.to_string()));
+                }
+                bodies
+            }
+        };
+        if tool_sheet != SplitSheet::Body && !tool_bodies.is_empty() {
+            return Err(bad(cmd, "`tool_bodies` needs `tool_sheet` \"body\""));
+        }
         return add_feature(
             s,
             p,
@@ -4229,6 +4285,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_plane,
                 tool_sheet,
                 tool_faces,
+                tool_bodies,
                 sketch: None,
                 line: None,
             },
@@ -4245,6 +4302,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
             tool_plane: false,
             tool_sheet: SplitSheet::Extended,
             tool_faces: Vec::new(),
+            tool_bodies: Vec::new(),
             sketch: None,
             line: None,
         },
@@ -4253,6 +4311,9 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The most other faces one Split Body by faces takes (`tool_faces`).
 const MAX_SPLIT_TOOL_FACES: usize = 1024;
+
+/// The most other surface bodies one Split Body takes (`tool_bodies`).
+const MAX_SPLIT_TOOL_BODIES: usize = 256;
 
 /// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).
 const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];
@@ -4560,15 +4621,19 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     // point in its own frame only (two leaves of a hinge, one turned) is not the one picked, so
     // neither its face nor its body is taken. Read before reference edges move the position.
     let picked = if points.is_none() { picked_bodies(s, position) } else { None };
-    let supplied_direction = p.get("direction").and_then(vec3);
     // Ordinary sketch-point holes use the sketch normal and ignore this input.
-    if supplied_direction.is_none() && p.get("direction").is_some_and(|v| !v.is_null()) && points.as_ref().is_none_or(|(sp, _, _)| sp.single) {
-        return Err(bad(cmd, "`direction` must be a non-zero [x, y, z]"));
-    }
-    let direction = match (supplied_direction, &points) {
-        (None, Some((sp, _, d))) if !sp.single => *d,
+    let supplied_direction = match p.get("direction").filter(|v| !v.is_null()) {
+        Some(v) => match hole_direction_param(s, v, cmd) {
+            Ok(d) => Some(d),
+            Err(e) if points.as_ref().is_none_or(|(sp, _, _)| sp.single) => return Err(e),
+            Err(_) => None,
+        },
+        None => None,
+    };
+    let (direction_exprs, direction) = match (supplied_direction, &points) {
+        (None, Some((sp, _, d))) if !sp.single => (solidcraft_doc::dir_expr(*d), *d),
         (d, _) => match d {
-            Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
+            Some(d) => d,
             None => {
                 // Into the face the position lies on: against the outward normal of the face
                 // nearest it (planar or curved), as it faces out of its own body. A hole that
@@ -4584,7 +4649,8 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
                     _ => &named,
                 };
                 let st = s.model.state();
-                solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
+                let d = solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?;
+                (solidcraft_doc::dir_expr(d), d)
             }
         },
     };
@@ -4736,7 +4802,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Hole {
             position: FacePick(position),
             at,
-            direction: Dir(direction),
+            direction: direction_exprs,
             diameter,
             depth,
             hole: kind,
@@ -5332,9 +5398,14 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     }
     use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    // Resolve and store the form at creation or redefinition, including an inferred Unified
+    // designation. Evaluation must not reinterpret an older Thread that saved no form.
     let form = match str_(p, "form") {
         Some(f) => ThreadForm::from_name(f).ok_or_else(|| {
-            bad(cmd, format!("unknown thread form `{f}` (metric, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"))
+            bad(
+                cmd,
+                format!("unknown thread form `{f}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"),
+            )
         })?,
         None => designation.as_deref().and_then(ThreadForm::of_designation).unwrap_or_default(),
     };
@@ -5486,7 +5557,9 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
     if let Some(w) = &wall {
-        check_expr(s, w, Kind::Length, cmd, "wall")?;
+        // A wall is a thickness. A word such as "hollow" is not one, and the message says so
+        // instead of naming an unknown parameter (#18344).
+        check_expr(s, w, Kind::Length, cmd, "wall").map_err(|_| bad(cmd, "the wall must be a thickness, such as 2 mm"))?;
     }
     add_feature(
         s,

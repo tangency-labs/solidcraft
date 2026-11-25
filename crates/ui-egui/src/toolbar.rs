@@ -234,7 +234,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // or the caption buttons take its ends. In full screen macOS shows the traffic lights in
         // its own title bar that slides down over the window, not in the bar: no room for them.
         let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar && !fullscreen, caption_buttons: app.custom_titlebar };
+        let chrome = crate::window_chrome::TitleBar {
+            traffic_lights: app.integrated_titlebar && !fullscreen,
+            caption_buttons: app.custom_titlebar,
+            hide_caption_buttons: !app.preferences.show_window_controls,
+        };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
             let idle = !app.file_load_holds();
@@ -3372,6 +3376,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 } else if app.session.has_selection() || app.session.active_sketch.is_none() {
                     crate::edit_clipboard::drop_cut(app);
                     app.tree.picked_joints.clear();
+                    app.viewport.edit_dimensions = None;
                     let _ = app.run("select.clear", json!({}));
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
@@ -7220,6 +7225,147 @@ mod command_start_tab_tests {
         h.app.session.selection = vec![face];
         h.app.start("occurrence.ground");
         assert!(!grounded(&h), "a picked face toggles its placement back: {:?}", h.app.status);
+    }
+
+    /// A design with a 40 x 30 x 20 box, saved as a file and inserted into a new design as a
+    /// linked component: the app, the component, its placement and the folder the file is in.
+    fn with_a_linked_component(name: &str) -> (Harness, u64, u64, std::path::PathBuf) {
+        let folder = std::env::temp_dir().join(format!("solidcraft-break-link-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("part.solidcraft");
+        let mut part = solidcraft_engine::Session::default();
+        part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        part.execute("file.save", &json!({"path": source})).unwrap();
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let inserted = h.app.run("component.insert_design", json!({"path": source})).unwrap();
+        h.app.ui.tab = "INSERT".into();
+        h.app.status = None;
+        let (component, occurrence) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+        (h, component, occurrence, folder)
+    }
+
+    /// The ribbon's Break Link ran `component.break_link` with no component, so it always
+    /// failed with "`component` must be a component id or name". With a linked component's
+    /// placement selected in the Browser it breaks that component's link, and the body stays.
+    #[test]
+    fn ribbon_break_link_breaks_the_link_of_the_selected_placement() {
+        let (mut h, component, occurrence, folder) = with_a_linked_component("placement");
+        assert!(h.app.session.doc.links.contains_key(&component));
+        let bodies = h.app.session.model.state().bodies.len();
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the link is broken: {:?}", h.app.status);
+        assert_eq!(h.app.session.model.state().bodies.len(), bodies, "its bodies stay");
+        let (status, _, error) = h.app.status.clone().expect("the status line says which link was broken");
+        assert_eq!(status, solidcraft_ui_text::format("ui.break_link_done", &[("name", "part")]));
+        assert!(!error);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A body of the linked component picked in the view stands for its placement, as it does
+    /// for Ground; so does the component picked in the Browser.
+    #[test]
+    fn ribbon_break_link_takes_the_component_of_a_picked_body_or_browser_row() {
+        let (mut h, component, _, folder) = with_a_linked_component("body");
+        let body = h.app.session.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the picked body's component: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+
+        let (mut h, component, _, folder) = with_a_linked_component("row");
+        h.app.tree.picked_components = vec![component];
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the component picked in the Browser: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A linked component inside a component that is not linked: a body of it picked in the view
+    /// breaks its link (the placement a drag or Ground takes for that body is the outer one,
+    /// which has no link), and so does its own placement's row. The outer component selected
+    /// breaks nothing: it is not linked.
+    #[test]
+    fn ribbon_break_link_finds_a_linked_component_inside_one_that_is_not_linked() {
+        let nested = |name: &str| {
+            let folder = std::env::temp_dir().join(format!("solidcraft-break-link-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&folder).unwrap();
+            let source = folder.join("part.solidcraft");
+            let mut part = solidcraft_engine::Session::default();
+            part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+            part.execute("file.save", &json!({"path": source})).unwrap();
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            let holder = h.app.run("component.create", json!({"name": "Holder"})).unwrap();
+            let inserted = h.app.run("component.insert_design", json!({"path": source})).unwrap();
+            h.app.run("component.activate", json!({"component": 0})).unwrap();
+            h.app.status = None;
+            let ids = (holder["occurrence"].as_u64().unwrap(), inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+            (h, ids, folder)
+        };
+        let (mut h, (holder, component, occurrence), folder) = nested("nested-body");
+        assert_eq!(
+            h.app.session.occurrence_placement(&[holder, occurrence]).ok().map(|p| p.component),
+            Some(component),
+            "the linked part is inside Holder"
+        );
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(h.app.session.doc.links.contains_key(&component), "Holder is not linked: nothing is broken");
+        let body = h.app.session.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the picked body's linked component: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+
+        let (mut h, (holder, component, occurrence), folder) = nested("nested-row");
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder, occurrence]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "its own placement's row: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// With no linked component among what is selected, Break Link says what to pick and changes
+    /// nothing: nothing selected, or a component that is not linked.
+    #[test]
+    fn ribbon_break_link_without_a_linked_component_says_what_to_pick() {
+        let (mut h, component, _, folder) = with_a_linked_component("nothing");
+        h.app.start("component.break_link");
+        let (status, _, error) = h.app.status.clone().expect("it says what to pick");
+        assert_eq!(status, h.app.tr("ui.break_link_select_first"));
+        assert!(!error);
+        assert!(h.app.session.doc.links.contains_key(&component), "nothing selected: the link stays");
+        let own = h.app.run("component.create", json!({"name": "Own"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [own]}]})).unwrap();
+        h.app.status = None;
+        h.app.start("component.break_link");
+        assert_eq!(h.app.status.clone().map(|(status, _, _)| status), Some(h.app.tr("ui.break_link_select_first").to_string()));
+        assert!(h.app.session.doc.links.contains_key(&component), "a component that is not linked: the link stays");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A right-click on a linked component offers Break Link, beside Relink Source, and it
+    /// breaks that component's link; a component that is not linked does not offer it.
+    #[test]
+    fn a_linked_components_menu_offers_break_link() {
+        use crate::context_menu::{self, Target};
+        let (mut h, component, occurrence, folder) = with_a_linked_component("menu");
+        let own = h.app.run("component.create", json!({"name": "Own"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        // Break Link sits in the menu's Component flyout, after Relink Source.
+        fn find(items: Vec<crate::ui_kit::Item>) -> Option<crate::ui_kit::Item> {
+            items.into_iter().find_map(|item| if item.id == "component.break_link" { Some(item) } else { find(item.children) })
+        }
+        let offered = |app: &SolveApp, target: Target| find(context_menu::items(app, &target));
+        assert!(offered(&h.app, Target::Component { id: own }).is_none(), "not for a component that is not linked");
+        assert!(offered(&h.app, Target::Occurrence { path: vec![occurrence] }).is_some(), "on its placement's row too");
+        let item = offered(&h.app, Target::Component { id: component }).expect("a linked component offers Break Link");
+        assert!(item.enabled);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        assert!(!h.app.session.doc.links.contains_key(&component), "the link is broken: {:?}", h.app.status);
+        assert!(offered(&h.app, Target::Component { id: component }).is_none(), "and no longer offered");
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     /// #10540: View Fit, Home and the other view display commands act on the view the same way

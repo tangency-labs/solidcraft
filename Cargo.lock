@@ -6636,6 +6636,7 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-kernel",
  "solidcraft-look",
+ "solidcraft-panel-layout",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-kit",

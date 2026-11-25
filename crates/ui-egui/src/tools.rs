@@ -885,7 +885,10 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
 /// placed until fully constrained; the engine's `dimension_roles` decides which shapes those are.
 /// This is the one place drawing tools commit through: the 3D tools (`sketch3d`) take part by
 /// committing here once their creators are listed there.
-pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value, String> {
+pub(crate) fn draw(app: &mut SolveApp, t: &Tool, mut params: Value) -> Result<Value, String> {
+    if matches!(t.cmd, "sketch.spline.control_point" | "sketch.spline.control_point_5") {
+        params["control_polygon"] = json!(true);
+    }
     let dimensions = crate::sketch_dims::dimensions(t);
     let as_drawn = app.preferences.sketch_auto_dimensions && solidcraft_engine::dimension_roles(t.cmd).is_some();
     let locate = as_drawn && app.preferences.sketch_auto_locate;

@@ -62,14 +62,18 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
                 let palette = style.palette(appearance);
                 match appearance.contrast.as_ref().unwrap() {
                     ContrastOutcome::Readable { effective_background_alpha } => {
-                        assert!(!impossible, "a shipped unreadable authored pair cannot be reported compliant: {name}");
                         assert!(*effective_background_alpha >= requested);
-                        assert_eq!(inks(palette), inks(&authored), "ordinary resolution preserves every canonical ink: {name}");
+                        for (before, after) in inks(&authored).into_iter().zip(inks(palette)) {
+                            if solidcraft_theme::contrast_ratio(before, opaque) >= 4.5 {
+                                assert_eq!(before, after, "ordinary resolution preserves every readable canonical ink: {name}");
+                            } else {
+                                assert!(impossible);
+                                assert!(solidcraft_theme::contrast_ratio(after, opaque) >= 4.5, "an unreadable ink is lifted: {name}");
+                            }
+                        }
                     }
-                    ContrastOutcome::RetainReadableFallback { reason } => {
-                        assert!(impossible, "fallback is justified by an independently checked opaque pair: {name}");
-                        assert_eq!(*reason, ContrastFailure::UnreadableAtFullOpacity);
-                        assert_eq!(appearance.fill.a(), 255);
+                    ContrastOutcome::RetainReadableFallback { .. } => {
+                        panic!("a shipped theme keeps its own panel colours and lifts only unreadable inks: {name}");
                     }
                 }
                 for viewport in [0, 1, 64, 117, 192, 254, 255] {
@@ -200,7 +204,8 @@ fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
     let _restore = RestoreDark(solidcraft_theme::is_dark());
     let ctx = egui::Context::default();
     let mut tokens = surface_test_palette(false);
-    tokens.form_dim = tokens.panel;
+    // A translucent-clear ink cannot be lifted, so only the known-theme fallback reads.
+    tokens.form_dim = egui::Color32::TRANSPARENT;
     let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     solidcraft_theme::set_dark(false);
     let light = HostSurfaceStyle::capture(&ctx, false, Some(0.5), None);
@@ -216,7 +221,8 @@ fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
 fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
     let ctx = egui::Context::default();
     let mut tokens = surface_test_palette(false);
-    tokens.form_dim = tokens.panel;
+    // A translucent-clear ink cannot be lifted, so only the known-theme fallback reads.
+    tokens.form_dim = egui::Color32::TRANSPARENT;
     tokens.space_4 = 7.0;
     let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     for override_alpha in [Some(0.5), Some(f32::NAN), Some(f32::INFINITY), Some(-0.1), Some(1.1)] {
@@ -234,6 +240,72 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
         let cached = HostSurfaceStyle::capture(&ctx, false, override_alpha, Some(&style));
         assert_eq!(cached, style, "even an invalid raw NaN override has a stable bitwise cache key");
     }
+}
+
+#[test]
+fn built_in_themes_keep_their_own_panel_colours_and_lift_only_failing_inks() {
+    // #16023: a built-in theme whose muted ink missed 4.5:1 on its panel got the
+    // Dark or Light theme's panel colours (slate blue in Amber Phosphor).
+    crate::test_support::host_data();
+    struct RestoreDark(bool);
+    impl Drop for RestoreDark {
+        fn drop(&mut self) {
+            solidcraft_theme::set_dark(self.0);
+        }
+    }
+    let _restore = RestoreDark(solidcraft_theme::is_dark());
+    let inks = |t: &solidcraft_theme::Tokens| [t.text, t.text_dim, t.form_ink, t.form_dim, t.dialog_label];
+    let mut lifted = Vec::new();
+    for theme in crate::theme_files::builtin() {
+        let authored = crate::theme_files::resolve(theme);
+        solidcraft_theme::set_dark(theme.base.is_dark());
+        let _scope = solidcraft_theme::scoped_panel_tokens(authored);
+        let ctx = egui::Context::default();
+        let style = HostSurfaceStyle::capture(&ctx, false, None, None);
+        let appearance = style.appearance(PanelSurface::Opaque, false);
+        let id = &theme.id;
+        assert!(matches!(appearance.contrast, Some(ContrastOutcome::Readable { .. })), "{id}: panel fell back to another theme");
+        let own = crate::ui_kit::panel_host_frame(&ctx, false).fill.to_opaque();
+        assert_eq!(appearance.fill.to_opaque(), own, "{id}: the panel keeps its own fill");
+        let palette = style.palette(appearance);
+        assert!(solidcraft_theme::panel_surface_readable(appearance.fill, palette), "{id}");
+        for (before, after) in inks(&authored).into_iter().zip(inks(palette)) {
+            if solidcraft_theme::contrast_ratio(before, own) >= 4.5 {
+                assert_eq!(before, after, "{id}: a readable ink stays as authored");
+            } else {
+                assert!(solidcraft_theme::contrast_ratio(after, own) >= 4.5, "{id}: a lifted ink reads");
+            }
+        }
+        if inks(&authored) != inks(palette) {
+            lifted.push(id.clone());
+            // The paint path scopes the lifted inks for the panel body; a
+            // checked palette alone would leave the faint ink on screen.
+            assert_eq!(style.paint_palette(appearance), Some(palette), "{id}");
+            let bounds = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(200.0, 120.0));
+            let mut painted = None;
+            crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                crate::ui_kit::panel_host_surface(
+                    ui,
+                    egui::Id::unique(id),
+                    bounds,
+                    false,
+                    appearance.fill,
+                    style.paint_palette(appearance),
+                    |_, _| {
+                        painted = Some(solidcraft_theme::Tokens::get());
+                    },
+                );
+            });
+            assert_eq!(painted.as_ref().map(inks), Some(inks(palette)), "{id}: the panel body paints the lifted inks");
+        } else {
+            assert_eq!(style.paint_palette(appearance), None, "{id}: an unchanged theme keeps the window's own tokens");
+        }
+        if id == "amber-phosphor" {
+            let dim = palette.text_dim;
+            assert!(dim.r() > dim.g() && dim.g() > dim.b(), "Amber Phosphor's muted ink stays amber: {dim:?}");
+        }
+    }
+    assert!(!lifted.is_empty(), "some built-in theme still exercises the lift path");
 }
 
 #[test]
@@ -566,7 +638,7 @@ fn saved_production_layout_retries_small_startup_without_a_recovery_notice() {
         let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
         let saved = h.app.prefs();
         h.call("ui.resize", serde_json::json!({"width":200,"height":100}));
-        h.app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        *h.app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         h.app.load_prefs(&saved);
         let recovery = h.app.tr("prefs.panel_layout.recovery").to_string();
         h.frame();
@@ -765,6 +837,75 @@ fn panel_layout_tile_selection_tracks_complete_arrangements_and_manual_reversion
     let reverted = layout_preferences_view(&app).unwrap();
     assert!(reverted.default_matches);
     assert_eq!(reverted.entries.iter().filter(|entry| entry.selected).count(), 1);
+}
+
+/// The host saves preferences on any settings change and every 30 s. Building them converts
+/// every remembered layout in the catalogue, which cost ~0.9 s on a 56,100-body design; a save
+/// whose layout and conversion inputs are unchanged reuses the last build, and a changed layout
+/// is converted again.
+#[test]
+fn a_save_with_the_same_panel_layout_reuses_the_portable_preferences() {
+    use commands::LayoutCatalogue as _;
+    let mut fixture = PanelMountHarness::new(true).unwrap();
+    fixture.command("panel.open", &panel_command_editor()).unwrap();
+    fixture.command("panel.popout", &panel_command_native_move()).unwrap();
+    fixture.command("layout.save", &serde_json::json!({"name":"Native arrangement"})).unwrap();
+    let workspace = fixture.runtime.layout().layout().workspace.clone();
+    let record = |rejected: serde_json::Value| {
+        super::preferences::PreferenceRecord {
+            version: 1,
+            selected: workspace.clone(),
+            catalogue: fixture.catalogue.state().export().unwrap(),
+            rejected: Some(rejected),
+            legacy: None,
+            unread: Vec::new(),
+        }
+        .value()
+    };
+    let mut app = crate::SolveApp::new(Default::default(), Default::default());
+    let empty = PanelMountHarness::new(false).unwrap();
+    app.enable_panel_runtime(
+        empty.runtime,
+        Box::new(AppFixtureServices {
+            models: FakeModels { editable: true },
+            commands: FakeContentCommands::default(),
+            local: FakeLocalServices::default(),
+            refreshed: 0,
+        }),
+    )
+    .unwrap();
+    let builds = |app: &crate::SolveApp| app.portable_prefs.lock().unwrap().as_ref().map_or(0, |c| c.builds);
+    // The layout the save converts: a catalogue whose remembered layout has a native window,
+    // which the conversion projects away (the costly path).
+    let held = |app: &crate::SolveApp| crate::prefs::held_panel_layout(app).unwrap_or_else(|| preferences_value(app));
+    let windowless = |app: &crate::SolveApp, saved: &str| {
+        let saved: serde_json::Value = serde_json::from_str(saved).unwrap();
+        let registry = app.panel_runtime().unwrap().layout().registry();
+        let catalogue = super::preferences::PreferenceRecord::read(&saved["panel_layout"], registry).unwrap().catalogue(registry).unwrap();
+        let mut windows = 0;
+        catalogue
+            .map_envelopes(registry, |_, envelope| {
+                windows += envelope.layout.sections.iter().filter(|section| section.location.zone() == Zone::Window).count();
+                Ok(envelope)
+            })
+            .unwrap();
+        windows == 0
+    };
+    let loaded = serde_json::json!({"panel_layout":record(serde_json::json!({"first":1}))}).to_string();
+    assert!(!windowless(&app, &loaded), "the saved layout has a native window to project");
+    app.load_prefs(&loaded);
+    assert!(held(&app).is_some(), "a panel layout to convert");
+    let first = app.try_prefs().unwrap();
+    assert!(windowless(&app, &first), "the remembered layout went through the portable conversion");
+    let again = app.try_prefs().unwrap();
+    assert_eq!(first, again, "what the first conversion made");
+    assert_eq!(builds(&app), 1, "the second save reuses the first's conversion");
+    // Another layout is converted again.
+    app.load_prefs(&serde_json::json!({"panel_layout":record(serde_json::json!({"second":2}))}).to_string());
+    let other = app.try_prefs().unwrap();
+    assert_eq!(builds(&app), 2, "a changed layout is converted again");
+    assert_ne!(other, first);
+    assert!(windowless(&app, &other));
 }
 
 #[test]
@@ -2907,7 +3048,7 @@ impl RawPanelHost {
         let mut output = self.ctx.run_ui(input, |ui| {
             passes += 1;
             self.host.capture_metrics(&self.content.runtime, &self.content.models).unwrap();
-            self.host.capture_reservations(&self.content.runtime, &self.content.catalogue).unwrap();
+            self.host.capture_reservations(&self.content.runtime, &CatalogueLayoutStoreRef(&self.content.catalogue)).unwrap();
             self.host.prepare(&self.content.runtime, self.capacity).unwrap();
             self.root_layer = Some(ui.layer_id());
             if self.bind_fixture_scopes {
@@ -3033,7 +3174,7 @@ impl RawPanelHost {
                     &mut h.runtime,
                     &mut h.native,
                     &mut ContentServices { models: &h.models, commands: &mut h.commands, local: &mut h.local },
-                    &mut h.catalogue,
+                    &mut CatalogueLayoutStore(&mut h.catalogue),
                 )
                 .unwrap();
             if let Some(modal) = modal {
@@ -9584,7 +9725,10 @@ fn late_first_appearance_window_blocks_nested_popup_navigation() {
                             environment.document = Some(DocumentId::new("new-popup-context").unwrap());
                             h.runtime.set_environment(environment, services.local).unwrap();
                             assert_eq!(
-                                raw.host.finish(ui, &mut h.runtime, &mut h.native, &mut services, &mut h.catalogue).unwrap_err().rule,
+                                raw.host
+                                    .finish(ui, &mut h.runtime, &mut h.native, &mut services, &mut CatalogueLayoutStore(&mut h.catalogue))
+                                    .unwrap_err()
+                                    .rule,
                                 Rule::Placement
                             );
                         },
@@ -10329,7 +10473,7 @@ fn captured_incoming_workspace_cohort_is_created_measured_and_committed_exactly_
     h.tick().unwrap();
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let mut incoming = h.runtime.layout().layout().clone();
     incoming.workspace = WorkspaceId::new("review.incoming").unwrap();
@@ -10369,7 +10513,7 @@ fn proposed_unavailable_and_unbound_owners_remain_requested_open_without_false_b
     h.tick().unwrap();
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let mut incoming = h.runtime.layout().layout().clone();
     incoming.workspace = WorkspaceId::new("review.unavailable").unwrap();
@@ -10388,7 +10532,7 @@ fn proposed_unavailable_and_unbound_owners_remain_requested_open_without_false_b
     assert!(h.runtime.layout().layout().instances.iter().all(|instance| instance.requested_open));
     assert!(h.runtime.layout().layout().instances.iter().all(|instance| h.runtime.layout().availability(&instance.id) != Availability::Available));
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     assert!(host.frame().unwrap().layout.resolved.panels.is_empty());
 }
@@ -10859,7 +11003,7 @@ fn cached_command_proposal_is_discarded_on_metric_change_without_a_second_factor
     h.tick().unwrap();
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let action = transaction(vec![Mutation::Collapse { section: section("log"), collapsed: true }]);
     let before = h.runtime.layout().inspect();
@@ -10885,7 +11029,7 @@ fn command_storage_refusal_uses_the_same_host_admission_before_any_runtime_publi
     h.tick().unwrap();
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let before = h.runtime.layout().inspect();
     let controllers = h.runtime.controller_count();
@@ -11228,7 +11372,7 @@ fn atomic_batch_growing_projections_reuse_one_private_cohort_and_measure_each_ne
     let (mut h, trace) = review_cohort_host(|_| {});
     let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
     host.capture_metrics(&h.runtime, &h.models).unwrap();
-    host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+    host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
     host.prepare(&h.runtime, capacity()).unwrap();
     let registry = h.runtime.layout().registry().clone();
     let mut services = ContentServices { models: &h.models, commands: &mut h.commands, local: &mut h.local };
@@ -12192,7 +12336,7 @@ fn deferred_outgoing_unavailable_actions_use_captured_retained_or_staged_owner_a
                 }
                 let mut host = WorkspacePanelHost::new(priority_host_options()).unwrap();
                 host.capture_metrics(&h.runtime, &h.models).unwrap();
-                host.capture_reservations(&h.runtime, &h.catalogue).unwrap();
+                host.capture_reservations(&h.runtime, &CatalogueLayoutStoreRef(&h.catalogue)).unwrap();
                 host.prepare(&h.runtime, capacity()).unwrap();
                 assert_ne!(h.runtime.layout().availability(&id("deferred")), Availability::Available);
                 let before = h.runtime.layout().inspect();
@@ -15560,4 +15704,66 @@ fn raw_host_drags_a_panel_out_to_a_desktop_window_keeping_its_editor() {
     assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location, docked);
     let state = raw.content.probe.state(&key).unwrap();
     assert_eq!((state.draft.as_str(), state.transaction_live), ("torn-off draft", true));
+}
+
+#[test]
+fn direct_layout_store_captures_reservations_shows_and_commits_with_context_validation() {
+    let mut h = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut h);
+    let key = editor_key(&h);
+    h.probe.edit(&key, |state| state.draft = "direct store draft".into()).unwrap();
+    let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
+    let ctx = crate::fonts::test_context();
+    let mut time = 0.0;
+    let mut run_frame = |h: &mut PanelMountHarness, host: &mut WorkspacePanelHost, events: Vec<egui::Event>| {
+        h.tick().unwrap();
+        time += 1.0 / 60.0;
+        let mut output = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui_rect(capacity())), events, time: Some(time), focused: true, ..Default::default() },
+            |ui| {
+                host.capture_metrics(&h.runtime, &h.models).unwrap();
+                host.capture_reservations(&h.runtime, &DirectLayoutStore).unwrap();
+                host.prepare(&h.runtime, capacity()).unwrap();
+                let mut services = ContentServices { models: &h.models, commands: &mut h.commands, local: &mut h.local };
+                host.show(ui, &mut h.runtime, &mut h.native, &mut services, &mut DirectLayoutStore).unwrap();
+            },
+        );
+        output.textures_delta.clear();
+        host.frame().unwrap().clone()
+    };
+
+    let frame = run_frame(&mut h, &mut host, Vec::new());
+    let collapse = middle(
+        frame
+            .controls
+            .iter()
+            .find(|control| control.target == HostControlTarget::Pointer(HostPointerTarget::Collapse { instance: id("editor") }))
+            .unwrap()
+            .bounds,
+    );
+    let at = egui::pos2(collapse.x, collapse.y);
+    run_frame(&mut h, &mut host, vec![egui::Event::PointerMoved(at)]);
+    run_frame(
+        &mut h,
+        &mut host,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+        ],
+    );
+    let released = run_frame(
+        &mut h,
+        &mut host,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+        ],
+    );
+    assert!(
+        released.events.iter().any(|event| matches!(event, HostEvent::Committed { .. })),
+        "DirectLayoutStore must commit through RetainedCandidateSink::dispatch_in_context: {:?}",
+        released.events
+    );
+    assert!(h.runtime.layout().layout().containing(&id("editor")).unwrap().collapsed);
+    assert_eq!(h.probe.state(&key).unwrap().draft, "direct store draft");
 }

@@ -214,6 +214,15 @@ Reload from disk to pick it up. If Windows won't let the file be replaced becaus
 it, the new copy gets a number (`name-2.3mf`) and the status line says so. Files older than seven days are
 deleted the next time SolidCraft starts.
 
+To keep the file with your other parts instead, tick **Keep in a folder** in the Send
+window (the desktop app only) and **Choose…** a folder. The file is then saved there, named after the
+design with the next free version (`Mount plate-v1.3mf`, `Mount plate-v2.3mf`, …), and the slicer
+opens that file. Tick **Replace file** to keep one file (`Mount plate.3mf`)
+instead. SolidCraft remembers the folder for each saved design (a design that was never saved asks again), so the next send of it starts with
+the folder already chosen; untick the box to go back to the slicer folder. Scripts pass `copy_to`
+(the folder) and, to replace the file, `copy_overwrite: true` to `file.send_to_slicer`; the reply has
+`copy: true` and the `version`.
+
 If the slicer is already running, PrusaSlicer, SuperSlicer and Cura load the file in
 the open window instead of starting another one (they are started with `--single-instance`).
 Other slicers, Bambu Studio and OrcaSlicer among them, are started as they are, so they may open a

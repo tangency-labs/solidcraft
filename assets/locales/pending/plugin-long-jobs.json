@@ -30,5 +30,9 @@
   "zh": {
     "operations.plugin_job": "{plugin}：{entry}",
     "operations.plugin_job_step": "{plugin}：{entry}，{step}"
+  },
+  "fr": {
+    "operations.plugin_job": "{plugin} : {entry}",
+    "operations.plugin_job_step": "{plugin} : {entry}, {step}"
   }
 }
