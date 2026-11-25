@@ -22,7 +22,7 @@ use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
-use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel, Result};
+use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel, Result, ScaleAbout};
 
 type JointFaces = (Body, kernel::Result<Arc<[kernel::FaceInfo]>>);
 
@@ -70,6 +70,8 @@ pub struct ModelBody {
     /// once and kept, so a solve that works the cam's table out again does not mesh the body
     /// again (#3389).
     cam_mesh: Arc<OnceLock<Arc<Mesh>>>,
+    /// The body's edges as polylines ([`ModelBody::edge_lines`]), drawn once and shared by clones.
+    edge_lines: Arc<OnceLock<kernel::EdgeLines>>,
     /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
     /// [`placed_mesh::OppositeHand`]. Display only: the model reads the copy's own triangles.
     mirrored_mesh: Option<Arc<placed_mesh::PlacedMesh>>,
@@ -80,7 +82,7 @@ pub struct ModelBody {
     plan: Arc<[OnceLock<Option<Arc<TessPlan>>>; 4]>,
     /// Each display plan in the form the GPU evaluates ([`crate::gpu_plan`]), made once from it
     /// and shared like it, so the viewport sees the same allocation every frame.
-    gpu_plan: Arc<[OnceLock<Option<Arc<solidcore_tess::TessPlan>>>; 4]>,
+    gpu_plan: Arc<[OnceLock<Option<Arc<solidcraft_kernel::services::tess::TessPlan>>>; 4]>,
     /// The plan evaluated on the CPU (none without a plan), shared like the mesh: the triangles a
     /// GPU viewport draws, so a highlight over a face lies exactly on it.
     plan_mesh: Arc<[OnceLock<Option<Arc<Mesh>>>; 4]>,
@@ -231,6 +233,7 @@ impl ModelBody {
             faces: Default::default(),
             mesh_placement: None,
             cam_mesh: Arc::new(OnceLock::new()),
+            edge_lines: Arc::new(OnceLock::new()),
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
@@ -457,7 +460,7 @@ impl ModelBody {
     /// The display plan at a given display quality in the form the GPU evaluates
     /// ([`crate::gpu_plan`]): made once per level from [`ModelBody::display_plan_at`], the same
     /// allocation on every call.
-    pub fn gpu_plan_at(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<solidcore_tess::TessPlan>> {
+    pub fn gpu_plan_at(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<solidcraft_kernel::services::tess::TessPlan>> {
         self.gpu_plan.get(q.index())?.get_or_init(|| self.display_plan_at(q).map(|plan| Arc::new(crate::gpu_plan::gpu_plan(&plan)))).clone()
     }
 
@@ -634,7 +637,11 @@ impl ModelBody {
     /// see [`crate::display_quality::refinement_for`]). Step 0 is the cached plan at `q`; finer
     /// steps are made on each call and kept by the viewport, which evicts them when it runs over
     /// its budget. `None` when the body has no plan at that step.
-    pub fn refined_display(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<solidcore_tess::TessPlan>, Arc<Mesh>)> {
+    pub fn refined_display(
+        &self,
+        q: crate::display_quality::DisplayQuality,
+        k: u8,
+    ) -> Option<(Arc<solidcraft_kernel::services::tess::TessPlan>, Arc<Mesh>)> {
         if k == 0 {
             return Some((self.gpu_plan_at(q)?, self.plan_mesh_at(q)?));
         }
@@ -669,6 +676,12 @@ impl ModelBody {
     /// table out again does not mesh the body again (#3389). `make` meshes the body: the
     /// profile is a decision made on a mesh (`xtask/mesh-decisions.txt`), so the meshing stays
     /// with the cam.
+    /// The body's edges as polylines, for the edge nearest a point ([`kernel::Body::edge_lines`]):
+    /// drawn once, as the display mesh is, not again for every point a design names.
+    pub(crate) fn edge_lines(&self) -> &kernel::EdgeLines {
+        self.edge_lines.get_or_init(|| self.body.edge_lines())
+    }
+
     pub(crate) fn cam_mesh(&self, make: impl FnOnce() -> kernel::Result<Mesh>) -> Result<Arc<Mesh>> {
         if let Some(mesh) = self.cam_mesh.get() {
             return Ok(mesh.clone());
@@ -720,6 +733,17 @@ pub struct SolvedSketch {
     pub profiles_3d: Vec<solidcraft_sketch::Profile3D>,
     /// Open and untied ends of its profile curves (where a profile can fail).
     pub ends: solidcraft_sketch::EndReport,
+}
+
+/// One more placement of a component's sketch than the one it is drawn and edited at: where the
+/// sketch shows on another copy of its part, and what picks there are made on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchCopy {
+    /// The placement's occurrence ids, from the root.
+    pub path: Vec<u64>,
+    /// From where the sketch is drawn (its [`SolvedSketch::plane`] in the world state) to this
+    /// placement.
+    pub delta: Mat,
 }
 
 /// A constant fillet of `edges`; with [`FilletFit::Reduce`](crate::FilletFit::Reduce), a radius too
@@ -1102,6 +1126,10 @@ pub struct ModelState {
     pub bodies: Vec<ModelBody>,
     /// Shared between states: a feature that does not change a sketch keeps it as it was.
     pub sketches: Vec<Arc<SolvedSketch>>,
+    /// The other placements of each component sketch (by sketch feature id), in a world state:
+    /// a part placed more than once shows its sketches on every copy, not only on the one they
+    /// are edited at. Empty in a model's own state.
+    pub sketch_copies: BTreeMap<u64, Arc<[SketchCopy]>>,
     pub body_counter: usize,
     /// Body names the design used and must not use again (a name a `body.rename` freed, #4957),
     /// and the names stored on the suppressed features so far, so a body made while a feature is
@@ -1197,6 +1225,7 @@ impl ModelState {
             threads,
             bodies: _,
             sketches,
+            sketch_copies,
             body_counter,
             reserved_body_names,
             surface_sheets,
@@ -1218,6 +1247,7 @@ impl ModelState {
             threads: threads.clone(),
             bodies,
             sketches: sketches.clone(),
+            sketch_copies: sketch_copies.clone(),
             body_counter: *body_counter,
             reserved_body_names: reserved_body_names.clone(),
             surface_sheets: surface_sheets.clone(),
@@ -1817,6 +1847,16 @@ impl ModelState {
     }
     pub fn sketch(&self, feature: u64) -> Option<&SolvedSketch> {
         self.sketches.iter().find(|s| s.feature == feature).map(|s| &**s)
+    }
+
+    /// Point `id` of sketch `sketch` on the copy of its part at `path` ([`SketchCopy`]), in the
+    /// world, and the sketch plane's normal there. A copy's delta is rigid (placements are), so
+    /// the moved normal is still a unit vector.
+    pub fn placed_sketch_point(&self, sketch: u64, path: &[u64], id: &str) -> Option<(Vec3, Vec3)> {
+        let ss = self.sketch(sketch)?;
+        let copy = self.sketch_copies.get(&sketch)?.iter().find(|c| c.path == path)?;
+        let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(id)?)?);
+        Some((crate::apply_point(&copy.delta, at), crate::apply_vector(&copy.delta, ss.plane.normal())))
     }
 }
 
@@ -2801,6 +2841,12 @@ impl PlacementReads {
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
             // A construction point is kept in its own component's frame: the sketch reads where
             // that component is placed (#12075).
+            L::Plane { name } if Plane::named(name).is_none() => match doc.find_feature(name) {
+                Some(plane) => {
+                    self.components.insert(plane.component);
+                }
+                None => self.all = true,
+            },
             L::ConstructionPoint { name } => match doc.find_feature(name) {
                 Some(point) => {
                     self.components.insert(point.component);
@@ -3170,6 +3216,10 @@ impl Feature {
                 let mut read = Reads::default();
                 for link in &sketch.links {
                     link_reads(st, &link.source, &mut read)?;
+                }
+                // A face held by a 3D constraint is read even without a projected curve.
+                for plane in sketch.wire_constraints.iter().filter_map(|c| c.kind.model_plane()) {
+                    link_reads(st, &plane.source, &mut read)?;
                 }
                 read.bodies.sort_unstable();
                 read.bodies.dedup();
@@ -3887,7 +3937,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     }
     // The faces To / From Object names, in `face_points` order.
     let object_names = match &f.kind {
-        FeatureKind::Extrude { extent, .. } => usize::from(extent.to.is_some()) + usize::from(extent.from.is_some()),
+        FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } => {
+            usize::from(extent.to.is_some()) + usize::from(extent.from.is_some())
+        }
         FeatureKind::Revolve { to, .. } => usize::from(to.is_some()),
         _ => 0,
     };
@@ -4036,6 +4088,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
             for link in &sketch.links {
                 reads.link(doc, st, &link.source);
+            }
+            // The face's placement can move independently of the sketch's component.
+            for plane in sketch.wire_constraints.iter().filter_map(|c| c.kind.model_plane()) {
+                reads.link(doc, st, &plane.source);
             }
         }
         // Each end is read as a sketch on a face is: in the frame it was capped in, its member
@@ -6502,6 +6558,19 @@ fn apply_traced_with(
         }
         return Ok(());
     }
+    // A mesh body is no solid to cut or intersect either (#615). A cut that names no body leaves
+    // the mesh bodies alone when it has a solid to cut, as it leaves surfaces; otherwise, and for
+    // a mesh named as a target, it is refused with the way to make the mesh a solid.
+    if matches!(op, Operation::Cut | Operation::Intersect) {
+        let mesh = |i: &usize| state.bodies.get(*i).is_some_and(|b| b.body.is_mesh());
+        let solid = |i: &usize| !mesh(i) && state.bodies.get(*i).is_some_and(ModelBody::is_closed);
+        if op == Operation::Cut && !named && target_idx.iter().any(solid) {
+            target_idx.retain(|i| !mesh(i));
+        } else if let Some(b) = target_idx.iter().copied().find(|i| mesh(i)).and_then(|i| state.bodies.get(i)) {
+            let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
+            return Err(DocError::Invalid(format!("{} is a mesh body, and {verb} needs a solid: use Convert Mesh to make it a solid first", b.name)));
+        }
+    }
     // A surface body is no solid to cut or intersect, including automatic targets (#17587).
     // Automatic cuts with solid targets leave surfaces intact. Keep Thicken's sources too.
     // Surface-only cuts leave a surface alone when exact bounds prove every tool is clear of
@@ -7966,10 +8035,30 @@ fn hole_reaches(st: &ModelState, p: Vec3, d: Vec3, ahead: bool, scope: &[String]
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
     let eps = size * 1e-6;
     let q = p + d * eps;
-    st.bodies.iter().filter(|b| in_hole_scope(scope, b)).any(|b| {
-        let m = b.mesh();
-        m.contains(q) || (ahead && m.raycast(q, d).is_some())
-    })
+    st.bodies.iter().filter(|b| in_hole_scope(scope, b)).any(|b| exactly_inside(b, q) || (ahead && ray_face(b, q, d).is_some()))
+}
+
+/// Whether `p` is inside `b`, decided on its exact faces. A point the kernel finds on the
+/// boundary (within its tolerance), or cannot place, is decided on the display mesh as before.
+fn exactly_inside(b: &ModelBody, p: Vec3) -> bool {
+    match b.body.classify_point(p) {
+        Ok(kernel::PointClass::Inside) => true,
+        Ok(kernel::PointClass::Outside) => false,
+        _ => b.mesh().contains(p),
+    }
+}
+
+/// The first face of `b` the ray from `o` along `d` meets, as `(distance, face)`, found on its
+/// exact faces. A ray the kernel will not fire (one that starts on the body) goes on the display
+/// mesh as before, which passes the face it starts on.
+fn ray_face(b: &ModelBody, o: Vec3, d: Vec3) -> Option<(f64, usize)> {
+    match b.body.fire_ray(o, d) {
+        Ok(hit) => hit.map(|h| (h.depth, h.face)),
+        Err(_) => {
+            let m = b.mesh();
+            m.raycast(o, d).and_then(|(t, tri)| m.tri_face.get(tri).map(|f| (t, *f as usize)))
+        }
+    }
 }
 
 /// The side hole centres on a sketch drill to: into the material, whichever way the sketch plane
@@ -8034,9 +8123,14 @@ pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     }
     let anywhere = hole_on_surface(st, p, dir, &[]);
     // `hole_on_surface` hands `p` itself back when `p` is on a body's boundary (or meets no body
-    // at all); the B-rep also says whether it is on a face within the chord tolerance.
-    if anywhere == p || on_a_brep_face(st, p, &[]) {
+    // at all).
+    if anywhere == p {
         return p;
+    }
+    // A point within a body's chord tolerance of a face (a pick on its display mesh) starts on
+    // that face, where the axis meets its exact surface (#20741).
+    if let Some(q) = brep_face_start(st, p, dir) {
+        return q;
     }
     let targets = hole_targets(st, f);
     if targets.len() == st.bodies.len() {
@@ -8055,6 +8149,35 @@ fn on_a_brep_face(st: &ModelState, p: Vec3, scope: &[String]) -> bool {
     faces_near(st, p, reach, scope)
         .into_iter()
         .any(|(_, i, face, _)| st.bodies.get(i).is_some_and(|b| matches!(b.body.point_lies_on_face(face as usize, p, b.display_tol()), Ok(Some(_)))))
+}
+
+/// Where a hole at `p` along `dir` starts when `p` lies on a face of a B-rep body within the
+/// body's chord tolerance ([`ModelBody::display_tol`], so the face's mesh is within reach, as a
+/// pick on the display mesh is), `None` when it lies on none. solidcore decides that on the face's
+/// surface and trim ([`solidcraft_kernel::Body::point_lies_on_face`]; the mesh only names the
+/// faces to ask), and the start is where the axis meets that face's exact surface within the same
+/// reach ([`solidcraft_kernel::Body::face_line_hit`]), never the facet under `p`, which lies up to
+/// the display sag inside a curved face (#20741). Of several such faces (near an edge) the meeting
+/// nearest `p` wins; an axis that meets none of them so near (one grazing the face) keeps `p`.
+fn brep_face_start(st: &ModelState, p: Vec3, dir: Vec3) -> Option<Vec3> {
+    let reach = st.bodies.iter().map(ModelBody::display_tol).fold(0.0, f64::max);
+    let mut on = false;
+    let mut best: Option<Vec3> = None;
+    for (_, i, face, _) in faces_near(st, p, reach, &[]) {
+        let Some(b) = st.bodies.get(i) else { continue };
+        let tol = b.display_tol();
+        let Ok(Some(foot)) = b.body.point_lies_on_face(face as usize, p, tol) else { continue };
+        on = true;
+        // How far the meeting may lie from `p` is bounded across the surface (the same gap the
+        // membership test allows), not along an oblique axis.
+        if let Ok(Some(q)) = b.body.face_line_hit(face as usize, p, dir)
+            && solidcraft_kernel::Body::distance_across_surface(p, foot, q) <= tol
+            && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
+        {
+            best = Some(q);
+        }
+    }
+    on.then(|| best.unwrap_or(p))
 }
 
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
@@ -8178,9 +8301,8 @@ fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth
     // The face at the To point, met along the axis.
     for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let Some(fi) = crate::appearance::face_index_at(b, *t) else { continue };
-        let m = b.mesh();
-        if let Some((h, tri)) = m.raycast(*at + dir * 1e-6, dir)
-            && m.tri_face.get(tri).is_some_and(|x| *x as usize == fi)
+        if let Some((h, hit_face)) = ray_face(b, *at + dir * 1e-6, dir)
+            && hit_face == fi
         {
             d = h + 1e-6;
         }
@@ -10977,13 +11099,13 @@ fn pattern_skipped_note(skipped: &[String], why: &DocError) -> String {
 /// older designs, which saved no placement and mirror the body's own geometry.
 fn mirrored_placement(doc: &Document, own: u64, mb: &ModelBody, path: Option<&[u64]>) -> Result<Option<(u64, Mat, Mat)>> {
     let Some(path) = path else { return Ok(None) };
-    let lost = || DocError::Invalid(format!("the placement `{}` was mirrored at no longer exists", mb.name));
+    let lost = || DocError::Invalid(format!("the placement `{}` was copied from no longer shows it", mb.name));
     // A stale or edited path that leads to another component no longer shows the body.
     let (at, _) = doc.path_placement(path).ok_or_else(lost)?;
     if !placement_shows(doc, mb, at) {
         return Err(lost());
     }
-    let singular = || DocError::Invalid(format!("the placement `{}` was mirrored at is singular", mb.name));
+    let singular = || DocError::Invalid(format!("the placement `{}` was copied from is singular", mb.name));
     let (component, frame, picked) = mirror_copy_frame(doc, own, path).ok_or_else(singular)?;
     let source = doc.model_body_offset(mb).map(|offset| crate::mat_mul(&picked, offset)).unwrap_or(picked);
     Ok(Some((component, frame, source)))
@@ -11613,6 +11735,30 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
         .collect()
 }
 
+/// Whether every face of `mb`, as the feature that made it traces them, came from `mb` as it was
+/// before the feature, none from a tool: the feature's tools took no material from it. A tool
+/// that shares material with a body leaves some of its boundary inside the body (unless the body
+/// lies inside the tool, and is gone), and a cut keeps that boundary as faces of the body. A body
+/// the history does not trace, or a face it traces to anything else (a tool's face, edge,
+/// profile or cap), says nothing.
+fn no_face_from_tools(mb: &ModelBody) -> bool {
+    use solidcraft_kernel::history::FaceOrigin;
+    let crate::lineage::Made::Traced(lineage) = &mb.made else { return false };
+    if lineage.history.faces.len() != mb.body.face_count() {
+        return false;
+    }
+    let own: Vec<bool> = lineage.operands.iter().map(|op| matches!(op.as_ref(), crate::lineage::Operand::Body(n) if *n == mb.name)).collect();
+    lineage.history.faces.iter().all(|face| {
+        !face.origins.is_empty()
+            && face.origins.iter().all(|origin| match *origin {
+                FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => {
+                    own.get(operand) == Some(&true)
+                }
+                _ => false,
+            })
+    })
+}
+
 /// Whether `new` has a face on a surface no face of `old` lies on. A plane, cylinder, cone,
 /// sphere or torus is compared by its geometry, to within a ten-millionth of the bodies' size;
 /// any other surface (a spline) by its exact definition in the record. A cut that removes
@@ -12230,11 +12376,15 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                 }
                 match (k, hole_axis) {
                     (0, Some(axis)) => match hit.along(input, from, axis) {
-                        Some(q) => *p = q,
+                        Ok(Some(q)) => *p = q,
                         // The place still lies on the face (the axis may run along it).
-                        None if hit.on_point => {}
-                        None => notes.push(format!(
+                        Ok(None) if hit.on_point => {}
+                        Ok(None) => notes.push(format!(
                             "the hole's position [{}, {}, {}] is no longer on face `{n}`: it stays where it was placed",
+                            from.x, from.y, from.z
+                        )),
+                        Err(e) => notes.push(format!(
+                            "the hole's axis could not be met with face `{n}` ({e}): it stays at [{}, {}, {}]",
                             from.x, from.y, from.z
                         )),
                     },
@@ -13128,7 +13278,7 @@ fn level_along(plane: &Plane, q: Vec3) -> f64 {
 
 /// The level along `plane`'s normal of face `(body, face)` when it is a plane square to the
 /// normal, and the face's own tolerance, from solidcore ([`Body::face_square_level`]).
-fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -> Option<solidcore_ops::SquareFaceLevel> {
+fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -> Option<solidcraft_kernel::services::SquareFaceLevel> {
     st.bodies.get(bi)?.body.face_square_level(fi, plane.normal(), plane.origin).ok()?
 }
 
@@ -13142,10 +13292,9 @@ fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centr
         return square.level;
     }
     // A curved or slanted face: where the profile's middle meets it.
-    let m = b.mesh();
     for dir in [n, n * -1.0] {
-        if let Some((t, tri)) = m.raycast(centre, dir)
-            && m.tri_face.get(tri).is_some_and(|x| *x as usize == fi)
+        if let Some((t, hit_face)) = ray_face(b, centre, dir)
+            && hit_face == fi
         {
             return h(centre + dir * t);
         }
@@ -13510,7 +13659,7 @@ fn tapered_reach(
     // from the start, as the kernel measures it.
     let far_side = |body: &Body| -> Result<f64> {
         let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let [_, far] = solidcore_ops::affine::span_along(bb.min.into(), bb.max.into(), start_plane.origin.into(), travel.into())
+        let [_, far] = solidcraft_kernel::services::affine::span_along(bb.min.into(), bb.max.into(), start_plane.origin.into(), travel.into())
             .map_err(|e| DocError::Invalid(e.to_string()))?;
         Ok(far)
     };
@@ -14022,6 +14171,21 @@ fn chamfer_with(
     })
 }
 
+/// The centre of the exact bounding box of a Scale's bodies, as the features before it leave
+/// them.
+fn bodies_centre(st: &ModelState, bodies: &[crate::BodyName]) -> Result<Vec3> {
+    let mut bb: Option<(Vec3, Vec3)> = None;
+    for n in bodies {
+        let b = st.bodies.iter().find(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+        let x = b.body.exact_bounds()?;
+        bb = Some(match bb {
+            None => (x.min, x.max),
+            Some((lo, hi)) => (lo.min(x.min), hi.max(x.max)),
+        });
+    }
+    bb.map(|(lo, hi)| (lo + hi) * 0.5).filter(|c| c.is_finite()).ok_or_else(|| DocError::Invalid("the bodies have no centre to scale about".into()))
+}
+
 /// Evaluate one feature into its scratch state; the caller commits it only after validation.
 #[allow(clippy::too_many_arguments)]
 fn eval_feature(
@@ -14122,6 +14286,7 @@ fn eval_feature_kind(
         | FeatureKind::SheetFold { .. }
         | FeatureKind::SheetPath { .. }
         | FeatureKind::SheetTab { .. }
+        | FeatureKind::SheetBead { .. }
         | FeatureKind::SheetUnfold { .. }
         | FeatureKind::SheetConvert { .. }
         | FeatureKind::SheetSurfaceConvert { .. }
@@ -14179,12 +14344,22 @@ fn eval_feature_kind(
                 // same exact volume (the faces it split add up to the faces they were), while a cut
                 // can remove very little of a large body (a 0.005 mm wall between two pockets in a
                 // 1 m cube is 5e-10 of it).
-                let same_volume = |old: &Body, new: &Body| match (old.volume_at(0.0), new.volume_at(0.0)) {
-                    (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
-                    _ => false,
+                let same_volume = |old: &Body, new: &Body| {
+                    #[cfg(test)]
+                    cost_tests::count(|c| c.measures += 1);
+                    match (old.volume_at(0.0), new.volume_at(0.0)) {
+                        (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
+                        _ => false,
+                    }
                 };
+                // A body every face of which the cut's history traces to the body itself took no
+                // material from the tools: its volume is what it was, without measuring it.
                 let kept = |b: &ModelBody, old: &Body| {
-                    old.same(&b.body) || (!b.body.is_mesh() && !old.is_mesh() && !has_a_new_surface(old, &b.body) && same_volume(old, &b.body))
+                    old.same(&b.body)
+                        || (!b.body.is_mesh()
+                            && !old.is_mesh()
+                            && !has_a_new_surface(old, &b.body)
+                            && (no_face_from_tools(b) || same_volume(old, &b.body)))
                 };
                 if let Some(before) = &before
                     && !before.is_empty()
@@ -15086,7 +15261,7 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Scale { bodies, origin, factor, factors } => {
+        FeatureKind::Scale { bodies, origin, about, factor, factors } => {
             let k = match factors {
                 Some(fs) => [val(vals, &fs[0], Kind::Unitless)?, val(vals, &fs[1], Kind::Unitless)?, val(vals, &fs[2], Kind::Unitless)?],
                 None => {
@@ -15097,7 +15272,16 @@ fn eval_feature_kind(
             if k.iter().any(|x| !(x.is_finite() && *x > 1e-9 && *x < 1e6)) {
                 return Err(DocError::Invalid("scale factors must be positive".into()));
             }
-            let o = *origin;
+            let o = match about {
+                None => origin.0,
+                Some(ScaleAbout::Centre) => bodies_centre(st, bodies)?,
+                Some(ScaleAbout::Pick { at }) => {
+                    crate::construct::scale_point(&crate::construct::Ctx { doc, vals, st, depth: 0, component: f.component }, at)?
+                }
+            };
+            if !o.is_finite() {
+                return Err(DocError::Invalid("the point to scale about is not finite".into()));
+            }
             // Column-major: scale about the origin.
             let m = [
                 [k[0], 0.0, 0.0, 0.0],
@@ -15321,7 +15505,7 @@ fn eval_feature_kind(
             // A linked design's bodies left out of the file, and not read back when it opened.
             if records.is_none() && step.is_empty() && doc.links.values().any(|link| link.feature == f.id) {
                 return Err(DocError::Invalid(format!(
-                    "the bodies of the linked design {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
+                    "the bodies of the linked file {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
                 )));
             }
             let (imp, digest) = match records {
@@ -15398,11 +15582,16 @@ fn eval_sketch(
         // A sketch that reads no geometry (a fixed plane, no projections) needs no other
         // component's bodies moved into its frame: placing every body of a large
         // assembly again is what made each sketch edit as slow as the design is big.
-        None if !plane_reads_geometry(plane) && sketch.links.is_empty() => std::borrow::Cow::Borrowed(st),
+        None if !plane_reads_geometry(plane)
+            && sketch.links.is_empty()
+            && !sketch.wire_constraints.iter().any(|c| c.kind.model_plane().is_some()) =>
+        {
+            std::borrow::Cow::Borrowed(st)
+        }
         None => state_in_frame(doc, st, f.component)?,
     };
     // A further placement a link reads is placed in its frame too (#9957).
-    let named: Vec<&str> = sketch.links.iter().flat_map(|l| l.source.bodies()).collect();
+    let named = sketch.linked_bodies();
     let fst = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
         _ if named.is_empty() => fst,
         Some(Ok(frame)) => with_placed_copies(doc, st, fst, &frame, &named),
@@ -15638,7 +15827,7 @@ fn move_turn_line(
 ) -> Result<(Vec3, Vec3)> {
     let found = construction_state(doc, st, comp).and_then(|cs| crate::construct::model_axis_in(Some(doc), &cs, about, comp));
     match found {
-        Ok((o, d)) => match solidcore_ops::affine::same_sense(d.into(), axis.into()).filter(|_| o.is_finite()) {
+        Ok((o, d)) => match solidcraft_kernel::services::affine::same_sense(d.into(), axis.into()).filter(|_| o.is_finite()) {
             Some(d) => Ok((o, Vec3::from(d))),
             None => lost_turn_line(origin, axis, "it has no direction".into(), warning),
         },
@@ -17204,7 +17393,7 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
 /// and leaves a slab a few µm thick under the face (#6762). A plane with nothing to drop stays
 /// as it is.
 fn square_to_axes(plane: &Plane) -> Plane {
-    match solidcore_ops::affine::axis_squared_axes(plane.x.into(), plane.y.into(), 1e-12) {
+    match solidcraft_kernel::services::affine::axis_squared_axes(plane.x.into(), plane.y.into(), 1e-12) {
         Some([x, y]) => Plane { origin: plane.origin, x: Vec3::new(x[0], x[1], x[2]), y: Vec3::new(y[0], y[1], y[2]) },
         None => *plane,
     }

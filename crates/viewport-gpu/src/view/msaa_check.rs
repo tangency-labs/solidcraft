@@ -129,6 +129,7 @@ impl Renderer {
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
+            selection_all: false,
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,

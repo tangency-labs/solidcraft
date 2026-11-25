@@ -196,7 +196,7 @@ macro_rules! gn_try {
         match $e {
             Ok(v) => v,
             // a cancel (#2136) is never a failed evaluation: it ends the operation
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => return Err(e),
             // a foot past its face's domain end is refused by name (#14284)
             Err(e) if is_foot_past_domain_end(&e) => return Err(e),
             Err(_) => return Ok($none),
@@ -4843,7 +4843,9 @@ pub fn gn_certify_span_reusing(
             {
                 Ok((st, _)) => ends.push(st),
                 // a cancel (#2136) is not an unsolved piece: it ends the operation
-                Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+                Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                    return Err(e)
+                }
                 Err(_) => solved = false,
             }
             i += 1;

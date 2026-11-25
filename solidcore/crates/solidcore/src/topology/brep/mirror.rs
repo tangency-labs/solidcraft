@@ -30,8 +30,8 @@
 //! volume (parts are held by value), where upstream also edits a volume the object does
 //! not own. Composite edges do not exist in the arena model (`sEdges` is the edge
 //! alone). The NURBs of analytic surfaces without one are made before the infinite region
-//! search (`make_missing_nurbs`), where upstream's bounding box makes them lazily. With
-//! `analytic_copy_keeps_parameterization`, each face keeps its UV domain across
+//! search (`make_missing_nurbs`), where upstream's bounding box makes them lazily. Each
+//! face keeps its UV domain across
 //! `ReplaceSurface` (upstream's `SetSurface` gives it the new surface's whole natural
 //! domain), as `Transform` keeps it when it moves a surface in place: the mirrored surface
 //! keeps the face's parameters. The debug drawing code is omitted. No recursion is
@@ -179,15 +179,10 @@ fn mirror_in(
         ))?;
         // Not upstream: the face's UV domain, which `SetSurface` resets to its new surface's
         // natural domain. The mirrored surface is the NURB with its control points reflected,
-        // in the same parameters, and with `analytic_copy_keeps_parameterization` its analytic
-        // copy keeps them too (it proves the same points at the same parameters, or stays an
-        // exact copy). So the face keeps the rectangle it had, as `Transform` keeps it when
-        // it moves a surface in place.
-        let domain = if k.fixes.analytic_copy_keeps_parameterization {
-            Some(b.face(face)?.uv_domain)
-        } else {
-            None
-        };
+        // in the same parameters, and its analytic copy keeps them too (it proves the same
+        // points at the same parameters, or stays an exact copy, WR-450). So the face keeps
+        // the rectangle it had, as `Transform` keeps it when it moves a surface in place.
+        let domain = b.face(face)?.uv_domain;
         let tmp_surface = b
             .face(face)?
             .surface
@@ -210,9 +205,7 @@ fn mirror_in(
             notifications.as_deref_mut(),
         )?;
         // (the face's own domain back, before its UV trims are made again)
-        if let Some(domain) = domain {
-            b.face_mut(face)?.uv_domain = domain;
-        }
+        b.face_mut(face)?.uv_domain = domain;
 
         // for every Face using pSurface - remove UVTrimCurves, swap Faceuse shells
         for f in modified {
@@ -357,7 +350,7 @@ fn degenerate_low_work_transform(
         fixes: k.fixes,
         memoize_curve_caches: k.memoize_curve_caches,
         cancel: k.cancel.clone(),
-        // (the caller's WR-57 replay seam, test only: the trial calls through it)
+        // (the caller's replay seam, test only: the trial calls through it)
         #[cfg(feature = "wr57-replay")]
         replay: k.replay.clone(),
         ..Kernel::default()
