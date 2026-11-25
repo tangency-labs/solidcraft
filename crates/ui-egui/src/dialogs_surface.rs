@@ -690,7 +690,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                 );
                 p["path"] = json!(path);
             }
-            crate::dialogs_sweep::params(app, opts, items(inputs, 2).first(), [items(inputs, 3), items(inputs, 4)], &mut p)?;
+            crate::dialogs_sweep::params(app, opts, items(inputs, 2).first(), &[items(inputs, 3), items(inputs, 4)], &mut p)?;
             ("surface.sweep", p)
         }
         Surf::Loft { rail_fit } => {
@@ -727,7 +727,8 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                 return Err("pick at least two sections".into());
             }
             let mut p = json!({ "sections": sections });
-            crate::dialogs_sweep::rail_params(app, *rail_fit, [items(inputs, 1), items(inputs, 2)], &mut p)?;
+            let rails: Vec<&[Sel]> = (1..inputs.len()).map(|i| items(inputs, i)).collect();
+            crate::dialogs_sweep::rail_params(app, *rail_fit, &rails, &mut p)?;
             ("surface.loft", p)
         }
         Surf::Blend { continuity, bulge, stitch } => {
@@ -1096,7 +1097,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             ..
         } => {
             let (opts, direction) = crate::dialogs_sweep::SweepOpts::of(orientation, twist, scale, *rail_fit, frame);
-            let [rail, rail2] = crate::dialogs_sweep::rail_sels(rails, s.active_sketch);
+            let mut sweep_rails = crate::dialogs_sweep::rail_sels(rails, s.active_sketch).into_iter();
             (
                 Surf::Sweep(opts),
                 vec![
@@ -1108,8 +1109,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                         None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
                     },
                     direction.into_iter().collect(),
-                    rail,
-                    rail2,
+                    sweep_rails.next().unwrap_or_default(),
+                    sweep_rails.next().unwrap_or_default(),
                 ],
             )
         }
@@ -1175,7 +1176,6 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             (Surf::Boundary { continuity: g, join: *operation == solidcraft_engine::doc::Operation::Join }, vec![sels(u), sels(v)])
         }
         FeatureKind::SurfaceLoft { sections, rails, rail_fit, .. } => {
-            let [rail, rail2] = crate::dialogs_sweep::rail_sels(rails, s.active_sketch);
             let picked: Vec<Sel> = sections
                 .iter()
                 .flat_map(|sec| {
@@ -1186,7 +1186,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                     }
                 })
                 .collect();
-            (Surf::Loft { rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) }, vec![picked, rail, rail2])
+            let fill = std::iter::once(picked).chain(crate::dialogs_sweep::rail_sels(rails, s.active_sketch)).collect();
+            (Surf::Loft { rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) }, fill)
         }
         FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
             let sels = sheet_sels(app, sketch.0, profiles.as_ref(), curves);
@@ -1429,8 +1430,18 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
         _ => return None,
     };
     let mut ins = inputs(&k);
-    for (inp, items) in ins.iter_mut().zip(fill) {
-        inp.items = items;
+    if matches!(k, Surf::Loft { .. }) {
+        // The rail rows grow to one per stored rail (#12185).
+        let mut fill = fill.into_iter();
+        if let Some(inp) = ins.first_mut() {
+            inp.items = fill.next().unwrap_or_default();
+        }
+        crate::dialogs_sweep::fill_rails(&mut ins, 1, fill);
+        crate::dialogs_sweep::grow_rails(&mut ins, 1);
+    } else {
+        for (inp, items) in ins.iter_mut().zip(fill) {
+            inp.items = items;
+        }
     }
     Some((Kind::Surface(k), ins, kept))
 }
