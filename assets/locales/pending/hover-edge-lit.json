@@ -1,7 +1,7 @@
 {
   "en": {
-    "prefs.hover_edge_lit": "Fillet and Chamfer: colour the edges under the pointer",
-    "prefs.hover_edge_lit_help": "In Fillet and Chamfer the edges a click would take are drawn in their own colour: the edge under the pointer, or the edges of the face under it. When off, the edge or face is lit as everywhere else."
+    "prefs.hover_edge_lit": "Fillet and Chamfer: color the edges under the pointer",
+    "prefs.hover_edge_lit_help": "In Fillet and Chamfer the edges a click would take are drawn in their own color: the edge under the pointer, or the edges of the face under it. When off, the edge or face is lit as everywhere else."
   },
   "de": {
     "prefs.hover_edge_lit": "Verrundung und Fase: Kanten unter dem Zeiger einfärben",
