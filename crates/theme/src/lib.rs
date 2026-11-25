@@ -417,7 +417,8 @@ pub fn accent() -> Option<Color32> {
 /// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
 pub fn parse_accent(s: &str) -> Option<Color32> {
     let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
-    Color32::from_hex(&format!("#{hex}")).ok()
+    let ([r, g, b], _) = solidcraft_color::hex::parse_digits(hex)?;
+    Some(Color32::from_rgb(r, g, b))
 }
 
 /// The File view's unset colours follow the theme's panel, border, accent and text, not its base's (#4868).
@@ -2058,6 +2059,22 @@ mod tests {
                 assert_eq!(accent.on_fill(&t), if white_ok { t.on_accent } else { t.tab_on_fill_dark });
             }
         }
+    }
+
+    /// The Preferences accent reads `#rrggbb` and nothing else, as the colour field's hex box does (#22089).
+    /// A `+` before five hex digits was read as a colour (`#+fffff` as `#0fffff`). The other inputs were
+    /// refused already and stay refused: a short one, a `-`, a space, and non-ASCII digits that are six
+    /// bytes long.
+    #[test]
+    fn an_accent_with_a_sign_or_a_non_hex_digit_after_the_hash_is_refused() {
+        let taken: Vec<_> =
+            ["#+fffff", "#+FFFFF", "#+0000f", "#+ffff", "#-fffff", "# fffff", "#ffff\u{e9}", "#\u{660}\u{660}\u{660}", "#\u{ff10}\u{ff10}"]
+                .into_iter()
+                .filter_map(|s| super::parse_accent(s).map(|c| (s, c)))
+                .collect();
+        assert!(taken.is_empty(), "taken as an accent: {taken:?}");
+        assert_eq!(super::parse_accent("#3B82F6"), Some(egui::Color32::from_rgb(0x3b, 0x82, 0xf6)));
+        assert_eq!(super::parse_accent(""), None);
     }
 
     #[test]
