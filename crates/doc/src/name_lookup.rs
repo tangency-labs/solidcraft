@@ -1346,11 +1346,15 @@ pub(crate) fn unique_resuffixed_on_body(names: &Names, name: &str) -> Option<usi
 ///   is taken — among those that still share a neighbour from the stored qualifier, or (when none
 ///   do, e.g. its sole qualifying neighbour was replaced) among faces that are still qualified
 ///   pieces, never a face that became whole again with zero surviving neighbours (#11731).
-fn resuffixed_face(candidates: &[(usize, &ModelBody, usize)], name: &str, pick: Option<Vec3>) -> Option<FaceHit> {
+fn resuffixed_face<'a>(
+    candidates: &[(usize, &'a ModelBody, usize)],
+    name: &str,
+    pick: Option<Vec3>,
+    found: impl Fn((usize, &'a ModelBody, usize)) -> Option<FaceHit>,
+) -> Option<FaceHit> {
     if candidates.is_empty() || !name.contains("#[") {
         return None;
     }
-    let p = pick.unwrap_or(Vec3::ZERO);
     let mut scored: Vec<(usize, &ModelBody, usize, usize, usize)> = Vec::with_capacity(candidates.len());
     for &(bi, b, face) in candidates {
         let names = naming::names(b);
@@ -1367,14 +1371,7 @@ fn resuffixed_face(candidates: &[(usize, &ModelBody, usize)], name: &str, pick: 
     let majority: Vec<_> = overlap.iter().copied().filter(|&(_, _, _, m, total)| m.saturating_mul(2) >= total).collect();
     if majority.len() == overlap.len() && !majority.is_empty() {
         if let &[(bi, b, face, ..)] = majority.as_slice() {
-            let (distance, point) = nearest_on_face(&b.mesh(), face, p)?;
-            return Some(FaceHit {
-                body: bi,
-                face,
-                point,
-                verified: naming::names(b).verified(face),
-                on_point: distance <= (b.body.size() * 1e-3).max(1e-3),
-            });
+            return found((bi, b, face));
         }
         let p = pick.filter(|p| p.is_finite())?;
         let mut on = majority.into_iter().filter(|(_, b, ..)| !b.body.is_mesh()).filter_map(|(bi, b, face, ..)| {
@@ -1415,12 +1412,12 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
             }
         }
     }
-    let Some((level, faces)) = best else {
-        return resuffixed_face(&stem, name, pick).ok_or(Miss::Gone);
-    };
     let found = |(body, b, face): (usize, &ModelBody, usize)| {
         let (distance, point) = nearest_on_face(&b.mesh(), face, p)?;
         Some(FaceHit { body, face, point, verified: naming::names(b).verified(face), on_point: distance <= (b.body.size() * 1e-3).max(1e-3) })
+    };
+    let Some((level, faces)) = best else {
+        return resuffixed_face(&stem, name, pick, found).ok_or(Miss::Gone);
     };
     if let [one] = faces.as_slice() {
         return found(*one).ok_or(Miss::Gone);
