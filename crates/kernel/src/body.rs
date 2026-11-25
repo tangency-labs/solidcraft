@@ -1106,23 +1106,27 @@ impl Body {
         }
     }
 
-    /// The edge of `self` nearest `p`, or `None` for a mesh body or empty body.
-    pub fn edge_at(&self, p: Vec3) -> Option<usize> {
-        if self.is_mesh() || !p.is_finite() {
-            return None;
+    /// The edge of `self` nearest each of `pts`, or `None` for a mesh body or empty body. Each
+    /// edge's curve is drawn once for all the points.
+    pub fn edges_at(&self, pts: &[Vec3]) -> Vec<Option<usize>> {
+        if self.is_mesh() || pts.iter().all(|p| !p.is_finite()) {
+            return vec![None; pts.len()];
         }
         let chord = (self.size() * 1e-3).max(1e-4);
-        self.record
-            .edges
-            .iter()
-            .enumerate()
-            .filter_map(|(i, e)| {
-                let pts = edge_points(e, chord).ok()?;
-                let d = pts.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
-                Some((d, i))
+        let lines: Vec<(usize, Vec<Vec3>)> =
+            self.record.edges.iter().enumerate().filter_map(|(i, e)| edge_points(e, chord).ok().map(|pts| (i, pts))).collect();
+        pts.iter()
+            .map(|p| {
+                if !p.is_finite() {
+                    return None;
+                }
+                lines
+                    .iter()
+                    .map(|(i, pts)| (pts.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), *i))
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, i)| i)
             })
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, i)| i)
+            .collect()
     }
 
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
