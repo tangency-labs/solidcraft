@@ -1610,6 +1610,15 @@ impl history_bar::Contents for BarSteps<'_> {
 /// (Preferences › Layout), the first body is also found there, as Find in Browser on a body
 /// does: the rows down to it open.
 pub(crate) fn find_in_browser(app: &mut SolveApp, ids: &[u64]) {
+    // A construction plane, axis or point is found in its Construction folder (#15355).
+    if let [id] = ids
+        && app.session.doc.feature(*id).is_some_and(|f| {
+            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+        })
+    {
+        crate::browser::reveal_construction(app, *id);
+        return;
+    }
     let st = crate::open_meshing::session_world(&app.session);
     let mut bodies: Vec<String> = Vec::new();
     let mut items: Vec<serde_json::Value> = Vec::new();
