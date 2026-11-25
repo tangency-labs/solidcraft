@@ -559,6 +559,38 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Headings, folding sections, units and help links
+
+A long dialog can be grouped and explained with four annotations. They change only how the dialog
+is drawn: input checks, tool schemas and the values the plugin receives stay the same.
+
+```json
+"input_schema": {"type": "object", "x-solidcraft-field-order": "declared", "x-solidcraft-sections": "collapsible",
+  "properties": {
+    "units": {"type": "string", "enum": ["mm", "in"], "default": "mm", "x-solidcraft-section": "Carcass"},
+    "width": {"type": "number", "title": "Width", "default": 600, "x-solidcraft-unit-from": "units",
+              "x-solidcraft-help": "https://example.com/woodwork/width"},
+    "drawers": {"type": "integer", "title": "Drawers", "default": 2, "x-solidcraft-section": "Drawers"}
+  }}
+```
+
+- `x-solidcraft-section` on a field draws a heading above it, or a divider line when it is `""`.
+  The heading belongs to its field, so it hides when a condition hides that field. Headings follow
+  the dialog's field order, so use them with `"x-solidcraft-field-order": "declared"`.
+- `"x-solidcraft-sections": "collapsible"` on the root lets each heading fold away the fields under
+  it, down to the next heading or divider. Sections start open each time the dialog
+  opens. Folded fields keep their values and are still sent. A folded field with an error is
+  still drawn.
+- `x-solidcraft-unit-from` on a number field names a string choice in the same schema. The
+  choice's current value (for example `mm` or `in`) is drawn after the number instead of `unit`.
+- `x-solidcraft-help` on a field adds a "More about this field" link under it, opening the page
+  in the browser. It must be an https URL with a domain name (not an IP address), and nothing opens
+  until the link is clicked.
+
+The manifest is refused when a heading is not text or is longer than 80 characters, when
+`x-solidcraft-sections` is anything but `"collapsible"`, when `x-solidcraft-unit-from` is not on a
+number field naming another field that is a string choice, or when a help link is not an https URL with a domain name.
+
 ### Font fields
 
 Mark a string property with `"x-solidcraft-font": true` to offer installed font families in the
