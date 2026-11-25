@@ -9,6 +9,9 @@ parameter to watch the timeline rebuild. [Documentation](https://docs.solidcraft
 [roadmap detail](https://github.com/bherbruck/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) lists
 the known limitations. Designs from every earlier version open in this one.
 
+<details>
+<summary>Download and installation, compatibility and migration</summary>
+
 **New app ID.** The app ID is now `io.tangencylabs.solidcraft` (it was `ai.storyteller.solidcraft`): `flatpak update` offers to replace the old app, the
 `.deb`, `.rpm` and AppImage remove the old menu entry, and settings stay. On macOS the bundle ID
 changed too, so macOS asks once more for the permissions it had granted.
@@ -61,3 +64,4 @@ On Windows, SmartScreen may say "Windows protected your PC": **More info**, then
 Licences are built in (Help ▸ About ▸ Licences, `solidcraft-cli licences`); the packages also
 install `THIRD-PARTY-LICENSES.txt`.
 
+</details>
