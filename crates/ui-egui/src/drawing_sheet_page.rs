@@ -901,6 +901,8 @@ fn kind_name(kind: ObjectKind) -> &'static str {
         ObjectKind::Fill => "fill",
         ObjectKind::Dimension => "dimension",
         ObjectKind::Note => "note",
+        ObjectKind::CentreMark => "centre_mark",
+        ObjectKind::CentreLine => "centre_line",
         ObjectKind::ViewLabel => "view_label",
         ObjectKind::Balloon => "balloon",
         ObjectKind::RevisionTag => "revision_tag",

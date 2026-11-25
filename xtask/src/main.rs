@@ -336,6 +336,8 @@ fn cmd_layers() -> Result<(), String> {
     let mut violations: Vec<String> = layers::check(&crates).iter().map(ToString::to_string).collect();
     let allow = std::fs::read_to_string(root().join(layers::SEAM_LIST)).map_err(|e| format!("{}: {e}", layers::SEAM_LIST))?;
     violations.extend(layers::seam_check(&crates, &allow, &layers::read_public(&root())?));
+    let adapter = std::fs::read_to_string(root().join(layers::ADAPTER_LIST)).map_err(|e| format!("{}: {e}", layers::ADAPTER_LIST))?;
+    violations.extend(layers::adapter_check(&crates, &adapter));
     violations.extend(layers::standalone_check(&layers::read_solidcore_manifests(&root())?));
     let paths = solidcore_paths::counts(&solidcore_paths::scan(
         &root(),
